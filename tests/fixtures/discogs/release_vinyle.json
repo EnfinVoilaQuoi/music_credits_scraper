@@ -1,0 +1,529 @@
+{
+ "id": 939133,
+ "status": "Accepted",
+ "year": 2002,
+ "resource_url": "https://api.discogs.com/releases/939133",
+ "uri": "https://www.discogs.com/release/939133-Booba-2-Temps-Mort",
+ "artists": [
+  {
+   "name": "Booba (2)",
+   "anv": "",
+   "join": "",
+   "role": "",
+   "tracks": "",
+   "id": 245750,
+   "resource_url": "https://api.discogs.com/artists/245750",
+   "thumbnail_url": "https://i.discogs.com/8ofGGOcQuF9-2A6DBQUpdlYySrEOjJad7wRAqBp7M1Y/rs:fit/g:sm/q:90/h:600/w:508/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9BLTI0NTc1/MC0xNTM0OTI4NDcy/LTk2MDMuanBlZw.jpeg"
+  }
+ ],
+ "artists_sort": "Booba (2)",
+ "labels": [
+  {
+   "name": "45 Scientific",
+   "catno": "DFI 01_12 BOOBA 01.1",
+   "entity_type": "1",
+   "entity_type_name": "Label",
+   "id": 59407,
+   "resource_url": "https://api.discogs.com/labels/59407",
+   "thumbnail_url": "https://i.discogs.com/Z6aC57XKiUUMEA7nSzRsACwBkg2PDIyDt32Zwal4ycU/rs:fit/g:sm/q:90/h:403/w:400/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTU5NDA3/LTEyNjU1ODk3MDQu/anBlZw.jpeg"
+  }
+ ],
+ "series": [],
+ "companies": [],
+ "formats": [
+  {
+   "name": "Vinyl",
+   "qty": "2",
+   "descriptions": [
+    "LP",
+    "Album"
+   ]
+  }
+ ],
+ "data_quality": "Needs Vote",
+ "community": {
+  "have": 972,
+  "want": 999,
+  "rating": {
+   "count": 152,
+   "average": 4.57
+  },
+  "submitter": {
+   "username": "ThirstyDragon",
+   "resource_url": "https://api.discogs.com/users/ThirstyDragon"
+  },
+  "contributors": [
+   {
+    "username": "ThirstyDragon",
+    "resource_url": "https://api.discogs.com/users/ThirstyDragon"
+   },
+   {
+    "username": "JYoh",
+    "resource_url": "https://api.discogs.com/users/JYoh"
+   },
+   {
+    "username": "di.mitri",
+    "resource_url": "https://api.discogs.com/users/di.mitri"
+   },
+   {
+    "username": "gaga789",
+    "resource_url": "https://api.discogs.com/users/gaga789"
+   },
+   {
+    "username": "vdbdux",
+    "resource_url": "https://api.discogs.com/users/vdbdux"
+   },
+   {
+    "username": "Senk_one",
+    "resource_url": "https://api.discogs.com/users/Senk_one"
+   },
+   {
+    "username": "NikloHose",
+    "resource_url": "https://api.discogs.com/users/NikloHose"
+   },
+   {
+    "username": "Koci_Ltb",
+    "resource_url": "https://api.discogs.com/users/Koci_Ltb"
+   }
+  ],
+  "data_quality": "Needs Vote",
+  "status": "Accepted"
+ },
+ "format_quantity": 2,
+ "date_added": "2007-04-18T05:09:36-07:00",
+ "date_changed": "2024-08-24T06:46:26-07:00",
+ "num_for_sale": 3,
+ "lowest_price": 106.8,
+ "master_id": 97107,
+ "master_url": "https://api.discogs.com/masters/97107",
+ "title": "Temps Mort",
+ "country": "France",
+ "released": "2002-01-00",
+ "notes": "There is no barcode on the original press sleeve / Il n'y a pas de code barre sur la pochette du pressage original\nThere is an insert with lyrics on this original press / Il y a un insert avec les paroles dans ce pressage original",
+ "released_formatted": "Jan 2002",
+ "identifiers": [
+  {
+   "type": "Matrix / Runout",
+   "value": "DFI 01-12 BOOBA 01.1 A Y.D.",
+   "description": "Side A runout"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "DFI 01-12 BOOBA 01.1 B Y.D.",
+   "description": "Side B runout"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "DFI 01-12 BOOBA 01.1 C Y.D.",
+   "description": "Side C runout"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "DFI 01-12 BOOBA 01.1 D Y.D.",
+   "description": "Side D runout"
+  }
+ ],
+ "videos": [
+  {
+   "uri": "https://www.youtube.com/watch?v=PD1-Vt3dkk4",
+   "title": "Booba -  \"Repose en Paix\"  clip officiel",
+   "description": "\"Repose en Paix\", le clip officiel, tiré de l'album mythique de Booba \"Temps Mort\"\nDisponible sur iTunes: https://itunes.apple.com/fr/album/temps-mort/id347606351",
+   "duration": 173,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=Z6XpBZ65SzU",
+   "title": "Booba feat. Ali - \"Strass et Paillettes\" clip officiel",
+   "description": "\"Strass et Paillettes\" le clip de Booba tiré de l'album mythique \"Temps Mort\"\nDisponible sur iTunes: https://itunes.apple.com/fr/album/temps-mort/id347606351",
+   "duration": 259,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=cRXkmmI7k6Y",
+   "title": "Booba - Temps mort",
+   "description": "Extrait du premier album solo de Booba \"Temps mort\", sorti le 22 janvier 2002\n\nFnac : http://musique.fnac.com/a2247397/Booba-Temps-mort-CD-album\nAmazon : http://www.amazon.fr/Temps-Mort-Booba/dp/B001716JHO/ref=sr_1_1?ie=UTF8&qid=1374495323&sr=8-1&keywords",
+   "duration": 145,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=zF9nuwh9_8c",
+   "title": "Booba feat Kayna Samet - Destinée (version non censurée)",
+   "description": " ",
+   "duration": 313,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=5QZEsTWWpyk",
+   "title": "Booba - Ma définition",
+   "description": "Extrait du premier album solo de Booba \"Temps mort\", sorti le 22 janvier 2002\n\nFnac : http://musique.fnac.com/a2247397/Booba-Temps-mort-CD-album\nAmazon : http://www.amazon.fr/Temps-Mort-Booba/dp/B001716JHO/ref=sr_1_1?ie=UTF8&qid=1374495323&sr=8-1&keywords",
+   "duration": 217,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=i0_4M3Uxmk4",
+   "title": "Ecoute bien",
+   "description": "Provided to YouTube by Universal Music Group\n\nEcoute bien · Booba\n\nTemps mort\n\n℗ 2002 Tallac Records\n\nReleased on: 2002-01-01\n\nAssociated  Performer, Vocals: Booba\nProducer, Associated  Performer, Programming: Fred Dudouet\nAuthor: Elie Yaffa\nComposer: Fre",
+   "duration": 273,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=PD1-Vt3dkk4",
+   "title": "Booba -  \"Repose en Paix\"  clip officiel",
+   "description": "\"Repose en Paix\", le clip officiel, tiré de l'album mythique de Booba \"Temps Mort\"\nDisponible sur iTunes: https://itunes.apple.com/fr/album/temps-mort/id347606351",
+   "duration": 173,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=9fu-lcAIlXQ",
+   "title": "Lunatic - Booba feat Ali - Strass et Paillettes",
+   "description": "Clip Booba feat Ali - Strass et Paillettes extrait de \"Temps mort\"",
+   "duration": 260,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=PD1-Vt3dkk4",
+   "title": "Booba -  \"Repose en Paix\"  clip officiel",
+   "description": "\"Repose en Paix\", le clip officiel, tiré de l'album mythique de Booba \"Temps Mort\"\nDisponible sur iTunes: https://itunes.apple.com/fr/album/temps-mort/id347606351",
+   "duration": 173,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=Z6XpBZ65SzU",
+   "title": "Booba feat. Ali - \"Strass et Paillettes\" clip officiel",
+   "description": "\"Strass et Paillettes\" le clip de Booba tiré de l'album mythique \"Temps Mort\"\nDisponible sur iTunes: https://itunes.apple.com/fr/album/temps-mort/id347606351",
+   "duration": 259,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=cRXkmmI7k6Y",
+   "title": "Booba - Temps mort",
+   "description": "Extrait du premier album solo de Booba \"Temps mort\", sorti le 22 janvier 2002\n\nFnac : http://musique.fnac.com/a2247397/Booba-Temps-mort-CD-album\nAmazon : http://www.amazon.fr/Temps-Mort-Booba/dp/B001716JHO/ref=sr_1_1?ie=UTF8&qid=1374495323&sr=8-1&keywords",
+   "duration": 145,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=zF9nuwh9_8c",
+   "title": "Booba feat Kayna Samet - Destinée (version non censurée)",
+   "description": " ",
+   "duration": 313,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=5QZEsTWWpyk",
+   "title": "Booba - Ma définition",
+   "description": "Extrait du premier album solo de Booba \"Temps mort\", sorti le 22 janvier 2002\n\nFnac : http://musique.fnac.com/a2247397/Booba-Temps-mort-CD-album\nAmazon : http://www.amazon.fr/Temps-Mort-Booba/dp/B001716JHO/ref=sr_1_1?ie=UTF8&qid=1374495323&sr=8-1&keywords",
+   "duration": 217,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=i0_4M3Uxmk4",
+   "title": "Ecoute bien",
+   "description": "Provided to YouTube by Universal Music Group\n\nEcoute bien · Booba\n\nTemps mort\n\n℗ 2002 Tallac Records\n\nReleased on: 2002-01-01\n\nAssociated  Performer, Vocals: Booba\nProducer, Associated  Performer, Programming: Fred Dudouet\nAuthor: Elie Yaffa\nComposer: Fre",
+   "duration": 273,
+   "embed": true
+  }
+ ],
+ "genres": [
+  "Hip Hop"
+ ],
+ "styles": [],
+ "tracklist": [
+  {
+   "position": "A1",
+   "type_": "track",
+   "title": "Temps Mort",
+   "duration": "2:26"
+  },
+  {
+   "position": "A2",
+   "type_": "track",
+   "title": "Indépendant",
+   "extraartists": [
+    {
+     "name": "Geraldo (2)",
+     "anv": "",
+     "join": "",
+     "role": "Producer",
+     "tracks": "",
+     "id": 278268,
+     "resource_url": "https://api.discogs.com/artists/278268"
+    }
+   ],
+   "duration": "3:53"
+  },
+  {
+   "position": "A3",
+   "type_": "track",
+   "title": "Écoute Bien",
+   "duration": "4:32"
+  },
+  {
+   "position": "A4",
+   "type_": "track",
+   "title": "Ma Définition",
+   "duration": "3:36"
+  },
+  {
+   "position": "B1",
+   "type_": "track",
+   "title": "Jusqu'ici Tout Va Bien",
+   "duration": "4:48"
+  },
+  {
+   "position": "B2",
+   "type_": "track",
+   "title": "Repose En Paix",
+   "extraartists": [
+    {
+     "name": "Clément Dumoulin",
+     "anv": "",
+     "join": "",
+     "role": "Producer",
+     "tracks": "",
+     "id": 475332,
+     "resource_url": "https://api.discogs.com/artists/475332"
+    }
+   ],
+   "duration": "2:52"
+  },
+  {
+   "position": "B3",
+   "type_": "track",
+   "title": "Le Bitume Avec Une Plume",
+   "duration": "4:44"
+  },
+  {
+   "position": "C1",
+   "type_": "track",
+   "title": "Animals",
+   "extraartists": [
+    {
+     "name": "LIM (2)",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 476342,
+     "resource_url": "https://api.discogs.com/artists/476342"
+    },
+    {
+     "name": "Moussa",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 475327,
+     "resource_url": "https://api.discogs.com/artists/475327"
+    }
+   ],
+   "duration": "4:36"
+  },
+  {
+   "position": "C2",
+   "type_": "track",
+   "title": "Sans Ratures",
+   "extraartists": [
+    {
+     "name": "Nessbeal",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 475351,
+     "resource_url": "https://api.discogs.com/artists/475351"
+    },
+    {
+     "name": "Julien Dicano",
+     "anv": "",
+     "join": "",
+     "role": "Producer",
+     "tracks": "",
+     "id": 475325,
+     "resource_url": "https://api.discogs.com/artists/475325"
+    }
+   ],
+   "duration": "4:32"
+  },
+  {
+   "position": "C3",
+   "type_": "track",
+   "title": "100-8 Zoo",
+   "extraartists": [
+    {
+     "name": "Malekal Morte",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 475331,
+     "resource_url": "https://api.discogs.com/artists/475331"
+    },
+    {
+     "name": "Sir Doum's",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 475326,
+     "resource_url": "https://api.discogs.com/artists/475326"
+    }
+   ],
+   "duration": "6:42"
+  },
+  {
+   "position": "D1",
+   "type_": "track",
+   "title": "On M'a Dit",
+   "extraartists": [
+    {
+     "name": "Clément Dumoulin",
+     "anv": "",
+     "join": "",
+     "role": "Producer",
+     "tracks": "",
+     "id": 475332,
+     "resource_url": "https://api.discogs.com/artists/475332"
+    }
+   ],
+   "duration": "4:15"
+  },
+  {
+   "position": "D2",
+   "type_": "track",
+   "title": "Nouvelle École",
+   "extraartists": [
+    {
+     "name": "Mala (2)",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 475806,
+     "resource_url": "https://api.discogs.com/artists/475806"
+    },
+    {
+     "name": "Fullmoon (2)",
+     "anv": "",
+     "join": "",
+     "role": "Producer",
+     "tracks": "",
+     "id": 475334,
+     "resource_url": "https://api.discogs.com/artists/475334"
+    }
+   ],
+   "duration": "4:15"
+  },
+  {
+   "position": "D3",
+   "type_": "track",
+   "title": "De Mauvaise Augure",
+   "duration": "3:34"
+  }
+ ],
+ "extraartists": [
+  {
+   "name": "Frédéric Dudouet",
+   "anv": "Fred Dudouet",
+   "join": "",
+   "role": "Producer",
+   "tracks": "A1, A3 to B1, C1, D3",
+   "id": 461059,
+   "resource_url": "https://api.discogs.com/artists/461059"
+  },
+  {
+   "name": "Marc Jouanneaux",
+   "anv": "",
+   "join": "",
+   "role": "Producer",
+   "tracks": "B3, C3, D1",
+   "id": 475333,
+   "resource_url": "https://api.discogs.com/artists/475333"
+  }
+ ],
+ "images": [
+  {
+   "type": "primary",
+   "uri": "https://i.discogs.com/OAAQHYYfNBy9iLASJqRw5r3Vena2RFEtCK_U5CMIKn0/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNjQyOTQ0MzM0/LTY3OTAuanBlZw.jpeg",
+   "resource_url": "https://i.discogs.com/OAAQHYYfNBy9iLASJqRw5r3Vena2RFEtCK_U5CMIKn0/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNjQyOTQ0MzM0/LTY3OTAuanBlZw.jpeg",
+   "uri150": "https://i.discogs.com/YqwxltN6h3Mba6yKF6BweW60YPXJKwSjK0WtFS0h9FM/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNjQyOTQ0MzM0/LTY3OTAuanBlZw.jpeg",
+   "width": 600,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/raE0Xez4E5LD3EbVSg3nupkREO8XzBHbG8lWoKK_4Co/rs:fit/g:sm/q:90/h:535/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzODk0/LTcyNzIuanBlZw.jpeg",
+   "resource_url": "https://i.discogs.com/raE0Xez4E5LD3EbVSg3nupkREO8XzBHbG8lWoKK_4Co/rs:fit/g:sm/q:90/h:535/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzODk0/LTcyNzIuanBlZw.jpeg",
+   "uri150": "https://i.discogs.com/G7iXTau4rqwuZ9OPx4b5zW8jknAW14Q4WQ7xdnn3CYs/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzODk0/LTcyNzIuanBlZw.jpeg",
+   "width": 600,
+   "height": 535
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/l43fG-0bxkV0kyhCmGMh7tWX6Jclf58ghsgfI-vZ2EY/rs:fit/g:sm/q:90/h:303/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzODk2/LTk3NjkuanBlZw.jpeg",
+   "resource_url": "https://i.discogs.com/l43fG-0bxkV0kyhCmGMh7tWX6Jclf58ghsgfI-vZ2EY/rs:fit/g:sm/q:90/h:303/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzODk2/LTk3NjkuanBlZw.jpeg",
+   "uri150": "https://i.discogs.com/1zLXbvfqqPs2-RbId67Thyu2pgil19OuhlyCz65TMBw/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzODk2/LTk3NjkuanBlZw.jpeg",
+   "width": 600,
+   "height": 303
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/3j6QdRb_4Q8OoOZWIZMwUelzlhDcTQ-D_CYzOsHMBys/rs:fit/g:sm/q:90/h:591/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzODk5/LTMyMjcuanBlZw.jpeg",
+   "resource_url": "https://i.discogs.com/3j6QdRb_4Q8OoOZWIZMwUelzlhDcTQ-D_CYzOsHMBys/rs:fit/g:sm/q:90/h:591/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzODk5/LTMyMjcuanBlZw.jpeg",
+   "uri150": "https://i.discogs.com/34Y_5Dbb-2uTOsB3_OMHB-d0z6kMb46VxI6N207YNW0/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzODk5/LTMyMjcuanBlZw.jpeg",
+   "width": 600,
+   "height": 591
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/hHWRqRbh0RuKtvuo1E3js9IILN7l_oUl_ZIkHoP5hFw/rs:fit/g:sm/q:90/h:572/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTgwOTkzMjE2/LTk4NDUuanBlZw.jpeg",
+   "resource_url": "https://i.discogs.com/hHWRqRbh0RuKtvuo1E3js9IILN7l_oUl_ZIkHoP5hFw/rs:fit/g:sm/q:90/h:572/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTgwOTkzMjE2/LTk4NDUuanBlZw.jpeg",
+   "uri150": "https://i.discogs.com/lCnbzmI_0dep_iMZcsOsXSRbfo9vtvxKJBEjkKhzfGI/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTgwOTkzMjE2/LTk4NDUuanBlZw.jpeg",
+   "width": 600,
+   "height": 572
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/nyFpsHdQ5E3RyegiCHXg7s1a0kRk_o-62Jrgm3GmxVQ/rs:fit/g:sm/q:90/h:577/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzOTA0/LTY3MjYuanBlZw.jpeg",
+   "resource_url": "https://i.discogs.com/nyFpsHdQ5E3RyegiCHXg7s1a0kRk_o-62Jrgm3GmxVQ/rs:fit/g:sm/q:90/h:577/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzOTA0/LTY3MjYuanBlZw.jpeg",
+   "uri150": "https://i.discogs.com/kBdm_Rnw2RRlT6iC_IpQagnbBb2ogQ-q26FxtLAeO9I/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzOTA0/LTY3MjYuanBlZw.jpeg",
+   "width": 600,
+   "height": 577
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/NL7ZNs9w3rvD2MlHh-A0uVNu2cTvZM0cHPVOeGxadsY/rs:fit/g:sm/q:90/h:590/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTgwOTkzMjIx/LTMyNzguanBlZw.jpeg",
+   "resource_url": "https://i.discogs.com/NL7ZNs9w3rvD2MlHh-A0uVNu2cTvZM0cHPVOeGxadsY/rs:fit/g:sm/q:90/h:590/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTgwOTkzMjIx/LTMyNzguanBlZw.jpeg",
+   "uri150": "https://i.discogs.com/mLFUpE82AzbRzhUD1o4xhBaQR2npwe87707l2iaXbaU/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTgwOTkzMjIx/LTMyNzguanBlZw.jpeg",
+   "width": 600,
+   "height": 590
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/vgCco-UQhkYIpdfHFAeAvngXhALgXfO8E2WEj04FWCI/rs:fit/g:sm/q:90/h:548/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzOTEx/LTIxNjMuanBlZw.jpeg",
+   "resource_url": "https://i.discogs.com/vgCco-UQhkYIpdfHFAeAvngXhALgXfO8E2WEj04FWCI/rs:fit/g:sm/q:90/h:548/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzOTEx/LTIxNjMuanBlZw.jpeg",
+   "uri150": "https://i.discogs.com/i4Hx19AuCTFX5qPUibVKQVP5RIYt2evKf2gCKNWYUvA/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzOTEx/LTIxNjMuanBlZw.jpeg",
+   "width": 600,
+   "height": 548
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/kd4QQjsJDB2ePS7QWEFwQ2RLwlxmza5SID82nV1xMGw/rs:fit/g:sm/q:90/h:547/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzOTE0/LTYyMjguanBlZw.jpeg",
+   "resource_url": "https://i.discogs.com/kd4QQjsJDB2ePS7QWEFwQ2RLwlxmza5SID82nV1xMGw/rs:fit/g:sm/q:90/h:547/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzOTE0/LTYyMjguanBlZw.jpeg",
+   "uri150": "https://i.discogs.com/HOQQO92wi-P8YPuiAmwyEsJaLBdFTMTLFb3jMgQ4B-g/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNTc4ODQzOTE0/LTYyMjguanBlZw.jpeg",
+   "width": 600,
+   "height": 547
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/z1JHw25L50HkPs4YQIJtuDD5heBysQi0qeiEfgYnuJ0/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNzI0NTA3MDky/LTM2MjEuanBlZw.jpeg",
+   "resource_url": "https://i.discogs.com/z1JHw25L50HkPs4YQIJtuDD5heBysQi0qeiEfgYnuJ0/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNzI0NTA3MDky/LTM2MjEuanBlZw.jpeg",
+   "uri150": "https://i.discogs.com/YGHCN9MVjkIsMRtmbD_fFCIXzMgwVjcRJ16xwpDVKNY/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNzI0NTA3MDky/LTM2MjEuanBlZw.jpeg",
+   "width": 600,
+   "height": 600
+  }
+ ],
+ "thumb": "https://i.discogs.com/YqwxltN6h3Mba6yKF6BweW60YPXJKwSjK0WtFS0h9FM/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTkzOTEz/My0xNjQyOTQ0MzM0/LTY3OTAuanBlZw.jpeg",
+ "estimated_weight": 460,
+ "blocked_from_sale": false,
+ "is_offensive": false
+}

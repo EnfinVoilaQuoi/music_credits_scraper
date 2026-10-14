@@ -598,6 +598,7 @@ def test_fenetre_se_construit(racine_tk):
         get_artist_edition_durations=lambda _id: {},
         get_artist_relations=lambda _id, status: [],
         divergences_identite_soeurs=lambda _id: [],
+        get_artist_positions=lambda _id: {},
         signalements_revue=lambda _id: [],
         verdicts_revue=lambda _id: {},
         trancher_cas=lambda aid, det, cle, **kw: tranches.append((det, cle)),

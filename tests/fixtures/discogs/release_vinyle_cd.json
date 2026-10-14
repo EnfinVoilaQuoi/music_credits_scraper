@@ -1,0 +1,991 @@
+{
+ "id": 1608688,
+ "status": "Accepted",
+ "year": 2008,
+ "resource_url": "https://api.discogs.com/releases/1608688",
+ "uri": "https://www.discogs.com/release/1608688-Kanye-West-808s-Heartbreak",
+ "artists": [
+  {
+   "name": "Kanye West",
+   "anv": "",
+   "join": "",
+   "role": "",
+   "tracks": "",
+   "id": 137880,
+   "resource_url": "https://api.discogs.com/artists/137880",
+   "thumbnail_url": "https://i.discogs.com/wy9IfP_N1tqxIJ1SmyUjPTPZTNGA4RUD27WPWiqLv6s/rs:fit/g:sm/q:90/h:600/w:449/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9BLTEzNzg4/MC0xNzg3MDM2ODA3/LTQ0NTcuanBlZw.jpeg"
+  }
+ ],
+ "artists_sort": "Kanye West",
+ "labels": [
+  {
+   "name": "Roc-A-Fella Records",
+   "catno": "B0012198-01",
+   "entity_type": "1",
+   "entity_type_name": "Label",
+   "id": 9433,
+   "resource_url": "https://api.discogs.com/labels/9433",
+   "thumbnail_url": "https://i.discogs.com/bcmmY9COdum4qSUKRiV2iCkteKLRa3qbjTZhyY4XTgw/rs:fit/g:sm/q:90/h:370/w:512/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTk0MzMt/MTYwNDMyMTAzNS00/NzUzLnBuZw.jpeg"
+  }
+ ],
+ "series": [],
+ "companies": [
+  {
+   "name": "Roc-A-Fella Records, LLC",
+   "catno": "",
+   "entity_type": "13",
+   "entity_type_name": "Phonographic Copyright (p)",
+   "id": 270246,
+   "resource_url": "https://api.discogs.com/labels/270246"
+  },
+  {
+   "name": "Roc-A-Fella Records, LLC",
+   "catno": "",
+   "entity_type": "14",
+   "entity_type_name": "Copyright (c)",
+   "id": 270246,
+   "resource_url": "https://api.discogs.com/labels/270246"
+  },
+  {
+   "name": "Island Def Jam Music Group",
+   "catno": "",
+   "entity_type": "10",
+   "entity_type_name": "Manufactured By",
+   "id": 11537,
+   "resource_url": "https://api.discogs.com/labels/11537",
+   "thumbnail_url": "https://i.discogs.com/6SgP07V2TdDt6c8jyxCBMgKutnsXIULErW0_xukOwbQ/rs:fit/g:sm/q:90/h:355/w:500/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTExNTM3/LTEyODIxNzE0NzMu/anBlZw.jpeg"
+  },
+  {
+   "name": "Island Def Jam Music Group",
+   "catno": "",
+   "entity_type": "8",
+   "entity_type_name": "Marketed By",
+   "id": 11537,
+   "resource_url": "https://api.discogs.com/labels/11537",
+   "thumbnail_url": "https://i.discogs.com/6SgP07V2TdDt6c8jyxCBMgKutnsXIULErW0_xukOwbQ/rs:fit/g:sm/q:90/h:355/w:500/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTExNTM3/LTEyODIxNzE0NzMu/anBlZw.jpeg"
+  },
+  {
+   "name": "Universal Music Distribution",
+   "catno": "",
+   "entity_type": "9",
+   "entity_type_name": "Distributed By",
+   "id": 115478,
+   "resource_url": "https://api.discogs.com/labels/115478"
+  },
+  {
+   "name": "Universal Music Studios East, NYC",
+   "catno": "",
+   "entity_type": "29",
+   "entity_type_name": "Mastered At",
+   "id": 466618,
+   "resource_url": "https://api.discogs.com/labels/466618"
+  },
+  {
+   "name": "Hip Hop Since 1978",
+   "catno": "",
+   "entity_type": "8",
+   "entity_type_name": "Marketed By",
+   "id": 309628,
+   "resource_url": "https://api.discogs.com/labels/309628"
+  },
+  {
+   "name": "Hustle.",
+   "catno": "",
+   "entity_type": "8",
+   "entity_type_name": "Marketed By",
+   "id": 113443,
+   "resource_url": "https://api.discogs.com/labels/113443",
+   "thumbnail_url": "https://i.discogs.com/h5Gn15gf3NEITh0O10CO73Z6MaaKGRXJjUBpcjggLP0/rs:fit/g:sm/q:90/h:84/w:170/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTExMzQ0/My0xNDIyMjE4Njcz/LTE2NDcuanBlZw.jpeg"
+  },
+  {
+   "name": "Optimal Media Production",
+   "catno": "B0012198",
+   "entity_type": "10",
+   "entity_type_name": "Manufactured By",
+   "id": 129094,
+   "resource_url": "https://api.discogs.com/labels/129094",
+   "thumbnail_url": "https://i.discogs.com/xdYheSyWn1vN66xv-AdF2A9JOojPaNsCzhsftoRG9Rg/rs:fit/g:sm/q:90/h:61/w:200/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTEyOTA5/NC0xMzE1MzI3MzE2/LmdpZg.jpeg"
+  },
+  {
+   "name": "EDC, USA",
+   "catno": "",
+   "entity_type": "16",
+   "entity_type_name": "Made By",
+   "id": 381697,
+   "resource_url": "https://api.discogs.com/labels/381697",
+   "thumbnail_url": "https://i.discogs.com/4afLzqZSdhkl8OhY7_dzMg_v-zyPlAQYfzA94-DOTuo/rs:fit/g:sm/q:90/h:140/w:353/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTM4MTY5/Ny0xNDM3MzQ0MTEy/LTg2MzIuanBlZw.jpeg"
+  },
+  {
+   "name": "Sterling Sound",
+   "catno": "",
+   "entity_type": "29",
+   "entity_type_name": "Mastered At",
+   "id": 264060,
+   "resource_url": "https://api.discogs.com/labels/264060",
+   "thumbnail_url": "https://i.discogs.com/Z8f0gMBrt5jLL4TAcCYDGXmMPOLi9V0UW593WXP6BUU/rs:fit/g:sm/q:90/h:118/w:400/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTI2NDA2/MC0xNTAwMjgzMzYy/LTMyMTguanBlZw.jpeg"
+  }
+ ],
+ "formats": [
+  {
+   "name": "Vinyl",
+   "qty": "2",
+   "descriptions": [
+    "LP",
+    "Album"
+   ]
+  },
+  {
+   "name": "CD",
+   "qty": "1",
+   "descriptions": [
+    "Album",
+    "Enhanced"
+   ]
+  },
+  {
+   "name": "All Media",
+   "qty": "1",
+   "descriptions": [
+    "Deluxe Edition"
+   ],
+   "text": "Gatefold"
+  }
+ ],
+ "data_quality": "Needs Vote",
+ "community": {
+  "have": 14649,
+  "want": 8661,
+  "rating": {
+   "count": 1161,
+   "average": 4.48
+  },
+  "submitter": {
+   "username": "zin",
+   "resource_url": "https://api.discogs.com/users/zin"
+  },
+  "contributors": [
+   {
+    "username": "zin",
+    "resource_url": "https://api.discogs.com/users/zin"
+   },
+   {
+    "username": "timm2014",
+    "resource_url": "https://api.discogs.com/users/timm2014"
+   },
+   {
+    "username": "blundski",
+    "resource_url": "https://api.discogs.com/users/blundski"
+   },
+   {
+    "username": "byek",
+    "resource_url": "https://api.discogs.com/users/byek"
+   },
+   {
+    "username": "Dr.Mighty",
+    "resource_url": "https://api.discogs.com/users/Dr.Mighty"
+   },
+   {
+    "username": "gatogato",
+    "resource_url": "https://api.discogs.com/users/gatogato"
+   },
+   {
+    "username": "DiscogsUpdateBot",
+    "resource_url": "https://api.discogs.com/users/DiscogsUpdateBot"
+   },
+   {
+    "username": "Erinyes",
+    "resource_url": "https://api.discogs.com/users/Erinyes"
+   },
+   {
+    "username": "drombulja",
+    "resource_url": "https://api.discogs.com/users/drombulja"
+   },
+   {
+    "username": "Mr.Websta",
+    "resource_url": "https://api.discogs.com/users/Mr.Websta"
+   },
+   {
+    "username": "foreveryoungrecords",
+    "resource_url": "https://api.discogs.com/users/foreveryoungrecords"
+   },
+   {
+    "username": "lostjungle308",
+    "resource_url": "https://api.discogs.com/users/lostjungle308"
+   },
+   {
+    "username": "AustinSimard",
+    "resource_url": "https://api.discogs.com/users/AustinSimard"
+   },
+   {
+    "username": "Jonah7Discogs",
+    "resource_url": "https://api.discogs.com/users/Jonah7Discogs"
+   }
+  ],
+  "data_quality": "Needs Vote",
+  "status": "Accepted"
+ },
+ "format_quantity": 4,
+ "date_added": "2009-01-13T13:24:15-08:00",
+ "date_changed": "2024-09-13T14:07:13-07:00",
+ "num_for_sale": 19,
+ "lowest_price": 14.24,
+ "master_id": 8489,
+ "master_url": "https://api.discogs.com/masters/8489",
+ "title": "808s & Heartbreak",
+ "country": "US",
+ "released": "2008",
+ "notes": "Deluxe Collectors Set\n\nContains two sided poster and lyric sheet.\n\n℗© 2008 Roc-A-Fella Records LLC.\nManufactured and Marketed by The Island Def Jam Music Group, 825 Eighth Avenue, NY, NY 10019.\nAll rights reserved\n\nEnhanced CD includes a computer application that links to Kanye West and Roc-A-Fella websites.",
+ "released_formatted": "2008",
+ "identifiers": [
+  {
+   "type": "Barcode",
+   "value": "6 02517 87281 3",
+   "description": "Text"
+  },
+  {
+   "type": "Barcode",
+   "value": "0602517872813",
+   "description": "Scanned"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "B0012198-01-LP1A RJ",
+   "description": "Side A runout, etched"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "STERLING",
+   "description": "Side A runout, stamped"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "B0012198-01-LP1B RJ",
+   "description": "Side B runout, etched"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "STERLING",
+   "description": "Side B runout, stamped"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "B0012198-01-LP2A RJ",
+   "description": "Side C runout, etched"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "STERLING",
+   "description": "Side C runout, stamped"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "B0012198-01-LP2B RJ",
+   "description": "Side D runout, etched"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "STERLING",
+   "description": "Side D runout, stamped"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "B00 121 9802 01%% EDC F",
+   "description": "CD, mirror band"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "MADE IN USA BY EDC",
+   "description": "CD, plastic hub"
+  },
+  {
+   "type": "Mastering SID Code",
+   "value": "IFPI L007",
+   "description": "CD"
+  },
+  {
+   "type": "Mould SID Code",
+   "value": "IFPI 0321",
+   "description": "CD"
+  }
+ ],
+ "videos": [
+  {
+   "uri": "https://www.youtube.com/watch?v=Co0tTeuUVhU",
+   "title": "Kanye West - Heartless",
+   "description": "Best of Kanye West: https://goo.gl/2FXUVW\nSubscribe here: https://goo.gl/AgJE59\n\n\nMusic video by Kanye West performing Heartless. (C) 2008 Roc-A-Fella Records, LLC",
+   "duration": 221,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=wMH0e8kIZtE",
+   "title": "Kanye West - Welcome To Heartbreak ft. Kid Cudi",
+   "description": "Best of Kanye West: https://goo.gl/2FXUVW\nSubscribe here: https://goo.gl/AgJE59\n\n\nMusic video by Kanye West performing Welcome To Heartbreak. (C) 2009 Roc-A-Fella Records, LLC",
+   "duration": 271,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=PH4JPgVD2SM",
+   "title": "Kanye West - Amazing ft. Young Jeezy",
+   "description": "Music video by Kanye West performing Amazing. (C) 2009 Roc-A-Fella Records, LLC",
+   "duration": 239,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=HZwMX6T5Jhk",
+   "title": "Kanye West - Love Lockdown",
+   "description": "Music video by Kanye West performing Love Lockdown. YouTube view counts pre-VEVO: 18,944,047. (C) 2008 Roc-A-Fella Records, LLC",
+   "duration": 276,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=irBP5FnksKc",
+   "title": "Kanye West - Paranoid ft. Mr Hudson",
+   "description": "Best of Kanye West: https://goo.gl/2FXUVW\nSubscribe here: https://goo.gl/AgJE59\n\n\nMusic video by Kanye West performing Paranoid. (C) 2009 Roc-A-Fella Records, LLC",
+   "duration": 205,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=n6rjQ9VVLDI",
+   "title": "Kanye West - Coldest Winter",
+   "description": "Music video by Kanye West performing Coldest Winter. (C) 2010 Roc-A-Fella Records, LLC",
+   "duration": 234,
+   "embed": true
+  }
+ ],
+ "genres": [
+  "Electronic",
+  "Hip Hop",
+  "Funk / Soul",
+  "Pop"
+ ],
+ "styles": [
+  "Experimental",
+  "Synth-pop",
+  "Pop Rap",
+  "Contemporary R&B"
+ ],
+ "tracklist": [
+  {
+   "position": "A1",
+   "type_": "track",
+   "title": "Say You Will",
+   "duration": ""
+  },
+  {
+   "position": "A2",
+   "type_": "track",
+   "title": "Welcome To Heartbreak",
+   "extraartists": [
+    {
+     "name": "Kid Cudi",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 1093094,
+     "resource_url": "https://api.discogs.com/artists/1093094"
+    }
+   ],
+   "duration": ""
+  },
+  {
+   "position": "A3",
+   "type_": "track",
+   "title": "Heartless",
+   "duration": ""
+  },
+  {
+   "position": "B1",
+   "type_": "track",
+   "title": "Amazing",
+   "extraartists": [
+    {
+     "name": "Young Jeezy",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 341733,
+     "resource_url": "https://api.discogs.com/artists/341733"
+    }
+   ],
+   "duration": ""
+  },
+  {
+   "position": "B2",
+   "type_": "track",
+   "title": "Love Lockdown",
+   "duration": ""
+  },
+  {
+   "position": "B3",
+   "type_": "track",
+   "title": "Paranoid",
+   "extraartists": [
+    {
+     "name": "Mr Hudson",
+     "anv": "Mr. Hudson",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 1024497,
+     "resource_url": "https://api.discogs.com/artists/1024497"
+    }
+   ],
+   "duration": ""
+  },
+  {
+   "position": "C1",
+   "type_": "track",
+   "title": "RoboCop",
+   "duration": ""
+  },
+  {
+   "position": "C2",
+   "type_": "track",
+   "title": "Street Lights",
+   "duration": ""
+  },
+  {
+   "position": "C3",
+   "type_": "track",
+   "title": "Bad News",
+   "duration": ""
+  },
+  {
+   "position": "D1",
+   "type_": "track",
+   "title": "See You In My Nightmares",
+   "extraartists": [
+    {
+     "name": "Lil Wayne",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 1065010,
+     "resource_url": "https://api.discogs.com/artists/1065010"
+    }
+   ],
+   "duration": ""
+  },
+  {
+   "position": "D2",
+   "type_": "track",
+   "title": "Coldest Winter",
+   "duration": ""
+  },
+  {
+   "position": "D3",
+   "type_": "track",
+   "title": "Pinocchio Story (Freestyle Live From Singapore)",
+   "duration": ""
+  },
+  {
+   "position": "1",
+   "type_": "track",
+   "title": "Say You Will",
+   "duration": "6:17"
+  },
+  {
+   "position": "2",
+   "type_": "track",
+   "title": "Welcome To Heartbreak",
+   "extraartists": [
+    {
+     "name": "Kid Cudi",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 1093094,
+     "resource_url": "https://api.discogs.com/artists/1093094"
+    }
+   ],
+   "duration": "4:23"
+  },
+  {
+   "position": "3",
+   "type_": "track",
+   "title": "Heartless",
+   "duration": "3:31"
+  },
+  {
+   "position": "4",
+   "type_": "track",
+   "title": "Amazing",
+   "extraartists": [
+    {
+     "name": "Young Jeezy",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 341733,
+     "resource_url": "https://api.discogs.com/artists/341733"
+    }
+   ],
+   "duration": "3:58"
+  },
+  {
+   "position": "5",
+   "type_": "track",
+   "title": "Love Lockdown",
+   "duration": "4:30"
+  },
+  {
+   "position": "6",
+   "type_": "track",
+   "title": "Paranoid",
+   "extraartists": [
+    {
+     "name": "Mr Hudson",
+     "anv": "Mr. Hudson",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 1024497,
+     "resource_url": "https://api.discogs.com/artists/1024497"
+    }
+   ],
+   "duration": "4:37"
+  },
+  {
+   "position": "7",
+   "type_": "track",
+   "title": "RoboCop",
+   "duration": "4:34"
+  },
+  {
+   "position": "8",
+   "type_": "track",
+   "title": "Street Lights",
+   "duration": "3:09"
+  },
+  {
+   "position": "9",
+   "type_": "track",
+   "title": "Bad News",
+   "duration": "3:58"
+  },
+  {
+   "position": "10",
+   "type_": "track",
+   "title": "See You In My Nightmares",
+   "extraartists": [
+    {
+     "name": "Lil Wayne",
+     "anv": "",
+     "join": "",
+     "role": "Featuring",
+     "tracks": "",
+     "id": 1065010,
+     "resource_url": "https://api.discogs.com/artists/1065010"
+    }
+   ],
+   "duration": "4:18"
+  },
+  {
+   "position": "11",
+   "type_": "track",
+   "title": "Coldest Winter",
+   "duration": "2:45"
+  },
+  {
+   "position": "12",
+   "type_": "track",
+   "title": "Pinocchio Story (Freestyle Live From Singapore)",
+   "duration": "6:03"
+  }
+ ],
+ "extraartists": [
+  {
+   "name": "Terese Joseph",
+   "anv": "",
+   "join": "",
+   "role": "A&R [Administration]",
+   "tracks": "",
+   "id": 1872052,
+   "resource_url": "https://api.discogs.com/artists/1872052"
+  },
+  {
+   "name": "Patrick Reynolds",
+   "anv": "Patrick \"Plain Pat\" Reynolds",
+   "join": "",
+   "role": "A&R [Direction]",
+   "tracks": "",
+   "id": 1600211,
+   "resource_url": "https://api.discogs.com/artists/1600211"
+  },
+  {
+   "name": "Past Tell Museum",
+   "anv": "",
+   "join": "",
+   "role": "Art Direction",
+   "tracks": "",
+   "id": 2325261,
+   "resource_url": "https://api.discogs.com/artists/2325261"
+  },
+  {
+   "name": "Kaws",
+   "anv": "",
+   "join": "",
+   "role": "Artwork",
+   "tracks": "",
+   "id": 2446777,
+   "resource_url": "https://api.discogs.com/artists/2446777"
+  },
+  {
+   "name": "Jeff Bhasker",
+   "anv": "",
+   "join": "",
+   "role": "Co-producer",
+   "tracks": "A2, B1 to B3, D2",
+   "id": 256804,
+   "resource_url": "https://api.discogs.com/artists/256804"
+  },
+  {
+   "name": "Mr Hudson",
+   "anv": "Mr. Hudson",
+   "join": "",
+   "role": "Co-producer",
+   "tracks": "C2",
+   "id": 1024497,
+   "resource_url": "https://api.discogs.com/artists/1024497"
+  },
+  {
+   "name": "No I.D.",
+   "anv": "",
+   "join": "",
+   "role": "Co-producer",
+   "tracks": "A3, D1, D2",
+   "id": 108618,
+   "resource_url": "https://api.discogs.com/artists/108618"
+  },
+  {
+   "name": "Plain Pat",
+   "anv": "",
+   "join": "",
+   "role": "Co-producer",
+   "tracks": "A2, B3",
+   "id": 231617,
+   "resource_url": "https://api.discogs.com/artists/231617"
+  },
+  {
+   "name": "Kristen Yiengst",
+   "anv": "",
+   "join": "",
+   "role": "Coordinator [Art & Photography]",
+   "tracks": "",
+   "id": 1918645,
+   "resource_url": "https://api.discogs.com/artists/1918645"
+  },
+  {
+   "name": "JP Robinson",
+   "anv": "",
+   "join": "",
+   "role": "Design [Package Design]",
+   "tracks": "",
+   "id": 2012007,
+   "resource_url": "https://api.discogs.com/artists/2012007"
+  },
+  {
+   "name": "Carol Corless",
+   "anv": "",
+   "join": "",
+   "role": "Design [Package Production]",
+   "tracks": "",
+   "id": 2216977,
+   "resource_url": "https://api.discogs.com/artists/2216977"
+  },
+  {
+   "name": "Gee Roberson",
+   "anv": "",
+   "join": "",
+   "role": "Executive-Producer",
+   "tracks": "",
+   "id": 233490,
+   "resource_url": "https://api.discogs.com/artists/233490"
+  },
+  {
+   "name": "Kanye West",
+   "anv": "",
+   "join": "",
+   "role": "Executive-Producer",
+   "tracks": "",
+   "id": 137880,
+   "resource_url": "https://api.discogs.com/artists/137880"
+  },
+  {
+   "name": "Kyambo Joshua",
+   "anv": "Kayambo \"Hip Hop\" Joshua",
+   "join": "",
+   "role": "Executive-Producer",
+   "tracks": "",
+   "id": 2320722,
+   "resource_url": "https://api.discogs.com/artists/2320722"
+  },
+  {
+   "name": "The Carter Administration",
+   "anv": "",
+   "join": "",
+   "role": "Executive-Producer",
+   "tracks": "",
+   "id": 2702599,
+   "resource_url": "https://api.discogs.com/artists/2702599"
+  },
+  {
+   "name": "Alison K. Finley",
+   "anv": "",
+   "join": "",
+   "role": "Legal [Legal Counsel]",
+   "tracks": "",
+   "id": 3250504,
+   "resource_url": "https://api.discogs.com/artists/3250504"
+  },
+  {
+   "name": "Eric Weissman Music Licensing, Inc.",
+   "anv": "",
+   "join": "",
+   "role": "Legal [Sample Clearances]",
+   "tracks": "",
+   "id": 4175901,
+   "resource_url": "https://api.discogs.com/artists/4175901"
+  },
+  {
+   "name": "Hip Hop Since 1978",
+   "anv": "",
+   "join": "",
+   "role": "Management",
+   "tracks": "",
+   "id": 421330,
+   "resource_url": "https://api.discogs.com/artists/421330"
+  },
+  {
+   "name": "Hustle (3)",
+   "anv": "",
+   "join": "",
+   "role": "Management",
+   "tracks": "",
+   "id": 4756233,
+   "resource_url": "https://api.discogs.com/artists/4756233"
+  },
+  {
+   "name": "Antoinette Trotman",
+   "anv": "",
+   "join": "",
+   "role": "Management [Business Affairs]",
+   "tracks": "",
+   "id": 1985637,
+   "resource_url": "https://api.discogs.com/artists/1985637"
+  },
+  {
+   "name": "Ian Allen (7)",
+   "anv": "",
+   "join": "",
+   "role": "Management [Business Affairs]",
+   "tracks": "",
+   "id": 3148550,
+   "resource_url": "https://api.discogs.com/artists/3148550"
+  },
+  {
+   "name": "Randy McMillan",
+   "anv": "",
+   "join": "",
+   "role": "Management [Business Affairs]",
+   "tracks": "",
+   "id": 1985635,
+   "resource_url": "https://api.discogs.com/artists/1985635"
+  },
+  {
+   "name": "Al Branch",
+   "anv": "",
+   "join": "",
+   "role": "Management [Marketed By]",
+   "tracks": "",
+   "id": 2738810,
+   "resource_url": "https://api.discogs.com/artists/2738810"
+  },
+  {
+   "name": "Don C",
+   "anv": "",
+   "join": "",
+   "role": "Management [Marketed By]",
+   "tracks": "",
+   "id": 370014,
+   "resource_url": "https://api.discogs.com/artists/370014"
+  },
+  {
+   "name": "Chris Atlas",
+   "anv": "",
+   "join": "",
+   "role": "Management [Marketing For Def Jam]",
+   "tracks": "",
+   "id": 176791,
+   "resource_url": "https://api.discogs.com/artists/176791"
+  },
+  {
+   "name": "Vlado Meller",
+   "anv": "",
+   "join": "",
+   "role": "Mastered By",
+   "tracks": "",
+   "id": 189744,
+   "resource_url": "https://api.discogs.com/artists/189744"
+  },
+  {
+   "name": "Ray Janos",
+   "anv": "RJ",
+   "join": "",
+   "role": "Mastered By [Vinyl]",
+   "tracks": "",
+   "id": 339229,
+   "resource_url": "https://api.discogs.com/artists/339229"
+  },
+  {
+   "name": "Willy Vanderperre",
+   "anv": "",
+   "join": "",
+   "role": "Photography By",
+   "tracks": "",
+   "id": 2325259,
+   "resource_url": "https://api.discogs.com/artists/2325259"
+  },
+  {
+   "name": "Danny Clinch",
+   "anv": "",
+   "join": "",
+   "role": "Photography By [Photograph Of Kanye And Donda West]",
+   "tracks": "",
+   "id": 329877,
+   "resource_url": "https://api.discogs.com/artists/329877"
+  },
+  {
+   "name": "Kanye West",
+   "anv": "",
+   "join": "",
+   "role": "Producer",
+   "tracks": "",
+   "id": 137880,
+   "resource_url": "https://api.discogs.com/artists/137880"
+  }
+ ],
+ "images": [
+  {
+   "type": "primary",
+   "uri": "https://i.discogs.com/mvvxUQukXN23iuZSMub01nj_auoQ5hndDn3nrKCBl5Q/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI4/My01NzE2LmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/mvvxUQukXN23iuZSMub01nj_auoQ5hndDn3nrKCBl5Q/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI4/My01NzE2LmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/GkYDpdi4_0EWODslrqInHkgloycU5SAzSiY2wLPHY1g/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI4/My01NzE2LmpwZWc.jpeg",
+   "width": 600,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/HeIK7FmON2z_AkEJtYQSap1-Xq-lGFGjdWc29KGovNs/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI5/NS0yNjk1LmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/HeIK7FmON2z_AkEJtYQSap1-Xq-lGFGjdWc29KGovNs/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI5/NS0yNjk1LmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/zbS2CJKbxx7A9zqC_j8YWF1Er5BxFiTOCKGHE1EmpAI/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI5/NS0yNjk1LmpwZWc.jpeg",
+   "width": 600,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/OTil5JYMCa0_47775z6Jh0JjILyDeUXMN7ewLDmrQwo/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI5/NS00MjM4LmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/OTil5JYMCa0_47775z6Jh0JjILyDeUXMN7ewLDmrQwo/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI5/NS00MjM4LmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/9SLWeHPYrFDyA-hZVoHePoRp4KabyUDU3I23KSudo7E/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI5/NS00MjM4LmpwZWc.jpeg",
+   "width": 600,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/dUcAyoHsvGWoF0wm23NdQBdAJah1gxWSL1fVD5YcdZ4/rs:fit/g:sm/q:90/h:600/w:587/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0NzA2Mjk2/NS05MTEzLmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/dUcAyoHsvGWoF0wm23NdQBdAJah1gxWSL1fVD5YcdZ4/rs:fit/g:sm/q:90/h:600/w:587/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0NzA2Mjk2/NS05MTEzLmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/8F3wKaPYDz8LcxkPFJZdA-ErcIoJ3ettraKEDOpiZzc/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0NzA2Mjk2/NS05MTEzLmpwZWc.jpeg",
+   "width": 587,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/DD4ihWs_B0JpYF8h7lZYudyz9717fHnE1RNl1ctYDcs/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI4/Ni0zMDIxLmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/DD4ihWs_B0JpYF8h7lZYudyz9717fHnE1RNl1ctYDcs/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI4/Ni0zMDIxLmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/zz59RFUGN9Sem6pHCEE8ajHb7vuoBbVT3yp2gpzGWBA/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI4/Ni0zMDIxLmpwZWc.jpeg",
+   "width": 600,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/ZC8NUQ4MCzSPwe9E8Q84CJc9GwG73OtcDBKJuuNQNeU/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI5/Ni00Njk4LmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/ZC8NUQ4MCzSPwe9E8Q84CJc9GwG73OtcDBKJuuNQNeU/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI5/Ni00Njk4LmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/zJJto4I-6u7RMoANI8MJQHkjlfvs0K_TSQF_eYd8hT4/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI5/Ni00Njk4LmpwZWc.jpeg",
+   "width": 600,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/1tE3Arhjh6o314b1aeo7lzjrkMxYrjZwJPJ22vSVTbo/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMy/Mi02NzcwLmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/1tE3Arhjh6o314b1aeo7lzjrkMxYrjZwJPJ22vSVTbo/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMy/Mi02NzcwLmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/0-e4ybqEZFE8KJcSvQfEDQmNu4lgtffOzEkZJxPUCrw/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMy/Mi02NzcwLmpwZWc.jpeg",
+   "width": 600,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/-zZmJUEMtSr90TXuq2Bpm-kfk4_2csqmChFxoShqycU/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMy/NC0zMzA3LmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/-zZmJUEMtSr90TXuq2Bpm-kfk4_2csqmChFxoShqycU/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMy/NC0zMzA3LmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/ltqVNJGdICVelzOqrKdYU_uYZ_1GhgH1oTxAWUvMr08/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMy/NC0zMzA3LmpwZWc.jpeg",
+   "width": 600,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/uElo1c_lWY61kmIH7YiGZzzYKSwHFEjSk2nRFJYWcuo/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMx/NC00OTc2LmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/uElo1c_lWY61kmIH7YiGZzzYKSwHFEjSk2nRFJYWcuo/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMx/NC00OTc2LmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/EPbkQ8JIDF_StnbcITYBLL5rlzHuVFvJ7-dX7ZpIeYE/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMx/NC00OTc2LmpwZWc.jpeg",
+   "width": 600,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/tcA9kjDmKTGwt4PNgBcHhRnFMqwlQXNYqMmC2YZaL3I/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMy/My03OTc5LmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/tcA9kjDmKTGwt4PNgBcHhRnFMqwlQXNYqMmC2YZaL3I/rs:fit/g:sm/q:90/h:600/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMy/My03OTc5LmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/cA8OvLsLU_ujETJ5uHoBB8PeZdtnNP5WKIDelWbKfLQ/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDMy/My03OTc5LmpwZWc.jpeg",
+   "width": 600,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/-n6Wq60AHM28mJ-bLg4PC90xxXjfdrOoaja9jFW5oMs/rs:fit/g:sm/q:90/h:600/w:301/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjc5/Ny0zMTQ1LmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/-n6Wq60AHM28mJ-bLg4PC90xxXjfdrOoaja9jFW5oMs/rs:fit/g:sm/q:90/h:600/w:301/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjc5/Ny0zMTQ1LmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/GMXS1PHnovz6y-ztE6ZKh6M7Z-GAj3icxVYupp7YZUM/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjc5/Ny0zMTQ1LmpwZWc.jpeg",
+   "width": 301,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/S_MdC2dmRc99zQPVjvvm7kj-rrHY6YZFFtrD_mKcOR0/rs:fit/g:sm/q:90/h:600/w:309/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjc5/OS00NTE3LmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/S_MdC2dmRc99zQPVjvvm7kj-rrHY6YZFFtrD_mKcOR0/rs:fit/g:sm/q:90/h:600/w:309/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjc5/OS00NTE3LmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/1U0D4QaU41Oj_kPj4rbvQg36nalqklvi1dVgrN90RfI/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjc5/OS00NTE3LmpwZWc.jpeg",
+   "width": 309,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/rbehCVKq25-NvHJg1VTVebmhHX9LZ0Hv3X1QU7YRwv0/rs:fit/g:sm/q:90/h:297/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjc4/OS0zNTkwLmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/rbehCVKq25-NvHJg1VTVebmhHX9LZ0Hv3X1QU7YRwv0/rs:fit/g:sm/q:90/h:297/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjc4/OS0zNTkwLmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/J2Y9PNb-4vxmvgwStRBXJ7ifQmt5tYmh1wq1XTquw30/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjc4/OS0zNTkwLmpwZWc.jpeg",
+   "width": 600,
+   "height": 297
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/H36CFvBq2n4g-3iw-6O1VMnAQChO88Pa6iStpn36VUg/rs:fit/g:sm/q:90/h:298/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjgw/Mi03MDQwLmpwZWc.jpeg",
+   "resource_url": "https://i.discogs.com/H36CFvBq2n4g-3iw-6O1VMnAQChO88Pa6iStpn36VUg/rs:fit/g:sm/q:90/h:298/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjgw/Mi03MDQwLmpwZWc.jpeg",
+   "uri150": "https://i.discogs.com/0ExcROart50AQjOgcXA_BOT1-I9WpKSuP3KDY0fSbJI/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzkxNjgw/Mi03MDQwLmpwZWc.jpeg",
+   "width": 600,
+   "height": 298
+  }
+ ],
+ "thumb": "https://i.discogs.com/GkYDpdi4_0EWODslrqInHkgloycU5SAzSiY2wLPHY1g/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTE2MDg2/ODgtMTU0MzU3NDI4/My01NzE2LmpwZWc.jpeg",
+ "estimated_weight": 775,
+ "blocked_from_sale": false,
+ "is_offensive": false
+}

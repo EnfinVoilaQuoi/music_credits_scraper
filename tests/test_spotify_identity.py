@@ -288,8 +288,73 @@ def test_l_id_d_une_autre_fiche_est_refuse(monkeypatch):
     monkeypatch.setattr(si, "fournisseur_titres", lambda aid: [(1, "Only"), (2, "Only One")])
     assert si.valider_identite(only, "SP", lambda s: identite) is False
 
+    # Sans fiche sœur, le titre CONTENU ne passe plus seul (2026-10-14) : il
+    # faut une durée indépendante concordante.
     monkeypatch.setattr(si, "fournisseur_titres", lambda aid: [(1, "Only")])
+    assert si.valider_identite(only, "SP", lambda s: identite) is False
+    only.durations_observees = {"deezer": 281}
+    identite = {**identite, "duration": 282}
     assert si.valider_identite(only, "SP", lambda s: identite) is True
+
+
+class TestTitreContenu:
+    """2026-10-14 : sur les 14 faux probables de la relecture du 2026-10-11
+    (CORRECTIFS, gate Spotify), 9 passaient parce qu'un titre CONTENAIT
+    l'autre — le mot en plus fait souvent un autre morceau."""
+
+    @pytest.mark.parametrize(
+        ("fiche", "servi", "artiste"),
+        [
+            ("Only", "Only One", "Kanye West"),
+            ("Wait", "I Can't Wait", "Kanye West"),
+            ("Rollin'", "Game Rollin", "Kanye West"),
+            ("Tree", "That Tree", "Kid Cudi"),
+            ("Dream", "Dream Killer", "Travis Scott"),
+            ("Tout c'que j'ai appris", "Tout c'que j'ai", "Booba"),
+            ("Civilisé, partie 1", "Civilisé", "Booba"),
+            ("L'amour Véritable", "L'AMOUR", "Diam's"),
+            ("Freestyle Dans ma bulle", "Dans Ma Bulle", "Diam's"),
+        ],
+    )
+    def test_contenu_sans_duree_independante_refuse(self, fiche, servi, artiste):
+        ok, motif = identite_concorde(
+            _track(titre=fiche, artiste=artiste), _identite(servi, [artiste], 200)
+        )
+        assert ok is False
+        assert "durée indépendante" in motif
+
+    def test_contenu_corrobore_par_une_duree_independante(self):
+        track = _track(titre="Civilisé", artiste="Booba", durations_observees={"deezer": 199})
+        assert identite_concorde(track, _identite("Civilisé, partie 1", ["Booba"], 200))[0]
+
+    def test_une_duree_lue_par_l_id_ne_corrobore_pas(self):
+        """SCH « Massimo » ← « La mallette » : la colonne a SUIVI l'ID (durée
+        `spotify_web`) — l'ID faux se corroborait lui-même."""
+        track = _track(
+            titre="Massimo", artiste="SCH", duree=201, durations_observees={"spotify_web": 201}
+        )
+        ok, motif = identite_concorde(track, _identite("La mallette", ["SCH"], 201))
+        assert ok is False
+        assert "titre" in motif
+
+    def test_la_colonne_sans_lecture_par_l_id_reste_un_temoin(self):
+        """« 1 pour la plume » / « Un pour la plume » : colonne d'avant les
+        observations, aucune durée lue par l'ID — elle corrobore toujours."""
+        track = _track(titre="Un pour la plume", artiste="Flynt", duree=249)
+        assert identite_concorde(track, _identite("1 pour la plume", ["Flynt"], 249))[0]
+
+    def test_le_temoin_independant_dement_l_id(self):
+        """La colonne a suivi l'ID (357 s) ; Deezer dit 295 s : autre
+        enregistrement (Kanye « New God Flow.1 »)."""
+        track = _track(
+            titre="New God Flow.1",
+            artiste="Kanye West",
+            duree=357,
+            durations_observees={"deezer": 295, "spotify_web": 357},
+        )
+        ok, motif = identite_concorde(track, _identite("New God Flow.1", ["Kanye West"], 357))
+        assert ok is False
+        assert "indépendante" in motif
 
 
 class TestLigneDInviteHomonyme:

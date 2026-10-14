@@ -1,0 +1,73 @@
+{
+ "created": "2026-10-14T03:49:06.700Z",
+ "count": 1,
+ "offset": 0,
+ "releases": [
+  {
+   "id": "42ad49f8-c5eb-4785-befd-22f94860b383",
+   "score": 100,
+   "status-id": "4e304316-386d-3409-af2e-78857eec5cfe",
+   "packaging-id": "119eba76-b343-3e02-a292-f0f00644bb9b",
+   "artist-credit-id": "69a7656f-55a7-31a9-9de5-bb800c607cff",
+   "count": 1,
+   "title": "ADC",
+   "status": "Official",
+   "packaging": "None",
+   "text-representation": {
+    "language": "fra",
+    "script": "Latn"
+   },
+   "artist-credit": [
+    {
+     "name": "Freeze Corleone",
+     "artist": {
+      "id": "c715bbba-fe0f-4cb1-be89-40aa8d2117f9",
+      "name": "Freeze Corleone",
+      "sort-name": "Freeze Corleone",
+      "disambiguation": "French rapper, 667/LDO"
+     }
+    }
+   ],
+   "release-group": {
+    "id": "92cde637-21e8-4eda-875d-37ac10bb290e",
+    "type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc",
+    "primary-type-id": "f529b476-6e62-324f-b0aa-1f3e33d313fc",
+    "title": "ADC",
+    "primary-type": "Album"
+   },
+   "date": "2023-09-11",
+   "country": "XW",
+   "release-events": [
+    {
+     "date": "2023-09-11",
+     "area": {
+      "id": "525d4e18-3d00-31b9-a58b-a146a916de8f",
+      "name": "[Worldwide]",
+      "sort-name": "[Worldwide]",
+      "iso-3166-1-codes": [
+       "XW"
+      ]
+     }
+    }
+   ],
+   "barcode": "3701421546227",
+   "label-info": [
+    {
+     "label": {
+      "id": "9de6721a-148d-4a05-8796-78f9e701c0d0",
+      "name": "MMS Records"
+     }
+    }
+   ],
+   "track-count": 15,
+   "media": [
+    {
+     "id": "1b945068-c5e7-32ff-9f62-6bda8a5c560b",
+     "format": "Digital Media",
+     "disc-count": 0,
+     "track-count": 15
+    }
+   ]
+  }
+ ]
+}

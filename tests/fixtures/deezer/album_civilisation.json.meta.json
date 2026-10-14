@@ -1,0 +1,7 @@
+{
+  "name": "deezer_album_upc",
+  "url": "https://api.deezer.com/album/366967207",
+  "method": "requests",
+  "captured_at": "2026-10-14T03:48:59",
+  "size_bytes": 40581
+}

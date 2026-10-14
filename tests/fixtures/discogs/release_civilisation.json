@@ -1,0 +1,1118 @@
+{
+ "id": 24973729,
+ "status": "Accepted",
+ "year": 2022,
+ "resource_url": "https://api.discogs.com/releases/24973729",
+ "uri": "https://www.discogs.com/release/24973729-OrelSan-Civilisation",
+ "artists": [
+  {
+   "name": "Orelsan",
+   "anv": "OrelSan",
+   "join": "",
+   "role": "",
+   "tracks": "",
+   "id": 1409627,
+   "resource_url": "https://api.discogs.com/artists/1409627",
+   "thumbnail_url": "https://i.discogs.com/4EEoqgb7vsm49MocysmgMAzias6yWDyGTe_hiZ-wpAU/rs:fit/g:sm/q:90/h:600/w:528/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9BLTE0MDk2/MjctMTU0NDI2MTA2/MS0yMjcwLmpwZWc.jpeg"
+  }
+ ],
+ "artists_sort": "Orelsan",
+ "labels": [
+  {
+   "name": "7th Magnitude",
+   "catno": "3428142",
+   "entity_type": "1",
+   "entity_type_name": "Label",
+   "id": 153182,
+   "resource_url": "https://api.discogs.com/labels/153182",
+   "thumbnail_url": "https://i.discogs.com/R3QjUG3BmSE12mz6NzEV8aG8Ncfy35bq1AWTlio4Qa4/rs:fit/g:sm/q:90/h:64/w:270/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTE1MzE4/Mi0xNDUzMDMwODY3/LTYxNDIuanBlZw.jpeg"
+  },
+  {
+   "name": "3ème Bureau",
+   "catno": "3428142",
+   "entity_type": "1",
+   "entity_type_name": "Label",
+   "id": 153180,
+   "resource_url": "https://api.discogs.com/labels/153180",
+   "thumbnail_url": "https://i.discogs.com/0Jka2rsuHMzTojBNfgJpx-_utAFBKk7JgJA0eOzFWUk/rs:fit/g:sm/q:90/h:219/w:170/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTE1MzE4/MC0xMzIzMDA1NzUw/LmpwZWc.jpeg"
+  },
+  {
+   "name": "Wagram Music",
+   "catno": "3428142",
+   "entity_type": "1",
+   "entity_type_name": "Label",
+   "id": 27276,
+   "resource_url": "https://api.discogs.com/labels/27276",
+   "thumbnail_url": "https://i.discogs.com/O9XEO0OyPpU07zH9YuWcwh8yCw7fDjIPqwugJzQS6to/rs:fit/g:sm/q:90/h:207/w:441/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTI3Mjc2/LTEzNTY1MjI0ODYt/OTk2Ni5qcGVn.jpeg"
+  }
+ ],
+ "series": [],
+ "companies": [
+  {
+   "name": "7th Magnitude",
+   "catno": "",
+   "entity_type": "13",
+   "entity_type_name": "Phonographic Copyright (p)",
+   "id": 153182,
+   "resource_url": "https://api.discogs.com/labels/153182",
+   "thumbnail_url": "https://i.discogs.com/R3QjUG3BmSE12mz6NzEV8aG8Ncfy35bq1AWTlio4Qa4/rs:fit/g:sm/q:90/h:64/w:270/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTE1MzE4/Mi0xNDUzMDMwODY3/LTYxNDIuanBlZw.jpeg"
+  },
+  {
+   "name": "7th Magnitude",
+   "catno": "",
+   "entity_type": "14",
+   "entity_type_name": "Copyright (c)",
+   "id": 153182,
+   "resource_url": "https://api.discogs.com/labels/153182",
+   "thumbnail_url": "https://i.discogs.com/R3QjUG3BmSE12mz6NzEV8aG8Ncfy35bq1AWTlio4Qa4/rs:fit/g:sm/q:90/h:64/w:270/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTE1MzE4/Mi0xNDUzMDMwODY3/LTYxNDIuanBlZw.jpeg"
+  },
+  {
+   "name": "Studio Haxo, Paris",
+   "catno": "",
+   "entity_type": "23",
+   "entity_type_name": "Recorded At",
+   "id": 446622,
+   "resource_url": "https://api.discogs.com/labels/446622",
+   "thumbnail_url": "https://i.discogs.com/tzt8xCFtaeviVnQRDbn_6B6ncLCvBBTJn1iwS-NIHDM/rs:fit/g:sm/q:90/h:556/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9MLTQ0NjYy/Mi0xNDcxNjkwMDAz/LTc3OTAuanBlZw.jpeg"
+  },
+  {
+   "name": "Phazz Studio",
+   "catno": "",
+   "entity_type": "23",
+   "entity_type_name": "Recorded At",
+   "id": 2493391,
+   "resource_url": "https://api.discogs.com/labels/2493391"
+  },
+  {
+   "name": "OTHER Island Studios",
+   "catno": "",
+   "entity_type": "23",
+   "entity_type_name": "Recorded At",
+   "id": 2493394,
+   "resource_url": "https://api.discogs.com/labels/2493394"
+  }
+ ],
+ "formats": [
+  {
+   "name": "CD",
+   "qty": "1",
+   "descriptions": [
+    "Album"
+   ],
+   "text": "Civilisation"
+  },
+  {
+   "name": "CD",
+   "qty": "1",
+   "descriptions": [
+    "Minimax",
+    "Album",
+    "Reissue"
+   ],
+   "text": "Civilisation Perdu"
+  }
+ ],
+ "data_quality": "Needs Vote",
+ "community": {
+  "have": 647,
+  "want": 32,
+  "rating": {
+   "count": 40,
+   "average": 4.13
+  },
+  "submitter": {
+   "username": "Dj_Sawn",
+   "resource_url": "https://api.discogs.com/users/Dj_Sawn"
+  },
+  "contributors": [
+   {
+    "username": "Dj_Sawn",
+    "resource_url": "https://api.discogs.com/users/Dj_Sawn"
+   },
+   {
+    "username": "Blazheart",
+    "resource_url": "https://api.discogs.com/users/Blazheart"
+   },
+   {
+    "username": "momento",
+    "resource_url": "https://api.discogs.com/users/momento"
+   },
+   {
+    "username": "AN0ZER",
+    "resource_url": "https://api.discogs.com/users/AN0ZER"
+   },
+   {
+    "username": "McPasFurieux",
+    "resource_url": "https://api.discogs.com/users/McPasFurieux"
+   },
+   {
+    "username": "samuel.gremaud",
+    "resource_url": "https://api.discogs.com/users/samuel.gremaud"
+   },
+   {
+    "username": "MIKED76",
+    "resource_url": "https://api.discogs.com/users/MIKED76"
+   },
+   {
+    "username": "Opdiner",
+    "resource_url": "https://api.discogs.com/users/Opdiner"
+   },
+   {
+    "username": "Rom444d",
+    "resource_url": "https://api.discogs.com/users/Rom444d"
+   },
+   {
+    "username": "fundare2",
+    "resource_url": "https://api.discogs.com/users/fundare2"
+   }
+  ],
+  "data_quality": "Needs Vote",
+  "status": "Accepted"
+ },
+ "format_quantity": 2,
+ "date_added": "2022-10-28T06:44:11-07:00",
+ "date_changed": "2025-08-10T08:03:43-07:00",
+ "num_for_sale": 13,
+ "lowest_price": 5.5,
+ "master_id": 2385178,
+ "master_url": "https://api.discogs.com/masters/2385178",
+ "title": "Civilisation",
+ "country": "France",
+ "released": "2022",
+ "released_formatted": "2022",
+ "identifiers": [
+  {
+   "type": "Barcode",
+   "value": "3 596974 281424",
+   "description": "Printed"
+  },
+  {
+   "type": "Barcode",
+   "value": "3596974281424",
+   "description": "Scanned"
+  },
+  {
+   "type": "Mould SID Code",
+   "value": "IFPI 1A21",
+   "description": "CD1"
+  },
+  {
+   "type": "Matrix / Runout",
+   "value": "MA-125 847",
+   "description": "CD2"
+  },
+  {
+   "type": "Mould SID Code",
+   "value": "IFPI 1A42",
+   "description": "CD2"
+  },
+  {
+   "type": "Label Code",
+   "value": "LC24760"
+  },
+  {
+   "type": "Rights Society",
+   "value": "SACD SACEM SDRM SCAM"
+  }
+ ],
+ "videos": [
+  {
+   "uri": "https://www.youtube.com/watch?v=zFknl7OAV0c",
+   "title": "OrelSan - L'odeur de l'essence [CLIP OFFICIEL]",
+   "description": "\"Civilisation\", nouvel album disponible le 19.11.21 : https://orelsan.lnk.to/civilisation\n\"L'odeur de l'essence\" en écoute ici : https://orelsan.lnk.to/lodeurdelessence\n\nTournée 2022 : http://orelsan.show \n\nInstru: Skread et Phazz\nRéalisé par David Tomasz",
+   "duration": 285,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=AkjaUuyXReU",
+   "title": "Shonen",
+   "description": "Provided to YouTube by Wagram\n\nShonen · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Skread\n\nAuto-generated by YouTube.",
+   "duration": 154,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=DTWVFjg-xIE",
+   "title": "La Quête",
+   "description": "Provided to YouTube by Wagram\n\nLa Quête · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Phazz\nComposer: Skread\n\nAuto-generated by YouTube.",
+   "duration": 245,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=ChvzUQJFWpU",
+   "title": "Du propre",
+   "description": "Provided to YouTube by Wagram\n\nDu propre · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Skread\n\nAuto-generated by YouTube.",
+   "duration": 228,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=bVt7eOb0xwo",
+   "title": "Bébéboa",
+   "description": "Provided to YouTube by Wagram\n\nBébéboa · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Orelsan\nComposer: Eddie Purple\n\nAuto-generated by YouTube.",
+   "duration": 183,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=93w3zMnl_lw",
+   "title": "Rêve mieux",
+   "description": "Provided to YouTube by Wagram\n\nRêve mieux · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Phazz\n\nAuto-generated by YouTube.",
+   "duration": 225,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=rqsJfbyVvxo",
+   "title": "Seul avec du monde autour",
+   "description": "Provided to YouTube by Wagram\n\nSeul avec du monde autour · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Skread\n\nAuto-generated by YouTube.",
+   "duration": 209,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=IEuY3tGoa5I",
+   "title": "Manifeste",
+   "description": "Provided to YouTube by Wagram\n\nManifeste · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Skread\n\nAuto-generated by YouTube.",
+   "duration": 443,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=WyxUhZW2JV0",
+   "title": "Jour meilleur",
+   "description": "Provided to YouTube by Wagram\n\nJour meilleur · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Skread\n\nAuto-generated by YouTube.",
+   "duration": 182,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=IoaQMDuaiR0",
+   "title": "Baise le monde",
+   "description": "Provided to YouTube by Wagram\n\nBaise le monde · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Skread\n\nAuto-generated by YouTube.",
+   "duration": 226,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=RbQ2ethvuzQ",
+   "title": "Casseurs Flowters Infinity",
+   "description": "Provided to YouTube by Wagram\n\nCasseurs Flowters Infinity · Orelsan · Gringe\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Skread\n\nAuto-generated by YouTube.",
+   "duration": 189,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=WMlG4sF6BEA",
+   "title": "Dernier verre",
+   "description": "Provided to YouTube by Wagram\n\nDernier verre · Orelsan · The Neptunes\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nProducer: The Neptunes\nComposer: Pharrell Williams\nComposer: Chad Hugo\nComposer: Skread\n\nAuto-gener",
+   "duration": 204,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=n-2FxFYA8y0",
+   "title": "Ensemble",
+   "description": "Provided to YouTube by Wagram\n\nEnsemble · Orelsan · Skread\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Skread\n\nAuto-generated by YouTube.",
+   "duration": 284,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=dg7ax3yUSHo",
+   "title": "Athéna",
+   "description": "Provided to YouTube by Wagram\n\nAthéna · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Phazz\n\nAuto-generated by YouTube.",
+   "duration": 173,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=7CT7WZCIsMk",
+   "title": "Civilisation",
+   "description": "Provided to YouTube by Wagram\n\nCivilisation · Orelsan\n\nCivilisation\n\n℗ 7th Magnitude / 3ème Bureau / Wagram Music\n\nReleased on: 2021-11-19\n\nComposer: Skread\n\nAuto-generated by YouTube.",
+   "duration": 246,
+   "embed": true
+  },
+  {
+   "uri": "https://www.youtube.com/watch?v=LdYE8r_LYpA",
+   "title": "Seul avec du monde autour",
+   "description": "Provided to YouTube by 7TH Magnitude / Strong Ninja\n\nSeul avec du monde autour · Orelsan\n\nCivilisation\n\n℗ 2021, 7TH Magnitude / Strong Ninja, distributed by Sony Music Entertainment France SAS\n\nReleased on: 2021-11-19\n\nDrums, Programmer, Synthesizer, Comp",
+   "duration": 209,
+   "embed": true
+  }
+ ],
+ "genres": [
+  "Hip Hop"
+ ],
+ "styles": [
+  "Conscious",
+  "Pop Rap"
+ ],
+ "tracklist": [
+  {
+   "position": "",
+   "type_": "heading",
+   "title": "Civilisation (57'45)",
+   "duration": ""
+  },
+  {
+   "position": "1-1",
+   "type_": "track",
+   "title": "Shonen",
+   "extraartists": [
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "2:33"
+  },
+  {
+   "position": "1-2",
+   "type_": "track",
+   "title": "La Quête",
+   "extraartists": [
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    },
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "4:04"
+  },
+  {
+   "position": "1-3",
+   "type_": "track",
+   "title": "Du Propre",
+   "extraartists": [
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "3:47"
+  },
+  {
+   "position": "1-4",
+   "type_": "track",
+   "title": "Bébéboa",
+   "extraartists": [
+    {
+     "name": "Orelsan",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 1409627,
+     "resource_url": "https://api.discogs.com/artists/1409627"
+    },
+    {
+     "name": "Eddy Purple",
+     "anv": "",
+     "join": "",
+     "role": "Guitar",
+     "tracks": "",
+     "id": 10320781,
+     "resource_url": "https://api.discogs.com/artists/10320781"
+    }
+   ],
+   "duration": "3:02"
+  },
+  {
+   "position": "1-5",
+   "type_": "track",
+   "title": "Rêve Mieux",
+   "extraartists": [
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    }
+   ],
+   "duration": "3:44"
+  },
+  {
+   "position": "1-6",
+   "type_": "track",
+   "title": "Seul Avec Du Monde Autour",
+   "extraartists": [
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "3:28"
+  },
+  {
+   "position": "1-7",
+   "type_": "track",
+   "title": "Manifeste",
+   "extraartists": [
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    },
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Electronic Drums",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    }
+   ],
+   "duration": "7:22"
+  },
+  {
+   "position": "1-8",
+   "type_": "track",
+   "title": "L'odeur De L'essence",
+   "extraartists": [
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    },
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "4:42"
+  },
+  {
+   "position": "1-9",
+   "type_": "track",
+   "title": "Jour Meilleur",
+   "extraartists": [
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    },
+    {
+     "name": "Eddy Purple",
+     "anv": "",
+     "join": "",
+     "role": "Guitar",
+     "tracks": "",
+     "id": 10320781,
+     "resource_url": "https://api.discogs.com/artists/10320781"
+    }
+   ],
+   "duration": "3:01"
+  },
+  {
+   "position": "1-10",
+   "type_": "track",
+   "title": "Baise Le Monde",
+   "extraartists": [
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "3:45"
+  },
+  {
+   "position": "1-11",
+   "type_": "track",
+   "title": "Casseurs Flowters Infinity",
+   "extraartists": [
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    },
+    {
+     "name": "Gringe",
+     "anv": "",
+     "join": "",
+     "role": "Featuring, Written By",
+     "tracks": "",
+     "id": 1090972,
+     "resource_url": "https://api.discogs.com/artists/1090972"
+    }
+   ],
+   "duration": "3:08"
+  },
+  {
+   "position": "1-12",
+   "type_": "track",
+   "title": "Dernier Verre",
+   "extraartists": [
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    },
+    {
+     "name": "The Neptunes",
+     "anv": "",
+     "join": "",
+     "role": "Featuring, Composed By",
+     "tracks": "",
+     "id": 17110,
+     "resource_url": "https://api.discogs.com/artists/17110"
+    },
+    {
+     "name": "Pharrell Williams",
+     "anv": "",
+     "join": "",
+     "role": "Written By",
+     "tracks": "",
+     "id": 0,
+     "resource_url": ""
+    }
+   ],
+   "duration": "3:23"
+  },
+  {
+   "position": "1-13",
+   "type_": "track",
+   "title": "Ensemble",
+   "extraartists": [
+    {
+     "name": "Eddy Purple",
+     "anv": "",
+     "join": "",
+     "role": "Bass",
+     "tracks": "",
+     "id": 10320781,
+     "resource_url": "https://api.discogs.com/artists/10320781"
+    },
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Electronic Drums, Synth",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    },
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Featuring, Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "4:43"
+  },
+  {
+   "position": "1-14",
+   "type_": "track",
+   "title": "Athéna",
+   "extraartists": [
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    }
+   ],
+   "duration": "2:52"
+  },
+  {
+   "position": "1-15",
+   "type_": "track",
+   "title": "Civilisation",
+   "extraartists": [
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    },
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "4:05"
+  },
+  {
+   "position": "",
+   "type_": "heading",
+   "title": "Civilisation Perdue (33'16)",
+   "duration": ""
+  },
+  {
+   "position": "2-1",
+   "type_": "track",
+   "title": "CP_001_ Intro Civilisation Perdue",
+   "extraartists": [
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    },
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "2:41"
+  },
+  {
+   "position": "2-2",
+   "type_": "track",
+   "title": "CP_002_ Les aventures de MiniSan",
+   "extraartists": [
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    }
+   ],
+   "duration": "4:46"
+  },
+  {
+   "position": "2-3",
+   "type_": "track",
+   "title": "CP_003_ Toujours perdu quand même",
+   "extraartists": [
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "3:38"
+  },
+  {
+   "position": "2-4",
+   "type_": "track",
+   "title": "CP_004_ Juste un dernier",
+   "extraartists": [
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    }
+   ],
+   "duration": "3:09"
+  },
+  {
+   "position": "2-5",
+   "type_": "track",
+   "title": "CP_005_ Ok... Super...",
+   "extraartists": [
+    {
+     "name": "Orelsan",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 1409627,
+     "resource_url": "https://api.discogs.com/artists/1409627"
+    },
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    }
+   ],
+   "duration": "2:22"
+  },
+  {
+   "position": "2-6",
+   "type_": "track",
+   "title": "CP_006_ Ah la France",
+   "extraartists": [
+    {
+     "name": "Orelsan",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 1409627,
+     "resource_url": "https://api.discogs.com/artists/1409627"
+    },
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "2:31"
+  },
+  {
+   "position": "2-7",
+   "type_": "track",
+   "title": "CP_007_ Point de rupture",
+   "extraartists": [
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    },
+    {
+     "name": "Eddy Purple",
+     "anv": "",
+     "join": "",
+     "role": "Guitar",
+     "tracks": "",
+     "id": 10320781,
+     "resource_url": "https://api.discogs.com/artists/10320781"
+    }
+   ],
+   "duration": "3:42"
+  },
+  {
+   "position": "2-8",
+   "type_": "track",
+   "title": "CP_008_ Nous contre le monde",
+   "extraartists": [
+    {
+     "name": "Eddy Purple",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 10320781,
+     "resource_url": "https://api.discogs.com/artists/10320781"
+    }
+   ],
+   "duration": "2:47"
+  },
+  {
+   "position": "2-9",
+   "type_": "track",
+   "title": "CP_009_ Évidemment",
+   "extraartists": [
+    {
+     "name": "Phazz",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3511601,
+     "resource_url": "https://api.discogs.com/artists/3511601"
+    },
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    },
+    {
+     "name": "Tristan Salvati",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 3197403,
+     "resource_url": "https://api.discogs.com/artists/3197403"
+    },
+    {
+     "name": "Angèle (3)",
+     "anv": "",
+     "join": "",
+     "role": "Featuring, Written By, Composed By",
+     "tracks": "",
+     "id": 5226023,
+     "resource_url": "https://api.discogs.com/artists/5226023"
+    }
+   ],
+   "duration": "3:26"
+  },
+  {
+   "position": "2-10",
+   "type_": "track",
+   "title": "CP_010_ On a gagné",
+   "extraartists": [
+    {
+     "name": "Skread",
+     "anv": "",
+     "join": "",
+     "role": "Composed By",
+     "tracks": "",
+     "id": 402518,
+     "resource_url": "https://api.discogs.com/artists/402518"
+    }
+   ],
+   "duration": "4:05"
+  }
+ ],
+ "extraartists": [
+  {
+   "name": "Rægular",
+   "anv": "",
+   "join": "",
+   "role": "Artwork, Art Direction",
+   "tracks": "",
+   "id": 7237958,
+   "resource_url": "https://api.discogs.com/artists/7237958"
+  },
+  {
+   "name": "Mike Larson (4)",
+   "anv": "",
+   "join": "",
+   "role": "Mixed By",
+   "tracks": "1-12",
+   "id": 4134222,
+   "resource_url": "https://api.discogs.com/artists/4134222"
+  },
+  {
+   "name": "NK.F",
+   "anv": "Nikolas Feve «Nk.F»",
+   "join": "",
+   "role": "Mixed By, Mastered By",
+   "tracks": "",
+   "id": 3356498,
+   "resource_url": "https://api.discogs.com/artists/3356498"
+  },
+  {
+   "name": "Alice Moitié",
+   "anv": "",
+   "join": "",
+   "role": "Photography By",
+   "tracks": "",
+   "id": 4709028,
+   "resource_url": "https://api.discogs.com/artists/4709028"
+  },
+  {
+   "name": "Eliot Roch",
+   "anv": "",
+   "join": "",
+   "role": "Photography By",
+   "tracks": "",
+   "id": 12274987,
+   "resource_url": "https://api.discogs.com/artists/12274987"
+  },
+  {
+   "name": "Mike Larson (4)",
+   "anv": "",
+   "join": "",
+   "role": "Recorded By",
+   "tracks": "1-12",
+   "id": 4134222,
+   "resource_url": "https://api.discogs.com/artists/4134222"
+  },
+  {
+   "name": "Morgan David (2)",
+   "anv": "",
+   "join": "",
+   "role": "Recorded By",
+   "tracks": "1-12",
+   "id": 9285760,
+   "resource_url": "https://api.discogs.com/artists/9285760"
+  },
+  {
+   "name": "Phazz",
+   "anv": "",
+   "join": "",
+   "role": "Recorded By",
+   "tracks": "1-5 & 1-14",
+   "id": 3511601,
+   "resource_url": "https://api.discogs.com/artists/3511601"
+  },
+  {
+   "name": "Skread",
+   "anv": "",
+   "join": "",
+   "role": "Recorded By",
+   "tracks": "1-1 to 1-4; 1-6 to 1-11; 1-13 and 1-15",
+   "id": 402518,
+   "resource_url": "https://api.discogs.com/artists/402518"
+  },
+  {
+   "name": "Orelsan",
+   "anv": "OrelSan",
+   "join": "",
+   "role": "Written-By",
+   "tracks": "",
+   "id": 1409627,
+   "resource_url": "https://api.discogs.com/artists/1409627"
+  }
+ ],
+ "images": [
+  {
+   "type": "primary",
+   "uri": "https://i.discogs.com/oTUJCM9ym6o7h3R94kYPSQIULzA6oXvDOtYUPaGq29A/rs:fit/g:sm/q:90/h:529/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/MzEtNTU0OS5qcGVn.jpeg",
+   "resource_url": "https://i.discogs.com/oTUJCM9ym6o7h3R94kYPSQIULzA6oXvDOtYUPaGq29A/rs:fit/g:sm/q:90/h:529/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/MzEtNTU0OS5qcGVn.jpeg",
+   "uri150": "https://i.discogs.com/z03mV2Um2h3Hfl0jC99HLmeeQQiJ9AmIsvb2vZFByvw/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/MzEtNTU0OS5qcGVn.jpeg",
+   "width": 600,
+   "height": 529
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/W0zeqt4XzbksKbTJxd_bsDUNBTONGj4MuRpLEiAj9ZE/rs:fit/g:sm/q:90/h:539/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/NDctNzkzMy5qcGVn.jpeg",
+   "resource_url": "https://i.discogs.com/W0zeqt4XzbksKbTJxd_bsDUNBTONGj4MuRpLEiAj9ZE/rs:fit/g:sm/q:90/h:539/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/NDctNzkzMy5qcGVn.jpeg",
+   "uri150": "https://i.discogs.com/CMPqrP0fU_ECvuAQIzYPZGFPzcqMHi9An1BXoCP-35o/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/NDctNzkzMy5qcGVn.jpeg",
+   "width": 600,
+   "height": 539
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/qB718Ittr0Kx6TgK4XDkhu2Px7DuXAnpsBbPOKYYmcI/rs:fit/g:sm/q:90/h:529/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MTktMTY2Ni5qcGVn.jpeg",
+   "resource_url": "https://i.discogs.com/qB718Ittr0Kx6TgK4XDkhu2Px7DuXAnpsBbPOKYYmcI/rs:fit/g:sm/q:90/h:529/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MTktMTY2Ni5qcGVn.jpeg",
+   "uri150": "https://i.discogs.com/Ieb2Yk187X3x2FTBmbxhIfCkgj_hNVksAFkLn48HTGY/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MTktMTY2Ni5qcGVn.jpeg",
+   "width": 600,
+   "height": 529
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/qsb-d1tn9Pg88qb66qBqd2b-3sr0iqw_JFz4tVYyWaM/rs:fit/g:sm/q:90/h:525/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MjItMjU0OS5qcGVn.jpeg",
+   "resource_url": "https://i.discogs.com/qsb-d1tn9Pg88qb66qBqd2b-3sr0iqw_JFz4tVYyWaM/rs:fit/g:sm/q:90/h:525/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MjItMjU0OS5qcGVn.jpeg",
+   "uri150": "https://i.discogs.com/FsDrUTD6rwRCDht2kcj9hA5QSIRC-I-K3QofpinpMoM/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MjItMjU0OS5qcGVn.jpeg",
+   "width": 600,
+   "height": 525
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/BI8XE4FgZ_fHYUIzvtXYagMR6OyhezZuSYePlZgVjKI/rs:fit/g:sm/q:90/h:600/w:596/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MjctMjYyMS5qcGVn.jpeg",
+   "resource_url": "https://i.discogs.com/BI8XE4FgZ_fHYUIzvtXYagMR6OyhezZuSYePlZgVjKI/rs:fit/g:sm/q:90/h:600/w:596/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MjctMjYyMS5qcGVn.jpeg",
+   "uri150": "https://i.discogs.com/r6imjdC-SoCkDpnG_D7elnwb5g1UhLkgSMwpHywVbfM/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MjctMjYyMS5qcGVn.jpeg",
+   "width": 596,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/IZTlg8IVbB0oyTLLD974Yp0CcAg-69U5FucwfFUs4UY/rs:fit/g:sm/q:90/h:596/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MjktMzE4MC5qcGVn.jpeg",
+   "resource_url": "https://i.discogs.com/IZTlg8IVbB0oyTLLD974Yp0CcAg-69U5FucwfFUs4UY/rs:fit/g:sm/q:90/h:596/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MjktMzE4MC5qcGVn.jpeg",
+   "uri150": "https://i.discogs.com/QldS9okEJOaedWi4UfqXhMkEKdt0x2V0XIJ__CFObas/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE3MDg2ODY1/MjktMzE4MC5qcGVn.jpeg",
+   "width": 600,
+   "height": 596
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/Q98WdtzzxVx6jfnCrYa6YlecKXmoerl8eaa41AFDwWc/rs:fit/g:sm/q:90/h:519/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/NTctNTkyOC5qcGVn.jpeg",
+   "resource_url": "https://i.discogs.com/Q98WdtzzxVx6jfnCrYa6YlecKXmoerl8eaa41AFDwWc/rs:fit/g:sm/q:90/h:519/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/NTctNTkyOC5qcGVn.jpeg",
+   "uri150": "https://i.discogs.com/8v-CRs02Gir2S77_bIwevaXSuXJOcuhPlssccm2W59A/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/NTctNTkyOC5qcGVn.jpeg",
+   "width": 600,
+   "height": 519
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/BobQ8qZWYN-W06hlATnP0YcWycHC9yT3A2mXBVjoks4/rs:fit/g:sm/q:90/h:508/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/ODItMjI5OC5qcGVn.jpeg",
+   "resource_url": "https://i.discogs.com/BobQ8qZWYN-W06hlATnP0YcWycHC9yT3A2mXBVjoks4/rs:fit/g:sm/q:90/h:508/w:600/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/ODItMjI5OC5qcGVn.jpeg",
+   "uri150": "https://i.discogs.com/3R6eMn8HFxOt6OgT_jDlvIejqdXPkjpAj7vM_T6cISI/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/ODItMjI5OC5qcGVn.jpeg",
+   "width": 600,
+   "height": 508
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/nFGGeoCcnT054ya7Cd-tsUOxxcyJi1dKy-wMxpWmT8s/rs:fit/g:sm/q:90/h:600/w:287/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NjcwNzMz/MTMtNDQ5OS5qcGVn.jpeg",
+   "resource_url": "https://i.discogs.com/nFGGeoCcnT054ya7Cd-tsUOxxcyJi1dKy-wMxpWmT8s/rs:fit/g:sm/q:90/h:600/w:287/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NjcwNzMz/MTMtNDQ5OS5qcGVn.jpeg",
+   "uri150": "https://i.discogs.com/WzwlWBD6zFJ3OhcRpD7PEbqeclUVAqAVlzT6rEeXtrM/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NjcwNzMz/MTMtNDQ5OS5qcGVn.jpeg",
+   "width": 287,
+   "height": 600
+  },
+  {
+   "type": "secondary",
+   "uri": "https://i.discogs.com/3D6rNeH_D4d5RB_H5H9IRHAfsv8UHmkd_M7pIL0DgLI/rs:fit/g:sm/q:90/h:600/w:287/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NjcwNzMz/MTItMjc0OC5qcGVn.jpeg",
+   "resource_url": "https://i.discogs.com/3D6rNeH_D4d5RB_H5H9IRHAfsv8UHmkd_M7pIL0DgLI/rs:fit/g:sm/q:90/h:600/w:287/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NjcwNzMz/MTItMjc0OC5qcGVn.jpeg",
+   "uri150": "https://i.discogs.com/S_pz_zKUfphIPhjGfvGkcKSyiZyrxlpWBwcDjzzpw9M/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NjcwNzMz/MTItMjc0OC5qcGVn.jpeg",
+   "width": 287,
+   "height": 600
+  }
+ ],
+ "thumb": "https://i.discogs.com/z03mV2Um2h3Hfl0jC99HLmeeQQiJ9AmIsvb2vZFByvw/rs:fit/g:sm/q:40/h:150/w:150/czM6Ly9kaXNjb2dz/LWRhdGFiYXNlLWlt/YWdlcy9SLTI0OTcz/NzI5LTE2NzAzMTQx/MzEtNTU0OS5qcGVn.jpeg",
+ "estimated_weight": 85,
+ "blocked_from_sale": false,
+ "is_offensive": false
+}

@@ -1,0 +1,7 @@
+{
+  "name": "discogs_release_cd",
+  "url": "https://api.discogs.com/releases/24973729",
+  "method": "discogs",
+  "captured_at": "2026-10-14T03:49:02",
+  "size_bytes": 33207
+}

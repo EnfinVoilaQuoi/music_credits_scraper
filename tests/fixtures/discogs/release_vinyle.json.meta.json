@@ -1,0 +1,7 @@
+{
+  "name": "discogs_release_vinyle",
+  "url": "https://api.discogs.com/releases/939133",
+  "method": "discogs",
+  "captured_at": "2026-10-14T03:50:53",
+  "size_bytes": 19518
+}

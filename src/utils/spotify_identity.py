@@ -44,6 +44,41 @@ logger = get_logger(__name__)
 #: rien. Au-delà, c'est un autre enregistrement.
 TOLERANCE_DUREE = 5
 
+#: Sources de durée INDÉPENDANTES de l'ID Spotify (`DISCOGRAPHY_PRIORITIES`
+#: hors spotify_web et reccobeats, qui lisent la durée PAR l'ID), dans l'ordre
+#: où l'on prend le témoin.
+DUREES_INDEPENDANTES: tuple[str, ...] = (
+    "manual",
+    "deezer",
+    "apple_music",
+    "ytmusic",
+    "youtube_officiel",
+    "youtube",
+    "songbpm",
+    "youtube_video",
+)
+
+#: Sources qui lisent la durée PAR l'ID Spotify : leur durée suit l'ID, juste
+#: ou faux — elle ne peut pas le corroborer.
+DUREES_PAR_L_ID = frozenset({"spotify_web", "reccobeats"})
+
+
+def duree_temoin(track) -> int | None:
+    """PUR. La durée de la fiche qui ne doit RIEN à son ID Spotify, ou None.
+
+    Une durée observée par une source indépendante d'abord ; à défaut, la
+    colonne — mais seulement si aucune source n'a lu de durée PAR l'ID : sinon
+    la colonne a pu suivre l'ID fautif, et un ID faux se corroborerait lui-même
+    (Flynt « Version équipe », SCH « Massimo » ← « La mallette »)."""
+    observees = getattr(track, "durations_observees", None) or {}
+    for source in DUREES_INDEPENDANTES:
+        if observees.get(source):
+            return _clean_duration(observees[source])
+    if any(observees.get(s) for s in DUREES_PAR_L_ID):
+        return None
+    return _clean_duration(track.duration)
+
+
 #: Champ d'OBSERVATION d'un ID Spotify PROPOSÉ par une source qui n'a plus le
 #: droit d'en poser (② de l'étape Identité, 2026-09-28 : SongBPM lit un ID sur
 #: sa page, trouvée par une recherche de titre). Déclaré, jamais écrit en
@@ -337,18 +372,34 @@ def identite_concorde(
     duree_spotify = identite.get("duration")
     if duree_base and duree_spotify and abs(duree_base - duree_spotify) > tolerance:
         return False, f"durée : {duree_base} s attendus, {duree_spotify} s sur Spotify"
+    temoin = duree_temoin(track)
+    if temoin and duree_spotify and abs(temoin - duree_spotify) > tolerance:
+        return False, f"durée : {temoin} s (source indépendante), {duree_spotify} s sur Spotify"
 
     a, b = normalize_title(track.title or ""), normalize_title(titre_spotify)
-    # Deux signaux indépendants qui s'accordent valent mieux qu'un titre.
-    corrobore = bool(artistes and attendus and duree_base and duree_spotify)
+    # Deux signaux indépendants qui s'accordent valent mieux qu'un titre — à
+    # condition que la durée ne doive rien à l'ID jugé (`duree_temoin`).
+    corrobore = bool(artistes and attendus and temoin and duree_spotify)
     if (
         a
         and b
         and a != b
         and not corrobore
         and not titres_tranches
-        and not either_contains_as_words(a, b)
+        and not titres_equivalents(track.title, titre_spotify)
     ):
+        # Un titre CONTENU dans l'autre ne passe plus seul (2026-10-14) : sur
+        # les 14 faux probables de la relecture du 2026-10-11, 9 passaient par
+        # là — Kanye « Only » ← « Only One », « Wait » ← « I Can't Wait »,
+        # Kid Cudi « Tree » ← « That Tree », Travis « Dream » ← « Dream
+        # Killer », Diam's « L'amour Véritable » ← « L'AMOUR ». Le mot en plus
+        # fait souvent un AUTRE morceau ; seule une durée indépendante
+        # concordante dit que c'est le même.
+        if either_contains_as_words(a, b):
+            return False, (
+                f"titre : Spotify sert « {titre_spotify} », non corroboré par une "
+                "durée indépendante"
+            )
         # Le titre ne refuse QUE s'il est seul à parler. Quand l'artiste ET la
         # durée concordent, deux signaux indépendants s'accordent, et un titre
         # écrit autrement n'est qu'une variante éditoriale : Spotify sert « 1

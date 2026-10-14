@@ -181,7 +181,7 @@ _HORS_MORCEAU = {
     "src/api/deezer_api.py": 6,  # recherche/fiche d'album, d'artiste, catalogue
     "src/api/discogs_api.py": 4,  # recherche d'artiste, disque, formations ×2
     "src/api/genius_api.py": 2,  # recherche d'artiste, album
-    "src/api/itunes_api.py": 1,  # lookup par LOT
+    "src/api/itunes_api.py": 2,  # lookup par LOT, lookup par code-barres
     "src/api/musicbrainz_api.py": 3,  # recherche et lookup d'artiste, parution par code-barres
     "src/api/reccobeats_api.py": 1,  # ISRC par LOT
     "src/scrapers/bpi_scraper.py": 4,  # annuaire, artiste, fenêtres, corpus

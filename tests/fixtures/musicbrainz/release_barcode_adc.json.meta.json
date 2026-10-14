@@ -1,0 +1,7 @@
+{
+  "name": "musicbrainz_barcode",
+  "url": "https://musicbrainz.org/ws/2/release/?query=barcode%3A3701421546227&fmt=json",
+  "method": "musicbrainz",
+  "captured_at": "2026-10-14T03:49:06",
+  "size_bytes": 1663
+}

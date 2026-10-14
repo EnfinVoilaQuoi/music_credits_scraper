@@ -1,0 +1,115 @@
+{
+ "asin": null,
+ "disambiguation": "",
+ "text-representation": {
+  "script": "Latn",
+  "language": "fra"
+ },
+ "barcode": "3701421546227",
+ "packaging": "None",
+ "status-id": "4e304316-386d-3409-af2e-78857eec5cfe",
+ "country": "XW",
+ "id": "42ad49f8-c5eb-4785-befd-22f94860b383",
+ "quality": "normal",
+ "status": "Official",
+ "cover-art-archive": {
+  "count": 1,
+  "darkened": false,
+  "back": false,
+  "artwork": true,
+  "front": true
+ },
+ "relations": [
+  {
+   "type-id": "08445ccf-7b99-4438-9f9a-fb9ac18099ee",
+   "target-type": "url",
+   "target-credit": "",
+   "source-credit": "",
+   "attributes": [],
+   "begin": null,
+   "attribute-values": {},
+   "end": null,
+   "url": {
+    "resource": "https://open.spotify.com/album/4EsdvWk2Agy9jmUEWAzZWM",
+    "id": "1a573c96-de79-4887-b8ec-8e0206b30eea"
+   },
+   "type": "free streaming",
+   "direction": "forward",
+   "ended": false,
+   "attribute-ids": {}
+  },
+  {
+   "direction": "forward",
+   "attribute-ids": {},
+   "ended": false,
+   "url": {
+    "resource": "https://www.deezer.com/album/486213345",
+    "id": "40796df0-e792-473f-af35-92f32ee63659"
+   },
+   "type": "free streaming",
+   "source-credit": "",
+   "attribute-values": {},
+   "end": null,
+   "begin": null,
+   "attributes": [],
+   "type-id": "08445ccf-7b99-4438-9f9a-fb9ac18099ee",
+   "target-credit": "",
+   "target-type": "url"
+  },
+  {
+   "target-type": "url",
+   "target-credit": "",
+   "type-id": "98e08c20-8402-4163-8970-53504bb6a1e4",
+   "begin": null,
+   "attributes": [],
+   "end": null,
+   "attribute-values": {},
+   "source-credit": "",
+   "type": "purchase for download",
+   "url": {
+    "resource": "https://music.apple.com/gb/album/1706716253",
+    "id": "9da1c1d1-f0fb-4011-9940-22f5052d8b9a"
+   },
+   "ended": false,
+   "attribute-ids": {},
+   "direction": "forward"
+  },
+  {
+   "begin": null,
+   "attributes": [],
+   "end": null,
+   "attribute-values": {},
+   "source-credit": "",
+   "target-type": "url",
+   "target-credit": "",
+   "type-id": "320adf26-96fa-4183-9045-1f5f32f833cb",
+   "ended": false,
+   "attribute-ids": {},
+   "direction": "forward",
+   "url": {
+    "resource": "https://music.apple.com/gb/album/1706716253",
+    "id": "9da1c1d1-f0fb-4011-9940-22f5052d8b9a"
+   },
+   "type": "streaming"
+  }
+ ],
+ "packaging-id": "119eba76-b343-3e02-a292-f0f00644bb9b",
+ "title": "ADC",
+ "date": "2023-09-11",
+ "release-events": [
+  {
+   "date": "2023-09-11",
+   "area": {
+    "id": "525d4e18-3d00-31b9-a58b-a146a916de8f",
+    "disambiguation": "",
+    "iso-3166-1-codes": [
+     "XW"
+    ],
+    "type": null,
+    "name": "[Worldwide]",
+    "type-id": null,
+    "sort-name": "[Worldwide]"
+   }
+  }
+ ]
+}

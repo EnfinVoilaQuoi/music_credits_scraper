@@ -46,6 +46,34 @@ BOUTIQUES = ("fr", "us")
 _INTERVALLE_S = 3.0
 
 
+def album_du_code_barres(resultats: list[dict], nb_pistes: int | None) -> dict | None:
+    """PUR. L'album iTunes que désigne VRAIMENT un code-barres, ou None.
+
+    `lookup?upc=` rend aussi des albums qui ne portent pas ce code (mesuré le
+    2026-10-14 : *Civilisation Édition Ultime*, 25 pistes, rend aussi
+    *Civilisation*, 15 pistes) et aucun ne dit son UPC. Seule preuve
+    disponible : le nombre de pistes de l'édition (Deezer `nb_tracks`). Un
+    seul album, ou un seul au bon nombre de pistes ; sinon on ne choisit pas.
+
+    `resultats` : les `results` bruts de la réponse. Rend
+    `{"collection": fiche, "pistes": [fiches de piste triées]}`."""
+    albums = [r for r in resultats or [] if r.get("wrapperType") == "collection"]
+    if len(albums) != 1:
+        albums = [a for a in albums if nb_pistes and a.get("trackCount") == nb_pistes]
+    if len(albums) != 1:
+        return None
+    album = albums[0]
+    pistes = sorted(
+        (
+            r
+            for r in resultats
+            if r.get("wrapperType") == "track" and r.get("collectionId") == album["collectionId"]
+        ),
+        key=lambda r: (r.get("discNumber") or 1, r.get("trackNumber") or 0),
+    )
+    return {"collection": album, "pistes": pistes}
+
+
 class ITunesAPI:
     def __init__(self, timeout: int = 20):
         self.timeout = timeout
@@ -79,6 +107,27 @@ class ITunesAPI:
                 obs.absent(f"aucun des {len(ids)} identifiants en boutique {boutique}")
         source_usage.exiger_reponse(obs)
         return fiches
+
+    def lookup_code_barres(self, upc: str, boutique: str = "fr") -> list[dict]:
+        """Les `results` bruts de `lookup?upc=` (albums ET pistes) — à passer
+        par `album_du_code_barres`, jamais à prendre tels quels. `[]` = code
+        inconnu de la boutique ; lève sur panne."""
+        with source_usage.observe(
+            _SOURCE, label=f"code-barres {upc} ({boutique})", hors_morceau=True
+        ) as obs:
+            self._attendre_son_tour()
+            resp = source_usage.requests_get(
+                _SOURCE,
+                _URL,
+                params={"upc": upc, "country": boutique, "entity": "song"},
+                timeout=self.timeout,
+            )
+            resp.raise_for_status()
+            resultats = resp.json().get("results") or []
+            if not resultats:
+                obs.absent(f"code-barres {upc} inconnu en boutique {boutique}")
+        source_usage.exiger_reponse(obs)
+        return resultats
 
     def lookup(self, ids) -> dict[str, dict]:
         """`{id: fiche}` pour les identifiants que l'une des boutiques connaît.

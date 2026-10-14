@@ -44,23 +44,9 @@ from src.services.runtime import (
     selection_morceaux,
 )
 from src.utils.logger import etape_de_flux, get_logger
+from src.utils.spotify_identity import DUREES_INDEPENDANTES
 
 logger = get_logger(__name__)
-
-#: Sources de durée INDÉPENDANTES de l'ID Spotify (`DISCOGRAPHY_PRIORITIES`
-#: hors spotify_web et reccobeats, qui lisent la durée PAR l'ID).
-DUREES_INDEPENDANTES = frozenset(
-    {
-        "deezer",
-        "ytmusic",
-        "youtube",
-        "youtube_officiel",
-        "apple_music",
-        "songbpm",
-        "youtube_video",
-        "manual",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -434,7 +420,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
         kinds = (Manque.IDENTITE_SPOTIFY_FORCE,) if options.force else (Manque.IDENTITE_SPOTIFY,)
         tracks = selection_morceaux(runtime, artist, manquants=kinds)
         sans_duree = {
-            t.id for t in tracks if not (set(t.durations_observees) & DUREES_INDEPENDANTES)
+            t.id for t in tracks if not (set(t.durations_observees) & set(DUREES_INDEPENDANTES))
         }
         if tracks:
             b = _passage(runtime, artist, tracks, "spotify_id", hooks, "Spotify par morceau")

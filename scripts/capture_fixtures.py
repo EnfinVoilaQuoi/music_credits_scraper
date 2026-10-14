@@ -54,6 +54,19 @@ _GENIUS_NON_TRANSCRITES_URL = "https://genius.com/Bb-jacques-thankful-lyrics"
 # cas qui a réellement cassé.
 _SPOTIFY_WEB_TRACK_ID = "3EDDunSmj8RbiVGU0Qr0M8"  # ISHA — CR600 (Bonus Track)
 _SPOTIFY_WEB_ARTIST_ID = "0dSh0CIa0HPd9kJmJSmGQo"  # ISHA
+# Code-barres (2026-10-14) : OrelSan *Civilisation Édition Ultime*, 25 pistes,
+# deux disques chez Discogs (« 1-1 »… « 2-10 », intertitres) ; chez iTunes
+# son UPC rend AUSSI *Civilisation* de 2021 — le piège que la fixture fige.
+_UPC_CIVILISATION = "3596974281424"
+_DEEZER_ALBUM_CIVILISATION = 366967207
+_DISCOGS_RELEASE_CIVILISATION = 24973729
+# Un vinyle à faces (« A1 », « B2 ») pour la numérotation par ordre de liste.
+_DISCOGS_RELEASE_VINYLE = 939133  # Booba — Temps mort (2×LP)
+# Vinyle ET CD dans une même tracklist (« A1…D3 » puis « 1…12 ») : chaque titre
+# y est deux fois — le cas réel de *808s & Heartbreak* (crédits « tracks: C2 »).
+_DISCOGS_RELEASE_VINYLE_CD = 1608688  # Kanye West — 808s & Heartbreak (2×LP + CD)
+# Freeze Corleone *ADC* : parution MusicBrainz liant Spotify, Deezer et Apple.
+_UPC_ADC = "3701421546227"
 _RIAA_ARTIST = "Daft Punk"  # catalogue RIAA stable et court (pas de rap FR chez RIAA)
 
 
@@ -105,6 +118,51 @@ def _bpi_liste_url(page: int = 1) -> str:
 
 
 CAPTURES: list[dict] = [
+    {
+        "name": "deezer_album_upc",
+        "path": "deezer/album_civilisation.json",
+        "url": f"https://api.deezer.com/album/{_DEEZER_ALBUM_CIVILISATION}",
+        "method": "requests",
+    },
+    {
+        "name": "itunes_lookup_upc",
+        "path": "itunes/lookup_upc_civilisation.json",
+        "url": "https://itunes.apple.com/lookup?"
+        + urlencode({"upc": _UPC_CIVILISATION, "country": "fr", "entity": "song"}),
+        "method": "requests",
+    },
+    {
+        "name": "discogs_release_cd",
+        "path": "discogs/release_civilisation.json",
+        "url": f"https://api.discogs.com/releases/{_DISCOGS_RELEASE_CIVILISATION}",
+        "method": "discogs",
+    },
+    {
+        "name": "discogs_release_vinyle",
+        "path": "discogs/release_vinyle.json",
+        "url": f"https://api.discogs.com/releases/{_DISCOGS_RELEASE_VINYLE}",
+        "method": "discogs",
+    },
+    {
+        "name": "discogs_release_vinyle_cd",
+        "path": "discogs/release_vinyle_cd.json",
+        "url": f"https://api.discogs.com/releases/{_DISCOGS_RELEASE_VINYLE_CD}",
+        "method": "discogs",
+    },
+    {
+        "name": "musicbrainz_barcode",
+        "path": "musicbrainz/release_barcode_adc.json",
+        "url": "https://musicbrainz.org/ws/2/release/?"
+        + urlencode({"query": f"barcode:{_UPC_ADC}", "fmt": "json"}),
+        "method": "musicbrainz",
+    },
+    {
+        "name": "musicbrainz_release_rels",
+        "path": "musicbrainz/release_rels_adc.json",
+        "url": "https://musicbrainz.org/ws/2/release/42ad49f8-c5eb-4785-befd-22f94860b383?"
+        + urlencode({"inc": "url-rels", "fmt": "json"}),
+        "method": "musicbrainz",
+    },
     {
         "name": "kworb_artist_songs",
         "path": "kworb/artist_songs.html",
@@ -372,6 +430,30 @@ def _fetch_bpi(url: str, *, hx: bool = True) -> str | None:
         return None
 
 
+def _fetch_json(url: str, headers: dict) -> str | None:
+    """JSON d'une API, ré-indenté ; l'en-tête (token) n'est jamais écrit."""
+    try:
+        resp = requests.get(url, headers={"User-Agent": _UA, **headers}, timeout=30)
+        if resp.status_code != 200:
+            print(f"   HTTP {resp.status_code}")
+            return None
+        return json.dumps(resp.json(), indent=1, ensure_ascii=False)
+    except (requests.RequestException, ValueError) as e:
+        print(f"   erreur : {e}")
+        return None
+
+
+def _fetch_discogs(url: str) -> str | None:
+    token = os.getenv("DISCOGS_TOKEN") or os.getenv("DISCOGS_USER_TOKEN")
+    return _fetch_json(url, {"Authorization": f"Discogs token={token}"} if token else {})
+
+
+def _fetch_musicbrainz(url: str) -> str | None:
+    from src.api.musicbrainz_api import _USER_AGENT
+
+    return _fetch_json(url, {"User-Agent": _USER_AGENT})
+
+
 def _fetch_getsongbpm() -> str | None:
     api_key = os.getenv("GETSONGBPM_API_KEY")
     if not api_key:
@@ -443,6 +525,10 @@ def capture_one(entry: dict) -> bool:
         content = _fetch_bpi(entry["url"], hx=False)
     elif method == "getsongbpm":
         content = _fetch_getsongbpm()
+    elif method == "discogs":
+        content = _fetch_discogs(entry["url"])
+    elif method == "musicbrainz":
+        content = _fetch_musicbrainz(entry["url"])
     else:
         print(f"   méthode inconnue : {method}")
         return False

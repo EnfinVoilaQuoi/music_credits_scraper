@@ -1,0 +1,7 @@
+{
+  "name": "itunes_lookup_upc",
+  "url": "https://itunes.apple.com/lookup?upc=3596974281424&country=fr&entity=song",
+  "method": "requests",
+  "captured_at": "2026-10-14T03:49:01",
+  "size_bytes": 63634
+}

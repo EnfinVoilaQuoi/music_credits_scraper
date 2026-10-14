@@ -63,6 +63,35 @@ def fiche_concorde(track, fiche: dict | None) -> tuple[bool, str]:
     return True, ""
 
 
+def parution_de(track, fiche: dict | None):
+    """PUR. La parution iTunes d'un identifiant VÉRIFIÉ, avec la PLACE de la
+    piste (`trackNumber`, `discNumber`) — numérotation fiable, comparable à
+    elle-même seulement (`positions_disque`, 2026-10-14). None sans album."""
+    from src.models import ReleaseObservation
+
+    fiche = fiche or {}
+    if not fiche.get("collectionId") or not fiche.get("collectionName"):
+        return None
+
+    def entier(cle):
+        v = fiche.get(cle)
+        return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else None
+
+    date = str(fiche.get("releaseDate") or "")[:10] or None
+    return ReleaseObservation(
+        title=fiche["collectionName"],
+        source=SOURCE_APPLE,
+        credited_artist_name=fiche.get("collectionArtistName") or fiche.get("artistName"),
+        release_date=date,
+        scope="appearance" if track.is_featuring else "own",
+        external_release_id=fiche["collectionId"],
+        external_track_id=fiche.get("trackId"),
+        disc_number=entier("discNumber"),
+        track_number=entier("trackNumber"),
+        confidence="identified",
+    )
+
+
 def duree_de(fiche: dict) -> int | None:
     ms = fiche.get("trackTimeMillis")
     return round(ms / 1000) if ms else None

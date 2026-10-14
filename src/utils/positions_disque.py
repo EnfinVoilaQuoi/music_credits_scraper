@@ -5,6 +5,8 @@ morceau ; à deux emplacements, deux morceaux. Mais un numéro ne vaut que par
 sa source, et deux numéros ne se comparent qu'à source ÉGALE :
 
   · Deezer — la piste porte `track_position` et `disk_number` : fiable ;
+  · Apple Music — la fiche iTunes d'un ID vérifié porte `trackNumber` et
+    `discNumber` : fiable, sur SA parution iTunes ;
   · Genius — l'ordre de la page ALBUM, FAUX dès qu'un titre du disque n'y a
     pas de page : Genius le saute et le compteur continue (A2H *Art de vivre* :
     « Skit (Qui est trivette) » absent, « Trivette » passe de 13 à 12) ;
@@ -26,6 +28,7 @@ from __future__ import annotations
 RANG_POSITION: dict[str, int] = {
     "manual": 4,
     "deezer": 3,
+    "apple_music": 3,
     "spotify_web": 3,
     "musicbrainz": 3,
     "discogs": 2,
@@ -34,7 +37,7 @@ RANG_POSITION: dict[str, int] = {
 }
 
 #: Sources dont deux numéros, sur le même disque, se COMPARENT.
-SOURCES_COMPARABLES = frozenset({"manual", "deezer", "spotify_web", "musicbrainz"})
+SOURCES_COMPARABLES = frozenset({"manual", "deezer", "apple_music", "spotify_web", "musicbrainz"})
 
 
 def rang(source: str | None) -> int:

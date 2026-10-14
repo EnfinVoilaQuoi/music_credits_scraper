@@ -399,6 +399,9 @@ class _DMFormations:
     def get_artist_relations(self, artist_id, status="confirmed"):
         return []
 
+    def record_artist_spotify_ids(self, artist_id, ids, source):
+        return len(ids)
+
     def nature_connue_pour(self, nom):
         return None
 
@@ -446,6 +449,7 @@ def test_formations_et_alias_proposes_jamais_confirmes(monkeypatch):
                 desambiguation="Belgian rapper",
                 type="Person",
                 discogs_ids=[],
+                spotify_ids=[],
             )
 
     rt = _rt_formations(monkeypatch, _MB())
@@ -573,7 +577,7 @@ class TestAppleMusic:
 
     class _DMApple:
         def __init__(self, obs):
-            self.obs, self.ecrits, self.durees = obs, {}, {}
+            self.obs, self.ecrits, self.durees, self.parutions = obs, {}, {}, {}
 
         def get_artist_observations(self, artist_id):
             return self.obs
@@ -583,6 +587,9 @@ class TestAppleMusic:
 
         def record_duration_observation(self, tid, secondes, source):
             self.durees[tid] = (secondes, source)
+
+        def record_release_observations(self, tid, observations):
+            self.parutions[tid] = observations
 
     class _Client:
         def __init__(self, fiches):
@@ -614,6 +621,12 @@ class TestAppleMusic:
                     "artistName": "Kanye West",
                     "trackName": "Stronger",
                     "trackTimeMillis": 311000,
+                    "trackId": 11,
+                    "collectionId": 900,
+                    "collectionName": "Graduation",
+                    "releaseDate": "2007-09-11T07:00:00Z",
+                    "trackNumber": 3,
+                    "discNumber": 1,
                 },
                 "22": {"artistName": "Beau Monga", "trackName": "Gold Digger"},
             }
@@ -626,6 +639,16 @@ class TestAppleMusic:
         assert identite.verifier_apple_music(rt, artist, client=client) == (1, 1)
         assert dm.ecrits == {1: "11", 2: None}
         assert dm.durees == {1: (311, "apple_music")}
+        # La parution iTunes et la PLACE de la piste, pour l'ID vérifié seul.
+        (parution,) = dm.parutions[1]
+        assert (parution.title, parution.source, parution.external_release_id) == (
+            "Graduation",
+            "apple_music",
+            900,
+        )
+        assert (parution.disc_number, parution.track_number) == (1, 3)
+        assert parution.release_date == "2007-09-11"
+        assert list(dm.parutions) == [1]
         # Déjà vérifié : pas redemandé, sauf à forcer.
         assert client.demandes == {"11", "22"}
         identite.verifier_apple_music(rt, artist, client=client, force=True)

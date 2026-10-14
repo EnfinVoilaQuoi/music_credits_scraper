@@ -463,7 +463,13 @@ def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client
     de toutes les boutiques ou démenti n'est plus redemandé (sauf `force`) ; une
     panne du lookup lève et ne date rien."""
     from src.api.itunes_api import ITunesAPI
-    from src.utils.apple_identity import CHAMP_APPLE_PROPOSE, SOURCE_APPLE, duree_de, fiche_concorde
+    from src.utils.apple_identity import (
+        CHAMP_APPLE_PROPOSE,
+        SOURCE_APPLE,
+        duree_de,
+        fiche_concorde,
+        parution_de,
+    )
 
     dm = runtime.data_manager
     obs = dm.get_artist_observations(artist.id)
@@ -517,6 +523,13 @@ def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client
             duree = duree_de(fiches[am])
             if duree:
                 dm.record_duration_observation(tid, duree, SOURCE_APPLE)
+            # La parution et la PLACE de la piste (2026-10-14) : seconde source
+            # de numéros fiable, après Deezer.
+            parution = parution_de(track, fiches[am])
+            if parution is not None:
+                dm.record_release_observations(tid, [parution])
+            if fiches[am].get("trackExplicitness") == "cleaned":
+                logger.info(f"Apple Music {am} : édition CLEAN de « {track.title} »")
         else:
             dementis += 1
             dm.record_apple_music(tid, None)

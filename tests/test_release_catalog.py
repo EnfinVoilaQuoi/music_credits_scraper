@@ -652,3 +652,161 @@ def test_l_album_deezer_porte_son_upc():
     album = ed.AlbumDeezer.depuis({"id": 1, "title": "AVLD", "upc": "859733291991"}, [])
     assert album.upc == "859733291991"
     assert ed.AlbumDeezer.depuis({"id": 1, "title": "AVLD"}, []).upc is None
+
+
+def _liens(dm, release_id):
+    with dm.engine.connect() as conn:
+        return conn.exec_driver_sql(
+            "SELECT track_id, disc_number, track_number, position_source, position_brute "
+            "FROM release_tracks WHERE release_id = ? ORDER BY track_id",
+            (release_id,),
+        ).fetchall()
+
+
+def _nb_parutions(dm, artist_id):
+    with dm.engine.connect() as conn:
+        return conn.exec_driver_sql(
+            "SELECT COUNT(*) FROM releases WHERE artist_id = ?", (artist_id,)
+        ).scalar()
+
+
+def _discogs(**kw):
+    base = dict(
+        title="Civilisation",
+        source="discogs",
+        external_release_id=24973729,
+        upc="3596974281424",
+        rattacher_seulement=True,
+    )
+    base.update(kw)
+    return ReleaseObservation(**base)
+
+
+def test_un_pressage_discogs_rejoint_la_parution_de_son_code_barres(data_manager):
+    """2026-10-14 : le CD Discogs de *Civilisation Édition Ultime* porte l'UPC
+    de l'album Deezer ; sa place convertie (« 2-1 » → disque 2, piste 1) et
+    son libellé brut rejoignent CETTE parution, avec l'ID Discogs."""
+    artist = _artist(data_manager, name="OrelSan")
+    track = _track(data_manager, artist, title="Intro Civilisation perdue")
+    data_manager.record_release_observations(
+        track.id,
+        [
+            ReleaseObservation(
+                title="Civilisation Édition Ultime",
+                source="deezer",
+                external_release_id=366967207,
+                upc="3596974281424",
+            )
+        ],
+    )
+    (parution,) = data_manager.get_track_releases(track.id)
+    data_manager.record_release_observations(
+        track.id, [_discogs(disc_number=2, track_number=1, position_brute="2-1")]
+    )
+    assert _nb_parutions(data_manager, artist.id) == 1
+    assert _liens(data_manager, parution["id"]) == [(track.id, 2, 1, "discogs", "2-1")]
+    with data_manager.engine.connect() as conn:
+        sources = conn.exec_driver_sql(
+            "SELECT source, external_id FROM release_identifiers WHERE release_id = ? "
+            "ORDER BY source",
+            (parution["id"],),
+        ).fetchall()
+    assert sources == [("deezer", "366967207"), ("discogs", "24973729")]
+
+
+def test_un_pressage_discogs_sans_code_barres_commun_n_ouvre_rien(data_manager):
+    """Chaque pressage Discogs est un objet : sans parution au même code-barres,
+    l'observation est ignorée — ni création, ni rapprochement par le titre."""
+    artist = _artist(data_manager, name="OrelSan")
+    track = _track(data_manager, artist, title="Shonen", album="Civilisation")
+    avant = _nb_parutions(data_manager, artist.id)
+    data_manager.record_release_observations(
+        track.id, [_discogs(upc="1111111111116", disc_number=1, track_number=1)]
+    )
+    assert _nb_parutions(data_manager, artist.id) == avant
+    assert all(r["source"] != "discogs" for r in data_manager.get_track_releases(track.id))
+
+
+def test_le_code_barres_se_compare_sans_le_zero_de_tete(data_manager):
+    """Deezer écrit l'UPC-A (« 859733291991 »), Discogs et MusicBrainz l'EAN-13
+    (« 0859733291991 ») : le même code."""
+    artist = _artist(data_manager, name="SDM")
+    track = _track(data_manager, artist, title="AVLD")
+    data_manager.record_release_observations(
+        track.id,
+        [
+            ReleaseObservation(
+                title="AVLD", source="deezer", external_release_id=230952762, upc="859733291991"
+            )
+        ],
+    )
+    data_manager.record_release_observations(
+        track.id,
+        [_discogs(title="AVLD", external_release_id=1, upc="0859733291991", track_number=1)],
+    )
+    assert _nb_parutions(data_manager, artist.id) == 1
+
+
+def test_une_place_deezer_garde_la_main_et_son_libelle(data_manager):
+    """Discogs (rang 2) ne remplace pas la place Deezer (rang 3) — ni son
+    libellé : le « A1 » d'un vinyle n'est pas posé à côté d'un numéro Deezer."""
+    artist = _artist(data_manager, name="OrelSan")
+    track = _track(data_manager, artist, title="Shonen")
+    data_manager.record_release_observations(
+        track.id,
+        [
+            ReleaseObservation(
+                title="Civilisation",
+                source="deezer",
+                external_release_id=1,
+                upc="3596974281424",
+                disc_number=1,
+                track_number=1,
+            )
+        ],
+    )
+    (parution,) = data_manager.get_track_releases(track.id)
+    data_manager.record_release_observations(
+        track.id, [_discogs(track_number=3, position_brute="A3")]
+    )
+    assert _liens(data_manager, parution["id"]) == [(track.id, 1, 1, "deezer", None)]
+
+
+def test_fusion_des_parutions_d_avant_e54_au_meme_upc(data_manager):
+    """« A V L D » / « AVLD » ouvertes AVANT e54 : la réparation ponctuelle les
+    réunit — la plus ancienne garde les deux ID, les liens et la place la plus
+    sûre ; à blanc, rien ne bouge."""
+    artist = _artist(data_manager, name="SDM")
+    a = _track(data_manager, artist, title="A V L D")
+    b = _track(data_manager, artist, title="AVLD")
+    r1 = data_manager.ensure_release(artist.id, "A V L D", scope="own")
+    r2 = data_manager.ensure_release(artist.id, "AVLD", scope="own")
+    with data_manager.engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE releases SET upc = '859733291991' WHERE id = ?", (r1,))
+        conn.exec_driver_sql("UPDATE releases SET upc = '0859733291991' WHERE id = ?", (r2,))
+        for rid, ext in ((r1, "102768632"), (r2, "230952762")):
+            conn.exec_driver_sql(
+                "INSERT INTO release_identifiers (release_id, artist_id, source, external_id) "
+                "VALUES (?, ?, 'deezer', ?)",
+                (rid, artist.id, ext),
+            )
+    data_manager.link_track_to_release(r1, a.id, track_number=1, source="genius")
+    data_manager.link_track_to_release(r2, a.id, disc_number=1, track_number=1, source="deezer")
+    data_manager.link_track_to_release(r2, b.id, source="deezer")
+
+    (plan,) = data_manager.fusionner_parutions_meme_upc()
+    assert (plan["garde"], plan["absorbees"]) == (r1, [(r2, "AVLD")])
+    assert _nb_parutions(data_manager, artist.id) == 2
+
+    data_manager.fusionner_parutions_meme_upc(appliquer=True)
+    assert _nb_parutions(data_manager, artist.id) == 1
+    assert _liens(data_manager, r1) == [
+        (a.id, 1, 1, "deezer", None),
+        (b.id, None, None, None, None),
+    ]
+    with data_manager.engine.connect() as conn:
+        ids = conn.exec_driver_sql(
+            "SELECT external_id FROM release_identifiers WHERE release_id = ? ORDER BY 1", (r1,)
+        ).fetchall()
+    assert ids == [("102768632",), ("230952762",)]
+    assert data_manager.fusionner_parutions_meme_upc() == []

@@ -10,11 +10,12 @@ import requests
 from discogs_client.exceptions import DiscogsAPIError, HTTPError
 
 from src.enrichment.observation import Observation
-from src.models import Artist, ArtistRelation, Credit, CreditRole, Track
+from src.models import Artist, ArtistRelation, Credit, CreditRole, ReleaseObservation, Track
 from src.observability import source_usage
 from src.observability.issues import IssueKind
+from src.utils.codes_barres import code_barres_discogs
 from src.utils.discogs_identity import nom_sans_suffixe, release_concorde, titre_de_piste
-from src.utils.discogs_positions import concerne_la_piste
+from src.utils.discogs_positions import concerne_la_piste, numeroter
 from src.utils.logger import get_logger, log_api
 from src.utils.title_matching import normalize_name
 from src.utils.track_mapper import _clean_duration
@@ -294,14 +295,27 @@ class DiscogsClient:
 
             # Normaliser le titre recherché pour comparaison
             normalized_search_title = self._normalize_string(track_title)
+            pistes = list(release.tracklist)
+            noms = [p.title if hasattr(p, "title") else str(p) for p in pistes]
+            meme_titre = [
+                i
+                for i, nom in enumerate(noms)
+                if self._normalize_string(nom) == normalized_search_title
+            ]
+            # La PLACE de chaque ligne (« 1-03 » → disque 1, piste 3 ; faces
+            # « A1, B2 » → ordre de la liste), lue sur TOUTE la tracklist : le
+            # rang d'une face compte les pistes d'avant. Un titre présent deux
+            # fois (« Intro » sur deux disques) n'a pas de place sûre.
+            places = numeroter([getattr(p, "position", None) for p in pistes])
 
             # Chercher le track dans la tracklist
-            for track in release.tracklist:
-                track_name = track.title if hasattr(track, "title") else str(track)
+            for index, track in enumerate(pistes):
+                track_name = noms[index]
                 normalized_track_name = self._normalize_string(track_name)
 
                 if normalized_track_name == normalized_search_title:
                     logger.info(f"✅ Track trouvé: '{track_name}' dans release '{release.title}'")
+                    disque, numero = places[index] if len(meme_titre) == 1 else (None, None)
 
                     # Extraire les données
                     track_data = {
@@ -312,6 +326,13 @@ class DiscogsClient:
                         "discogs_url": release.url if hasattr(release, "url") else None,
                         "position": track.position if hasattr(track, "position") else None,
                         "duration": track.duration if hasattr(track, "duration") else None,
+                        "disque": disque,
+                        "numero": numero,
+                        # Le code-barres dit l'ÉDITION : c'est par lui seul que
+                        # la place rejoint une parution de la base (e54).
+                        "upc": code_barres_discogs(
+                            (getattr(release, "data", None) or {}).get("identifiers")
+                        ),
                         # Retirés par `_search_track_body` après le contrôle
                         # d'identité (`release_concorde`) : ils ne sont pas des
                         # données du morceau.
@@ -793,6 +814,25 @@ class DiscogsClient:
             if track_data.get("position"):
                 track.observations.append(
                     Observation("discogs_position", str(track_data["position"]), "discogs")
+                )
+
+            # La place CONVERTIE (« 1-03 » → disque 1, piste 3) rejoint la
+            # parution de la base qui porte le même code-barres (2026-10-14) —
+            # et seulement elle : chaque pressage Discogs (vinyle, CD) est un
+            # objet, en ouvrir une parution par pressage noierait le catalogue.
+            if track_data.get("upc") and track_data.get("album") and track_data.get("discogs_id"):
+                track.release_observations.append(
+                    ReleaseObservation(
+                        title=track_data["album"],
+                        source="discogs",
+                        scope="appearance" if track.is_featuring else "own",
+                        external_release_id=track_data["discogs_id"],
+                        disc_number=track_data.get("disque"),
+                        track_number=track_data.get("numero"),
+                        position_brute=track_data.get("position") or None,
+                        upc=track_data["upc"],
+                        rattacher_seulement=True,
+                    )
                 )
 
             # Durée de la piste sur le disque (lot B5, 2026-09-29) : déjà lue,

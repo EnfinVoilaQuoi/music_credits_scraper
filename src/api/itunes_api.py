@@ -14,7 +14,16 @@ Mesuré sur 40 fiches Genius tirées au hasard (26 portent un `apple_music_id`) 
   Genius en porte des FAUX (« Gold Digger » de Kanye → Beau Monga) : un
   identifiant ne vaut qu'après le contrôle d'identité de l'appelant.
 
-Pas d'ISRC dans la réponse publique.
+Pas d'ISRC dans la réponse publique, ni d'UPC sur les albums.
+
+⚠️ `lookup?upc=` (non utilisé ici) rend aussi des albums qui NE portent PAS ce
+code-barres (mesuré le 2026-10-14) : l'UPC de *Civilisation Édition Ultime*
+(3596974281424) rend aussi *Civilisation* de 2021, et aucun album ne dit son
+propre UPC. Le jour où on s'en sert, ne poser l'UPC sur AUCUN album renvoyé
+sans preuve qu'il est le bon (un seul résultat, ou le seul dont le nombre de
+pistes égale celui de l'édition Deezer). Même code-barres, deux albums Apple
+existent aussi : *AVLD* de SDM (859733291991), le second « distribution
+exclusive ADA France » — une seconde livraison, pas une autre édition.
 """
 
 from __future__ import annotations

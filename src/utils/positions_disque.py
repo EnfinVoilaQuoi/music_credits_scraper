@@ -10,7 +10,17 @@ sa source, et deux numéros ne se comparent qu'à source ÉGALE :
   · Genius — l'ordre de la page ALBUM, FAUX dès qu'un titre du disque n'y a
     pas de page : Genius le saute et le compteur continue (A2H *Art de vivre* :
     « Skit (Qui est trivette) » absent, « Trivette » passe de 13 à 12) ;
-  · `legacy` — `tracks.track_number` repris par e31, provenance inconnue.
+  · `legacy` — `tracks.track_number` repris par e31, provenance inconnue ;
+  · Spotify (page web) — l'ORDRE des pistes seulement, jamais le disque : sur
+    un album à deux disques, la 11ᵉ piste Spotify est la piste 1 du disque 2 ;
+    la page d'album, virtualisée, peut en plus être incomplète. Aucun code
+    n'écrit de position `spotify_web` (vérifié le 2026-10-14). En tirer une
+    exigerait la liste complète ET le découpage en disques de Deezer ou Apple
+    pour le même code-barres — qui donnent alors déjà la place eux-mêmes :
+    rangée sous Genius, jamais comparée ;
+  · Discogs — un LIBELLÉ (« 1-03 », « A1 ») converti par
+    `discogs_positions.numeroter` ; une face de vinyle prend son ORDRE dans la
+    liste, sans disque. Fiable sur SON pressage, jamais comparée.
 
 Mesuré le 2026-10-12 : 6 paires de fiches partageaient un emplacement — 1 vrai
 doublon (Swing « RECO30221 » / « REC030221 »), 1 probable (« GO GO GO »), 4
@@ -29,15 +39,15 @@ RANG_POSITION: dict[str, int] = {
     "manual": 4,
     "deezer": 3,
     "apple_music": 3,
-    "spotify_web": 3,
     "musicbrainz": 3,
     "discogs": 2,
     "genius": 1,
+    "spotify_web": 1,
     "legacy": 0,
 }
 
 #: Sources dont deux numéros, sur le même disque, se COMPARENT.
-SOURCES_COMPARABLES = frozenset({"manual", "deezer", "apple_music", "spotify_web", "musicbrainz"})
+SOURCES_COMPARABLES = frozenset({"manual", "deezer", "apple_music", "musicbrainz"})
 
 
 def rang(source: str | None) -> int:

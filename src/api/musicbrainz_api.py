@@ -41,6 +41,7 @@ import requests
 from src.observability import source_usage
 from src.observability.issues import IssueKind, SansReponse
 from src.persistence import brut as magasin_brut
+from src.utils.codes_barres import cle_upc
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_name, normalize_title
 
@@ -269,6 +270,28 @@ def spotify_ids_de(detail: dict) -> list[str]:
     return sorted(ids)
 
 
+#: Les albums de plateforme qu'une parution MusicBrainz lie (`inc=url-rels`).
+#: Mesuré le 2026-10-14 : la page d'une parution lie souvent Spotify, Deezer et
+#: Apple pour CETTE édition — sans aucun rapprochement de titre.
+_ALBUMS_LIES_RE: dict[str, re.Pattern] = {
+    "spotify": re.compile(r"open\.spotify\.com/(?:intl-[a-z]+/)?album/([A-Za-z0-9]{22})"),
+    "deezer": re.compile(r"deezer\.com/(?:[a-z]{2}/)?album/(\d+)"),
+    "apple_music": re.compile(r"apple\.com/[^?#]*?album/(?:[^/?#]+/)?(?:id)?(\d+)"),
+}
+
+
+def albums_lies(detail: dict) -> dict[str, list[str]]:
+    """`{plateforme: [ID d'album]}` des liens d'une parution, triés. Pure."""
+    out: dict[str, set[str]] = {}
+    for rel in detail.get("relations") or []:
+        url = str((rel.get("url") or {}).get("resource") or "")
+        for plateforme, motif in _ALBUMS_LIES_RE.items():
+            m = motif.search(url)
+            if m:
+                out.setdefault(plateforme, set()).add(m.group(1))
+    return {k: sorted(v) for k, v in sorted(out.items())}
+
+
 def compter_albums_communs(detail: dict, nos_albums: set[str]) -> int:
     """Nb de release-groups du candidat dont le titre normalisé est dans notre base."""
     if not nos_albums:
@@ -461,6 +484,42 @@ class MusicBrainzAPI:
             f"{retenu.albums_communs} album(s) commun(s), {len(retenu.relations)} relation(s)"
         )
         return retenu
+
+    def parutions_par_code_barres(self, upc: str, *, limite: int = 3) -> list[dict]:
+        """Les parutions MusicBrainz de ce code-barres, avec les albums de
+        plateforme qu'elles lient : `[{mbid, titre, barcode, albums}]`.
+
+        Une recherche, puis un lookup `url-rels` par parution retenue. Le
+        code-barres est cherché sous ses deux écritures (UPC-A / EAN-13) et
+        vérifié par clé : la recherche Lucene rend aussi des voisins. `[]` =
+        inconnu de MusicBrainz (le rap français y est moins couvert : mesuré le
+        2026-10-14, ~4 UPC Deezer sur 10)."""
+        cle = cle_upc(upc)
+        if not cle:
+            return []
+        variantes = sorted({cle, cle.zfill(12), cle.zfill(13)})
+        with source_usage.observe(_SOURCE, label=f"code-barres {upc}", hors_morceau=True) as obs:
+            data = self._get(
+                "/release/",
+                {"query": " OR ".join(f"barcode:{v}" for v in variantes), "limit": 10},
+            )
+            trouvees = [r for r in data.get("releases") or [] if cle_upc(r.get("barcode")) == cle]
+            out = []
+            for r in trouvees[:limite]:
+                detail = self._get(f"/release/{r['id']}", {"inc": "url-rels"})
+                out.append(
+                    {
+                        "mbid": r["id"],
+                        "titre": r.get("title"),
+                        "barcode": r.get("barcode"),
+                        "albums": albums_lies(detail),
+                    }
+                )
+            if out:
+                obs.ok()
+            else:
+                obs.absent("code-barres inconnu")
+            return out
 
     def close(self) -> None:
         self.session.close()

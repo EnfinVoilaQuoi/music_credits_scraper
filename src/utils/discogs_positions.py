@@ -106,3 +106,58 @@ def concerne_la_piste(tracks: str | None, position: str | None) -> bool:
 
 def _a_des_lettres(position: str) -> bool:
     return any(ch.isalpha() for ch in position)
+
+
+# ─────────────────────────────── numéroter une tracklist (2026-10-14)
+#
+# La position Discogs est un LIBELLÉ, pas un numéro : « 1-03 » (disque 1,
+# piste 3), « CD2-5 », « 7 », ou une face de vinyle « A1, A2, B1 ». Pour la
+# comparer à la place d'une piste chez Deezer ou Apple (`positions_disque`), il
+# faut un `(disque, numéro)` ; le libellé brut est gardé à côté.
+
+#: « 1-03 », « 2.5 », « CD2-5 », « Disc 1-4 » : disque et piste écrits.
+_DISQUE_PISTE = re.compile(r"^(?:CD|DISC|DISK|DVD|LP)?\s*(\d+)\s*[-.]\s*(\d+)$", re.IGNORECASE)
+#: « 7 », « 07 » : piste d'un disque unique.
+_PISTE_SEULE = re.compile(r"^\d+$")
+#: « A1 », « B12 », « AA », « C » : une face de vinyle (ou de cassette).
+_FACE = re.compile(r"^[A-Z]{1,2}\d*$", re.IGNORECASE)
+
+
+def numeroter(positions: list[str | None]) -> list[tuple[int | None, int | None]]:
+    """PUR. `(disque, numéro)` de chaque ligne d'une tracklist Discogs.
+
+    `positions` : le champ `position` de chaque ligne, dans l'ordre du disque,
+    intertitres compris (`None` ou vide pour un intertitre — « Civilisation
+    Perdue (33'16) » sur l'Édition Ultime d'OrelSan — ou pour une ligne non
+    numérotée). Rendu ligne pour ligne, `(None, None)` pour ce qu'on ne numérote
+    pas.
+
+    Une seule écriture par disque, sinon on ne conclut RIEN (tout à None) :
+      · « 1-03 » / « CD2-5 » → disque et piste tels qu'écrits ;
+      · « 7 » → disque 1, piste 7 ;
+      · faces « A1, A2, B1 » → numéro = ORDRE dans la liste, intertitres
+        sautés, disque inconnu (un double vinyle n'est pas un double CD).
+    Un mélange (« A1 » et « 3 », sous-pistes « 3a »…) ne se numérote pas : on
+    garde le libellé brut, on n'invente pas de place.
+    """
+    libelles = [(p or "").strip() for p in positions]
+    reels = [p for p in libelles if p]
+    if not reels:
+        return [(None, None)] * len(libelles)
+    if all(_DISQUE_PISTE.match(p) for p in reels):
+        return [
+            (int(m[1]), int(m[2])) if (m := _DISQUE_PISTE.match(p)) else (None, None)
+            for p in libelles
+        ]
+    if all(_PISTE_SEULE.match(p) for p in reels):
+        return [(1, int(p)) if p else (None, None) for p in libelles]
+    if all(_FACE.match(p) for p in reels):
+        rang, out = 0, []
+        for p in libelles:
+            if p:
+                rang += 1
+                out.append((None, rang))
+            else:
+                out.append((None, None))
+        return out
+    return [(None, None)] * len(libelles)

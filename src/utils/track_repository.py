@@ -21,6 +21,7 @@ from src.models import Credit, ReleaseObservation, Track, TrackSpotifyId, TrackV
 from src.models.track import CreditRole
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
+from src.utils.codes_barres import cle_upc
 from src.utils.corrections_fiches import credits_refuses, videos_refusees
 from src.utils.credits_genius_api import (
     purger_provisoires_couverts,
@@ -3817,8 +3818,45 @@ class TrackRepository:
             title = clean_stored_title(observation.title)
             if not title:
                 continue
-            release_id = self._resolve_release_observation(conn, artist_id, title, observation)
+            if observation.rattacher_seulement:
+                release_id = self._release_designee(conn, artist_id, title, observation)
+                if release_id is None:
+                    continue
+            else:
+                release_id = self._resolve_release_observation(conn, artist_id, title, observation)
             self._link_track_to_release_conn(conn, release_id, track_id, observation)
+
+    def _release_par_identifiant(
+        self, conn, artist_id: int, observation: ReleaseObservation
+    ) -> int | None:
+        """La parution que cette source identifie déjà sous cet ID, ou None."""
+        if observation.external_release_id is None:
+            return None
+        row = conn.execute(
+            text(
+                "SELECT release_id FROM release_identifiers WHERE artist_id = :artist_id "
+                "AND source = :source AND external_id = :external_id"
+            ),
+            {
+                "artist_id": artist_id,
+                "source": observation.source,
+                "external_id": str(observation.external_release_id),
+            },
+        ).first()
+        return int(row[0]) if row else None
+
+    def _release_designee(
+        self, conn, artist_id: int, title: str, observation: ReleaseObservation
+    ) -> int | None:
+        """`rattacher_seulement` : la parution que l'ID de la source ou le
+        code-barres désigne DÉJÀ, sinon None — jamais une création, jamais un
+        rapprochement par le titre (un pressage Discogs sans code-barres commun
+        n'est pas une de nos parutions)."""
+        release_id = self._release_par_identifiant(conn, artist_id, observation)
+        if release_id is not None:
+            self._complete_release(conn, release_id, title, observation)
+            return release_id
+        return self._adopter_par_upc(conn, artist_id, title, observation)
 
     def _resolve_release_observation(
         self, conn, artist_id: int, title: str, observation: ReleaseObservation
@@ -3835,23 +3873,8 @@ class TrackRepository:
             else None
         )
         if external_id:
-            row = (
-                conn.execute(
-                    text(
-                        "SELECT release_id FROM release_identifiers WHERE artist_id = :artist_id "
-                        "AND source = :source AND external_id = :external_id"
-                    ),
-                    {
-                        "artist_id": artist_id,
-                        "source": observation.source,
-                        "external_id": external_id,
-                    },
-                )
-                .mappings()
-                .first()
-            )
-            if row:
-                release_id = int(row["release_id"])
+            release_id = self._release_par_identifiant(conn, artist_id, observation)
+            if release_id is not None:
                 self._complete_release(conn, release_id, title, observation)
                 return release_id
             adoptee = self._adopter_par_upc(conn, artist_id, title, observation)
@@ -3969,21 +3992,27 @@ class TrackRepository:
         """La parution qui porte DÉJÀ ce code-barres (e54) : même édition, quel
         que soit l'ID que lui donne cette source — « A V L D » / « AVLD », deux
         ID Deezer pour un UPC (2026-10-14), ou une édition Discogs/MusicBrainz
-        face à sa parution Deezer. La source y ajoute son identifiant."""
-        upc = (observation.upc or "").strip()
-        if not upc:
+        face à sa parution Deezer. La source y ajoute son identifiant.
+
+        Comparé par CLÉ (`codes_barres.cle_upc`) : Deezer écrit l'UPC-A à 12
+        chiffres (« 859733291991 »), Discogs et MusicBrainz l'EAN-13 avec le 0
+        de tête — le même code."""
+        cle = cle_upc(observation.upc)
+        if not cle:
             return None
         row = conn.execute(
             text(
-                "SELECT id FROM releases WHERE artist_id = :a AND upc = :upc "
+                "SELECT id FROM releases WHERE artist_id = :a AND LTRIM(upc, '0') = :cle "
                 "AND status = 'confirmed' ORDER BY id LIMIT 1"
             ),
-            {"a": artist_id, "upc": upc},
+            {"a": artist_id, "cle": cle},
         ).first()
         if row is None:
             return None
         release_id = int(row[0])
         self._complete_release(conn, release_id, title, observation)
+        if observation.external_release_id is None:
+            return release_id
         conn.execute(
             text(
                 "INSERT OR IGNORE INTO release_identifiers "
@@ -3999,6 +4028,158 @@ class TrackRepository:
             },
         )
         return release_id
+
+    def fusionner_parutions_meme_upc(self, *, appliquer: bool = False) -> list[dict[str, Any]]:
+        """Réunit les parutions d'un artiste qui portent le MÊME code-barres.
+
+        e54 empêche les nouveaux doublons ; ceux d'avant restent deux parutions
+        (« A V L D » / « AVLD » de SDM : UPC 859733291991 sous deux ID Deezer,
+        une seconde livraison du même distributeur — Apple fait pareil, le
+        second album « distribution exclusive ADA France »). Ce n'est pas une
+        autre édition : la plus ancienne parution garde tout — identifiants,
+        liens (place la plus sûre, `positions_disque`), preuves — et la date la
+        plus ancienne ; l'autre disparaît. Comparé par clé (`cle_upc`).
+
+        Rend `[{artist_id, garde, absorbees: [(id, titre)], titre}]` ; n'écrit
+        qu'avec `appliquer`, en une transaction."""
+        with self.engine.begin() as conn:
+            rows = (
+                conn.execute(
+                    text(
+                        "SELECT id, artist_id, title, upc FROM releases "
+                        "WHERE upc IS NOT NULL AND status = 'confirmed' ORDER BY artist_id, id"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            groupes: dict[tuple[int, str], list] = {}
+            for r in rows:
+                cle = cle_upc(r["upc"])
+                if cle:
+                    groupes.setdefault((int(r["artist_id"]), cle), []).append(r)
+            plan = [
+                {
+                    "artist_id": artist_id,
+                    "garde": int(g[0]["id"]),
+                    "titre": g[0]["title"],
+                    "absorbees": [(int(r["id"]), r["title"]) for r in g[1:]],
+                }
+                for (artist_id, _cle), g in groupes.items()
+                if len(g) > 1
+            ]
+            if appliquer:
+                for fusion in plan:
+                    for absorbee, _titre in fusion["absorbees"]:
+                        self._absorber_parution(conn, fusion["garde"], absorbee)
+        return plan
+
+    def _absorber_parution(self, conn, garde: int, absorbee: int) -> None:
+        now = datetime.now()
+        conn.execute(
+            text("UPDATE OR IGNORE release_identifiers SET release_id = :g WHERE release_id = :a"),
+            {"g": garde, "a": absorbee},
+        )
+        conn.execute(text("DELETE FROM release_identifiers WHERE release_id = :a"), {"a": absorbee})
+        liens = (
+            conn.execute(
+                text(
+                    "SELECT id, track_id, disc_number, track_number, position_source, "
+                    "position_brute FROM release_tracks WHERE release_id = :a"
+                ),
+                {"a": absorbee},
+            )
+            .mappings()
+            .all()
+        )
+        for lien in liens:
+            garde_lien = (
+                conn.execute(
+                    text(
+                        "SELECT id, disc_number, track_number, position_source, position_brute "
+                        "FROM release_tracks WHERE release_id = :g AND track_id = :t"
+                    ),
+                    {"g": garde, "t": lien["track_id"]},
+                )
+                .mappings()
+                .first()
+            )
+            if garde_lien is None:
+                conn.execute(
+                    text("UPDATE release_tracks SET release_id = :g WHERE id = :id"),
+                    {"g": garde, "id": lien["id"]},
+                )
+                continue
+            connue = (
+                garde_lien["disc_number"],
+                garde_lien["track_number"],
+                garde_lien["position_source"],
+            )
+            observee = (lien["disc_number"], lien["track_number"], lien["position_source"])
+            retenue = position_retenue(connue if connue[1] is not None else None, observee)
+            brute = (
+                lien["position_brute"]
+                if retenue == observee and observee[1] is not None
+                else garde_lien["position_brute"]
+            )
+            conn.execute(
+                text(
+                    "UPDATE release_tracks SET disc_number = :d, track_number = :n, "
+                    "position_source = :s, position_brute = :b, updated_at = :now WHERE id = :id"
+                ),
+                {
+                    "d": retenue[0],
+                    "n": retenue[1],
+                    "s": retenue[2],
+                    "b": brute,
+                    "now": now,
+                    "id": garde_lien["id"],
+                },
+            )
+            conn.execute(
+                text(
+                    "UPDATE OR IGNORE release_track_sources SET release_track_id = :g "
+                    "WHERE release_track_id = :a"
+                ),
+                {"g": garde_lien["id"], "a": lien["id"]},
+            )
+            conn.execute(
+                text("DELETE FROM release_track_sources WHERE release_track_id = :a"),
+                {"a": lien["id"]},
+            )
+            conn.execute(text("DELETE FROM release_tracks WHERE id = :a"), {"a": lien["id"]})
+        a = (
+            conn.execute(
+                text(
+                    "SELECT title, credited_artist_name, release_date, record_type, "
+                    "deezer_album_id, upc FROM releases WHERE id = :a"
+                ),
+                {"a": absorbee},
+            )
+            .mappings()
+            .one()
+        )
+        conn.execute(
+            text(
+                "UPDATE releases SET deezer_album_id = COALESCE(deezer_album_id, :dz) "
+                "WHERE id = :g"
+            ),
+            {"dz": a["deezer_album_id"], "g": garde},
+        )
+        self._complete_release(
+            conn,
+            garde,
+            a["title"],
+            ReleaseObservation(
+                title=a["title"],
+                source="fusion",
+                credited_artist_name=a["credited_artist_name"],
+                release_date=a["release_date"],
+                record_type=a["record_type"],
+                upc=a["upc"],
+            ),
+        )
+        conn.execute(text("DELETE FROM releases WHERE id = :a"), {"a": absorbee})
 
     def _adopter_parution_heritee(
         self, conn, artist_id: int, title: str, observation: ReleaseObservation
@@ -4114,21 +4295,23 @@ class TrackRepository:
         self, conn, release_id: int, track_id: int, observation: ReleaseObservation
     ) -> None:
         now = datetime.now()
-        disc, numero, source_position = self._position_du_lien(
-            conn,
-            release_id,
-            track_id,
-            (observation.disc_number, observation.track_number, observation.source),
+        observee = (observation.disc_number, observation.track_number, observation.source)
+        disc, numero, source_position = self._position_du_lien(conn, release_id, track_id, observee)
+        # Le libellé brut SUIT la place retenue, comme le disque suit le numéro.
+        remplace = (
+            observation.track_number is not None and (disc, numero, source_position) == observee
         )
         conn.execute(
             text(
                 "INSERT INTO release_tracks (release_id, track_id, disc_number, track_number, source, matched_by, "
-                "external_track_id, position_source, created_at, updated_at) VALUES (:release_id, :track_id, "
-                ":disc_number, :track_number, :source, :matched_by, :external_track_id, :position_source, "
-                ":now, :now) "
+                "external_track_id, position_source, position_brute, created_at, updated_at) VALUES "
+                "(:release_id, :track_id, :disc_number, :track_number, :source, :matched_by, "
+                ":external_track_id, :position_source, :position_brute, :now, :now) "
                 "ON CONFLICT(release_id, track_id) DO UPDATE SET "
                 "disc_number = excluded.disc_number, track_number = excluded.track_number, "
                 "position_source = excluded.position_source, "
+                "position_brute = CASE WHEN :remplace THEN excluded.position_brute "
+                "ELSE release_tracks.position_brute END, "
                 "updated_at = excluded.updated_at"
             ),
             {
@@ -4137,6 +4320,8 @@ class TrackRepository:
                 "disc_number": disc,
                 "track_number": numero,
                 "position_source": source_position,
+                "position_brute": observation.position_brute if remplace else None,
+                "remplace": int(remplace),
                 "source": observation.source,
                 "matched_by": observation.confidence,
                 "external_track_id": (
@@ -4344,6 +4529,7 @@ class TrackRepository:
         """Ajoute une appartenance, idempotente et sans écraser un choix manuel."""
         try:
             with self.engine.begin() as conn:
+                numero_observe = track_number
                 disc_number, track_number, position_source = self._position_du_lien(
                     conn, release_id, track_id, (disc_number, track_number, source)
                 )
@@ -4356,6 +4542,8 @@ class TrackRepository:
                         "ON CONFLICT(release_id, track_id) DO UPDATE SET "
                         "disc_number = excluded.disc_number, track_number = excluded.track_number, "
                         "position_source = excluded.position_source, "
+                        "position_brute = CASE WHEN :remplace THEN NULL "
+                        "ELSE release_tracks.position_brute END, "
                         "source_track_id = COALESCE(excluded.source_track_id, release_tracks.source_track_id), "
                         "source = CASE WHEN release_tracks.source = 'manual' THEN 'manual' ELSE excluded.source END, "
                         "matched_by = CASE WHEN release_tracks.matched_by = 'manual' THEN 'manual' ELSE excluded.matched_by END, "
@@ -4367,6 +4555,7 @@ class TrackRepository:
                         "disc_number": disc_number,
                         "track_number": track_number,
                         "position_source": position_source,
+                        "remplace": int(numero_observe is not None and position_source == source),
                         "source_track_id": source_track_id,
                         "source": source,
                         "matched_by": matched_by,

@@ -252,3 +252,15 @@ def test_fiches_deja_rattachees_par_une_source(data_manager):
     data_manager.record_release_observations(track.id, [_obs("apple_music", 4, 1, release_id=9)])
     data_manager.record_release_observations(autre.id, [_obs("deezer", 5, 1)])
     assert data_manager.track_ids_avec_parution(artist.id, "apple_music") == {track.id}
+
+
+def test_spotify_web_ne_dit_pas_le_disque():
+    """2026-10-14 : Spotify ne donne que l'ORDRE (la 11ᵉ piste d'un double
+    album est la 1 du disque 2) — rangé sous Genius, jamais comparé, et ne
+    remplace jamais une place Deezer ou Discogs."""
+    from src.utils.positions_disque import SOURCES_COMPARABLES
+
+    assert "spotify_web" not in SOURCES_COMPARABLES
+    assert position_retenue((2, 1, "deezer"), (1, 11, "spotify_web")) == (2, 1, "deezer")
+    assert position_retenue((None, 3, "discogs"), (1, 11, "spotify_web")) == (None, 3, "discogs")
+    assert appoint_emplacement([_p(1, 11, "spotify_web")], [_p(1, 11, "spotify_web")]) is None

@@ -313,6 +313,10 @@ release_tracks = Table(
     # qui a créé le lien. Deux positions ne se comparent qu'à source égale
     # (`utils/positions_disque`).
     Column("position_source", Text),
+    # (e55) Le libellé de place tel que `position_source` l'écrit (« A1 »,
+    # « 1-03 ») ; il suit la place retenue. NULL pour une source qui ne donne
+    # que des numéros (Deezer, Apple).
+    Column("position_brute", Text),
     UniqueConstraint("release_id", "track_id"),
     sqlite_autoincrement=True,
 )

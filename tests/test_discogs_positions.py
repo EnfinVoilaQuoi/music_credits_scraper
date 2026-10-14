@@ -7,7 +7,7 @@ rapporte. Ce champ était stocké et jamais lu : 1 460 attributions en trop sur
 
 import pytest
 
-from src.utils.discogs_positions import concerne_la_piste, positions_citees
+from src.utils.discogs_positions import concerne_la_piste, numeroter, positions_citees
 
 
 class TestPositionsCitees:
@@ -103,3 +103,50 @@ def test_la_position_declaree_est_enregistree(data_manager):
             ).scalar()
             == "2"
         )
+
+
+class TestNumeroter:
+    """2026-10-14 : la position Discogs est un LIBELLÉ ; sa conversion en
+    `(disque, numéro)` la rend comparable aux places Deezer et Apple."""
+
+    def test_disque_et_piste_ecrits(self):
+        """*Civilisation Édition Ultime* (Discogs 24973729), intertitres compris."""
+        assert numeroter(["", "1-1", "1-15", "", "2-1", "2-10"]) == [
+            (None, None),
+            (1, 1),
+            (1, 15),
+            (None, None),
+            (2, 1),
+            (2, 10),
+        ]
+
+    @pytest.mark.parametrize(
+        ("libelle", "place"), [("1-03", (1, 3)), ("CD2-5", (2, 5)), ("2.4", (2, 4))]
+    )
+    def test_ecritures_du_disque(self, libelle, place):
+        assert numeroter([libelle]) == [place]
+
+    def test_piste_seule_disque_unique(self):
+        assert numeroter(["1", "02", "3"]) == [(1, 1), (1, 2), (1, 3)]
+
+    def test_faces_de_vinyle_ordre_de_la_liste_sans_intertitres(self):
+        """« A1, A2, B1 » : numéro = rang dans la liste, intertitre sauté,
+        disque inconnu (un double vinyle n'est pas un double CD)."""
+        assert numeroter(["A1", "A2", "", "B1", "C1"]) == [
+            (None, 1),
+            (None, 2),
+            (None, None),
+            (None, 3),
+            (None, 4),
+        ]
+
+    @pytest.mark.parametrize(
+        "positions",
+        [["A1", "2"], ["1", "2", "3a", "3b"], ["1-1", "2"], ["Video"]],
+    )
+    def test_un_melange_ne_se_numerote_pas(self, positions):
+        assert numeroter(positions) == [(None, None)] * len(positions)
+
+    def test_rien_a_numeroter(self):
+        assert numeroter([]) == []
+        assert numeroter([None, ""]) == [(None, None), (None, None)]

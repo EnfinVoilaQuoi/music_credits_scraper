@@ -432,3 +432,61 @@ def test_spotify_ids_des_relations_d_url():
     }
     assert spotify_ids_de(detail) == ["0wNxmIGMOHdCqfFWlDOLV0", "6dbdXbyAWk2qx8Qttw0knR"]
     assert spotify_ids_de({}) == []
+
+
+# ── Parution par code-barres (2026-10-14) ────────────────────────────────────
+
+
+class TestParutionsParCodeBarres:
+    """MusicBrainz relie les plateformes par le code-barres : la page d'une
+    parution lie l'album Spotify, Deezer et Apple de CETTE édition."""
+
+    def test_albums_lies(self):
+        from src.api.musicbrainz_api import albums_lies
+
+        detail = {
+            "relations": [
+                {"url": {"resource": "https://open.spotify.com/album/4kS7bSuU0Jm9LYMosFU2x5"}},
+                {"url": {"resource": "https://www.deezer.com/album/486213345"}},
+                {"url": {"resource": "https://music.apple.com/fr/album/adc/1707009275"}},
+                {"url": {"resource": "https://itunes.apple.com/fr/album/id1471847163"}},
+                {"url": {"resource": "https://tidal.com/album/1"}},
+            ]
+        }
+        assert albums_lies(detail) == {
+            "apple_music": ["1471847163", "1707009275"],
+            "deezer": ["486213345"],
+            "spotify": ["4kS7bSuU0Jm9LYMosFU2x5"],
+        }
+
+    def test_seul_le_meme_code_barres_est_retenu(self, monkeypatch):
+        """La recherche Lucene rend aussi des voisins : vérifié par clé, et
+        l'UPC-A Deezer retrouve l'EAN-13 de MusicBrainz."""
+        recherche = _Reponse(
+            200,
+            {
+                "releases": [
+                    {"id": "m1", "title": "ADC", "barcode": "03701421546227"},
+                    {"id": "m2", "title": "Autre", "barcode": "3701421546228"},
+                ]
+            },
+        )
+        lookup = _Reponse(
+            200, {"relations": [{"url": {"resource": "https://www.deezer.com/album/486213345"}}]}
+        )
+        api, file = _client(monkeypatch, [recherche, lookup])
+        assert api.parutions_par_code_barres("3701421546227") == [
+            {
+                "mbid": "m1",
+                "titre": "ADC",
+                "barcode": "03701421546227",
+                "albums": {"deezer": ["486213345"]},
+            }
+        ]
+        assert file == []
+
+    def test_inconnu_ou_pas_un_code_barres(self, monkeypatch):
+        api, file = _client(monkeypatch, [_Reponse(200, {"releases": []})])
+        assert api.parutions_par_code_barres("859733291991") == []
+        assert api.parutions_par_code_barres("LC 0979") == []
+        assert file == []

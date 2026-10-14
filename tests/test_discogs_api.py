@@ -279,6 +279,28 @@ class TestExtractionDuMorceau:
         assert data["labels"] == ["D'or et de platine"]
         assert data["credits"][0]["name"] == "Kore"
 
+    def test_place_convertie_et_code_barres(self, client):
+        """2026-10-14 : « B1 » sur un vinyle = 3ᵉ piste de la liste, intertitre
+        sauté ; le code-barres du disque est lu (clé sans espaces)."""
+        release = _Release(
+            tracklist=[
+                _Piste("Un", "A1"),
+                _Piste("Deux", "A2"),
+                _Piste("Face B", ""),
+                _Piste("Bande organisée", "B1"),
+            ]
+        )
+        release.data = {"identifiers": [{"type": "Barcode", "value": "3 596974 281424"}]}
+        data = client._extract_track_from_release(release, "Bande organisée", "Jul")
+        assert (data["position"], data["disque"], data["numero"]) == ("B1", None, 3)
+        assert data["upc"] == "3596974281424"
+
+    def test_titre_present_deux_fois_pas_de_place(self, client):
+        """« Intro » sur deux disques : laquelle ? Le libellé reste, pas la place."""
+        release = _Release(tracklist=[_Piste("Intro", "1-1"), _Piste("Intro", "2-1")])
+        data = client._extract_track_from_release(release, "Intro", "Jul")
+        assert (data["position"], data["numero"], data["upc"]) == ("1-1", None, None)
+
     def test_titre_normalise_avant_comparaison(self, client):
         """La tracklist Discogs écrit « Bande Organisée (feat. SCH) » là où notre
         base a « Bande organisée » : sans normalisation, aucun crédit ne
@@ -389,6 +411,35 @@ class TestEnrichissementDuTrack:
         assert ("discogs_position", "B3", "discogs") in [
             (o.field, o.value, o.source) for o in track.observations
         ]
+
+    def test_la_place_rejoint_la_parution_du_code_barres(self, client, monkeypatch):
+        """Avec un code-barres, la place convertie part en observation de
+        parution « rattacher seulement » : jamais une parution par pressage."""
+        self._stub(
+            client,
+            monkeypatch,
+            _donnees(album="Civilisation", position="2-1", disque=2, numero=1, upc="3596974281424"),
+        )
+        track = _track()
+        client.enrich_track_data(track)
+        (obs,) = track.release_observations
+        assert (obs.source, obs.external_release_id, obs.disc_number, obs.track_number) == (
+            "discogs",
+            42,
+            2,
+            1,
+        )
+        assert (obs.position_brute, obs.upc, obs.rattacher_seulement) == (
+            "2-1",
+            "3596974281424",
+            True,
+        )
+
+    def test_sans_code_barres_aucune_parution(self, client, monkeypatch):
+        self._stub(client, monkeypatch, _donnees(album="X", position="A1", numero=1))
+        track = _track()
+        client.enrich_track_data(track)
+        assert track.release_observations == []
 
     def test_la_duree_de_la_piste_est_declaree(self, client, monkeypatch):
         """Lot B5 : lue avec le disque, elle était jetée — déclarée, jamais posée

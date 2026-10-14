@@ -118,6 +118,12 @@ def certif_du_morceau(titre_fiche: str | None, titre_certif: str | None) -> bool
         reste = f[len(c) :].strip()
         if _PARTIE.match(reste) or parse_variant(titre_fiche).kind != Kind.NONE:
             return False
+        if titre_generique(c):
+            # « INTERLUDE » n'est pas le début coupé d'« Interlude - 420
+            # mètres » : un titre GÉNÉRIQUE ne désigne que lui-même (2026-10-14,
+            # SCH : la certif allait sur ses cinq interludes). Miroir de la
+            # règle des mots en plus côté certif.
+            return False
         # Un titre de certif COURT ne vaut que par un sous-titre entre
         # parenthèses : sinon « LA » irait sur « La zone ».
         return len(c) >= 8 or _sous_titre(titre_fiche, c)

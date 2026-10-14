@@ -133,3 +133,14 @@ def test_deux_numeros_de_partie_deux_morceaux(fiche, certif):
     3 rattachements retirés, tous faux."""
     assert not certif_du_morceau(fiche, certif)
     assert certif_du_morceau("Father Stretch My Hands, Pt. 1", certif)
+
+
+def test_un_titre_generique_n_est_pas_un_titre_coupe():
+    """2026-10-14, mesuré contre le catalogue Deezer : la certif « INTERLUDE »
+    de SCH allait sur ses cinq « Interlude - … » (9 lettres : la règle du
+    titre coupé l'admettait). Un titre générique ne désigne que lui-même."""
+    assert not certif_du_morceau("Interlude - 420 mètres", "INTERLUDE")
+    assert not certif_du_morceau("Interlude - Beretta 92FS", "INTERLUDE")
+    assert certif_du_morceau("Interlude", "INTERLUDE")
+    # Le titre coupé reste admis hors titre générique.
+    assert certif_du_morceau("Qui sème le vent récolte le tempo", "QUI SEME LE VENT")

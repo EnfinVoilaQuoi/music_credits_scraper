@@ -64,6 +64,14 @@ _EXPAND_JS = """
 """
 
 
+#: Fenêtre d'une page ALBUM : la liste est virtualisée, elle ne rend que ce
+#: qui tient à l'écran. Mesuré le 2026-10-15 : en 1280×900, 23 pistes rendues
+#: sur 25-26 (*Futur 2.0 Deluxe*, *OCHO Deluxe*, *Civilisation Édition
+#: Ultime*) même après déroulement ; en 12 000 px de haut, toutes (~56 px par
+#: ligne : de la marge pour 200 pistes).
+_FENETRE_ALBUM = {"width": 1280, "height": 12_000}
+
+
 class SpotifyWebScraper(CrawlAIScraperBase):
     """Lit les compteurs des pages Spotify rendues. Async natif (session)."""
 
@@ -205,8 +213,9 @@ class SpotifyWebScraper(CrawlAIScraperBase):
         ⚠️ La tracklist est VIRTUALISÉE : sans dérouler la page, le nombre de
         lignes rendues dépend du hasard du rendu (mesuré le 2026-09-05 : 15
         pistes à un appel, 7 au suivant, sur la MÊME page). D'où le déroulement
-        systématique, et surtout le `announced` renvoyé — c'est lui qui permet à
-        l'appelant de savoir qu'il n'a pas tout vu.
+        systématique, une fenêtre très HAUTE (`_FENETRE_ALBUM`, 2026-10-15 : en
+        900 px, 23 pistes sur 25-26), et surtout le `announced` renvoyé — c'est
+        lui qui permet à l'appelant de savoir qu'il n'a pas tout vu.
 
         Returns:
             {'title', 'tracks': [(track_id, titre)], 'track_ids', 'announced',
@@ -222,6 +231,7 @@ class SpotifyWebScraper(CrawlAIScraperBase):
                 wait_for='css:[data-testid="tracklist-row"]',
                 js_before_wait=_EXPAND_JS,
                 delay_before_return=1.0,
+                viewport=_FENETRE_ALBUM,
             )
             if not html:
                 obs.fail(IssueKind.UNREACHABLE, "page album non rendue")

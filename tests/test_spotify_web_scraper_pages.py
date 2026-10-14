@@ -27,10 +27,11 @@ class _Session:
     """Rend `html` à chaque `fetch`, et note les URL demandées."""
 
     def __init__(self, html):
-        self.html, self.urls = html, []
+        self.html, self.urls, self.options = html, [], []
 
-    async def fetch(self, url, **_):
+    async def fetch(self, url, **options):
         self.urls.append(url)
+        self.options.append(options)
         return self.html
 
 
@@ -56,6 +57,14 @@ class TestAlbum:
 
     def test_page_vide(self, scraper):
         assert _lancer(scraper.afetch_album(_Session(None), "X")) is None
+
+    def test_la_page_album_demande_une_fenetre_haute(self, scraper):
+        """2026-10-15 : en 900 px, 23 pistes sur 25-26 ; en 12 000 px, toutes
+        (*Futur 2.0 Deluxe* 25/25, *OCHO Deluxe* 26/26, vérifié sur la vraie
+        session)."""
+        sess = _Session(_page("album_incomplet.html"))
+        _lancer(scraper.afetch_album(sess, "X"))
+        assert sess.options[0]["viewport"]["height"] >= 10_000
 
     def test_page_sans_tracklist(self, scraper):
         assert _lancer(scraper.afetch_album(_Session("<html></html>"), "X")) is None

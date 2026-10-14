@@ -580,9 +580,35 @@ class _BrowserSession:
         wait_timeout: int = 15_000,
         page_timeout: int = 30_000,
         delay_before_return: float = 0.0,
+        viewport: dict | None = None,
     ) -> str | None:
-        """Navigue et rend le HTML rendu, ou `None` si la page n'est pas venue."""
+        """Navigue et rend le HTML rendu, ou `None` si la page n'est pas venue.
+
+        `viewport` : taille de fenêtre le temps de CETTE page, rétablie après
+        (une liste virtualisée ne rend que ce qui tient à l'écran)."""
         key = self._scraper.health_key
+        avant = None
+        if viewport:
+            avant = self._page.viewport_size
+            try:
+                await self._page.set_viewport_size(viewport)
+            except PatchrightError as e:
+                logger.debug(f"{url}: taille de fenêtre ignorée ({e})")
+                avant = None
+        try:
+            return await self._fetch(
+                url, key, wait_for, js_before_wait, wait_timeout, page_timeout, delay_before_return
+            )
+        finally:
+            if avant:
+                try:
+                    await self._page.set_viewport_size(avant)
+                except PatchrightError:
+                    pass
+
+    async def _fetch(
+        self, url, key, wait_for, js_before_wait, wait_timeout, page_timeout, delay_before_return
+    ) -> str | None:
         try:
             await self._page.goto(url, wait_until="domcontentloaded", timeout=page_timeout)
             if wait_for and wait_for.startswith("css:"):

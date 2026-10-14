@@ -593,3 +593,62 @@ def test_une_autre_page_deezer_devient_une_edition(data_manager):
     assert (col["deezer_id"], col["duration"]) == (1, 226)
     (edition,) = data_manager.get_track_editions(track.id)
     assert (edition["label"], edition["deezer_id"], edition["duration"]) == ("Single", 2, 232)
+
+
+def test_deux_id_deezer_d_un_meme_upc_sont_une_seule_parution(data_manager):
+    """e54 : « A V L D » / « AVLD », la même édition sous deux ID Deezer
+    (mesuré le 2026-10-14) — le code-barres désigne l'ÉDITION, la seconde
+    observation rejoint la première et y ajoute son identifiant."""
+    artist = _artist(data_manager, name="Josman")
+    a = _track(data_manager, artist, title="Matrix")
+    b = _track(data_manager, artist, title="Dans le vide")
+    data_manager.record_release_observations(
+        a.id,
+        [
+            ReleaseObservation(
+                title="A V L D", source="deezer", external_release_id=102768632, upc="859733291991"
+            )
+        ],
+    )
+    data_manager.record_release_observations(
+        b.id,
+        [
+            ReleaseObservation(
+                title="AVLD", source="deezer", external_release_id=230952762, upc="859733291991"
+            )
+        ],
+    )
+    (ra,) = data_manager.get_track_releases(a.id)
+    (rb,) = data_manager.get_track_releases(b.id)
+    assert ra["id"] == rb["id"]
+    with data_manager.engine.connect() as conn:
+        ids = conn.exec_driver_sql(
+            "SELECT external_id FROM release_identifiers WHERE release_id = ? ORDER BY external_id",
+            (ra["id"],),
+        ).fetchall()
+        upc = conn.exec_driver_sql("SELECT upc FROM releases WHERE id = ?", (ra["id"],)).scalar()
+    assert ids == [("102768632",), ("230952762",)]
+    assert upc == "859733291991"
+
+
+def test_sans_upc_deux_id_restent_deux_parutions(data_manager):
+    """Deux éditions Deezer d'un même titre (standard, deluxe) sans code-barres
+    commun restent deux parutions — l'UPC rapproche, le titre jamais seul."""
+    artist = _artist(data_manager, name="Josman")
+    a = _track(data_manager, artist, title="Matrix")
+    b = _track(data_manager, artist, title="Dans le vide")
+    for t, ext, upc in ((a, 1, "111"), (b, 2, "222")):
+        data_manager.record_release_observations(
+            t.id,
+            [ReleaseObservation(title="J.O.$", source="deezer", external_release_id=ext, upc=upc)],
+        )
+    assert (
+        data_manager.get_track_releases(a.id)[0]["id"]
+        != data_manager.get_track_releases(b.id)[0]["id"]
+    )
+
+
+def test_l_album_deezer_porte_son_upc():
+    album = ed.AlbumDeezer.depuis({"id": 1, "title": "AVLD", "upc": "859733291991"}, [])
+    assert album.upc == "859733291991"
+    assert ed.AlbumDeezer.depuis({"id": 1, "title": "AVLD"}, []).upc is None

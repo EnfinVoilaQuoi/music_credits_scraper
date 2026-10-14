@@ -21,6 +21,8 @@ class ReleaseObservation:
     external_track_id: str | int | None = None
     disc_number: int | None = None
     track_number: int | None = None
+    #: Code-barres UPC/EAN de l'édition (e54) : relie les sources entre elles.
+    upc: str | None = None
     # identified = ID de plateforme ; confirmed = métadonnées strictes ;
     # suggested = information incomplète, à montrer sans la fusionner.
     confidence: str = "identified"

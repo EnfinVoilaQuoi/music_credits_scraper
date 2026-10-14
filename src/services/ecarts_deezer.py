@@ -159,6 +159,8 @@ class AlbumDeezer:
     label: str | None = None
     link: str | None = None
     pistes: list[PisteDeezer] = field(default_factory=list)
+    #: Code-barres de l'édition (2026-10-14 : renseigné sur 100 % des albums).
+    upc: str | None = None
 
     @classmethod
     def depuis(cls, fiche: dict, pistes: list[dict]) -> AlbumDeezer:
@@ -180,6 +182,7 @@ class AlbumDeezer:
             label=fiche.get("label") or None,
             link=fiche.get("link"),
             pistes=[PisteDeezer.depuis(p) for p in pistes if p.get("id")],
+            upc=str(fiche.get("upc") or "").strip() or None,
         )
 
 
@@ -851,6 +854,7 @@ def _ligne(artist, e: Ecart, contributeurs: list[tuple[int, str]]) -> Track:
             disc_number=p.disk,
             track_number=p.position,
             confidence=e.matched_by or "identified",
+            upc=a.upc,
         )
     )
     if est_apparition:
@@ -1023,6 +1027,7 @@ def _lier_parution(dm, artist, e: Ecart, track: Track) -> bool:
                 disc_number=e.piste.disk,
                 track_number=e.piste.position,
                 confidence=e.matched_by or "identified",
+                upc=e.album.upc,
             )
         ],
     )

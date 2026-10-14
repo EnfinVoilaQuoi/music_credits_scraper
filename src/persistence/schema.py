@@ -283,6 +283,9 @@ releases = Table(
     # confirmed = utilisable dans la discographie ; suggested = donnée source
     # trop incomplète pour rapprocher silencieusement une autre parution.
     Column("status", Text, nullable=False, server_default=text("'confirmed'")),
+    # (e54) Code-barres UPC/EAN : désigne l'ÉDITION chez toutes les sources
+    # (Deezer `upc`, Discogs et MusicBrainz `barcode`) — clé inter-sources.
+    Column("upc", Text),
     UniqueConstraint("artist_id", "identity_key"),
     sqlite_autoincrement=True,
 )

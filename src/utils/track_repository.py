@@ -3854,7 +3854,9 @@ class TrackRepository:
                 release_id = int(row["release_id"])
                 self._complete_release(conn, release_id, title, observation)
                 return release_id
-            adoptee = self._adopter_parution_heritee(conn, artist_id, title, observation)
+            adoptee = self._adopter_par_upc(conn, artist_id, title, observation)
+            if adoptee is None:
+                adoptee = self._adopter_parution_heritee(conn, artist_id, title, observation)
             if adoptee is not None:
                 return adoptee
 
@@ -3921,12 +3923,13 @@ class TrackRepository:
                 result = conn.execute(
                     text(
                         "INSERT INTO releases (artist_id, title, credited_artist_name, release_date, record_type, "
-                        "deezer_album_id, scope, status, identity_key, created_at, updated_at) "
+                        "deezer_album_id, scope, status, identity_key, upc, created_at, updated_at) "
                         "VALUES (:artist_id, :title, :credited_artist_name, :release_date, :record_type, "
-                        ":deezer_album_id, :scope, :status, :identity_key, :now, :now)"
+                        ":deezer_album_id, :scope, :status, :identity_key, :upc, :now, :now)"
                     ),
                     {
                         "artist_id": artist_id,
+                        "upc": observation.upc,
                         "title": title,
                         "credited_artist_name": observation.credited_artist_name,
                         "release_date": observation.release_date,
@@ -3958,6 +3961,43 @@ class TrackRepository:
                     "now": datetime.now(),
                 },
             )
+        return release_id
+
+    def _adopter_par_upc(
+        self, conn, artist_id: int, title: str, observation: ReleaseObservation
+    ) -> int | None:
+        """La parution qui porte DÉJÀ ce code-barres (e54) : même édition, quel
+        que soit l'ID que lui donne cette source — « A V L D » / « AVLD », deux
+        ID Deezer pour un UPC (2026-10-14), ou une édition Discogs/MusicBrainz
+        face à sa parution Deezer. La source y ajoute son identifiant."""
+        upc = (observation.upc or "").strip()
+        if not upc:
+            return None
+        row = conn.execute(
+            text(
+                "SELECT id FROM releases WHERE artist_id = :a AND upc = :upc "
+                "AND status = 'confirmed' ORDER BY id LIMIT 1"
+            ),
+            {"a": artist_id, "upc": upc},
+        ).first()
+        if row is None:
+            return None
+        release_id = int(row[0])
+        self._complete_release(conn, release_id, title, observation)
+        conn.execute(
+            text(
+                "INSERT OR IGNORE INTO release_identifiers "
+                "(release_id, artist_id, source, external_id, created_at) "
+                "VALUES (:release_id, :artist_id, :source, :external_id, :now)"
+            ),
+            {
+                "release_id": release_id,
+                "artist_id": artist_id,
+                "source": observation.source,
+                "external_id": str(observation.external_release_id),
+                "now": datetime.now(),
+            },
+        )
         return release_id
 
     def _adopter_parution_heritee(
@@ -4042,10 +4082,12 @@ class TrackRepository:
             text(
                 "UPDATE releases SET credited_artist_name = COALESCE(:credited_artist_name, credited_artist_name), "
                 "release_date = COALESCE(:release_date, release_date), "
-                "record_type = COALESCE(:record_type, record_type), updated_at = :now WHERE id = :id"
+                "record_type = COALESCE(:record_type, record_type), "
+                "upc = COALESCE(upc, :upc), updated_at = :now WHERE id = :id"
             ),
             {
                 "id": release_id,
+                "upc": observation.upc,
                 "credited_artist_name": observation.credited_artist_name,
                 "release_date": date,
                 "record_type": observation.record_type,

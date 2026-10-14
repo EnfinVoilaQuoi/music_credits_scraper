@@ -306,6 +306,10 @@ release_tracks = Table(
     Column("updated_at", TIMESTAMP),
     # (e32 : ajoutée après updated_at.)
     Column("external_track_id", Text),
+    # (e52) Qui a dit `disc_number`/`track_number` — pas forcément `source`,
+    # qui a créé le lien. Deux positions ne se comparent qu'à source égale
+    # (`utils/positions_disque`).
+    Column("position_source", Text),
     UniqueConstraint("release_id", "track_id"),
     sqlite_autoincrement=True,
 )

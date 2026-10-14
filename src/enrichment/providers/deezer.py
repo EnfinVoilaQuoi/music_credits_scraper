@@ -226,6 +226,8 @@ class DeezerProvider:
                         release_date=data.get("deezer_release_date"),
                         scope="appearance" if track.is_featuring else "own",
                         confidence="identified",
+                        disc_number=data.get("deezer_disk_number"),
+                        track_number=data.get("deezer_track_position"),
                     )
                 )
 

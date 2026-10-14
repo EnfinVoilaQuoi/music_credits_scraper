@@ -29,6 +29,7 @@ from src.utils.credits_genius_api import (
 from src.utils.dates import completer, la_plus_ancienne, meme_jour
 from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
+from src.utils.positions_disque import position_retenue
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
 from src.utils.track_mapper import _clean_duration, track_from_row
 from src.utils.track_soeurs import (
@@ -4052,25 +4053,48 @@ class TrackRepository:
             },
         )
 
+    @staticmethod
+    def _position_du_lien(conn, release_id: int, track_id: int, observee) -> tuple:
+        """`(disque, numéro, source)` à écrire sur le lien : une position n'est
+        remplacée que par une source au moins aussi sûre (e52) — le `COALESCE`
+        laissait la dernière écriture l'emporter, un numéro Genius pouvait
+        écraser celui de Deezer."""
+        connue = conn.execute(
+            text(
+                "SELECT disc_number, track_number, position_source FROM release_tracks "
+                "WHERE release_id = :r AND track_id = :t"
+            ),
+            {"r": release_id, "t": track_id},
+        ).first()
+        return position_retenue(tuple(connue) if connue else None, observee)
+
     def _link_track_to_release_conn(
         self, conn, release_id: int, track_id: int, observation: ReleaseObservation
     ) -> None:
         now = datetime.now()
+        disc, numero, source_position = self._position_du_lien(
+            conn,
+            release_id,
+            track_id,
+            (observation.disc_number, observation.track_number, observation.source),
+        )
         conn.execute(
             text(
                 "INSERT INTO release_tracks (release_id, track_id, disc_number, track_number, source, matched_by, "
-                "external_track_id, created_at, updated_at) VALUES (:release_id, :track_id, :disc_number, "
-                ":track_number, :source, :matched_by, :external_track_id, :now, :now) "
+                "external_track_id, position_source, created_at, updated_at) VALUES (:release_id, :track_id, "
+                ":disc_number, :track_number, :source, :matched_by, :external_track_id, :position_source, "
+                ":now, :now) "
                 "ON CONFLICT(release_id, track_id) DO UPDATE SET "
-                "disc_number = COALESCE(excluded.disc_number, release_tracks.disc_number), "
-                "track_number = COALESCE(excluded.track_number, release_tracks.track_number), "
+                "disc_number = excluded.disc_number, track_number = excluded.track_number, "
+                "position_source = excluded.position_source, "
                 "updated_at = excluded.updated_at"
             ),
             {
                 "release_id": release_id,
                 "track_id": track_id,
-                "disc_number": observation.disc_number,
-                "track_number": observation.track_number,
+                "disc_number": disc,
+                "track_number": numero,
+                "position_source": source_position,
                 "source": observation.source,
                 "matched_by": observation.confidence,
                 "external_track_id": (
@@ -4278,15 +4302,18 @@ class TrackRepository:
         """Ajoute une appartenance, idempotente et sans écraser un choix manuel."""
         try:
             with self.engine.begin() as conn:
+                disc_number, track_number, position_source = self._position_du_lien(
+                    conn, release_id, track_id, (disc_number, track_number, source)
+                )
                 conn.execute(
                     text(
                         "INSERT INTO release_tracks (release_id, track_id, disc_number, track_number, "
-                        "source_track_id, source, matched_by, created_at, updated_at) "
+                        "source_track_id, source, matched_by, position_source, created_at, updated_at) "
                         "VALUES (:release_id, :track_id, :disc_number, :track_number, :source_track_id, "
-                        ":source, :matched_by, :now, :now) "
+                        ":source, :matched_by, :position_source, :now, :now) "
                         "ON CONFLICT(release_id, track_id) DO UPDATE SET "
-                        "disc_number = COALESCE(excluded.disc_number, release_tracks.disc_number), "
-                        "track_number = COALESCE(excluded.track_number, release_tracks.track_number), "
+                        "disc_number = excluded.disc_number, track_number = excluded.track_number, "
+                        "position_source = excluded.position_source, "
                         "source_track_id = COALESCE(excluded.source_track_id, release_tracks.source_track_id), "
                         "source = CASE WHEN release_tracks.source = 'manual' THEN 'manual' ELSE excluded.source END, "
                         "matched_by = CASE WHEN release_tracks.matched_by = 'manual' THEN 'manual' ELSE excluded.matched_by END, "
@@ -4297,6 +4324,7 @@ class TrackRepository:
                         "track_id": track_id,
                         "disc_number": disc_number,
                         "track_number": track_number,
+                        "position_source": position_source,
                         "source_track_id": source_track_id,
                         "source": source,
                         "matched_by": matched_by,
@@ -4348,6 +4376,36 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur get_deezer_release_links({artist_id}): {e}")
             return set()
+
+    def get_artist_positions(self, artist_id: int) -> dict[int, list[dict[str, Any]]]:
+        """`{track_id: [{release_id, title, disc_number, track_number,
+        position_source}]}` des fiches de l'artiste, liens NUMÉROTÉS seuls —
+        le panneau « À trancher » en tire la preuve d'appoint d'un 👯
+        (`positions_disque.appoint_emplacement`)."""
+        try:
+            with self.engine.connect() as conn:
+                rows = (
+                    conn.execute(
+                        text(
+                            "SELECT rt.track_id, rt.release_id, r.title, rt.disc_number, "
+                            "rt.track_number, rt.position_source "
+                            "FROM release_tracks rt JOIN releases r ON r.id = rt.release_id "
+                            "JOIN tracks t ON t.id = rt.track_id "
+                            "WHERE t.artist_id = :a AND rt.track_number IS NOT NULL"
+                        ),
+                        {"a": artist_id},
+                    )
+                    .mappings()
+                    .all()
+                )
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_artist_positions({artist_id}): {e}")
+            return {}
+        positions: dict[int, list[dict[str, Any]]] = {}
+        for row in rows:
+            ligne = dict(row)
+            positions.setdefault(ligne.pop("track_id"), []).append(ligne)
+        return positions
 
     def get_release_tracks_for_artist(
         self, artist_id: int, *, scope: str = "own"

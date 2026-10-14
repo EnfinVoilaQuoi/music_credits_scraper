@@ -139,6 +139,9 @@ class Contexte:
     #: Divergences d'IDENTITÉ entre lignes sœurs, lues par `analyser`
     #: (`divergences_identite_soeurs`) — le détecteur reste pur.
     soeurs: list = field(default_factory=list)
+    #: Places des fiches sur leurs disques (`get_artist_positions`), lues par
+    #: `analyser` : preuve d'appoint des 👯.
+    positions: dict = field(default_factory=dict)
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -1320,6 +1323,21 @@ DETECTEURS_ARTISTE: tuple[DetecteurArtiste, ...] = (
 )
 
 
+def _appoint_des_places(track, preuves: dict, ctx: Contexte) -> str:
+    """La place des deux fiches sur un même disque, ajoutée au MOTIF d'un 👯
+    (2026-10-14) — preuve d'appoint, jamais un cas à elle seule, et hors de la
+    clé du cas : un 👯 déjà tranché le reste. Seuls deux numéros d'une même
+    source comparable (Deezer, jamais Genius) parlent (`positions_disque`)."""
+    from src.utils.positions_disque import appoint_emplacement
+
+    a = ctx.positions.get(track.id) or []
+    for autre in preuves.get("autres") or []:
+        dit = appoint_emplacement(a, ctx.positions.get(autre) or []) if a else None
+        if dit:
+            return f" — 📀 {dit}"
+    return ""
+
+
 def detecter(ctx: Contexte, detecteurs=DETECTEURS, detecteurs_artiste=DETECTEURS_ARTISTE):
     """Tous les cas, triés par impact décroissant."""
     cas = []
@@ -1328,6 +1346,8 @@ def detecter(ctx: Contexte, detecteurs=DETECTEURS, detecteurs_artiste=DETECTEURS
             verdict = d.juger(t, ctx)
             if verdict:
                 motif, preuves = verdict
+                if d.icone == "👯":
+                    motif += _appoint_des_places(t, preuves, ctx)
                 poids = preuves.get("impact", impact(t))
                 cas.append(
                     Cas(d.code, t.id, t.title, motif, poids, preuves, cle_du_cas(t, preuves))
@@ -1561,7 +1581,7 @@ def _vote_de_parution(s, par_id: dict) -> str:
 
 def analyser(data_manager, artiste) -> Revue:
     """Détecteurs hors ligne + signalements des runs, moins ce que
-    l'utilisateur a déjà tranché. Quatre lectures, aucune écriture."""
+    l'utilisateur a déjà tranché. Lectures seules, aucune écriture."""
     tracks = artiste.tracks or []
     durees_editions = data_manager.get_artist_edition_durations(artiste.id)
     for t in tracks:
@@ -1572,6 +1592,7 @@ def analyser(data_manager, artiste) -> Revue:
         data_manager.get_artist_relations(artiste.id, status="proposed"),
     )
     ctx.soeurs = data_manager.divergences_identite_soeurs(artiste.id)
+    ctx.positions = data_manager.get_artist_positions(artiste.id)
     cas = detecter(ctx)
     cas += _cas_des_signalements(
         data_manager.signalements_revue(artiste.id), {t.id for t in tracks}, tracks

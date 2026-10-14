@@ -43,6 +43,12 @@ _KIND_ERREUR_DEEZER: dict[int, IssueKind | None] = {
 }
 
 
+def _entier_positif(valeur) -> int | None:
+    return (
+        valeur if isinstance(valeur, int) and not isinstance(valeur, bool) and valeur > 0 else None
+    )
+
+
 class DeezerAPI:
     """
     Client pour l'API Deezer permettant d'enrichir les données musicales
@@ -438,6 +444,11 @@ class DeezerAPI:
             "deezer_release_date": deezer_date,
             "deezer_picture": None,
             "deezer_rank": track_data.get("rank"),
+            # La PLACE sur le disque : la fiche `/track/{id}` la porte, un hit de
+            # recherche non (None). Fiable — c'est la seule source dont deux
+            # numéros se comparent (`positions_disque`, 2026-10-14).
+            "deezer_track_position": _entier_positif(track_data.get("track_position")),
+            "deezer_disk_number": _entier_positif(track_data.get("disk_number")),
             "deezer_link": track_data.get("link"),
             # Chantier « Media » : ids + covers haute résolution (déjà présents
             # dans track_data, jamais lus jusqu'ici). Consommés par media_enricher.

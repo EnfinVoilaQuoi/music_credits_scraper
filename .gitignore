@@ -160,6 +160,9 @@ scripts/*
 !scripts/rematerialiser.py
 !scripts/combler_isrc.py
 !scripts/realigner_soeurs.py
+# Mesures hors ligne (2026-10-14) : places sur les disques, champs du brut.
+!scripts/mesurer_positions.py
+!scripts/sonder_brut.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
 # méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
 # `scripts/*` les exclut déjà : ne PAS ajouter de négation ici.

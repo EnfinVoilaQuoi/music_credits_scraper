@@ -59,16 +59,44 @@ fournisseur_titres = None
 #: `artist_id -> [(track_id, titre)]`. Même contrat que `fournisseur_titres`.
 fournisseur_propres = None
 
-#: IDs Spotify d'ARTISTE de ses ALIAS confirmés : `artist_id -> set[str]`.
-#: Même contrat que `fournisseur_titres` ; l'ID de l'artiste lui-même vient de
-#: la fiche (`track.artist.spotify_id`). Les formations n'en sont PAS : Lunatic
+#: Autres profils Spotify CONNUS de l'artiste : `artist_id -> set[str]` — ceux
+#: que lie sa fiche MusicBrainz (e53) et ceux de ses ALIAS confirmés. Même
+#: contrat que `fournisseur_titres` ; l'ID de l'artiste lui-même vient de la
+#: fiche (`track.artist.spotify_id`). Les formations n'en sont PAS : Lunatic
 #: n'est pas Booba, son URI ne prouve pas qu'un morceau est à Booba.
 fournisseur_ids_artiste = None
 
 
+#: IDs Spotify des AUTRES fiches du disque : `(artist_id, album) -> [id]`.
+#: Même contrat ; sert la preuve par la pochette d'un titre générique.
+fournisseur_ids_du_disque = None
+
+
+def ids_du_disque(track, spotify_id: str) -> list[str]:
+    """Jusqu'à 3 IDs d'autres pistes du disque de la fiche (références de
+    pochette), jamais l'ID jugé."""
+    artist_id = getattr(track.artist, "id", None)
+    if fournisseur_ids_du_disque is None or not artist_id or not getattr(track, "album", None):
+        return []
+    try:
+        ids = fournisseur_ids_du_disque(artist_id, track.album) or []
+    except Exception:  # noqa: BLE001 — garde-fou : un fournisseur en panne ne prouve rien
+        logger.exception("Fournisseur des IDs du disque en échec")
+        return []
+    return [i for i in ids if i and i != spotify_id][:3]
+
+
+def meme_pochette(identite: dict | None, references) -> bool:
+    """PUR. L'ID partage la pochette d'une piste du disque de la fiche : même
+    parution (2026-10-14). Sans pochette lisible, rien n'est prouvé."""
+    pochette = (identite or {}).get("pochette")
+    return bool(pochette) and any((r or {}).get("pochette") == pochette for r in references)
+
+
 def ids_artiste_attendus(track) -> frozenset[str]:
     """Les URI Spotify (IDs) sous lesquels l'artiste de la fiche peut être
-    crédité : le sien, et ceux de ses alias confirmés. Vide ⇒ inconnu."""
+    crédité : le sien, ceux que lie MusicBrainz, ceux de ses alias confirmés.
+    Vide ⇒ inconnu."""
     artiste = track.artist
     ids = {getattr(artiste, "spotify_id", None)}
     artist_id = getattr(artiste, "id", None)
@@ -129,22 +157,30 @@ def artiste_homonyme(track, identite: dict | None) -> str | None:
 
 
 def profils_homonymes(lectures) -> list[dict]:
-    """PUR. Les artistes à l'ID Spotify INCONNU que Spotify crédite sous
-    PLUSIEURS URI à leur nom — l'homonyme que `artiste_homonyme` ne peut pas
-    juger faute d'ID de référence, montré au panneau « À trancher ».
+    """Les artistes SANS profil Spotify connu (`ids_artiste_attendus` vide) que
+    Spotify crédite sous PLUSIEURS URI à leur nom — l'homonyme que
+    `artiste_homonyme` ne peut pas juger faute de référence, montré au panneau
+    « À trancher ».
 
-    `lectures` : `[(nom, spotify_id_artiste, titre, identite)]`, une par ID lu.
-    Rend `[{"artiste", "uris": {uri: [titres]}}]`, l'URI la plus créditée en
-    tête : c'est souvent le vrai profil, et l'autre un homonyme (Lunatic,
-    2026-09-26 : 26 couples sur un profil, 1 sur l'autre)."""
+    `lectures` : `[(track, identite)]`, une par ID lu. Rend
+    `[{"artiste", "uris": {uri: [titres]}}]`, l'URI la plus créditée en tête :
+    c'est souvent le vrai profil, et l'autre un homonyme (Lunatic, 2026-09-26 :
+    26 couples sur un profil, 1 sur l'autre)."""
     par_nom: dict[str, dict[str, list[str]]] = {}
-    for nom, sid_artiste, titre, identite in lectures:
-        if sid_artiste or not nom:
+    connus: dict[str, bool] = {}
+    for track, identite in lectures:
+        artiste = track.artist
+        nom = artiste.name if hasattr(artiste, "name") else str(artiste or "")
+        if not nom:
+            continue
+        if nom not in connus:
+            connus[nom] = bool(ids_artiste_attendus(track))
+        if connus[nom]:
             continue
         uris = par_nom.setdefault(nom, {})
         for n, i in _credites(identite):
             if i and names_match_as_words(nom, n):
-                uris.setdefault(i, []).append(titre)
+                uris.setdefault(i, []).append(track.title)
     return [
         {"artiste": nom, "uris": dict(sorted(uris.items(), key=lambda kv: -len(kv[1])))}
         for nom, uris in par_nom.items()
@@ -505,13 +541,20 @@ def valider_identite(
     identite = lecteur(spotify_id)
     album = None
     if _disque_a_lire(track, identite):
-        album = (lire_album or lire_album_page)(spotify_id)
+        # La pochette d'abord : une requête embed par référence, là où la page
+        # titre coûte un navigateur.
+        references = [lecteur(i) for i in ids_du_disque(track, spotify_id)]
+        if meme_pochette(identite, references):
+            album = track.album
+        else:
+            album = (lire_album or lire_album_page)(spotify_id)
     return _juger(track, spotify_id, identite, tolerance, titres_tranches, album)
 
 
 def _disque_a_lire(track, identite) -> bool:
-    """La page titre ne se lit que pour un titre générique d'une fiche à
-    disque connu, quand l'identité ne porte pas déjà le disque."""
+    """Le disque ne se prouve (pochette d'une piste sœur, sinon page titre) que
+    pour un titre générique d'une fiche à disque connu, quand l'identité ne
+    porte pas déjà le disque."""
     return bool(
         titre_generique(track.title or "")
         and getattr(track, "album", None)
@@ -531,5 +574,9 @@ async def valider_identite_async(
     identite = await lire_identite(spotify_id)
     album = None
     if _disque_a_lire(track, identite):
-        album = await asyncio.to_thread(lire_album or lire_album_page, spotify_id)
+        references = [await lire_identite(i) for i in ids_du_disque(track, spotify_id)]
+        if meme_pochette(identite, references):
+            album = track.album
+        else:
+            album = await asyncio.to_thread(lire_album or lire_album_page, spotify_id)
     return _juger(track, spotify_id, identite, tolerance, album=album)

@@ -180,6 +180,7 @@ class _MB:
             desambiguation="rapper",
             type=None,
             discogs_ids=[],
+            spotify_ids=[],
         )
 
 
@@ -203,6 +204,10 @@ class _DM:
 
     def get_artist_relations(self, artist_id, status="confirmed"):
         return [r for r in self._relations if status is None or r.status == status]
+
+    def record_artist_spotify_ids(self, artist_id, ids, source):
+        self.spotify_ids = (list(ids), source)
+        return len(ids)
 
     def nature_connue_pour(self, nom):
         return None

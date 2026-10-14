@@ -110,6 +110,7 @@ class _FauxMB:
             desambiguation="Belgian rapper",
             type="Person",
             discogs_ids=[],
+            spotify_ids=["6dbdXbyAWk2qx8Qttw0knR"],
         )
 
 
@@ -148,6 +149,10 @@ class _FauxDM:
 
     def get_artist_relations(self, artist_id, status="confirmed"):
         return [r for r in self._relations if status is None or r.status == status]
+
+    def record_artist_spotify_ids(self, artist_id, ids, source):
+        self.spotify_ids = (list(ids), source)
+        return len(ids)
 
     def nature_connue_pour(self, nom):
         return self._natures.get(nom)
@@ -249,6 +254,18 @@ class TestRecherche:
             _artiste(), _FauxDM(), mb=_FauxMB([_mb("IAM")]), discogs=_FauxDiscogs()
         )
         assert rapport.identite_mb == "Belgian rapper"
+
+    def test_les_profils_spotify_lies_par_musicbrainz_sont_memorises(self):
+        """Référence du garde des homonymes (e53) — une identité, pas une
+        relation : rien n'est confirmé à la place de l'utilisateur."""
+        dm = _FauxDM()
+        chercher_formations(_artiste(), dm, mb=_FauxMB([_mb("IAM")]), discogs=_FauxDiscogs())
+        assert dm.spotify_ids == (["6dbdXbyAWk2qx8Qttw0knR"], "musicbrainz")
+
+    def test_musicbrainz_en_panne_ne_touche_pas_aux_profils(self):
+        dm = _FauxDM()
+        chercher_formations(_artiste(), dm, mb=_FauxMB(boum=True), discogs=_FauxDiscogs())
+        assert not hasattr(dm, "spotify_ids")
 
     def test_aucune_formation_trouvee(self):
         rapport = chercher_formations(_artiste(), _FauxDM(), mb=_FauxMB(), discogs=_FauxDiscogs())

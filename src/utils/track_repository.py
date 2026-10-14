@@ -5456,6 +5456,26 @@ class TrackRepository:
                 )
             ]
 
+    def ids_spotify_du_disque(self, artist_id: int, album: str) -> list[str]:
+        """IDs Spotify (principaux) des fiches de l'artiste rangées sur ce disque,
+        hors titres GÉNÉRIQUES — eux-mêmes à prouver (gate d'identité Spotify,
+        preuve par la pochette). Comparaison par `cle_album`."""
+        cle = cle_album(album)
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text(
+                    "SELECT title, album, spotify_id FROM tracks WHERE artist_id = :a "
+                    "AND spotify_id IS NOT NULL AND spotify_id != '' AND album IS NOT NULL "
+                    "ORDER BY id"
+                ),
+                {"a": artist_id},
+            ).all()
+        return [
+            sid
+            for titre, disque, sid in lignes
+            if cle_album(disque) == cle and not titre_generique(titre or "")
+        ]
+
     def titres_des_fiches_propres(self, artist_id: int) -> list[tuple[int, str]]:
         """`[(id, titre)]` des fiches PROPRES de l'artiste — ni ligne d'invité,
         ni rôle secondaire (gate d'identité Spotify, `sienne_homonyme`)."""

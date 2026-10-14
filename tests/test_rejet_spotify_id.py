@@ -49,7 +49,24 @@ class TestOracleEmbed:
             "artists": ["SCH", "Jul"],
             "artist_ids": ["AAA", "BBB"],
             "duration": 1471,
+            "pochette": None,
+            "release_date": None,
+            "explicit": None,
         }
+
+    def test_pochette_date_et_explicite_de_l_embed(self):
+        """2026-10-14 : ce que l'embed portait sans être lu. L'empreinte de la
+        pochette ignore la TAILLE (00001e02, 00004851, 0000b273)."""
+        from pathlib import Path
+
+        html = (Path(__file__).parent / "fixtures" / "spotify_embed" / "track.html").read_text(
+            encoding="utf-8"
+        )
+        identite = SpotifyIDScraper._identite_depuis_embed(html)
+        assert identite["pochette"] == "e0541641a2a32591fed00d76"
+        assert identite["release_date"] == "2016-06-13"
+        assert identite["explicit"] is True
+        assert identite["artist_ids"] == ["6dbdXbyAWk2qx8Qttw0knR"]
 
     def test_la_duree_compte_autant_que_le_titre(self):
         """Un titre s'écrit de dix façons ; une durée est objective. C'est elle

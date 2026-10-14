@@ -407,3 +407,28 @@ def test_discogs_ids_des_relations_d_url():
     }
     assert discogs_ids_de(detail) == [42, 6244752]
     assert discogs_ids_de({}) == []
+
+
+def test_spotify_ids_des_relations_d_url():
+    """Les profils Spotify que la fiche lie, souvent plusieurs quand Spotify a
+    dédoublé l'artiste : référence du garde des homonymes (2026-10-14)."""
+    from src.api.musicbrainz_api import spotify_ids_de
+
+    detail = {
+        "relations": [
+            {
+                "type": "free streaming",
+                "url": {"resource": "https://open.spotify.com/artist/6dbdXbyAWk2qx8Qttw0knR"},
+            },
+            {
+                "type": "free streaming",
+                "url": {
+                    "resource": "https://open.spotify.com/intl-fr/artist/0wNxmIGMOHdCqfFWlDOLV0"
+                },
+            },
+            {"type": "free streaming", "url": {"resource": "https://open.spotify.com/album/x"}},
+            {"type": "discogs", "url": {"resource": "https://www.discogs.com/artist/42"}},
+        ]
+    }
+    assert spotify_ids_de(detail) == ["0wNxmIGMOHdCqfFWlDOLV0", "6dbdXbyAWk2qx8Qttw0knR"]
+    assert spotify_ids_de({}) == []

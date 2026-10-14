@@ -195,9 +195,7 @@ def verifier_lignes(
             illisibles += 1
         else:
             track = track_de_la_ligne(ligne)
-            lectures.append(
-                (ligne["artiste"], ligne.get("artiste_spotify_id"), ligne["title"], identite)
-            )
+            lectures.append((track, identite))
             ok, motif = identite_concorde(track, identite, tolerance=tolerance)
             if not ok:
                 ecarts.append(

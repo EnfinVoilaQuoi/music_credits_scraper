@@ -226,3 +226,20 @@ def test_le_script_de_mesure_tourne_sur_une_base(data_manager, capsys):
     sortie = capsys.readouterr().out
     assert "dont à source égale et comparable (preuve d'appoint) : 1" in sortie
     assert "avec une place en appoint : 1" in sortie
+
+
+def test_les_ids_du_disque_excluent_les_titres_generiques(data_manager):
+    """Références de pochette : les pistes du disque, jamais une autre
+    « Intro » (elle-même à prouver)."""
+    artist = Artist(name="Diam's")
+    artist.id = data_manager.save_artist(artist)
+    for titre, album, sid in (
+        ("Intro", "Premier mandat", "I" * 22),
+        ("Marine", "Premier mandat", "M" * 22),
+        ("Enfants du désert", "Brut de femme", "E" * 22),
+        ("Sans ID", "Premier mandat", None),
+    ):
+        t = Track(title=titre, artist=artist, album=album)
+        t.spotify_id = sid
+        data_manager.save_track(t)
+    assert data_manager.ids_spotify_du_disque(artist.id, "PREMIER MANDAT") == ["M" * 22]

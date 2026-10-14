@@ -40,7 +40,8 @@ class DataManager(ArtistRepository, TrackRepository, RevueRepository):
 
         spotify_identity.fournisseur_titres = self.titres_des_fiches
         spotify_identity.fournisseur_propres = self.titres_des_fiches_propres
-        spotify_identity.fournisseur_ids_artiste = self.ids_spotify_des_alias
+        spotify_identity.fournisseur_ids_artiste = self.ids_spotify_connus
+        spotify_identity.fournisseur_ids_du_disque = self.ids_spotify_du_disque
         # Les refus décidés à la main vivent en base (table `refus`, e48) ;
         # `corrections_fiches` garde son API par morceau et lit ce moteur.
         from src.utils import corrections_fiches

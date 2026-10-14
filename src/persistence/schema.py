@@ -448,6 +448,22 @@ track_spotify_ids = Table(
 )
 
 
+# Profils Spotify CONNUS d'un artiste, par source (e53) : `artists.spotify_id`
+# n'en tient qu'un, Spotify en dédouble certains. Lus par le garde des
+# homonymes (`spotify_identity.ids_artiste_attendus`) ; MusicBrainz les lie.
+artist_spotify_ids = Table(
+    "artist_spotify_ids",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
+    Column("spotify_id", Text, nullable=False),
+    Column("source", Text, nullable=False),
+    Column("seen_at", TIMESTAMP),
+    UniqueConstraint("artist_id", "spotify_id", "source"),
+    sqlite_autoincrement=True,
+)
+
+
 # Index de la clé d'enregistrement (e23). `genius_id` identifie l'ENREGISTREMENT
 # là où `tracks.id` identifie la ligne d'UN artiste : c'est par lui que se
 # retrouvent les lignes sœurs d'un même morceau (le titre chez son auteur, la

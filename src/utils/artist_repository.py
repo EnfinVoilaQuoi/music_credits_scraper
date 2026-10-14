@@ -11,12 +11,12 @@ Core phase E2).
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, insert, select, text, update
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.models import Artist, ArtistRelation, Track
 from src.persistence.binding import date_bind
-from src.persistence.schema import artists, monthly_listeners_history
+from src.persistence.schema import artist_spotify_ids, artists, monthly_listeners_history
 from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words, normalize_name
 
@@ -305,6 +305,7 @@ class ArtistRepository:
                     "DELETE FROM releases WHERE artist_id = :aid",
                     "DELETE FROM albums WHERE artist_id = :aid",
                     "DELETE FROM monthly_listeners_history WHERE artist_id = :aid",
+                    "DELETE FROM artist_spotify_ids WHERE artist_id = :aid",
                     "DELETE FROM revue_verdicts WHERE artist_id = :aid",
                     "DELETE FROM revue_signalements WHERE artist_id = :aid "
                     "OR track_id IN {morceaux}",
@@ -816,26 +817,63 @@ class ArtistRepository:
             logger.error(f"Erreur get_artist_relations({artist_id}): {e}")
             return []
 
-    def ids_spotify_des_alias(self, artist_id: int) -> set[str]:
-        """IDs Spotify des ALIAS confirmés de l'artiste qui sont en base (gate
-        d'identité Spotify, `ids_artiste_attendus`). Les formations n'en sont
-        pas : leur URI ne prouve pas qu'un morceau est à l'artiste."""
+    def ids_spotify_connus(self, artist_id: int) -> set[str]:
+        """Profils Spotify CONNUS de l'artiste, hors `artists.spotify_id` (porté
+        par la fiche) : ceux que lie sa fiche MusicBrainz (e53), et l'ID des
+        ALIAS confirmés qui sont en base. Gate d'identité Spotify
+        (`ids_artiste_attendus`). Les formations n'en sont pas : leur URI ne
+        prouve pas qu'un morceau est à l'artiste."""
         ids_alias = [
             r.related_artist_id
             for r in self.get_artist_relations(artist_id)
             if r.kind == "alias" and r.related_artist_id
         ]
-        if not ids_alias:
-            return set()
         try:
             with self.engine.connect() as conn:
-                lignes = conn.execute(
-                    select(artists.c.spotify_id).where(artists.c.id.in_(ids_alias))
-                ).scalars()
-                return {s for s in lignes if s}
+                connus = set(
+                    conn.execute(
+                        select(artist_spotify_ids.c.spotify_id).where(
+                            artist_spotify_ids.c.artist_id == artist_id
+                        )
+                    ).scalars()
+                )
+                if ids_alias:
+                    connus |= set(
+                        conn.execute(
+                            select(artists.c.spotify_id).where(artists.c.id.in_(ids_alias))
+                        ).scalars()
+                    )
+                return {s for s in connus if s}
         except SQLAlchemyError as e:
-            logger.error(f"Erreur ids_spotify_des_alias({artist_id}): {e}")
+            logger.error(f"Erreur ids_spotify_connus({artist_id}): {e}")
             return set()
+
+    def record_artist_spotify_ids(self, artist_id: int, ids, source: str) -> int:
+        """REMPLACE les profils Spotify qu'une source lie à l'artiste (elle vient
+        de tout relire) ; les autres sources restent. Rend le nombre écrit."""
+        maintenant = datetime.now()
+        uniques = sorted({i for i in ids or () if i})
+        with self.engine.begin() as conn:
+            conn.execute(
+                delete(artist_spotify_ids).where(
+                    (artist_spotify_ids.c.artist_id == artist_id)
+                    & (artist_spotify_ids.c.source == source)
+                )
+            )
+            if uniques:
+                conn.execute(
+                    insert(artist_spotify_ids),
+                    [
+                        {
+                            "artist_id": artist_id,
+                            "spotify_id": i,
+                            "source": source,
+                            "seen_at": maintenant,
+                        }
+                        for i in uniques
+                    ],
+                )
+        return len(uniques)
 
     def nature_connue_pour(self, related_name: str) -> str | None:
         """Nature déjà choisie pour CETTE formation, quel qu'en soit le membre.

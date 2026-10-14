@@ -405,6 +405,55 @@ class TestTitreGeneriqueEtDisque:
             lire_album=jamais,
         )
 
+    def test_la_pochette_d_une_piste_soeur_prouve_le_disque(self, monkeypatch):
+        """2026-10-14 : la pochette de l'embed désigne la parution. Une piste du
+        disque de la fiche la partage → même disque, sans ouvrir de navigateur."""
+        from src.utils import spotify_identity as si
+
+        t = self._fiche()
+        t.artist.id = 27
+        monkeypatch.setattr(si, "fournisseur_ids_du_disque", lambda aid, album: ["SOEUR", "X" * 22])
+        pochettes = {"X" * 22: "e0541641", "SOEUR": "e0541641"}
+
+        def lire(sid):
+            return {**self._identite(), "pochette": pochettes[sid]}
+
+        def jamais(sid):
+            raise AssertionError("page titre lue alors que la pochette prouvait le disque")
+
+        assert si.valider_identite(t, "X" * 22, lire, lire_album=jamais)
+
+    def test_une_autre_pochette_retombe_sur_la_page(self, monkeypatch):
+        """Une pochette différente ne PROUVE rien (deluxe, réédition) : la
+        page titre tranche, comme avant."""
+        from src.utils import spotify_identity as si
+
+        t = self._fiche()
+        t.artist.id = 27
+        monkeypatch.setattr(si, "fournisseur_ids_du_disque", lambda aid, album: ["SOEUR"])
+        pochettes = {"X" * 22: "brut-de-femme", "SOEUR": "premier-mandat"}
+
+        def lire(sid):
+            return {**self._identite(), "pochette": pochettes[sid]}
+
+        assert not si.valider_identite(t, "X" * 22, lire, lire_album=lambda sid: "Brut de femme")
+        assert si.valider_identite(t, "X" * 22, lire, lire_album=lambda sid: "Premier mandat")
+
+    def test_le_jumeau_async_lit_aussi_la_pochette(self, monkeypatch):
+        from src.utils import spotify_identity as si
+
+        t = self._fiche()
+        t.artist.id = 27
+        monkeypatch.setattr(si, "fournisseur_ids_du_disque", lambda aid, album: ["SOEUR"])
+
+        async def lire(sid):
+            return {**self._identite(), "pochette": "p"}
+
+        def jamais(sid):
+            raise AssertionError("page titre lue")
+
+        assert asyncio.run(si.valider_identite_async(t, "X" * 22, lire, lire_album=jamais))
+
     def test_le_disque_porte_par_l_identite_suffit(self):
         """Le run streams lit déjà la page titre : son identité porte le disque."""
         from src.utils.spotify_identity import valider_identite
@@ -475,18 +524,29 @@ class TestHomonymes:
         ok, motif = identite_concorde(t, self._id(["Lunatic"], [self.AUTRE]))
         assert ok is False and "homonyme" in motif
 
-    def test_profils_homonymes_ne_regarde_que_les_id_inconnus(self):
-        from src.utils.spotify_identity import profils_homonymes
+    def test_profils_homonymes_ne_regarde_que_les_id_inconnus(self, monkeypatch):
+        from src.utils import spotify_identity as si
 
+        def ligne(artiste, sid, titre, credites, ids, artist_id=None):
+            t = _track(titre=titre, artiste=artiste)
+            t.artist.spotify_id, t.artist.id = sid, artist_id
+            return t, self._id(credites, ids, nom=titre)
+
+        # Booba n'a pas d'ID en fiche, mais MusicBrainz lie son profil : connu.
+        monkeypatch.setattr(
+            si, "fournisseur_ids_artiste", lambda aid: {"MB"} if aid == 9 else set()
+        )
         lectures = [
-            ("Lunatic", None, "Le Crime paie", self._id(["Lunatic"], [self.VRAI])),
-            ("Lunatic", None, "Civilisé", self._id(["Lunatic"], [self.VRAI])),
-            ("Lunatic", None, "Intro (Black Album)", self._id(["Lunatic"], [self.AUTRE])),
-            ("Swing", "SW", "Mouton noir", self._id(["Swing"], ["X"])),
-            ("Swing", "SW", "Nulle part", self._id(["Swing"], ["Y"])),
-            ("Isha", None, "Idole", self._id(["Isha", "Limsa d'Aulnay"], ["I", "L"])),
+            ligne("Lunatic", None, "Le Crime paie", ["Lunatic"], [self.VRAI]),
+            ligne("Lunatic", None, "Civilisé", ["Lunatic"], [self.VRAI]),
+            ligne("Lunatic", None, "Intro (Black Album)", ["Lunatic"], [self.AUTRE]),
+            ligne("Swing", "SW", "Mouton noir", ["Swing"], ["X"]),
+            ligne("Swing", "SW", "Nulle part", ["Swing"], ["Y"]),
+            ligne("Booba", None, "Ouest Side", ["Booba"], ["X"], artist_id=9),
+            ligne("Booba", None, "Pitbull", ["Booba"], ["Y"], artist_id=9),
+            ligne("Isha", None, "Idole", ["Isha", "Limsa d'Aulnay"], ["I", "L"]),
         ]
-        assert profils_homonymes(lectures) == [
+        assert si.profils_homonymes(lectures) == [
             {
                 "artiste": "Lunatic",
                 "uris": {

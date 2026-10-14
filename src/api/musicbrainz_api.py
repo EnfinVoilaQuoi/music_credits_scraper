@@ -144,6 +144,10 @@ class CandidatArtiste:
     #: Pages Discogs que la fiche MusicBrainz lie (relations d'URL, posées à
     #: la main par ses contributeurs) — identité Discogs, 2026-09-29.
     discogs_ids: list[int] = field(default_factory=list)
+    #: Profils Spotify que la fiche MusicBrainz lie (`url-rels`, MÊME requête) :
+    #: souvent plusieurs quand Spotify a dédoublé l'artiste — référence du
+    #: garde des homonymes (`spotify_identity.ids_artiste_attendus`), 2026-10-14.
+    spotify_ids: list[str] = field(default_factory=list)
 
 
 # ── Logique PURE (testable sans réseau) ──────────────────────────────────────
@@ -248,6 +252,20 @@ def discogs_ids_de(detail: dict) -> list[int]:
         m = _DISCOGS_ARTISTE_RE.search(str((rel.get("url") or {}).get("resource") or ""))
         if m:
             ids.add(int(m.group(1)))
+    return sorted(ids)
+
+
+_SPOTIFY_ARTISTE_RE = re.compile(r"open\.spotify\.com/(?:intl-[a-z]+/)?artist/([A-Za-z0-9]{22})")
+
+
+def spotify_ids_de(detail: dict) -> list[str]:
+    """Les IDs des profils d'artiste Spotify liés (`inc=url-rels`), triés.
+    Fonction pure."""
+    ids = set()
+    for rel in detail.get("relations") or []:
+        m = _SPOTIFY_ARTISTE_RE.search(str((rel.get("url") or {}).get("resource") or ""))
+        if m:
+            ids.add(m.group(1))
     return sorted(ids)
 
 
@@ -426,6 +444,7 @@ class MusicBrainzAPI:
                     relations=relations_membre(detail),
                     aliases=aliases_de(detail),
                     discogs_ids=discogs_ids_de(detail),
+                    spotify_ids=spotify_ids_de(detail),
                 )
             )
 

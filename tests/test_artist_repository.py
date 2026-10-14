@@ -318,3 +318,22 @@ def test_supprimer_ou_fusionner_un_morceau_ne_laisse_pas_la_revue_orpheline(data
         ).scalar()
     assert orphelins == 0
     assert journal_garde == 1
+
+
+def test_profils_spotify_connus_par_source(data_manager):
+    """e53 : une source REMPLACE ses profils ; ceux des autres sources et les
+    alias confirmés en base restent connus."""
+    from src.models import Artist, ArtistRelation
+
+    booba = Artist(name="Booba")
+    booba.id = data_manager.save_artist(booba)
+    alias = Artist(name="B2O", spotify_id="ALIAS")
+    alias.id = data_manager.save_artist(alias)
+    data_manager.record_artist_spotify_ids(booba.id, ["A", "B"], "musicbrainz")
+    data_manager.record_artist_spotify_ids(booba.id, ["M"], "manual")
+    data_manager.record_artist_spotify_ids(booba.id, ["B", "C"], "musicbrainz")
+    assert data_manager.ids_spotify_connus(booba.id) == {"B", "C", "M"}
+    data_manager.record_artist_relations(
+        booba.id, [ArtistRelation(related_name="B2O", kind="alias", source="manual")]
+    )
+    assert data_manager.ids_spotify_connus(booba.id) == {"B", "C", "M", "ALIAS"}

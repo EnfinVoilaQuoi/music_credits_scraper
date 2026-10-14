@@ -366,6 +366,7 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
     relations_mb = []
     alias_mb = []
     discogs_mb: list[int] = []
+    spotify_mb: list[str] | None = None
     try:
         if mb is None:
             from src.api.musicbrainz_api import MusicBrainzAPI
@@ -384,12 +385,18 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
             relations_mb = retenu.relations
             alias_mb = retenu.aliases
             discogs_mb = retenu.discogs_ids
+            spotify_mb = retenu.spotify_ids
             rapport.mbid = retenu.mbid
             rapport.identite_mb = retenu.desambiguation or retenu.type
     except Exception as e:  # noqa: BLE001 — une source en panne ne vide pas la fenêtre
         logger.warning(f"MusicBrainz indisponible pour « {artist.name} » : {e}")
         rapport.panne_mb = str(e)
         rapport.diagnostics.append(f"MusicBrainz indisponible : {e}")
+    if spotify_mb is not None:
+        # Les profils Spotify que la fiche lie : la MÊME requête les rend. Ils
+        # servent de référence au garde des homonymes (e53). Hors du `try` : une
+        # écriture manquée n'est pas une panne de MusicBrainz.
+        data_manager.record_artist_spotify_ids(artist.id, spotify_mb, "musicbrainz")
 
     proposees, confirmees = [], set()
     try:

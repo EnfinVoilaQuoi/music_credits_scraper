@@ -505,7 +505,35 @@ class SpotifyIDScraper:
             # distingue pas deux homonymes, l'URI si (2026-10-14, Lunatic).
             "artist_ids": [cls._id_artiste(a.get("uri")) for a in credites],
             "duration": round(ms / 1000) if isinstance(ms, (int, float)) and ms > 0 else None,
+            # 2026-10-14 : ce que l'embed portait déjà sans être lu. La POCHETTE
+            # (empreinte de l'image, toutes tailles confondues) désigne le disque :
+            # deux pistes qui la partagent sont sur la même parution.
+            "pochette": cls._pochette(entity),
+            "release_date": cls._date_de_sortie(entity),
+            "explicit": entity.get("isExplicit")
+            if isinstance(entity.get("isExplicit"), bool)
+            else None,
         }
+
+    _POCHETTE_RE = re.compile(r"/image/ab67616d[0-9a-f]{8}([0-9a-f]{16,})")
+
+    @classmethod
+    def _pochette(cls, entity: dict) -> str | None:
+        """L'empreinte de la pochette : l'URL change avec la TAILLE (préfixe
+        `ab67616d` + 8 caractères de format : 00001e02, 00004851, 0000b273),
+        pas la suite, qui désigne l'image."""
+        images = ((entity.get("visualIdentity") or {}).get("image")) or []
+        for image in images:
+            m = cls._POCHETTE_RE.search(str((image or {}).get("url") or ""))
+            if m:
+                return m.group(1)
+        return None
+
+    @staticmethod
+    def _date_de_sortie(entity: dict) -> str | None:
+        """`releaseDate.isoString` → `AAAA-MM-JJ` (date de la PARUTION servie)."""
+        iso = str(((entity.get("releaseDate") or {}).get("isoString")) or "")
+        return iso[:10] if re.fullmatch(r"\d{4}-\d{2}-\d{2}.*", iso) else None
 
     @staticmethod
     def _id_artiste(uri) -> str | None:

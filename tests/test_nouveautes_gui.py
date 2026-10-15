@@ -72,3 +72,30 @@ class TestBandeau:
         """50 titres inconnus, ce n'est pas l'actualité : c'est un rattrapage."""
         texte = nouveautes_gui.bandeau(_app(_v(50)))
         assert "n'est pas à jour" in texte
+
+
+class TestRolesSecondaires:
+    """Option 3 (2026-10-15) : les covers sont mentionnées, jamais comptées."""
+
+    @staticmethod
+    def _avec_secondaires(n=1, secondaires=2):
+        return Verification(
+            nouveautes=tuple(Nouveaute(genius_id=i, titre=f"T{i}") for i in range(n)),
+            secondaires=tuple(
+                Nouveaute(genius_id=100 + i, titre=f"C{i}", role="Writer")
+                for i in range(secondaires)
+            ),
+        )
+
+    def test_le_badge_ne_compte_pas_les_roles_secondaires(self):
+        app = _app(self._avec_secondaires(n=0))
+        nouveautes_gui.rafraichir_badge(app)
+        assert app.get_tracks_button.texte == "Discographie"
+
+    def test_le_bandeau_les_mentionne_seules(self):
+        texte = nouveautes_gui.bandeau(_app(self._avec_secondaires(n=0)))
+        assert texte == "🆕 0 nouveau titre · 2 en rôle secondaire"
+
+    def test_le_bandeau_les_mentionne_apres_les_titres(self):
+        texte = nouveautes_gui.bandeau(_app(self._avec_secondaires(n=1, secondaires=1)))
+        assert texte == "🆕 1 nouveau(x) titre(s) détecté(s) : « T0 » · 1 en rôle secondaire"

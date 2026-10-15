@@ -359,6 +359,38 @@ class GeniusAPI:
         target = artist_name.strip().lower()
         return any(p.strip().lower() == target for p in parts)
 
+    @classmethod
+    def credite_dans_la_liste(cls, song: dict, artist) -> bool:
+        """L'artiste porte-t-il ce morceau d'après la LISTE seule (`artist_songs`) ?
+
+        L'API renvoie aussi les morceaux où l'artiste a un rôle secondaire
+        (writer, producer…) ou est mal tagué. Sont « crédités » : 1) l'artiste
+        principal, 2) les VRAIS feats (id dans featured_artists), 3) les
+        co-primaires (id dans primary_artists — un co-primaire n'est PAS dans
+        featured_artists, d'où le test par id), 4) la page collab à son nom
+        (« Limsa d'Aulnay & Isha » — mais PAS « Vasjan & ISHA! »). Le reste ne se
+        tranche qu'au détail (`_verify_artist_credit`). Partagé par l'import et
+        le badge des nouveautés, qui doivent trier pareil.
+        """
+        primary = song.get("primary_artist") or {}
+        if primary.get("id") == artist.genius_id:
+            return True
+        try:
+            aid = int(artist.genius_id)
+        except (TypeError, ValueError):
+            aid = artist.genius_id
+        return (
+            aid in cls._collect_artist_ids(song.get("featured_artists"))
+            or aid in cls._collect_artist_ids(song.get("primary_artists"))
+            or cls._primary_is_collab_with(primary.get("name", ""), artist.name)
+        )
+
+    @staticmethod
+    def role_de_prod(role: str | None) -> bool:
+        """Un rôle secondaire de PRODUCTION (`participation.PROD`), gardé par
+        l'import par défaut (`include_prods`), au contraire des autres."""
+        return map_role(role or "") in _PRODUCER_ROLES
+
     def _verify_artist_credit(self, song_id, artist_id, detail_out: dict | None = None):
         """
         Vérifie au détail (`genius.song`) si `artist_id` (id EXACT) est crédité
@@ -461,70 +493,48 @@ class GeniusAPI:
                     secondary_role = None  # rempli si contribution secondaire (Additional Voices…)
                     detail: dict = {}  # fiche lue par la vérification, le cas échéant
 
-                    if is_feat:
-                        # L'API renvoie aussi les morceaux où l'artiste a un rôle
-                        # secondaire (writer, producer...) ou est mal tagué.
-                        # Garder : 1) VRAIS feats (id dans featured_artists),
-                        # 2) co-primaires (id dans primary_artists), 3) collab par nom
-                        # ("Limsa d'Aulnay & Isha" — mais PAS "Vasjan & ISHA!").
-                        featured_ids = self._collect_artist_ids(song.get("featured_artists"))
-                        # primary_artists (pluriel) = co-artistes principaux (collab) ;
-                        # un co-primaire n'est PAS dans featured_artists → test par ID indispensable.
-                        primary_ids = self._collect_artist_ids(song.get("primary_artists"))
-                        try:
-                            aid = int(artist.genius_id)
-                        except (TypeError, ValueError):
-                            aid = artist.genius_id
-                        is_collab_page = self._primary_is_collab_with(
-                            primary.get("name", ""), artist.name
-                        )
-                        if (
-                            aid not in featured_ids
-                            and aid not in primary_ids
-                            and not is_collab_page
-                        ):
-                            if not (include_secondary or include_prods):
+                    if is_feat and not self.credite_dans_la_liste(song, artist):
+                        if not (include_secondary or include_prods):
+                            logger.debug(
+                                f"Ignoré (rôle secondaire/tag douteux): "
+                                f"{song.get('title')} — primary='{primary.get('name')}'"
+                            )
+                            continue
+                        # Mode rôles secondaires : on VÉRIFIE au détail que c'est
+                        # bien NOTRE artiste (id exact) et on récupère son rôle.
+                        # Rôle déjà constaté en base (MàJ) : un appel détail
+                        # par morceau connu, à chaque run, faisait durer une
+                        # MàJ de Travis Scott 20 à 40 min (2026-09-24).
+                        verdict = (roles_connus or {}).get(song.get("id"))
+                        if verdict is None:
+                            verdict = self._verify_artist_credit(
+                                song.get("id"), artist.genius_id, detail_out=detail
+                            )
+                            time.sleep(DELAY_BETWEEN_REQUESTS)
+                        if verdict is None:
+                            logger.debug(
+                                f"Ignoré (non crédité au détail / id ≠): {song.get('title')} "
+                                f"— primary='{primary.get('name')}'"
+                            )
+                            continue
+                        kind, role = verdict
+                        if kind == "primary":
+                            is_feat = False  # liste sous-déclarée → vrai primaire
+                        elif kind == "feat":
+                            is_feat = True  # vrai feat sous-déclaré par la liste
+                        else:  # 'secondary'
+                            est_prod = self.role_de_prod(role)
+                            if not (include_prods if est_prod else include_secondary):
                                 logger.debug(
-                                    f"Ignoré (rôle secondaire/tag douteux): "
-                                    f"{song.get('title')} — primary='{primary.get('name')}' "
-                                    f"feat_ids={featured_ids} prim_ids={primary_ids} aid={aid}"
+                                    f"Ignoré (rôle {role} non demandé): {song.get('title')}"
                                 )
                                 continue
-                            # Mode rôles secondaires : on VÉRIFIE au détail que c'est
-                            # bien NOTRE artiste (id exact) et on récupère son rôle.
-                            # Rôle déjà constaté en base (MàJ) : un appel détail
-                            # par morceau connu, à chaque run, faisait durer une
-                            # MàJ de Travis Scott 20 à 40 min (2026-09-24).
-                            verdict = (roles_connus or {}).get(song.get("id"))
-                            if verdict is None:
-                                verdict = self._verify_artist_credit(
-                                    song.get("id"), artist.genius_id, detail_out=detail
-                                )
-                                time.sleep(DELAY_BETWEEN_REQUESTS)
-                            if verdict is None:
-                                logger.debug(
-                                    f"Ignoré (non crédité au détail / id ≠): {song.get('title')} "
-                                    f"— primary='{primary.get('name')}'"
-                                )
-                                continue
-                            kind, role = verdict
-                            if kind == "primary":
-                                is_feat = False  # liste sous-déclarée → vrai primaire
-                            elif kind == "feat":
-                                is_feat = True  # vrai feat sous-déclaré par la liste
-                            else:  # 'secondary'
-                                est_prod = map_role(role or "") in _PRODUCER_ROLES
-                                if not (include_prods if est_prod else include_secondary):
-                                    logger.debug(
-                                        f"Ignoré (rôle {role} non demandé): {song.get('title')}"
-                                    )
-                                    continue
-                                is_feat = True
-                                secondary_role = role
-                                logger.info(
-                                    f"🎙️ Rôle secondaire gardé: {song.get('title')} "
-                                    f"— {artist.name} = {role}"
-                                )
+                            is_feat = True
+                            secondary_role = role
+                            logger.info(
+                                f"🎙️ Rôle secondaire gardé: {song.get('title')} "
+                                f"— {artist.name} = {role}"
+                            )
 
                     # e34 : l'astérisque finale du titre Genius marque un
                     # INÉDIT. Le constat est posé ICI, et le titre stocké en est

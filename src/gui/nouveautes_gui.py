@@ -57,7 +57,7 @@ def _appliquer(app, artist, verification, *, annoncer: bool) -> None:
         return
     if verification.motif:
         messagebox.showwarning("Nouveautés", nouveautes.resume(verification, artist.name))
-    elif verification.nouveautes:
+    elif verification.nouveautes or verification.secondaires:
         messagebox.showinfo("Nouveautés", nouveautes.resume(verification, artist.name))
     else:
         messagebox.showinfo("Nouveautés", f"Rien de neuf pour {artist.name}.")
@@ -88,16 +88,25 @@ def bandeau(app) -> str | None:
     Un compte ÉNORME ne veut pas dire « il y a eu des sorties » : il veut dire
     que la discographie n'a jamais été récupérée. Le bandeau le dit, plutôt
     que de faire passer un rattrapage pour une actualité.
+
+    Les pages en rôle secondaire (une cover dont l'artiste est l'auteur) ne
+    sont que mentionnées : « 🆕 0 nouveau titre · 2 en rôle secondaire ».
     """
     verification = getattr(app, "nouveautes", None)
-    if not verification or not verification.concluante or not verification.nouveautes:
+    if not verification or not verification.concluante:
         return None
+    total = verification.nombre + verification.nombre_secondaires
+    if not total:
+        return None
+    if total >= nouveautes.PAR_PAGE:
+        return (
+            f"🆕 Au moins {total} titres Genius manquent en base — "
+            "la discographie n'est pas à jour. Lancer une mise à jour."
+        )
+    sec = nouveautes.mention_secondaires(verification)
+    if not verification.nouveautes:
+        return f"🆕 0 nouveau titre{sec}"
     titres = ", ".join(f"« {n.titre} »" for n in verification.nouveautes[:5])
     reste = verification.nombre - min(5, verification.nombre)
     suite = f" … et {reste} autre(s)" if reste else ""
-    if verification.nombre >= nouveautes.PAR_PAGE:
-        return (
-            f"🆕 Au moins {verification.nombre} titres Genius manquent en base — "
-            "la discographie n'est pas à jour. Lancer une mise à jour."
-        )
-    return f"🆕 {verification.nombre} nouveau(x) titre(s) détecté(s) : {titres}{suite}"
+    return f"🆕 {verification.nombre} nouveau(x) titre(s) détecté(s) : {titres}{suite}{sec}"

@@ -23,6 +23,7 @@ def _cache_isole(tmp_path, monkeypatch):
 
     monkeypatch.setattr(nouveautes_cache, "FICHIER", tmp_path / "nouveautes_cache.json")
     monkeypatch.setattr(corrections_fiches, "charger", lambda: {})
+    monkeypatch.setattr(nouveautes, "PAUSE_DETAIL", 0)
 
 
 class _Genius:
@@ -39,9 +40,21 @@ class _Genius:
         return {"songs": self._songs}
 
 
-def _runtime(genius, tracks=(), supprimes=(), editions=()):
+class _Detail:
+    """`_verify_artist_credit` : le verdict au détail, par id de page."""
+
+    def __init__(self, verdicts=None):
+        self.verdicts = verdicts or {}
+        self.lus = []
+
+    def __call__(self, song_id, artist_id):
+        self.lus.append(song_id)
+        return self.verdicts.get(song_id)
+
+
+def _runtime(genius, tracks=(), supprimes=(), editions=(), detail=None):
     return SimpleNamespace(
-        genius_api=SimpleNamespace(genius=genius),
+        genius_api=SimpleNamespace(genius=genius, _verify_artist_credit=detail or _Detail()),
         data_manager=SimpleNamespace(
             get_artist_tracks=lambda aid: list(tracks),
             get_artist_edition_genius_ids=lambda aid: set(editions),
@@ -54,8 +67,16 @@ def _artist(genius_id=1236609, tracks=None):
     return SimpleNamespace(id=7, name="Isha", genius_id=genius_id, tracks=tracks)
 
 
+ISHA = 1236609
+
+
 def _song(sid, titre):
-    return {"id": sid, "title": titre, "primary_artist": {"name": "ISHA"}}
+    return {"id": sid, "title": titre, "primary_artist": {"id": ISHA, "name": "Isha"}}
+
+
+def _page_tierce(sid, titre, artiste="Emma Peters", **listes):
+    """Une page d'un AUTRE artiste où Isha figure (ou non) dans les listes."""
+    return {"id": sid, "title": titre, "primary_artist": {"id": 1, "name": artiste}, **listes}
 
 
 def test_titres_inconnus_sont_des_nouveautes():
@@ -169,3 +190,83 @@ def test_oublier_retire_l_entree_d_un_artiste():
     assert nouveautes_cache.lire(7) is None
     assert nouveautes_cache.lire(8) is not None
     nouveautes_cache.oublier(99)  # absent : rien ne casse
+
+
+class TestTriParRole:
+    """Le badge trie comme l'import (2026-10-15) : les covers d'A2H par Emma
+    Peters et Dinaa, où il n'est crédité qu'auteur, passaient pour des
+    « nouveaux titres » alors que l'import par défaut les ignore."""
+
+    def test_une_cover_ou_l_artiste_est_auteur_est_a_part(self):
+        detail = _Detail({10: ("secondary", "Writer")})
+        genius = _Genius([_page_tierce(10, "Les bras d’une autre"), _song(11, "Inédit")])
+        v = nouveautes.verifier(_runtime(genius, detail=detail), _artist())
+        assert [n.titre for n in v.nouveautes] == ["Inédit"]
+        assert [(n.titre, n.role, n.artiste_principal) for n in v.secondaires] == [
+            ("Les bras d’une autre", "Writer", "Emma Peters")
+        ]
+        assert v.nombre == 1 and v.nombre_secondaires == 1
+        assert nouveautes.resume(v, "Isha").endswith("« Inédit » · 1 en rôle secondaire")
+
+    def test_une_prod_pour_un_autre_reste_un_titre(self):
+        """L'import garde les prods par défaut (`include_prods`)."""
+        detail = _Detail({10: ("secondary", "Producer")})
+        v = nouveautes.verifier(
+            _runtime(_Genius([_page_tierce(10, "Prod")]), detail=detail), _artist()
+        )
+        assert [n.titre for n in v.nouveautes] == ["Prod"] and v.secondaires == ()
+
+    def test_un_feat_declare_dans_la_liste_ne_coute_pas_d_appel_detail(self):
+        detail = _Detail()
+        pages = [
+            _page_tierce(10, "Feat", featured_artists=[{"id": ISHA}]),
+            _page_tierce(11, "Collab", primary_artists=[{"id": 1}, {"id": ISHA}]),
+        ]
+        v = nouveautes.verifier(_runtime(_Genius(pages), detail=detail), _artist())
+        assert [n.titre for n in v.nouveautes] == ["Feat", "Collab"]
+        assert detail.lus == []
+
+    def test_un_feat_sous_declare_est_rattrape_au_detail(self):
+        detail = _Detail({10: ("feat", None)})
+        v = nouveautes.verifier(
+            _runtime(_Genius([_page_tierce(10, "Feat caché")]), detail=detail), _artist()
+        )
+        assert [n.titre for n in v.nouveautes] == ["Feat caché"]
+
+    def test_une_page_ou_le_detail_ne_credite_pas_l_artiste_disparait(self):
+        """Homonyme, tag douteux : l'import la jette, le badge aussi."""
+        v = nouveautes.verifier(
+            _runtime(_Genius([_page_tierce(10, "Homonyme")]), detail=_Detail()), _artist()
+        )
+        assert v.nouveautes == () and v.secondaires == () and v.concluante
+
+    def test_au_dela_du_plafond_les_pages_restent_comptees(self):
+        """Discographie jamais récupérée : pas cinquante appels détail."""
+        detail = _Detail()
+        pages = [_page_tierce(i, f"T{i}") for i in range(1, nouveautes.PLAFOND_DETAIL + 4)]
+        v = nouveautes.verifier(_runtime(_Genius(pages), detail=detail), _artist())
+        assert len(detail.lus) == nouveautes.PLAFOND_DETAIL
+        assert v.nombre == 3
+
+    def test_le_cache_retient_les_secondaires(self):
+        detail = _Detail({10: ("secondary", "Writer")})
+        rt, art = _runtime(_Genius([_page_tierce(10, "Cover")]), detail=detail), _artist()
+        nouveautes.verifier(rt, art)
+        seconde = nouveautes.verifier(rt, art)
+        assert seconde.depuis_le_cache and len(detail.lus) == 1
+        assert [(n.titre, n.role) for n in seconde.secondaires] == [("Cover", "Writer")]
+
+    def test_un_cache_d_avant_le_tri_est_reverifie(self):
+        """Une entrée sans `secondaires` comptait les covers comme nouveautés."""
+        nouveautes_cache.ecrire(
+            7,
+            {
+                "verifie_le": datetime.now().isoformat(timespec="seconds"),
+                "nouveautes": [{"genius_id": 10, "titre": "Cover"}],
+            },
+        )
+        genius = _Genius([_page_tierce(10, "Cover")])
+        detail = _Detail({10: ("secondary", "Writer")})
+        v = nouveautes.verifier(_runtime(genius, detail=detail), _artist())
+        assert genius.appels == 1 and not v.depuis_le_cache
+        assert v.nouveautes == () and v.nombre_secondaires == 1

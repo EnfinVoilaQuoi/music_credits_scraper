@@ -591,7 +591,7 @@ def _prises(v: Variant) -> set[str]:
     return familles - {"edition", "remaster"}
 
 
-def qualificatifs_incompatibles(a: Variant, b: Variant) -> bool:
+def qualificatifs_incompatibles(a: Variant, b: Variant, *, compter: bool = True) -> bool:
     """PUR. Deux descripteurs d'une même famille qui désignent pourtant deux
     enregistrements — décisions utilisateur du 2026-10-12, chacune mesurée
     sur toutes les paires réelles (chantier D) :
@@ -618,7 +618,7 @@ def qualificatifs_incompatibles(a: Variant, b: Variant) -> bool:
     da, db = a.descriptor or "", b.descriptor or ""
     if bool(_EXTENDED.search(da)) != bool(_EXTENDED.search(db)):
         return True
-    if _nombre_de_qualificatifs(da) != _nombre_de_qualificatifs(db):
+    if compter and _nombre_de_qualificatifs(da) != _nombre_de_qualificatifs(db):
         return True
     ya, yb = set(_ANNEE.findall(da)), set(_ANNEE.findall(db))
     if ya and yb and ya != yb:
@@ -689,7 +689,7 @@ def meme_prise(a: Variant, b: Variant) -> bool:
     return bool(communes - {"edition"})
 
 
-def meme_famille(a: Variant, b: Variant) -> bool:
+def meme_famille(a: Variant, b: Variant, *, compter_qualificatifs: bool = True) -> bool:
     """Deux titres désignent-ils la même VERSION d'un morceau ?
 
     Même nature, et pour un remix nommé le même remixeur ; pour deux renditions,
@@ -697,7 +697,7 @@ def meme_famille(a: Variant, b: Variant) -> bool:
     ≈ « Live au Zénith », mais « Live » ≠ « Acoustic » ≠ « Instrumental »). C'est ce prédicat qui laisse passer « Heartless
     (Remix) » face à « Heartless - Remix » et refuse « Heartless » nu.
     """
-    if qualificatifs_incompatibles(a, b):
+    if qualificatifs_incompatibles(a, b, compter=compter_qualificatifs):
         return False
     if a.est_remix and b.est_remix:
         # Genius écrit « (Remix) », Spotify nomme le remixeur (« In Common - Black
@@ -847,8 +847,38 @@ def meme_enregistrement(a: CleTitre, b: CleTitre) -> bool:
     if (a.censure and a.censure.fullmatch(b.norme)) or (b.censure and b.censure.fullmatch(a.norme)):
         return True
     if a.parties != b.parties or a.socle != b.socle:
-        return False
+        return _graphies_equivalentes(a, b)
     return meme_famille(a.variant, b.variant)
+
+
+_LIAISONS = frozenset({"et", "and"})
+_FEAT_EXPLICITE = re.compile(r"[\(\[]\s*(?:feat|ft|featuring)\.?\s+([^\)\]]+)[\)\]]", re.IGNORECASE)
+
+
+def _graphies_equivalentes(a: CleTitre, b: CleTitre) -> bool:
+    """Deux graphies du même titre que les plateformes écrivent autrement
+    (2026-10-15, Deezer / Apple à la même place d'un même code-barres) :
+      · « & » face à « et » / « and » (« Argent, Drogue & Sexe » / « …
+        Drogue et Sexe ») — corpus : 4 paires basculent, toutes justes
+        (« HOTEL LOBBY (Unc & Phew) » / « (UNC AND PHEW) »…) ;
+      · l'invité entre parenthèses sans « feat. » face au « (feat. X) » de
+        l'autre (« Today Is a Good Day (Darina) » / « (feat. Darina) »)."""
+    if "&" in a.titre or "&" in b.titre:
+        ma = [m for m in a.norme.split() if m not in _LIAISONS]
+        mb = [m for m in b.norme.split() if m not in _LIAISONS]
+        if ma and ma == mb:
+            return True
+    for x, y in ((a, b), (b, a)):
+        m = _FEAT_EXPLICITE.search(y.titre)
+        g = re.search(r"[\(\[]([^\)\]]+)[\)\]]\s*$", x.titre)
+        if (
+            m
+            and g
+            and normalize_title(g.group(1)) == normalize_title(m.group(1))
+            and normalize_title(x.titre[: g.start()]) == normalize_title(strip_featuring(y.titre))
+        ):
+            return True
+    return False
 
 
 def meme_oeuvre(a: CleTitre, b: CleTitre) -> bool:

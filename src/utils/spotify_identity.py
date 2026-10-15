@@ -27,6 +27,7 @@ from src.utils.logger import get_logger
 from src.utils.title_matching import (
     either_contains_as_words,
     names_match_as_words,
+    normalize_name,
     normalize_title,
     strip_featuring,
 )
@@ -44,6 +45,11 @@ logger = get_logger(__name__)
 #: de fin au même endroit, et Genius arrondit : quelques secondes ne prouvent
 #: rien. Au-delà, c'est un autre enregistrement.
 TOLERANCE_DUREE = 5
+
+#: Même FICHIER chez deux plateformes : 99,4 % à ±2 s (Deezer / Apple, même
+#: place d'un même code-barres, mesuré le 2026-10-14). Sert à départager deux
+#: prises au même titre (« Version EP »), où 5 s ne suffisent pas.
+TOLERANCE_MEME_FICHIER = 2
 
 #: Sources de durée INDÉPENDANTES de l'ID Spotify (`DISCOGRAPHY_PRIORITIES`
 #: hors spotify_web et reccobeats, qui lisent la durée PAR l'ID), dans l'ordre
@@ -179,7 +185,11 @@ def artiste_homonyme(track, identite: dict | None) -> str | None:
         return None
     artiste = track.artist
     nom = artiste.name if hasattr(artiste, "name") else str(artiste or "")
-    homonymes = [(n, i) for n, i in credites if i and names_match_as_words(nom, n)]
+    # Un nom COMPOSÉ par le distributeur (« Diam's - Sinik », « Admiral T -
+    # Diam's », « Medine feat. Nneka » — mesuré le 2026-10-15 : profils à
+    # l'album unique de l'artiste) n'est pas un homonyme : seul un crédit au
+    # MÊME nom sous une autre URI l'est (« Isha », profil indien ; « SADEK »).
+    homonymes = [(n, i) for n, i in credites if i and normalize_name(n) == normalize_name(nom)]
     if not homonymes:
         return None
     autres = [n for n in noms_attendus(track) if not names_match_as_words(n, nom)]
@@ -489,7 +499,22 @@ def variante_etrangere(track, identite: dict | None) -> bool:
     titre_spotify = identite.get("name") or ""
     if not titre_spotify or not track.title:
         return False
-    return not meme_famille(parse_variant(track.title), parse_variant(titre_spotify))
+    va, vb = parse_variant(track.title), parse_variant(titre_spotify)
+    if meme_famille(va, vb):
+        return False
+    # Un qualificatif DE PLUS d'un seul côté, même famille de prise (Diam's
+    # « Dans ma bulle (Live 2006; Version EP) » / « Dans Ma Bulle - Live
+    # 2006 ») : le titre ne départage pas — l'EP live de 2006 et l'album live
+    # de 2007 portent le même titre chez Spotify et Deezer, avec des ISRC et
+    # des durées différents (312 / 278 s ; 4 s seulement pour « La
+    # Gamberge »). Seule une durée INDÉPENDANTE à ±2 s (même fichier : 99,4 %)
+    # dit que c'est la bonne prise — mesuré le 2026-10-15 : les 12 ID
+    # « Version EP » de la base avaient la durée de l'EP.
+    if meme_famille(va, vb, compter_qualificatifs=False):
+        temoin, duree = duree_temoin(track), identite.get("duration")
+        if temoin and duree and abs(temoin - duree) <= TOLERANCE_MEME_FICHIER:
+            return False
+    return True
 
 
 def lire_identite_http(spotify_id: str) -> dict | None:

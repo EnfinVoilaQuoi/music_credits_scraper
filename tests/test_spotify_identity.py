@@ -656,3 +656,66 @@ def test_le_meme_descripteur_inconnu_est_la_meme_version():
     t = _track(titre="Intro (Black Album)", artiste="Lunatic")
     assert variante_etrangere(t, _identite("Intro (Black Album)", ["Lunatic"])) is False
     assert variante_etrangere(t, _identite("Intro", ["Lunatic"])) is True
+
+
+class TestPrisesAuMemeTitre:
+    """2026-10-15 : l'EP live de 2006 et l'album live de 2007 de Diam's portent
+    le même titre « X - Live 2006 » chez Spotify, avec des durées différentes
+    (« Dans Ma Bulle » 312 / 278 s, « La Gamberge » 170 / 166 s). La fiche
+    Genius dit « (Live 2006; Version EP) » : seule la durée départage — les
+    12 ID de la base avaient celle de l'EP."""
+
+    def _ep(self, titre, duree_independante):
+        return _track(
+            titre=titre, artiste="Diam's", durations_observees={"deezer": duree_independante}
+        )
+
+    def test_la_duree_de_l_ep_confirme(self):
+        track = self._ep("Dans ma bulle (Live 2006; Version EP)", 312)
+        assert not variante_etrangere(
+            track, _identite("Dans Ma Bulle - Live 2006", ["Diam's"], 313)
+        )
+
+    def test_la_duree_de_l_album_live_dement(self):
+        track = self._ep("Dans ma bulle (Live 2006; Version EP)", 312)
+        assert variante_etrangere(track, _identite("Dans Ma Bulle - Live 2006", ["Diam's"], 278))
+
+    def test_quatre_secondes_suffisent_a_dementir(self):
+        track = self._ep("La Gamberge (Live 2006; Version EP)", 170)
+        assert variante_etrangere(track, _identite("La Gamberge - Live 2006", ["Diam's"], 166))
+
+    def test_sans_duree_independante_toujours_refuse(self):
+        track = _track(titre="Vénus (Live 2006; Version EP)", artiste="Diam's")
+        assert variante_etrangere(track, _identite("Vénus - Live 2006", ["Diam's"], 216))
+
+
+class TestProfilsComposes:
+    """2026-10-15 : « Diam's - Sinik », « Admiral T - Diam's » — profils créés
+    par le distributeur pour l'album live, pas des homonymes. Un homonyme a le
+    MÊME nom sous une autre URI (Isha : un profil d'artiste indienne)."""
+
+    def _diams(self):
+        a = Artist(name="Diam's", spotify_id="6379rD5bSEwInazkKhZ9DM")
+        t = Track(title="Le Même sang - Live 2006", artist=a)
+        return t
+
+    def test_profil_compose_accepte(self):
+        identite = {
+            "name": "Le Même sang - Live 2006",
+            "artists": ["Diam's - Sinik"],
+            "artist_ids": ["3kdDn8dPf7SisdyowMooe3"],
+            "duration": 326,
+        }
+        assert identite_concorde(self._diams(), identite)[0]
+
+    def test_meme_nom_autre_uri_reste_un_homonyme(self):
+        a = Artist(name="Isha", spotify_id="0dSh0CIa0HPd9kJmJSmGQo")
+        t = Track(title="Sab Tera", artist=a)
+        identite = {
+            "name": "Sab Tera",
+            "artists": ["Isha"],
+            "artist_ids": ["1bQSJZvUdbDVnSwUlinkdM"],
+            "duration": 200,
+        }
+        ok, motif = identite_concorde(t, identite)
+        assert not ok and "homonyme" in motif

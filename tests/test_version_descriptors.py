@@ -481,3 +481,28 @@ class TestGraphiesDesPlateformes:
     )
     def test_toujours_distincts(self, a, b):
         assert not titres_equivalents(a, b)
+
+
+class TestGraphiesEtFeat:
+    """2026-10-15 : « & » / « et » / « and », et l'invité entre parenthèses
+    sans « feat. » (Deezer / Apple à la même place d'un même UPC)."""
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("Argent, Drogue et Sexe", "Argent, Drogue & Sexe (feat. Seth Gueko)"),
+            ("HOTEL LOBBY (Unc & Phew)", "HOTEL LOBBY (UNC AND PHEW)"),
+            ("Le poète et le vandale", "Le Poète & Le Vandale"),
+            ("Today Is a Good Day (Darina)", "Today Is a Good Day (feat. Darina)"),
+        ],
+    )
+    def test_meme_morceau(self, a, b):
+        assert titres_equivalents(a, b)
+
+    def test_sans_esperluette_et_reste_un_mot(self):
+        assert not titres_equivalents("Pierre et Paul", "Pierre Paul")
+
+    def test_parenthese_qui_n_est_pas_l_invite(self):
+        assert not titres_equivalents(
+            "Today Is a Good Day (Remix)", "Today Is a Good Day (feat. Darina)"
+        )

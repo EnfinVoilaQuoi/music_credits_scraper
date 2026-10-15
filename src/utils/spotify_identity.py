@@ -166,6 +166,26 @@ def uri_attendue_creditee(track, identite: dict | None) -> bool:
     return bool(connus) and any(i in connus for _, i in _credites(identite))
 
 
+#: Séparateurs d'un profil COMPOSÉ par le distributeur (« Diam's - Sinik »,
+#: « Medine feat. Nneka »).
+_SEPARATEURS_DE_PROFIL = re.compile(
+    r"\s+-\s+|\s*,\s*|\s*&\s*|\s*/\s*|\s+(?:feat\.?|ft\.?|x|et|and|with)\s+", re.IGNORECASE
+)
+
+
+def nom_compose_de(credite: str, nom: str) -> bool:
+    """PUR. `credite` est un nom composé dont l'une des parties est EXACTEMENT
+    `nom` (« Admiral T - Diam's » pour Diam's) — pas « Los Josman » pour
+    Josman, ni « Diam's » lui-même."""
+    cible = normalize_name(nom)
+    parties = [p for p in _SEPARATEURS_DE_PROFIL.split(credite or "") if p.strip()]
+    return (
+        len(parties) >= 2
+        and normalize_name(credite) != cible
+        and any(normalize_name(p) == cible for p in parties)
+    )
+
+
 def artiste_homonyme(track, identite: dict | None) -> str | None:
     """PUR (hors fournisseur). Spotify crédite un artiste au NOM de celui de la
     fiche, mais sous une AUTRE URI que la sienne → motif, sinon None.
@@ -186,10 +206,15 @@ def artiste_homonyme(track, identite: dict | None) -> str | None:
     artiste = track.artist
     nom = artiste.name if hasattr(artiste, "name") else str(artiste or "")
     # Un nom COMPOSÉ par le distributeur (« Diam's - Sinik », « Admiral T -
-    # Diam's », « Medine feat. Nneka » — mesuré le 2026-10-15 : profils à
-    # l'album unique de l'artiste) n'est pas un homonyme : seul un crédit au
-    # MÊME nom sous une autre URI l'est (« Isha », profil indien ; « SADEK »).
-    homonymes = [(n, i) for n, i in credites if i and normalize_name(n) == normalize_name(nom)]
+    # Diam's », « Medine feat. Nneka » — confirmés le 2026-10-15 : profils
+    # communs de l'artiste et de son invité) n'est pas un homonyme. Un autre
+    # nom qui CONTIENT le sien en reste un (« Los Josman », « Django Bates » :
+    # d'autres groupes), comme le même nom sous une autre URI (« Isha »).
+    homonymes = [
+        (n, i)
+        for n, i in credites
+        if i and names_match_as_words(n, nom) and not nom_compose_de(n, nom)
+    ]
     if not homonymes:
         return None
     autres = [n for n in noms_attendus(track) if not names_match_as_words(n, nom)]

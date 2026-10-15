@@ -875,6 +875,34 @@ class ArtistRepository:
                 )
         return len(uniques)
 
+    def confirmer_profil_spotify(self, artist_id: int, spotify_id: str) -> bool:
+        """AJOUTE un profil Spotify confirmé à la main (source `manual`), sans
+        toucher aux autres : le gate des homonymes l'accepte désormais. Rend
+        False s'il était déjà confirmé."""
+        if spotify_id in self._profils_manuels(artist_id):
+            return False
+        with self.engine.begin() as conn:
+            conn.execute(
+                insert(artist_spotify_ids).values(
+                    artist_id=artist_id,
+                    spotify_id=spotify_id,
+                    source="manual",
+                    seen_at=datetime.now(),
+                )
+            )
+        return True
+
+    def _profils_manuels(self, artist_id: int) -> set[str]:
+        with self.engine.connect() as conn:
+            return set(
+                conn.execute(
+                    select(artist_spotify_ids.c.spotify_id).where(
+                        (artist_spotify_ids.c.artist_id == artist_id)
+                        & (artist_spotify_ids.c.source == "manual")
+                    )
+                ).scalars()
+            )
+
     def nature_connue_pour(self, related_name: str) -> str | None:
         """Nature déjà choisie pour CETTE formation, quel qu'en soit le membre.
 

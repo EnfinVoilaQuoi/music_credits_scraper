@@ -17,6 +17,7 @@ import pytest
 from src.models import Artist, Track
 from src.utils.spotify_identity import (
     identite_concorde,
+    nom_compose_de,
     noms_attendus,
     valider_identite,
     valider_identite_async,
@@ -707,6 +708,56 @@ class TestProfilsComposes:
             "duration": 326,
         }
         assert identite_concorde(self._diams(), identite)[0]
+
+    def test_profil_commun_avec_l_invite_accepte(self):
+        """« Medine feat. Nneka » : profil commun, confirmé le 2026-10-15."""
+        a = Artist(name="Médine", spotify_id="1afjj7vSBkpIjkiJdSV6bV")
+        t = Track(title="A l'ombre du Mêle (feat. Nneka)", artist=a)
+        identite = {
+            "name": "A l'ombre du Mêle (feat. Nneka)",
+            "artists": ["Medine feat. Nneka", "Nneka"],
+            "artist_ids": ["2ZUmgoSSZVrr7BgN2KI0JV", "x"],
+            "duration": 250,
+        }
+        assert identite_concorde(t, identite)[0]
+
+    def test_un_autre_groupe_qui_contient_le_nom_reste_un_homonyme(self):
+        """« Los Josman », « Django Bates » : d'autres groupes (confirmé le
+        2026-10-15) — le nom contenu ne fait pas un profil composé."""
+        for nom, sid, credite, uri, titre in (
+            ("Josman", "6dbdXbyAWk2qx8Qttw0knR", "Los Josman", "1NMprs3jcnDK3o1cd8CKhn", "Lola"),
+            (
+                "Django",
+                "5gU8eqolA1bziWv6e3Wjp3",
+                "Django Bates",
+                "0aPobuZcU7C6OgpGU0R5V8",
+                "La nuit",
+            ),
+        ):
+            t = Track(title=titre, artist=Artist(name=nom, spotify_id=sid))
+            identite = {"name": titre, "artists": [credite], "artist_ids": [uri], "duration": 200}
+            ok, motif = identite_concorde(t, identite)
+            assert not ok and "homonyme" in motif, credite
+
+    def test_meme_nom_sans_accent_est_un_homonyme_tant_qu_il_n_est_pas_confirme(self):
+        """« Medine » (4pJO…) est bien Médine, mais seul un profil CONFIRMÉ le
+        dit (`artist_spotify_ids`, `scripts/confirmer_profil_spotify.py`)."""
+        a = Artist(name="Médine", spotify_id="1afjj7vSBkpIjkiJdSV6bV")
+        t = Track(title="Marianne a tout pris", artist=a)
+        identite = {
+            "name": "Marianne a tout pris",
+            "artists": ["Ibrah", "Medine"],
+            "artist_ids": ["y", "4pJO3XfdxenH27mjTN5je4"],
+            "duration": 200,
+        }
+        assert not identite_concorde(t, identite)[0]
+
+    def test_nom_compose_de(self):
+        assert nom_compose_de("Admiral T - Diam's", "Diam's")
+        assert nom_compose_de("Medine feat. Nneka", "Médine")
+        assert not nom_compose_de("Diam's", "Diam's")
+        assert not nom_compose_de("Los Josman", "Josman")
+        assert not nom_compose_de("113 - Magic System - Mohamed Lamine", "Diam's")
 
     def test_meme_nom_autre_uri_reste_un_homonyme(self):
         a = Artist(name="Isha", spotify_id="0dSh0CIa0HPd9kJmJSmGQo")

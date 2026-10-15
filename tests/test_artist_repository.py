@@ -337,3 +337,26 @@ def test_profils_spotify_connus_par_source(data_manager):
         booba.id, [ArtistRelation(related_name="B2O", kind="alias", source="manual")]
     )
     assert data_manager.ids_spotify_connus(booba.id) == {"B", "C", "M", "ALIAS"}
+
+
+def test_confirmer_un_profil_spotify_s_ajoute_aux_autres(data_manager):
+    """2026-10-15 : « Medine » (4pJO…) est Médine. Confirmé à la main, il
+    s'AJOUTE (source manual) sans retirer ceux de MusicBrainz ; idempotent."""
+    from src.models import Artist
+
+    medine = Artist(name="Médine")
+    medine.id = data_manager.save_artist(medine)
+    data_manager.record_artist_spotify_ids(medine.id, ["MB"], "musicbrainz")
+    assert data_manager.confirmer_profil_spotify(medine.id, "4pJO3XfdxenH27mjTN5je4")
+    assert not data_manager.confirmer_profil_spotify(medine.id, "4pJO3XfdxenH27mjTN5je4")
+    data_manager.confirmer_profil_spotify(medine.id, "AUTRE")
+    assert data_manager.ids_spotify_connus(medine.id) == {"MB", "4pJO3XfdxenH27mjTN5je4", "AUTRE"}
+
+
+def test_id_du_profil_depuis_un_lien():
+    from scripts.confirmer_profil_spotify import id_du_profil
+
+    sid = "4pJO3XfdxenH27mjTN5je4"
+    for texte in (sid, f"spotify:artist:{sid}", f"https://open.spotify.com/artist/{sid}?si=x"):
+        assert id_du_profil(texte) == sid
+    assert id_du_profil("pas un id") is None

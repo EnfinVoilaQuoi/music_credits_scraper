@@ -22,6 +22,7 @@ from src.utils.spotify_identity import (
     valider_identite,
     valider_identite_async,
     variante_etrangere,
+    variante_indecidable,
 )
 
 SRC = Path(__file__).resolve().parents[1] / "src"
@@ -688,6 +689,28 @@ class TestPrisesAuMemeTitre:
     def test_sans_duree_independante_toujours_refuse(self):
         track = _track(titre="Vénus (Live 2006; Version EP)", artiste="Diam's")
         assert variante_etrangere(track, _identite("Vénus - Live 2006", ["Diam's"], 216))
+
+    def test_sans_duree_independante_la_reparation_ne_retire_pas(self):
+        """Refusé à la POSE, jamais RETIRÉ : rien ne montre que l'ID est faux."""
+        from scripts.repair_spotify_ids import _fautif
+
+        track = _track(titre="Vénus (Live 2006; Version EP)", artiste="Diam's")
+        identite = _identite("Vénus - Live 2006", ["Diam's"], 216)
+        assert variante_indecidable(track, identite)
+        assert not _fautif(track, identite, variantes=True)
+
+    def test_la_reparation_retire_ce_que_la_duree_dement(self):
+        from scripts.repair_spotify_ids import _fautif
+
+        track = self._ep("La Gamberge (Live 2006; Version EP)", 170)
+        identite = _identite("La Gamberge - Live 2006", ["Diam's"], 166)
+        assert not variante_indecidable(track, identite)
+        assert _fautif(track, identite, variantes=True)
+
+    def test_une_vraie_variante_n_est_pas_indecidable(self):
+        """« Heartless (Remix) » / « Heartless » : autre famille, retirée."""
+        track = _track(titre="Heartless (Remix)", artiste="Kanye West")
+        assert not variante_indecidable(track, _identite("Heartless", ["Kanye West"], 211))
 
 
 class TestProfilsComposes:

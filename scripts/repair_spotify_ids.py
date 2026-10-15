@@ -47,6 +47,7 @@ from src.utils.spotify_identity import (
     identite_concorde,
     lire_identite_http,
     variante_etrangere,
+    variante_indecidable,
 )
 
 
@@ -55,7 +56,13 @@ def _fautif(track, identite, *, variantes: bool) -> bool:
     étranger, et — depuis 2026-09-21 — une VARIANTE étrangère (la base attend
     « Heartless (Remix) », Spotify sert « Heartless » : 73 lignes, 22,7 Md de
     streams sur la mauvaise ligne). `--sans-variantes` revient au seul premier."""
-    return artiste_etranger(track, identite) or (variantes and variante_etrangere(track, identite))
+    return artiste_etranger(track, identite) or (
+        variantes
+        and variante_etrangere(track, identite)
+        # « Version EP » sans durée indépendante (2026-10-15) : refusé à la
+        # pose, jamais retiré — les 12 ID de la base étaient justes.
+        and not variante_indecidable(track, identite)
+    )
 
 
 def a_retirer(

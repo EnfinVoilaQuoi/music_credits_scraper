@@ -542,6 +542,21 @@ def variante_etrangere(track, identite: dict | None) -> bool:
     return True
 
 
+def variante_indecidable(track, identite: dict | None) -> bool:
+    """PUR. La variante ne tient qu'à un qualificatif de plus, de même famille
+    de prise, et AUCUNE durée indépendante ne départage (« Version EP » sans
+    témoin) : le gate refuse de POSER l'ID, mais la réparation ne le RETIRE
+    pas — on n'efface que ce qu'on peut montrer."""
+    if not identite or not track.title or not identite.get("name"):
+        return False
+    va, vb = parse_variant(track.title), parse_variant(identite["name"])
+    return (
+        not meme_famille(va, vb)
+        and meme_famille(va, vb, compter_qualificatifs=False)
+        and not duree_temoin(track)
+    )
+
+
 def lire_identite_http(spotify_id: str) -> dict | None:
     """Lecteur par DÉFAUT : la page `/embed/` en `requests` nu, sans navigateur.
 

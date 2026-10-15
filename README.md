@@ -49,8 +49,8 @@ Pilotage en ligne de commande : `venv/Scripts/python -m src.cli --help`. Tests :
 - [Deezer](https://developers.deezer.com/api)                       - Données **Durée**, **ISRC**, Explicit Lyrics, **Picture**, **Date de Sortie**, **Type d'album** (Album/EP/Single)
 - [LRCLIB](https://lrclib.net/)                                     - **Paroles synchronisées** (timestamps LRC)
 - [Musixmatch](https://www.musixmatch.com/)                          - **Paroles synchronisées** (dernier recours, option `--musixmatch`)
-- [iTunes Search](https://performance-partners.apple.com/search-api) - Contrôle des identifiants **Apple Music** (**Durée**, **Date de Sortie**)
-- [MusicBrainz](https://musicbrainz.org/)                           - **Groupes & Alias** d'un artiste
+- [iTunes Search](https://performance-partners.apple.com/search-api) - Contrôle des identifiants **Apple Music** (**Durée**, **Date de Sortie**), album Apple d'une parution par son **code-barres**
+- [MusicBrainz](https://musicbrainz.org/)                           - **Groupes & Alias** d'un artiste, album Spotify d'une parution par son **code-barres**
 
 ## Données utilisées
 - [Genius](https://genius.com/)                                     - **Crédits** Complets, **Paroles** Structurées, **Date de Sortie**

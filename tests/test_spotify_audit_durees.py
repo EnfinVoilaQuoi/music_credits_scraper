@@ -28,3 +28,18 @@ def test_l_audit_porte_les_durees_observees(data_manager):
         track, {"name": "La mallette", "artists": ["SCH"], "duration": 201}
     )
     assert not ok and "titre" in motif
+
+
+def test_l_audit_peut_se_limiter_a_des_fiches(data_manager):
+    artiste = Artist(name="SCH")
+    artiste.id = data_manager.save_artist(artiste)
+    premier = Track(title="Massimo", artist=artiste)
+    premier.spotify_id = "SP1"
+    premier.id = data_manager.save_track(premier)
+    second = Track(title="La mallette", artist=artiste)
+    second.spotify_id = "SP2"
+    second.id = data_manager.save_track(second)
+
+    lignes = lignes_a_verifier(data_manager.engine, track_ids=[second.id])
+
+    assert [(ligne["id"], ligne["sid"]) for ligne in lignes] == [(second.id, "SP2")]

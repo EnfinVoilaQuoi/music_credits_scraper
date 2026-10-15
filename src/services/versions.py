@@ -10,7 +10,10 @@ et à chaque run discographie pour les suivantes.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from src.models import Credit, CreditRole
+from src.models.track import _PRODUCER_ROLES
 from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words
 from src.utils.version_heritage import (
@@ -22,8 +25,10 @@ from src.utils.version_heritage import (
     socle_parmi,
 )
 
-#: Source d'un crédit lu dans le TITRE de la fiche (le remixeur d'un remix nommé).
+#: Le titre désigne le remixeur, une source directe confirme qu'il a bien
+#: travaillé sur cette version. La provenance garde les deux informations.
 SOURCE_TITRE = "titre"
+_SOURCES_CORROBORANTES = frozenset({"genius", "discogs", "musicbrainz"})
 
 logger = get_logger(__name__)
 
@@ -50,27 +55,99 @@ def heriter_versions(dm, tracks) -> int:
     return n
 
 
+@dataclass(frozen=True)
+class CandidatRemixeur:
+    """Un nom lu dans le titre, avec le niveau de preuve disponible.
+
+    ``corrobore`` est le seul état qui autorise une écriture : un crédit de
+    production direct de Genius, Discogs ou MusicBrainz porte déjà ce nom sur
+    la version. Un titre n'est jamais une preuve suffisante à lui seul.
+    """
+
+    nom: str
+    statut: str  # deja_credite | corrobore | propose | titre_seul_historique
+    source: str | None = None
+
+
+def candidats_remixeurs(track) -> list[CandidatRemixeur]:
+    """Classe les remixeurs proposés par un titre sans modifier la fiche.
+
+    Le rôle ``Producer`` (et ses sous-rôles) d'une source directe est une
+    corroboration : le titre permet alors de préciser que cette production est
+    celle du remix. Un crédit ``Remixer`` direct est déjà complet. Les anciens
+    crédits posés depuis le seul titre sont signalés, jamais recyclés comme
+    preuve.
+    """
+    noms = remixeurs_du_titre(track.title)
+    if not noms:
+        return []
+
+    def source_directe(credit) -> str | None:
+        return credit.source if credit.source in _SOURCES_CORROBORANTES else None
+
+    out = []
+    for nom in noms:
+        directs = [
+            c for c in track.credits if source_directe(c) and names_match_as_words(nom, c.name)
+        ]
+        remixeur = next((c for c in directs if c.role == CreditRole.REMIXER), None)
+        if remixeur:
+            out.append(CandidatRemixeur(nom, "deja_credite", remixeur.source))
+            continue
+        qualifie = next(
+            (
+                c
+                for c in track.credits
+                if c.role == CreditRole.REMIXER
+                and c.source.startswith(f"{SOURCE_TITRE}+")
+                and names_match_as_words(nom, c.name)
+            ),
+            None,
+        )
+        if qualifie:
+            out.append(CandidatRemixeur(nom, "deja_credite", qualifie.source))
+            continue
+        production = next((c for c in directs if c.role in _PRODUCER_ROLES), None)
+        if production:
+            out.append(CandidatRemixeur(nom, "corrobore", production.source))
+            continue
+        if any(
+            c.role == CreditRole.REMIXER
+            and c.source == SOURCE_TITRE
+            and names_match_as_words(nom, c.name)
+            for c in track.credits
+        ):
+            out.append(CandidatRemixeur(nom, "titre_seul_historique"))
+            continue
+        out.append(CandidatRemixeur(nom, "propose"))
+    return out
+
+
 def crediter_remixeurs(dm, tracks) -> int:
-    """Le remixeur que NOMME le titre d'un remix est crédité « Remixer »
-    (source `titre`) quand aucune source ne le crédite déjà (2026-10-14, WIP
-    « producteur des remix » : 337 remix sans producteur). Le remixeur est le
-    producteur du remix : la validation le compte comme tel
-    (`track_validation.credits_valides`). Rend le nombre de fiches touchées."""
+    """Ajoute ``Remixer`` seulement si une source directe le corrobore.
+
+    Le titre reste une proposition de qualification, jamais une source de
+    crédit autonome. Rend le nombre de fiches effectivement modifiées.
+    """
     n = 0
     for t in tracks:
-        noms = remixeurs_du_titre(t.title)
-        if not noms or t.id is None:
+        if t.id is None:
             continue
-        deja = [c.name for c in t.credits if c.role == CreditRole.REMIXER]
-        nouveaux = [nom for nom in noms if not any(names_match_as_words(nom, d) for d in deja)]
+        nouveaux = [c for c in candidats_remixeurs(t) if c.statut == "corrobore"]
         if not nouveaux:
             continue
-        for nom in nouveaux:
-            t.add_credit(Credit(name=nom, role=CreditRole.REMIXER, source=SOURCE_TITRE))
+        for candidat in nouveaux:
+            t.add_credit(
+                Credit(
+                    name=candidat.nom,
+                    role=CreditRole.REMIXER,
+                    source=f"{SOURCE_TITRE}+{candidat.source}",
+                )
+            )
         dm.save_track(t)
         n += 1
     if n:
-        logger.info(f"🎚️ Remixeur crédité depuis le titre sur {n} remix")
+        logger.info(f"🎚️ Remixeur qualifié sur {n} remix(s) corroboré(s)")
     return n
 
 

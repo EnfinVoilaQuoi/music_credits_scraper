@@ -26,6 +26,7 @@ Usage :
     python scripts/repair_spotify_ids.py                     # dry-run (défaut)
     python scripts/repair_spotify_ids.py --apply             # backup + écriture
     python scripts/repair_spotify_ids.py --artiste A2H
+    python scripts/repair_spotify_ids.py --seulement 12 34 --apply
     python scripts/repair_spotify_ids.py --depuis ecarts.json  # sans re-scraper
     python scripts/repair_spotify_ids.py --exclure 1233 1252
 """
@@ -66,10 +67,15 @@ def _fautif(track, identite, *, variantes: bool) -> bool:
 
 
 def a_retirer(
-    dm: DataManager, artiste: str | None, pause: float, *, variantes: bool = True
+    dm: DataManager,
+    artiste: str | None,
+    pause: float,
+    *,
+    variantes: bool = True,
+    track_ids: list[int] | None = None,
 ) -> list[dict]:
     """Les lignes dont l'ID désigne un autre morceau (artiste ou version)."""
-    lignes = lignes_a_verifier(dm.engine, artiste, None)
+    lignes = lignes_a_verifier(dm.engine, artiste, None, track_ids)
     print(f"🔎 {len(lignes)} identifiant(s) à vérifier sur l'embed Spotify\n")
     fautifs = []
     for i, ligne in enumerate(lignes, start=1):
@@ -139,6 +145,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Écrire (défaut : dry-run)")
     parser.add_argument("--artiste", help="Limiter à un artiste (nom exact en base)")
+    parser.add_argument(
+        "--seulement",
+        nargs="+",
+        type=int,
+        help="Ne vérifier que ces track_id (évite le balayage complet)",
+    )
     parser.add_argument("--depuis", help="Reprendre le JSON d'un audit précédent")
     parser.add_argument("--exclure", nargs="*", type=int, default=[], help="track_id à épargner")
     parser.add_argument("--pause", type=float, default=0.2, help="Pause entre deux requêtes")
@@ -154,7 +166,13 @@ def main() -> int:
     fautifs = (
         depuis_json(args.depuis, variantes=variantes)
         if args.depuis
-        else a_retirer(dm, args.artiste, args.pause, variantes=variantes)
+        else a_retirer(
+            dm,
+            args.artiste,
+            args.pause,
+            variantes=variantes,
+            track_ids=args.seulement,
+        )
     )
     if args.exclure:
         avant = len(fautifs)

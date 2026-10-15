@@ -1,11 +1,10 @@
-"""Crédite le remixeur que NOMME le titre de chaque remix (2026-10-14).
+"""Qualifie les remixeurs nommés par les titres, sans les inventer.
 
-Un remix nommé (« Dolce Camara - Snight B Remix ») dit qui l'a retravaillé ;
-mesuré le 2026-10-14, MusicBrainz, quand il le sait, donne le même remixeur
-10 fois sur 10. Le run discographie le pose désormais à chaque passage
-(`services.versions.crediter_remixeurs`) ; ce script rattrape l'existant
-sans attendre. La validation compte le remixeur d'un remix comme son
-producteur (`track_validation.remixeur_credite`).
+Un titre (« Dolce Camara - Snight B Remix ») est une PROPOSITION. Il devient
+un crédit « Remixer » seulement si Genius, Discogs ou MusicBrainz crédite déjà
+la même personne à la production sur cette version. Le rapport sépare les
+cas corroborés, les suggestions à vérifier, et les anciennes déductions par
+titre seul.
 
     python scripts/crediter_remixeurs.py            # à blanc (défaut)
     python scripts/crediter_remixeurs.py --apply    # backup + écriture
@@ -17,26 +16,9 @@ import sys
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from src.models import CreditRole
-from src.services.versions import crediter_remixeurs
+from src.services.versions import candidats_remixeurs, crediter_remixeurs
 from src.utils.data_manager import DataManager
 from src.utils.database_backup import get_backup_manager
-from src.utils.title_matching import names_match_as_words
-from src.utils.version_heritage import remixeurs_du_titre
-
-
-def a_crediter(tracks) -> list[tuple]:
-    out = []
-    for t in tracks:
-        deja = [c.name for c in t.credits if c.role == CreditRole.REMIXER]
-        manquants = [
-            n
-            for n in remixeurs_du_titre(t.title)
-            if not any(names_match_as_words(n, d) for d in deja)
-        ]
-        if manquants:
-            out.append((t, manquants))
-    return out
 
 
 def main() -> int:
@@ -46,18 +28,34 @@ def main() -> int:
 
     dm = DataManager()
     par_artiste = []
+    totaux = {"deja_credite": 0, "corrobore": 0, "propose": 0, "titre_seul_historique": 0}
     for nom in dm.get_artist_names():
         artiste = dm.get_artist_by_name(nom)
         tracks = dm.get_artist_tracks(artiste.id)
-        liste = a_crediter(tracks)
+        liste = [(t, candidats_remixeurs(t)) for t in tracks]
+        liste = [(t, candidats) for t, candidats in liste if candidats]
         if liste:
             par_artiste.append((artiste, tracks, liste))
-            for t, noms in liste:
-                print(f"   {nom} — « {t.title} » ← {', '.join(noms)}")
-    total = sum(len(liste) for _, _, liste in par_artiste)
-    print(f"\n{total} remix à créditer")
+            for t, candidats in liste:
+                for candidat in candidats:
+                    totaux[candidat.statut] += 1
+                    detail = f" ({candidat.source})" if candidat.source else ""
+                    marque = {
+                        "deja_credite": "✓ déjà crédité",
+                        "corrobore": "✓ corroboré, sera qualifié",
+                        "propose": "? à vérifier",
+                        "titre_seul_historique": "! ancien crédit titre seul",
+                    }[candidat.statut]
+                    print(f"   {marque}{detail} — {nom} — « {t.title} » ← {candidat.nom}")
+    total = totaux["corrobore"]
+    print(
+        "\nBilan : "
+        f"{totaux['corrobore']} corroboré(s) · {totaux['propose']} à vérifier · "
+        f"{totaux['deja_credite']} déjà crédité(s) · "
+        f"{totaux['titre_seul_historique']} ancien(s) crédit(s) titre seul"
+    )
     if not args.apply or not total:
-        print("(à blanc — relancer avec --apply pour écrire)")
+        print("(à blanc — --apply n'écrira que les cas corroborés)")
         return 0
     backup = get_backup_manager().create_backup("before_crediter_remixeurs")
     if not backup:

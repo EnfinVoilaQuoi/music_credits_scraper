@@ -118,6 +118,51 @@ def est_instrumental(titre: str | None) -> bool:
 
 _SEPARATEURS_DE_REMIXEURS = re.compile(r"\s+(?:x|&|and|et|vs\.?)\s+|\s*,\s*", re.IGNORECASE)
 
+# Un qualificatif de VERSION n'est pas un nom de personne : « French Remix »,
+# « Street Mix », « VIP Mix » et consorts décrivent une prise, sans révéler qui
+# l'a remixée. Le titre ne suffit donc pas à créer un crédit. Liste volontairement
+# conservatrice : mieux vaut manquer un nom ambigu que créditer « Soul » comme
+# remixeur. Les vrais pseudonymes nommés restent acceptés (Snight B, R3HAB…).
+_REMIXEURS_DESCRIPTIFS = frozenset(
+    {
+        "alternate",
+        "chill",
+        "clean",
+        "club",
+        "drill",
+        "extended",
+        "freestyle",
+        "french",
+        "home",
+        "international",
+        "japanese",
+        "mega",
+        "original",
+        "radio",
+        "re",
+        "reception",
+        "reggae",
+        "rough",
+        "soul",
+        "soundcloud",
+        "street",
+        "video",
+        "vip",
+    }
+)
+
+
+def _remixeur_nomme(nom: str) -> bool:
+    """Un candidat issu du titre est-il un nom, plutôt qu'un descripteur ?"""
+    normalise = " ".join(nom.casefold().split())
+    if not normalise or normalise in _REMIXEURS_DESCRIPTIFS:
+        return False
+    # Parenthèse/crochet restant = capture tronquée par une structure imbriquée,
+    # par exemple « Kanye West - POWER (Rap Blvd Remix) ».
+    if any(signe in nom for signe in "()[]"):
+        return False
+    return not bool(re.fullmatch(r"(?:\d+(?:st|nd|rd|th)?|[a-z])", normalise))
+
 
 def remixeurs_du_titre(titre: str | None) -> list[str]:
     """PUR. Les remixeurs que NOMME un titre de remix (« Dolce Camara - Snight
@@ -127,7 +172,9 @@ def remixeurs_du_titre(titre: str | None) -> list[str]:
     v = parse_variant(titre or "")
     if v.kind != Kind.REMIX_NAMED or not v.remixer:
         return []
-    return [n.strip() for n in _SEPARATEURS_DE_REMIXEURS.split(v.remixer) if n.strip()]
+    return [
+        n.strip() for n in _SEPARATEURS_DE_REMIXEURS.split(v.remixer) if _remixeur_nomme(n.strip())
+    ]
 
 
 def famille_de(titre: str) -> str | None:

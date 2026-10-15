@@ -22,7 +22,12 @@ from src.utils.track_mapper import _clean_duration
 logger = get_logger(__name__)
 
 
-def lignes_a_verifier(engine, artiste: str | None = None, limite: int | None = None) -> list[dict]:
+def lignes_a_verifier(
+    engine,
+    artiste: str | None = None,
+    limite: int | None = None,
+    track_ids: list[int] | None = None,
+) -> list[dict]:
     """Toutes les lignes portant un ID Spotify — colonne ET table (e23).
 
     Une ligne par (morceau, ID) : deux morceaux peuvent partager un ID — c'est
@@ -36,8 +41,16 @@ def lignes_a_verifier(engine, artiste: str | None = None, limite: int | None = N
     morceau PAR CONSTRUCTION (« DKR - Bonus Track » sur « DKR ») — la règle
     d'asymétrie de version les signalerait toutes, et la réparation les retirerait.
     """
-    filtre = "AND a.name = :artiste" if artiste else ""
-    params = {"artiste": artiste} if artiste else {}
+    filtres = []
+    params: dict[str, object] = {}
+    if artiste:
+        filtres.append("a.name = :artiste")
+        params["artiste"] = artiste
+    if track_ids:
+        marqueurs = ", ".join(f":track_id_{n}" for n in range(len(track_ids)))
+        filtres.append(f"t.id IN ({marqueurs})")
+        params.update({f"track_id_{n}": track_id for n, track_id in enumerate(track_ids)})
+    filtre = f"AND {' AND '.join(filtres)}" if filtres else ""
     requete = f"""
         SELECT t.id, t.title, t.duration, t.is_featuring, t.primary_artist_name,
                a.name AS artiste, t.spotify_id AS sid, 1 AS principal,

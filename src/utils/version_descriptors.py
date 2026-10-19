@@ -236,6 +236,25 @@ def titre_generique(titre: str | None) -> bool:
     return all(m in MOTS_DE_MEME_MORCEAU or m in _NUMEROTATION or m.isdigit() for m in mots)
 
 
+_GROUPE_FINAL = re.compile(r"^(?P<titre>.*?)\s*[\(\[](?P<groupe>[^\(\)\[\]]+)[\)\]]\s*$")
+
+
+def titre_sans_son_disque(titre: str | None, album: str | None) -> str:
+    """PUR. Le titre générique sans le nom de SON disque, que Genius ajoute
+    pour distinguer ses intros : « Intro (0.9) » sur *0.9* → « Intro »,
+    « Intro (Vieilles merdes vol.II) » sur *Vieilles Merdes, Vol. II*. Là où
+    Deezer et Spotify écrivent « Intro » (Booba, 2026-10-18 : l'Intro de
+    *0.9* proposée absente chez Deezer, son ID refusé chez Spotify). Rendu
+    inchangé si le groupe final n'est pas le disque de la fiche."""
+    titre = titre or ""
+    m = _GROUPE_FINAL.match(titre)
+    if not m or not album or not titre_generique(m["titre"]):
+        return titre
+    if normalize_title(m["groupe"]).replace(" ", "") != normalize_title(album).replace(" ", ""):
+        return titre
+    return m["titre"]
+
+
 def _tokens(texte: str) -> list[str]:
     """Mots normalisés d'un descripteur (ascii, minuscules, ponctuation écrasée).
 
@@ -854,6 +873,36 @@ def meme_enregistrement(a: CleTitre, b: CleTitre) -> bool:
 _LIAISONS = frozenset({"et", "and"})
 _FEAT_EXPLICITE = re.compile(r"[\(\[]\s*(?:feat|ft|featuring)\.?\s+([^\)\]]+)[\)\]]", re.IGNORECASE)
 
+#: Nombres écrits en lettres que Deezer écrit en chiffres (« 1 pour la plume »
+#: / Genius « Un pour la plume »). Ni « neuf » (aussi « nouveau ») ni « cent ».
+_NOMBRES_EN_LETTRES = {
+    "un": "1",
+    "une": "1",
+    "deux": "2",
+    "trois": "3",
+    "quatre": "4",
+    "cinq": "5",
+    "six": "6",
+    "sept": "7",
+    "huit": "8",
+    "dix": "10",
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+}
+
+
+def _en_chiffres(norme: str) -> str:
+    """`norme` aux nombres en chiffres, recollés comme `normalize_title`."""
+    mots = " ".join(_NOMBRES_EN_LETTRES.get(m, m) for m in norme.split())
+    return re.sub(r"\s+(?=\d)", "", mots)
+
 
 def _graphies_equivalentes(a: CleTitre, b: CleTitre) -> bool:
     """Deux graphies du même titre que les plateformes écrivent autrement
@@ -862,7 +911,15 @@ def _graphies_equivalentes(a: CleTitre, b: CleTitre) -> bool:
         Drogue et Sexe ») — corpus : 4 paires basculent, toutes justes
         (« HOTEL LOBBY (Unc & Phew) » / « (UNC AND PHEW) »…) ;
       · l'invité entre parenthèses sans « feat. » face au « (feat. X) » de
-        l'autre (« Today Is a Good Day (Darina) » / « (feat. Darina) »)."""
+        l'autre (« Today Is a Good Day (Darina) » / « (feat. Darina) ») ;
+      · un nombre en lettres face au même en chiffres (2026-10-19, Flynt
+        « Un pour la plume » / Deezer « 1 pour la plume », même ISRC) —
+        corpus : 2 paires basculent, toutes justes (« … 3 Milliards » /
+        « … trois milliards »)."""
+    if any(c.isdigit() for c in a.norme + b.norme) and _en_chiffres(a.norme) == _en_chiffres(
+        b.norme
+    ):
+        return True
     if "&" in a.titre or "&" in b.titre:
         ma = [m for m in a.norme.split() if m not in _LIAISONS]
         mb = [m for m in b.norme.split() if m not in _LIAISONS]
@@ -879,6 +936,22 @@ def _graphies_equivalentes(a: CleTitre, b: CleTitre) -> bool:
         ):
             return True
     return False
+
+
+def graphies_equivalentes(a: str | None, b: str | None) -> bool:
+    """PUR. Le MÊME titre écrit autrement par deux catalogues : lettres
+    masquées, « & » / « et », invité entre parenthèses, nombre en lettres / en
+    chiffres. Plus étroit que `titres_equivalents` (pas d'équivalence entre
+    versions de même famille) : pour retrouver une fiche quand le titre
+    normalisé ne la donne pas (écarts Deezer, 2026-10-19)."""
+    ka, kb = cle_titre(a), cle_titre(b)
+    if not ka.titre or not kb.titre:
+        return False
+    if (ka.censure and ka.censure.fullmatch(kb.norme)) or (
+        kb.censure and kb.censure.fullmatch(ka.norme)
+    ):
+        return True
+    return _graphies_equivalentes(ka, kb)
 
 
 def meme_oeuvre(a: CleTitre, b: CleTitre) -> bool:

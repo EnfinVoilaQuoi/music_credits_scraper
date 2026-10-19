@@ -91,9 +91,10 @@ class TestTitreObligatoire:
     def test_titres_equivalents(self):
         assert titres_equivalents("Un pour la plume", "Un Pour La Plume")
         assert titres_equivalents("In Common (Remix)", "In Common - Black Coffee Remix")
-        assert not titres_equivalents(
-            "1 pour la plume", "Un pour la plume"
-        )  # accepté : refuser est un bon résultat
+        # Nombre en lettres / en chiffres (2026-10-19) : même morceau, même ISRC
+        # (Flynt) — refusé jusque-là, faute de règle.
+        assert titres_equivalents("1 pour la plume", "Un pour la plume")
+        assert not titres_equivalents("2 pour la plume", "Un pour la plume")
         assert not titres_equivalents("", "X")
 
 

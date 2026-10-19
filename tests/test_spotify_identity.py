@@ -299,6 +299,40 @@ def test_l_id_d_une_autre_fiche_est_refuse(monkeypatch):
     assert si.valider_identite(only, "SP", lambda s: identite) is True
 
 
+def test_un_titre_generique_d_une_autre_fiche_ne_refuse_rien(monkeypatch):
+    """Booba « Intro (0.9) » (2026-10-18) : Spotify sert « Intro », et une
+    autre fiche s'appelle « Intro » (un autre disque) — refusé « c'est celui de
+    la fiche Intro ». Chaque projet a son intro : c'est le DISQUE qui tranche."""
+    from src.models import Artist, Track
+    from src.utils import spotify_identity as si
+
+    booba = Artist(name="Booba")
+    booba.id = 3
+    intro = Track(title="Intro (0.9)", artist=booba, album="0.9")
+    intro.id = 1
+    monkeypatch.setattr(si, "fournisseur_titres", lambda aid: [(1, "Intro (0.9)"), (2, "Intro")])
+
+    du_disque = {"name": "Intro", "artists": ["Booba"], "duration": None, "album": "0.9"}
+    assert si.valider_identite(intro, "SP", lambda s: du_disque) is True
+    d_un_autre = {**du_disque, "album": "Autopsie Vol. 3"}
+    assert si.valider_identite(intro, "SP", lambda s: d_un_autre) is False
+
+
+def test_un_refus_a_la_main_n_est_pas_un_avertissement(monkeypatch, caplog):
+    """Un ID retiré à la main est une décision déjà prise : INFO, pas WARNING
+    (« Garcimore », « Pakistan » remontaient à chaque run, 2026-10-18)."""
+    import logging
+
+    from src.utils import corrections_fiches
+    from src.utils import spotify_identity as si
+
+    monkeypatch.setattr(corrections_fiches, "ids_refuses", lambda t: {"SP"})
+    with caplog.at_level(logging.INFO, logger=si.logger.name):
+        assert si.valider_identite(_track(), "SP", lambda s: None) is False
+    refus = [r for r in caplog.records if "retiré à la main" in r.getMessage()]
+    assert refus and all(r.levelno == logging.INFO for r in refus)
+
+
 class TestTitreContenu:
     """2026-10-14 : sur les 14 faux probables de la relecture du 2026-10-11
     (CORRECTIFS, gate Spotify), 9 passaient parce qu'un titre CONTENAIT
@@ -424,6 +458,34 @@ class TestLigneDInviteHomonyme:
         identite = {"name": "Par Amour", "artists": ["Dinos", "Diam's"], "duration": None}
         monkeypatch.setattr(si, "fournisseur_propres", lambda aid: [(2, "Par amour")])
         assert si.valider_identite(self._ligne(), "SP", lambda s: identite) is True
+
+    def test_le_refus_nomme_le_principal(self, monkeypatch, caplog):
+        """A2H « Les bras d'une autre » (2026-10-18) : « c'est celui de la
+        fiche Les bras d'une autre » — même titre des deux côtés, le message
+        ne disait pas que la fiche refusée était une ligne d'INVITÉ."""
+        from src.utils import spotify_identity as si
+
+        identite = {"name": "Par amour", "artists": ["Diam's"], "duration": None}
+        monkeypatch.setattr(si, "fournisseur_propres", lambda aid: [(2, "Par amour")])
+        assert si.valider_identite(self._ligne(), "SP", lambda s: identite) is False
+        assert "invité chez Dinos" in caplog.text
+        assert "fiche propre « Par amour »" in caplog.text
+
+    def test_un_titre_generique_ne_designe_pas_la_fiche_propre(self, monkeypatch):
+        """Freeze Corleone « Intro » d'un projet d'un autre, refusée pour sa
+        fiche « INTRO » d'un autre disque (2026-10-18) : le disque tranche."""
+        from src.utils import spotify_identity as si
+
+        ligne = self._ligne()
+        ligne.title, ligne.album = "Intro", "Projet commun"
+        identite = {
+            "name": "Intro",
+            "artists": ["Diam's"],
+            "duration": None,
+            "album": "Projet commun",
+        }
+        monkeypatch.setattr(si, "fournisseur_propres", lambda aid: [(2, "INTRO")])
+        assert si.valider_identite(ligne, "SP", lambda s: identite) is True
 
 
 def test_fiches_propres_excluent_invites_et_roles_secondaires(data_manager):

@@ -36,6 +36,7 @@ from src.utils.version_descriptors import (
     meme_famille,
     parse_variant,
     titre_generique,
+    titre_sans_son_disque,
     titres_equivalents,
 )
 
@@ -269,9 +270,16 @@ def fiche_du_titre_spotify(track, identite: dict | None) -> str | None:
     en posaient (scraper, Kworb, SongBPM, Genius, historique). Le titre seul
     ne refuse pas un ID (« 1 pour la plume » / « Un pour la plume ») ; il le
     refuse quand ce titre est celui d'une fiche SŒUR.
+
+    Jamais pour un titre servi GÉNÉRIQUE (2026-10-19) : chaque projet a son
+    « Intro », une autre fiche au même mot ne dit rien de l'ID — Booba
+    « Intro (0.9) » refusait l'Intro de *0.9* parce qu'une autre fiche
+    s'appelle « Intro ». C'est le disque qui tranche (`motif_titre_generique`).
     """
     nom = (identite or {}).get("name")
     if fournisseur_titres is None or not nom or titres_equivalents(track.title, nom):
+        return None
+    if titre_generique(nom):
         return None
     artist_id = getattr(track.artist, "id", None)
     if not artist_id:
@@ -298,12 +306,16 @@ def sienne_homonyme(track, identite: dict | None) -> str | None:
     lignes d'invité : graphies (« CYRIL.mp4 » / « CYRILmp4 », « $tanlee (FRA) »)
     et compilations où Genius met le producteur ou le collectif en principal
     (Kilomaître, Sachons Dire Non). Ce qui sépare les vrais faux : Spotify ne
-    crédite pas le principal ET l'artiste a SA fiche au titre servi."""
+    crédite pas le principal ET l'artiste a SA fiche au titre servi.
+
+    Un titre servi GÉNÉRIQUE n'en dit rien (2026-10-19, Freeze Corleone
+    « Intro » refusé pour sa fiche « INTRO » d'un autre projet) : le disque
+    tranche, comme dans `fiche_du_titre_spotify`."""
     if not (track.is_featuring and track.primary_artist_name) or fournisseur_propres is None:
         return None
     credites = [a for a in (identite or {}).get("artists") or [] if a]
     nom = (identite or {}).get("name")
-    if not credites or not nom:
+    if not credites or not nom or titre_generique(nom):
         return None
     if any(names_match_as_words(track.primary_artist_name, a) for a in credites):
         return None
@@ -412,7 +424,10 @@ def identite_concorde(
     if temoin and duree_spotify and abs(temoin - duree_spotify) > tolerance:
         return False, f"durée : {temoin} s (source indépendante), {duree_spotify} s sur Spotify"
 
-    a, b = normalize_title(track.title or ""), normalize_title(titre_spotify)
+    # « Intro (0.9) » sur *0.9* : Genius nomme le disque, Spotify sert « Intro »
+    # — le disque reste prouvé à part (`motif_titre_generique`).
+    titre_fiche = titre_sans_son_disque(track.title, getattr(track, "album", None))
+    a, b = normalize_title(titre_fiche), normalize_title(titre_spotify)
     # Deux signaux indépendants qui s'accordent valent mieux qu'un titre — à
     # condition que la durée ne doive rien à l'ID jugé (`duree_temoin`).
     corrobore = bool(artistes and attendus and temoin and duree_spotify)
@@ -422,7 +437,7 @@ def identite_concorde(
         and a != b
         and not corrobore
         and not titres_tranches
-        and not titres_equivalents(track.title, titre_spotify)
+        and not titres_equivalents(titre_fiche, titre_spotify)
     ):
         # Un titre CONTENU dans l'autre ne passe plus seul (2026-10-14) : sur
         # les 14 faux probables de la relecture du 2026-10-11, 9 passaient par
@@ -439,7 +454,7 @@ def identite_concorde(
         # SR3MM », « To… » tronqué. Seul un mot en plus DANS le titre principal
         # exige la durée (`memes_titres_principaux`).
         if either_contains_as_words(a, b):
-            if memes_titres_principaux(track.title, titre_spotify):
+            if memes_titres_principaux(titre_fiche, titre_spotify):
                 return True, ""
             return False, (
                 f"titre : Spotify sert « {titre_spotify} », non corroboré par une "
@@ -650,17 +665,25 @@ def _juger(
     from src.utils.corrections_fiches import ids_refuses
 
     if spotify_id in ids_refuses(track):
-        logger.warning(
-            f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — retiré à la main"
-        )
+        # Décision déjà prise par un humain : rien à regarder (INFO, 2026-10-19 —
+        # en WARNING, chaque run la remontait comme un problème).
+        logger.info(f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — retiré à la main")
         return False
     autre = None if titres_tranches else fiche_du_titre_spotify(track, identite)
-    if autre is None:
-        autre = sienne_homonyme(track, identite)
     if autre is not None:
         logger.warning(
-            f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — c'est celui "
-            f"de la fiche « {autre} »"
+            f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — Spotify sert "
+            f"« {(identite or {}).get('name')} », titre d'une autre fiche : « {autre} »"
+        )
+        return False
+    autre = sienne_homonyme(track, identite)
+    if autre is not None:
+        # Les deux fiches portent souvent le MÊME titre : sans le principal, le
+        # message « c'est celui de la fiche X » se lisait comme un non-sens.
+        logger.warning(
+            f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » (invité chez "
+            f"{track.primary_artist_name}) — Spotify ne crédite pas "
+            f"{track.primary_artist_name} : c'est la fiche propre « {autre} »"
         )
         return False
     accepte, motif = identite_concorde(

@@ -60,7 +60,10 @@ def main() -> int:
             "artiste": art.name,
             "deezer_id": int(art.deezer_id),
             "albums": [cassettes.album_vers_dict(x) for x in bilan.albums],
-            "base": [cassettes.fiche_vers_dict(t) for t in dm.discographie_reunie(art)],
+            "base": [
+                cassettes.fiche_vers_dict(t)
+                for t in ecarts_deezer.discographie_de_classement(dm, art)
+            ],
             "albums_base": dm.get_albums_for_artist(art.id),
             "liens_connus": sorted(dm.get_deezer_release_links(art.id)),
         }

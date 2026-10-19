@@ -33,6 +33,7 @@ Deux titres jumeaux d'EP (« … » / « ... ») normalisent à la chaîne VIDE 
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -306,6 +307,10 @@ def _cle_edition_generique(piste: PisteDeezer) -> str:
     return normalize_title(parse_variant(piste.title).socle)
 
 
+#: « Titre [Nom] » : un nom entre crochets en fin de titre Genius.
+_INTERPRETE_ENTRE_CROCHETS = re.compile(r"^(.*\S)\s*\[([^\]]+)\]\s*$")
+
+
 def _match_existing(
     piste: PisteDeezer,
     *,
@@ -369,6 +374,21 @@ def _match_existing(
         # commun des titres, pas une clé de plus (2026-10-19).
         candidats = [
             t for ts in by_title.values() for t in ts if graphies_equivalentes(t.title, piste.title)
+        ]
+    if not candidats and piste.contributors:
+        # Genius nomme l'INTERPRÈTE d'un skit entre crochets : « Skit - Dream
+        # Bank [Sofiane Pamart] » = la piste « Skit - Dream Bank » de Deezer
+        # quand Sofiane Pamart y est crédité (Médine, *Storyteller* : fiche
+        # créée en double le 2026-09-22). Le nom doit être un crédité de la
+        # piste : « [Remix] », « [V2] » restent des versions.
+        credites = {normalize_name(nom) for _, nom in piste.contributors}
+        candidats = [
+            t
+            for ts in by_title.values()
+            for t in ts
+            if (m := _INTERPRETE_ENTRE_CROCHETS.match(t.title or ""))
+            and normalize_title(m.group(1)) == title_key
+            and normalize_name(m.group(2)) in credites
         ]
     if not candidats:
         return None, None
@@ -493,16 +513,24 @@ def classer(
         c for c, fiches in par_disque.items() if all(t.is_featuring for t in fiches)
     }
     ids_albums = {int(a["deezer_album_id"]) for a in albums_base if a.get("deezer_album_id")}
+    # Le disque relié par son ID Deezer garde le titre de la BASE, qui peut
+    # différer du sien : « Des flingues et des roses » en base, « MJ Des
+    # flingues et des roses » chez Deezer (cassette Freeze, 2026-10-19).
+    cles_par_id = {
+        int(a["deezer_album_id"]): cle_album(a["title"])
+        for a in albums_base
+        if a.get("deezer_album_id") and a.get("title")
+    }
     ecarts: list[Ecart] = []
     jumelles: list[str] = []
     for album in albums:
         est_a_nous = album.artist_id == notre_id
         cle = cle_album(album.title)
-        connu = (
-            album.id in ids_albums
-            or cle in cles_albums
-            or base_album_key(normalize_title(album.title), cles_albums) is not None
-        ) and not (not est_a_nous and cle in cles_invite_seulement)
+        cle_base = base_album_key(normalize_title(album.title), cles_albums)
+        cles_du_disque = {cle, cle_base, cles_par_id.get(album.id)} - {None}
+        connu = (album.id in ids_albums or cle in cles_albums or cle_base is not None) and not (
+            not est_a_nous and cles_du_disque & cles_invite_seulement
+        )
         inconnues: list[tuple[PisteDeezer, Track | None, bool]] = []
         for p in album.pistes:
             # « Album Version » est parfois porté hors du titre principal : le
@@ -748,13 +776,26 @@ def accrocher_genius(ecarts: list[Ecart], artist, genius_api) -> None:
 # ── Détection (async) ────────────────────────────────────────────────────────
 
 
+def discographie_de_classement(dm, artist) -> list[Track]:
+    """Les fiches que le classement lit : la discographie réunie, et les durées
+    de leurs ÉDITIONS (`track_editions`). Sans elles, un lien vers la radio
+    edit d'une fiche ressortait « à revoir » à chaque run (Booba « Avant De
+    Partir (Radio Edit) » 250 s face à l'album 325 s, 2026-10-19) — le vote
+    les attendait (`_lien_a_revoir`), personne ne les chargeait."""
+    base = dm.discographie_reunie(artist)
+    durees = dm.get_artist_edition_durations(artist.id)
+    for t in base:
+        t.durees_editions = durees.get(t.id, ())
+    return base
+
+
 async def detecter_async(
     client, http, dm, artist, *, deezer_id: int, should_stop=None, genius_api=None
 ) -> BilanEcarts:
     """Lit la discographie Deezer et classe les écarts. `client` = `DeezerAPI`."""
     bilan = BilanEcarts(deezer_id=deezer_id, artiste=artist.name or "")
     should_stop = should_stop or (lambda: False)
-    base = dm.discographie_reunie(artist)
+    base = discographie_de_classement(dm, artist)
     albums_base = dm.get_albums_for_artist(artist.id)
     albums: list[AlbumDeezer] = []
     try:

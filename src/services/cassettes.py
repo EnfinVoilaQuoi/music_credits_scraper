@@ -34,6 +34,7 @@ CHAMPS_FICHE = (
     "secondary_role",
     "release_date",
     "unreleased",
+    "durees_editions",
 )
 
 
@@ -41,6 +42,8 @@ def fiche_vers_dict(track: Track) -> dict:
     d = {}
     for champ in CHAMPS_FICHE:
         valeur = getattr(track, champ, None)
+        if champ == "durees_editions":
+            valeur = list(valeur or ())
         d[champ] = str(valeur) if champ == "release_date" and valeur is not None else valeur
     return d
 

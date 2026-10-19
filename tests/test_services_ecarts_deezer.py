@@ -6,6 +6,7 @@ versions ; Lucio Bukowski a de vrais trous et deux EP jumeaux « … » / « ...
 """
 
 import asyncio
+import dataclasses
 
 from src.models import Artist, Track, TrackSpotifyId
 from src.models.track import CreditRole
@@ -117,6 +118,32 @@ class TestClasser:
         ]
         ecarts, _ = ed.classer(albums, [feat], [], NOUS)
         assert [(e.nature, e.titre, e.coche) for e in ecarts] == [("apparition", "MJ", False)]
+
+    def test_disque_d_un_autre_relie_par_son_id_sous_un_autre_titre(self):
+        """La base l'appelle « Des flingues et des roses », Deezer « MJ Des
+        flingues et des roses » : relié par son ID, il restait « le nôtre »
+        (cassette Freeze, 2026-10-19 : les 13 absents cochés revenaient)."""
+        feat = _track("Drapeaux hissés", "Des flingues et des roses")
+        feat.is_featuring, feat.primary_artist_name = True, "Ocho"
+        albums = [
+            _album(
+                7,
+                "MJ Des flingues et des roses",
+                [
+                    _piste(70, "Ziak", artist_id=999, contributors=[(999, "Ocho")]),
+                    _piste(
+                        71,
+                        "Drapeaux hissés",
+                        artist_id=999,
+                        contributors=[(999, "Ocho"), (NOUS, "Nous")],
+                    ),
+                ],
+                artist_id=999,
+            )
+        ]
+        albums_base = [{"deezer_album_id": 7, "title": "Des flingues et des roses"}]
+        ecarts, _ = ed.classer(albums, [feat], albums_base, NOUS)
+        assert [e.nature for e in ecarts if e.nature in ("absent", "album_absent")] == []
 
     def test_disque_absent_de_l_artiste_principal(self):
         albums = [_album(2, "Hourvari", [_piste(20, "Wunderlich"), _piste(21, "Ceux qui")])]
@@ -414,6 +441,9 @@ class TestDetecterAsync:
     class _DM:
         def discographie_reunie(self, artist):
             return [_track("MW2", "LMF")]
+
+        def get_artist_edition_durations(self, aid):
+            return {}
 
         def get_albums_for_artist(self, aid):
             return []
@@ -780,3 +810,46 @@ class TestMemoireDesRefus:
         ctx = SimpleNamespace(force_update=False)
         assert DeezerProvider()._apply_result(fiche, ctx, resultat, None, None) is False
         assert fiche.deezer_id is None and fiche.isrc is None
+
+
+def test_interprete_entre_crochets_credite_sur_la_piste():
+    """Genius : « Skit - Dream Bank [Sofiane Pamart] » ; Deezer : « Skit - Dream
+    Bank », Sofiane Pamart crédité (Médine, *Storyteller*, doublon créé le
+    2026-09-22). Un « [Remix] » non crédité reste une autre piste."""
+    skit = _track("Skit - Dream Bank [Sofiane Pamart]", "Storyteller")
+    remix = _track("Lecture aléatoire [Remix]", "Storyteller")
+    albums = [
+        _album(
+            9,
+            "Storyteller",
+            [
+                _piste(90, "Skit - Dream Bank", contributors=[(4, "Sofiane Pamart")]),
+                _piste(91, "Lecture aléatoire", contributors=[(4, "Sofiane Pamart")]),
+            ],
+        )
+    ]
+    ecarts, _ = ed.classer(albums, [skit, remix], [], NOUS)
+    par_titre = {e.titre: e for e in ecarts}
+    assert par_titre["Skit - Dream Bank"].existing_track is skit
+    assert par_titre["Lecture aléatoire"].existing_track is not remix
+
+
+def test_le_lien_vers_une_edition_connue_n_est_pas_a_revoir():
+    """Booba « Avant De Partir (Radio Edit) » (250 s), notée en édition de la
+    fiche album (325 s) : le lien ressortait « à revoir » à chaque run, faute
+    des durées d'édition au classement (2026-10-19)."""
+    fiche = _track("Avant de partir", "Panthéon")
+    fiche.id, fiche.duration = 8984, 325
+    fiche.durations_observees = {"deezer": 325, "discogs": 325, "spotify_web": 324}
+    albums = [
+        _album(
+            5,
+            "Avant De Partir (Radio Edit)",
+            [dataclasses.replace(_piste(50, "Avant De Partir (Radio Edit)"), duration=250)],
+        )
+    ]
+    sans, _ = ed.classer(albums, [fiche], [], NOUS, liens_connus={(5, 8984)})
+    fiche.durees_editions = (250,)
+    avec, _ = ed.classer(albums, [fiche], [], NOUS, liens_connus={(5, 8984)})
+    assert [e.nature for e in sans] == ["link_review"]
+    assert "link_review" not in [e.nature for e in avec]

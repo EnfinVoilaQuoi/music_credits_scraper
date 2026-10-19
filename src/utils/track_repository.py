@@ -38,9 +38,12 @@ from src.utils.positions_disque import position_retenue
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
 from src.utils.track_mapper import _clean_duration, track_from_row
 from src.utils.track_soeurs import (
+    CLES_LOCALES_DES_RELATIONS,
+    avec_relations_manuelles,
     effacer_chez_les_soeurs,
     fusionner_constat_instrumental,
     ids_soeurs,
+    relations_a_stocker,
     synchroniser_soeurs,
 )
 from src.utils.version_descriptors import titre_generique
@@ -2581,18 +2584,80 @@ class TrackRepository:
         (`if rels and not track.relationships`), donc aucune victime connue — on
         aligne pour la cohérence et pour rendre le vidage POSSIBLE, pas pour
         réparer un défaut constaté.
+
+        Écrit sur UNE ligne, donc deux règles des sœurs s'appliquent ici
+        (2026-10-19, `soeurs_divergentes` 10 → 48) : jamais de clé locale à la
+        machine (`relations_a_stocker` : le `cover_path` d'un sample) ; les
+        relations posées À LA MAIN chez une sœur sont gardées
+        (`avec_relations_manuelles`, comme l'alignement des sœurs).
         """
+        brut = json.dumps(relations_a_stocker(relationships))
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
+                gid = conn.execute(
+                    text("SELECT genius_id FROM tracks WHERE id = :id"), {"id": track_id}
+                ).scalar()
+                jumelles, _ = ids_soeurs(conn, track_id, gid)
+                if jumelles:
+                    # Re-sérialisé à l'identique de `brut` (échappé) : deux
+                    # sœurs se comparent comme des chaînes.
+                    brut = json.dumps(
+                        json.loads(
+                            avec_relations_manuelles(
+                                brut,
+                                [
+                                    conn.execute(
+                                        text("SELECT relationships FROM tracks WHERE id = :id"),
+                                        {"id": tid},
+                                    ).scalar()
+                                    for tid in jumelles
+                                ],
+                            )
+                        )
+                    )
                 conn.execute(
                     text("UPDATE tracks SET relationships = :rels WHERE id = :id"),
-                    {"rels": json.dumps(relationships or []), "id": track_id},
+                    {"rels": brut, "id": track_id},
                 )
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur record_relationships({track_id}): {e}")
             return False
+
+    def retirer_cles_locales_des_relations(self, *, appliquer: bool = False) -> list[int]:
+        """Réparation : retire des `relationships` stockées les clés locales à
+        la machine (`CLES_LOCALES_DES_RELATIONS`, le `cover_path` des samples
+        posé par `media_enricher` jusqu'au 2026-10-19). Rend les fiches
+        concernées ; n'écrit qu'avec `appliquer` (sinon : lecture seule).
+        L'alignement des sœurs suit par `realigner_soeurs`."""
+        motifs = " OR ".join(
+            f"relationships LIKE :m{n}" for n in range(len(CLES_LOCALES_DES_RELATIONS))
+        )
+        params = {f"m{n}": f'%"{c}"%' for n, c in enumerate(CLES_LOCALES_DES_RELATIONS)}
+        a_reecrire: dict[int, str] = {}
+        with self.engine.connect() as conn:
+            for tid, brut in conn.execute(
+                text(f"SELECT id, relationships FROM tracks WHERE {motifs}"), params  # noqa: S608
+            ):
+                try:
+                    relations = json.loads(brut)
+                except (TypeError, ValueError):
+                    continue
+                propres = relations_a_stocker(relations)
+                if propres != relations:
+                    # Même graphie que l'écriture d'origine (échappée ou non) :
+                    # deux sœurs se comparent comme des chaînes.
+                    a_reecrire[tid] = json.dumps(propres, ensure_ascii=brut.isascii())
+        if appliquer and a_reecrire:
+            # Aucun verdict ne dépend des relations : rien à recalculer.
+            with self._ecrire() as conn:
+                for tid, brut in a_reecrire.items():
+                    conn.execute(
+                        text("UPDATE tracks SET relationships = :r WHERE id = :t"),
+                        {"r": brut, "t": tid},
+                    )
+        return sorted(a_reecrire)
 
     def record_spotify_streams(
         self,

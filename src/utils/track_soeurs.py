@@ -223,6 +223,24 @@ def avec_relations_manuelles(relations_json: str | None, toutes: list) -> str | 
     return json.dumps(relations, ensure_ascii=False)
 
 
+#: Clés d'une relation propres à la MACHINE (un chemin d'image sur disque) :
+#: dérivables (`cover_image_path(artiste, titre)`), jamais stockées. Posées
+#: sur une seule ligne, elles faisaient diverger les sœurs (2026-10-19).
+CLES_LOCALES_DES_RELATIONS = ("cover_path",)
+
+
+def relations_a_stocker(relations) -> list:
+    """PUR. Les relations sans leurs clés locales (`CLES_LOCALES_DES_RELATIONS`)."""
+    return [
+        (
+            {k: v for k, v in r.items() if k not in CLES_LOCALES_DES_RELATIONS}
+            if isinstance(r, dict)
+            else r
+        )
+        for r in relations or []
+    ]
+
+
 def _aligner_sur_la_lecture_la_plus_recente(conn, famille: list[int]) -> int:
     """Pour chaque groupe de `DONNEES_DE_PAGE`, la ligne renseignée dont la
     lecture est la plus récente transmet sa valeur aux autres. Un REMPLACEMENT,

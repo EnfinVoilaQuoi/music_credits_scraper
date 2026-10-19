@@ -186,17 +186,23 @@ def test_cover_single_prefere_artwork_url(media_env):
 
 
 # ── 5. Covers des samples ────────────────────────────────────────────────────
-def test_sample_cover_ecrite_dans_la_relation(media_env):
+def test_sample_cover_sur_disque_jamais_dans_la_relation(media_env):
+    """La pochette d'un sample va sur disque, à un chemin DÉRIVABLE de la
+    relation ; l'écrire dans la relation d'UNE ligne faisait diverger les
+    lignes sœurs (2026-10-19)."""
+    from src.utils.image_downloader import cover_image_path, existing_image
+
     artist = _artist()
     t = _track("Morceau", artist)
     t.relationships = [
         {"type": "samples", "artist": "James Brown", "title": "Funky Drummer", "url": "u"},
         {"type": "sampled_in", "artist": "X", "title": "Y"},  # aval : ignoré
     ]
+    avant = [dict(r) for r in t.relationships]
     report = _apply(artist, [t], deezer=FakeDeezer())
     assert report.downloaded["sample"] == 1
-    assert t.relationships[0]["cover_path"] == "covers/James Brown - Funky Drummer.jpg"
-    assert "cover_path" not in t.relationships[1]
+    assert existing_image(cover_image_path("James Brown", "Funky Drummer"))
+    assert t.relationships == avant
 
 
 # ── 6. Vignettes YouTube ─────────────────────────────────────────────────────

@@ -300,8 +300,12 @@ class _MediaRun:
             else:
                 self.report.failed[CAT_COVER] += 1
 
-    # ── 5. Covers des samples / interpolations (chemin dans le dict relation) ─
+    # ── 5. Covers des samples / interpolations (sur disque seulement) ─────────
     def _sample_covers(self) -> None:
+        """Le chemin n'est PAS écrit dans la relation : il se déduit de
+        `cover_image_path(artiste, titre)`. Posé sur la relation d'UNE ligne,
+        il faisait diverger les lignes sœurs (2026-10-19 : 39 familles chez
+        Kanye West, « GOOD Morning » chez lui et chez Travis Scott)."""
         for track in self.tracks:
             for rel in track.relationships or []:
                 if self.should_stop():
@@ -313,15 +317,11 @@ class _MediaRun:
                 if not rel_title:
                     continue
                 base = cover_image_path(rel_artist or "Inconnu", rel_title)
-                existing = existing_image(base)
-                if existing and not self.force:
-                    rel["cover_path"] = self._rel(existing)
+                if existing_image(base) and not self.force:
                     self.report.skipped[CAT_SAMPLE] += 1
                     continue
                 url = self._deezer_track_cover(rel_artist, rel_title)
-                result = download_image(url, base)
-                if result:
-                    rel["cover_path"] = self._rel(result)
+                if download_image(url, base):
                     self.report.downloaded[CAT_SAMPLE] += 1
                 else:
                     self.report.failed[CAT_SAMPLE] += 1
@@ -381,7 +381,8 @@ def apply_images(
     Args:
         artist: l'``Artist`` courant (reçoit ``image_path``).
         tracks: ses ``Track`` (reçoivent ``cover_path`` / ``yt_thumbnail_path`` ;
-            les samples reçoivent ``cover_path`` dans leurs dicts de relation).
+            la pochette d'un sample va sur disque seulement, à
+            ``cover_image_path(artiste, titre)`` — jamais dans la relation).
         deezer: client ``DeezerAPI`` (ou None → source Deezer inactive).
         genius: client ``GeniusAPI`` (ou None → fallback Genius inactif).
         force: re-télécharge même si le champ est rempli et le fichier présent.

@@ -131,7 +131,7 @@ class TestSamples:
             {"type": "interpolates", "artist": None, "title": "Autre"},  # échec (pas de cover)
         ]
         report = _apply(artist, [t], deezer=FakeDeezer(track_cover=None))
-        assert t.relationships[1]["cover_path"] and "cover_path" not in t.relationships[0]
+        assert not any("cover_path" in r for r in t.relationships)
         assert report.skipped["sample"] == 1 and report.failed["sample"] == 1
 
 

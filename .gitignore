@@ -73,7 +73,9 @@ data/certifications/snep/certif-.csv
 
 # Outillage IA (suivi de travail, skills, mémoire) : privé
 .agents/
-.claude/
+# `.claude/settings.json` est partagé : il branche les hooks de garde (scripts/garde_*.py).
+.claude/*
+!.claude/settings.json
 CLAUDE.md
 JOURNAL.md
 WIP.md
@@ -131,6 +133,7 @@ scripts/*
 !scripts/audit_donnees.py
 !scripts/repair_spotify_ids.py
 !scripts/accepter_id_spotify.py
+!scripts/garde_git_add.py
 !scripts/repair_deezer_ids.py
 !scripts/repair_chimeres_genius.py
 !scripts/repair_relation_artiste.py

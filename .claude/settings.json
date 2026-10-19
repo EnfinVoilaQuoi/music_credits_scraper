@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(command -v python || command -v python3)\" \"$CLAUDE_PROJECT_DIR/scripts/garde_git_add.py\"",
+            "timeout": 10,
+            "statusMessage": "Garde : git add d'un dossier"
+          }
+        ]
+      }
+    ]
+  }
+}

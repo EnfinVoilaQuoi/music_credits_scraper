@@ -1658,9 +1658,9 @@ def _vote_de_parution(s, par_id: dict) -> str:
     return ""
 
 
-def analyser(data_manager, artiste) -> Revue:
-    """Détecteurs hors ligne + signalements des runs, moins ce que
-    l'utilisateur a déjà tranché. Lectures seules, aucune écriture."""
+def charger_contexte(data_manager, artiste) -> Contexte:
+    """Le contexte des détecteurs, lu UNE fois (lectures seules) — celui
+    qu'`analyser` juge, et que les politiques d'arbitrage relisent."""
     tracks = artiste.tracks or []
     durees_editions = data_manager.get_artist_edition_durations(artiste.id)
     for t in tracks:
@@ -1672,6 +1672,14 @@ def analyser(data_manager, artiste) -> Revue:
     )
     ctx.soeurs = data_manager.divergences_identite_soeurs(artiste.id)
     ctx.positions = data_manager.get_artist_positions(artiste.id)
+    return ctx
+
+
+def analyser(data_manager, artiste, ctx: Contexte | None = None) -> Revue:
+    """Détecteurs hors ligne + signalements des runs, moins ce que
+    l'utilisateur a déjà tranché. Lectures seules, aucune écriture."""
+    tracks = artiste.tracks or []
+    ctx = ctx or charger_contexte(data_manager, artiste)
     cas = detecter(ctx)
     cas += _cas_des_signalements(
         data_manager.signalements_revue(artiste.id), {t.id for t in tracks}, tracks

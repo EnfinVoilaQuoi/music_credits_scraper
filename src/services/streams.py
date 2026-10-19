@@ -129,6 +129,12 @@ def run(
                         # Pas « zéro stream » : aucun canal lisible. Un bilan
                         # propre cachait un artiste resté à 0 run après run.
                         bilan.erreurs.append("YouTube Music : aucun canal lisible")
+                    if results["ytm"].get("albums_brides"):
+                        # Partiel, pas en échec : relancer plus tard suffit.
+                        bilan.erreurs.append(
+                            f"YouTube Music bridé : {len(results['ytm']['albums_brides'])} "
+                            "album(s) non lu(s) — relancer plus tard"
+                        )
                     # Media 5 : vues + nature (clip/show/audio) des vidéos — batch
                     # YT mutualisé avec les streams. SÉPARÉ de ytm_streams.
                     # Défensif : n'interrompt pas la récupération des streams.

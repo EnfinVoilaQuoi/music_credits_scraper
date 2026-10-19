@@ -602,3 +602,23 @@ class TestVideosEchangees:
         assert (
             mod.fiche_que_la_video_nomme(live, titre, "Diam’s", self._index(live, studio)) is None
         )
+
+
+def test_un_album_bride_est_saute_et_ses_videos_connues_restent_mesurees(sans_recherche):
+    """2026-10-18 : une page d'album à réponse VIDE (bridage YTM) levait un
+    JSONDecodeError qui emportait tout le run YTM de l'artiste. L'album est
+    sauté et compté ; la vidéo déjà connue de sa fiche reste mesurée."""
+    api = FakeAPI(raw_tracks=None, vues={"audioaudioa": 500})
+    tracks = [
+        _track(
+            1,
+            "Magot",
+            videos=[TrackVideo(video_id="audioaudioa", url="u", source="ytm_album")],
+        )
+    ]
+
+    dm, result = _lancer(api, tracks)
+
+    assert result["albums_brides"] == ["Alb"]
+    assert result["albums_processed"] == 0
+    assert dm.stream_writes == [(1, 500)]

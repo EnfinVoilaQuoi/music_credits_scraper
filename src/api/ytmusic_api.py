@@ -337,13 +337,15 @@ class YTMusicAPI:
 
     # ── Étape 1 : tracks raw (ytmusicapi, zéro quota YT) ──────────────────────
 
-    def get_album_tracks_raw(self, browse_id: str) -> list[dict]:
+    def get_album_tracks_raw(self, browse_id: str) -> list[dict] | None:
         """Retourne les tracks d'un album avec leur videoId et views_str.
 
         N'appelle PAS YouTube Data API — zéro consommation de quota.
 
         Returns:
-            [{'title': str, 'video_id': str|None, 'views_str': str|None}]
+            [{'title': str, 'video_id': str|None, 'views_str': str|None}], ou
+            None quand YTM a rendu une réponse VIDE (bridage) : l'album n'a pas
+            été lu, ce qui n'est pas un album sans pistes.
         """
         try:
             album = self.yt.get_album(browse_id)
@@ -355,6 +357,12 @@ class YTMusicAPI:
                 }
                 for t in album.get("tracks", [])
             ]
+        except json.JSONDecodeError as e:
+            # Réponse VIDE : le bridage de YTM (comme `get_lyrics`). Elle
+            # remontait jusqu'au flux et emportait tout le run YTM de l'artiste
+            # (2026-10-18, traceback « YouTube Music en échec »).
+            logger.warning(f"YTM bridé : réponse vide pour l'album {browse_id} ({e})")
+            return None
         except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
             logger.error(f"Erreur get_album_tracks_raw ({browse_id}): {e}")
             return []

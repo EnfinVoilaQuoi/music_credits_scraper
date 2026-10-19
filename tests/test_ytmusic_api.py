@@ -401,6 +401,14 @@ class TestMorceauxDAlbum:
         yt = _FauxYT(album=requests.RequestException("timeout"))
         assert _api(yt).get_album_tracks_raw("B1") == []
 
+    def test_reponse_vide_est_un_bridage(self):
+        """Un JSONDecodeError (réponse vide) n'est pas un album sans pistes :
+        None, que le run distingue (2026-10-18, il remontait jusqu'au flux)."""
+        import json
+
+        yt = _FauxYT(album=json.JSONDecodeError("Expecting value", "", 0))
+        assert _api(yt).get_album_tracks_raw("B1") is None
+
 
 class TestComptesDeVuesEnLot:
     def _api_avec_reponses(self, monkeypatch, reponses):

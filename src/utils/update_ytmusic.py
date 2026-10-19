@@ -498,6 +498,8 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         "matched": 0,
         "unmatched": 0,
         "albums_processed": 0,
+        #: Pages d'album à réponse vide (bridage YTM) : non lues ce run.
+        "albums_brides": [],
         "yt_api_calls": 0,
         "unmatched_titles": [],
         "feats_covered": 0,  # morceaux hors canal résolus via un lien YouTube
@@ -625,6 +627,11 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
 
     for album_info in albums if canal_ok else []:
         raw_tracks = api.get_album_tracks_raw(album_info["browseId"])
+        if raw_tracks is None:
+            # Bridé : l'album est sauté, pas vidé. Ses vidéos déjà connues en
+            # base restent mesurées (étape 3b, par lien) ; le bilan le dit.
+            result["albums_brides"].append(album_info["title"])
+            continue
         tracks_by_album[album_info["title"]] = raw_tracks
         all_video_ids.extend(t["video_id"] for t in raw_tracks if t.get("video_id"))
 

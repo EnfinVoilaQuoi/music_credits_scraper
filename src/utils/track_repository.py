@@ -556,6 +556,22 @@ class TrackRepository:
             # donc de ses sœurs au moment même où elle naît, ce qui rend l'ajout
             # d'un artiste déjà couvert par un autre presque gratuit.
             if track.id:
+                # Constat d'instrumental NEUF (la page Genius affiche « This song
+                # is an instrumental ») : ni paroles ni LRC (décision 2026-10-09),
+                # sœurs comprises — AVANT l'union, qui regarnirait le texte. Le
+                # COALESCE ci-dessus ne sait pas vider : les runs crédits des
+                # 13-14/10 ont laissé 11 fiches constatées avec leurs anciennes
+                # paroles (Kanye « Every Hour (Piano Solo) », MC Solaar « Outro »…).
+                if (
+                    track.lyrics.instrumental is True
+                    and not track.lyrics.text
+                    and self._paroles_a_retirer(conn, track.id, track.genius_id)
+                ):
+                    self._poser_constat_instrumental(conn, track.id)
+                    track.lyrics.present = False
+                    track.lyrics.synced = None
+                    track.lyrics.synced_source = None
+                    track.lyrics.synced_confidence = None
                 # Crédits relus (page Genius, disque Discogs) : la source est
                 # celle de TOUTES les sœurs. Leurs crédits de cette source
                 # partent AVANT l'union, qui ne sait qu'ajouter et réinjecterait
@@ -2320,30 +2336,50 @@ class TrackRepository:
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
-
-                def poser(tid: int) -> None:
-                    conn.execute(
-                        text(
-                            "UPDATE tracks SET instrumental = 1, lyrics = NULL, has_lyrics = 0, "
-                            "lyrics_synced = NULL, lyrics_synced_source = NULL, "
-                            "lyrics_synced_confidence = NULL, updated_at = :now WHERE id = :id"
-                        ),
-                        {"id": tid, "now": datetime.now()},
-                    )
-                    conn.execute(
-                        text(
-                            "DELETE FROM observations WHERE track_id = :id "
-                            "AND field = 'lyrics_synced'"
-                        ),
-                        {"id": tid},
-                    )
-
-                poser(track_id)
-                effacer_chez_les_soeurs(conn, track_id, poser)
+                self._poser_constat_instrumental(conn, track_id)
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur constater_instrumental({track_id}): {e}")
             return False
+
+    @staticmethod
+    def _poser_constat_instrumental(conn, track_id: int) -> None:
+        """Corps de `constater_instrumental`, dans la transaction de l'appelant
+        (aussi `save_track`, quand l'objet porte un constat neuf)."""
+
+        def poser(tid: int) -> None:
+            conn.execute(
+                text(
+                    "UPDATE tracks SET instrumental = 1, lyrics = NULL, has_lyrics = 0, "
+                    "lyrics_synced = NULL, lyrics_synced_source = NULL, "
+                    "lyrics_synced_confidence = NULL, updated_at = :now WHERE id = :id"
+                ),
+                {"id": tid, "now": datetime.now()},
+            )
+            conn.execute(
+                text("DELETE FROM observations WHERE track_id = :id AND field = 'lyrics_synced'"),
+                {"id": tid},
+            )
+
+        poser(track_id)
+        effacer_chez_les_soeurs(conn, track_id, poser)
+
+    @staticmethod
+    def _paroles_a_retirer(conn, track_id: int, genius_id) -> bool:
+        """La fiche ou une sœur porte encore paroles, LRC ou observation LRC."""
+        ids = [track_id, *ids_soeurs(conn, track_id, genius_id)[0]]
+        cible = bindparam("ids", expanding=True)
+        return bool(
+            conn.execute(
+                text(
+                    "SELECT 1 FROM tracks WHERE id IN :ids AND ((lyrics IS NOT NULL "
+                    "AND lyrics <> '') OR lyrics_synced IS NOT NULL) UNION ALL "
+                    "SELECT 1 FROM observations WHERE track_id IN :ids "
+                    "AND field = 'lyrics_synced' LIMIT 1"
+                ).bindparams(cible),
+                {"ids": ids},
+            ).first()
+        )
 
     def lever_constat_instrumental(self, track_id: int) -> bool:
         """Remet le constat « instrumental » à NULL (jamais constaté), sœurs

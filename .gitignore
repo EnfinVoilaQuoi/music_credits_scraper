@@ -130,6 +130,7 @@ scripts/*
 !scripts/audit_spotify_ids.py
 !scripts/audit_donnees.py
 !scripts/repair_spotify_ids.py
+!scripts/accepter_id_spotify.py
 !scripts/repair_deezer_ids.py
 !scripts/repair_chimeres_genius.py
 !scripts/repair_relation_artiste.py

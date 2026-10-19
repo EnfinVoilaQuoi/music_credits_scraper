@@ -216,6 +216,37 @@ class TestSuppressionEtFusion:
 
         assert len(data_manager.get_track_videos(garde.id)) == 1
 
+    def test_la_fusion_fait_tomber_le_refus_d_une_regle(self, data_manager):
+        """Médine (2026-10-13) : le YTM retire « 17-Oct » de « 17 Octobre » parce
+        que la fiche « 17-Oct » la porte ; fusionnées, le motif disparaît — la
+        vidéo passe, et le refus ne reste pas en invariant cassé."""
+        from src.utils import corrections_fiches as cf
+
+        artist = _artiste(data_manager)
+        garde = _morceau(data_manager, artist, "17 Octobre")
+        doublon = _morceau(data_manager, artist, "17-Oct")
+        data_manager.record_track_videos(doublon.id, [TrackVideo(video_id="o" * 11, kind="audio")])
+        cf.memoriser_video_refusee(garde, "o" * 11, origine="regle:autre_version")
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        assert [v.video_id for v in data_manager.get_track_videos(garde.id)] == ["o" * 11]
+        assert cf.videos_refusees(garde) == set()
+
+    def test_la_fusion_respecte_un_refus_a_la_main(self, data_manager):
+        from src.utils import corrections_fiches as cf
+
+        artist = _artiste(data_manager)
+        garde = _morceau(data_manager, artist, "Déluge")
+        doublon = _morceau(data_manager, artist, "Deluge")
+        data_manager.record_track_videos(doublon.id, [TrackVideo(video_id="m" * 11, kind="audio")])
+        cf.memoriser_video_refusee(garde, "m" * 11)
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        assert data_manager.get_track_videos(garde.id) == []
+        assert cf.videos_refusees(garde) == {"m" * 11}
+
 
 class TestVuesYtmApresFusion:
     """CORRECTIFS 1.4 (2026-10-09) : le total YTM de la fiche gardée se

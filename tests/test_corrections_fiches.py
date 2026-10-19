@@ -325,3 +325,27 @@ def test_les_corrections_quittent_le_fichier_pour_la_base(tmp_path, monkeypatch,
     assert par_fiche(cf.charger()) == par_fiche(lu_avant)
     assert cf.genius_ids_absorbes("A2H") == {2}
     assert cf.migrer_corrections_vers_la_base() == {}
+
+
+def test_une_acceptation_se_memorise_et_s_oublie(data_manager):
+    """Le pendant des refus (e58, 2026-10-19) : un ID juste que le gate ne peut
+    pas prouver — Diam's « Température - Live 2006 », crédité à 113."""
+    fiche = _t("Température - Live 2006", "Diam's", genius_id=7)
+    assert cf.memoriser_id_accepte(fiche, "SPA") is True
+    assert cf.memoriser_id_accepte(fiche, "SPA") is False
+    assert cf.ids_acceptes(fiche) == {"SPA"}
+    assert cf.ids_refuses(fiche) == set()
+    assert cf.ids_acceptes(_t("Autre", "Diam's", genius_id=8)) == set()
+    assert cf.oublier_id_accepte(fiche, "SPA") is True
+    assert cf.ids_acceptes(fiche) == set()
+
+
+def test_le_gate_accepte_un_id_accepte_a_la_main_mais_la_duree_garde(data_manager):
+    temperature = _t("Température - Live 2006", "Diam's", genius_id=7)
+    temperature.duration = 55
+    identite = {"name": "Température - Live 2006", "artists": ["113"], "duration": 55}
+    assert valider_identite(temperature, "SPA", lambda sid: identite) is False
+    cf.memoriser_id_accepte(temperature, "SPA")
+    assert valider_identite(temperature, "SPA", lambda sid: identite) is True
+    # Accepté ne veut pas dire aveugle : une autre durée, c'est une autre piste.
+    assert valider_identite(temperature, "SPA", lambda sid: {**identite, "duration": 300}) is False

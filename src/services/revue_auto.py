@@ -63,7 +63,7 @@ def _corriger_lrc(dm, track, cas: Cas) -> tuple[str, dict]:
         raise LookupError("la fiche n'a plus de LRC")
     # Mémorisé d'abord : le résolveur ne le retiendra plus, quelle que soit la
     # source qui le resservirait.
-    memoriser_lrc_refuse(track, lrc)
+    memoriser_lrc_refuse(track, lrc, origine=f"regle:{cas.detecteur}")
     retirees: list[dict] = []
     dm.retirer_lrc(track.id, lrc, retirees=retirees)
     track.lyrics.synced = None
@@ -79,7 +79,7 @@ def _corriger_certif(dm, track, cas: Cas) -> tuple[str, dict]:
 
     entree = cas.preuves["certification"]
     # Mémorisée d'abord : `apply_certifications` ne la rattachera plus.
-    memoriser_certif_refusee(track, entree)
+    memoriser_certif_refusee(track, entree, origine=f"regle:{cas.detecteur}")
     cle = cle_certif(entree)
     track.certs.entries = [e for e in track.certs.entries if cle_certif(e) != cle]
     dm.record_certifications(track.id, track.certs.entries, track.certs.album_entries)

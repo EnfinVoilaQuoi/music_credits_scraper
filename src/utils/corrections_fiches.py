@@ -152,9 +152,10 @@ def _cle(nature: str, valeur) -> str:
     return str(valeur)
 
 
-def _lignes(track, nature: str) -> list[dict]:
-    """Les refus de `nature` qui visent la fiche — et, pour une donnée que les
-    sœurs partagent, la même page Genius chez tout artiste."""
+def _lignes(track, nature: str, table: str = "refus") -> list[dict]:
+    """Les refus (ou les `acceptations`) de `nature` qui visent la fiche — et,
+    pour une donnée que les sœurs partagent, la même page Genius chez tout
+    artiste."""
     artiste = track.artist.name if track.artist else None
     if moteur is None or not artiste:
         return []
@@ -166,7 +167,8 @@ def _lignes(track, nature: str) -> list[dict]:
             lignes = (
                 conn.execute(
                     text(
-                        "SELECT genius_id, artiste, titre, album, valeur, detail FROM refus "
+                        "SELECT genius_id, artiste, titre, album, valeur, detail"
+                        f"{', origine' if table == 'refus' else ''} FROM {table} "
                         "WHERE nature = :n AND (artiste = :a OR genius_id = :g)"
                     ),
                     {"n": nature, "a": artiste, "g": track.genius_id},
@@ -175,7 +177,7 @@ def _lignes(track, nature: str) -> list[dict]:
                 .all()
             )
     except SQLAlchemyError as e:
-        logger.warning(f"Refus illisibles ({nature}) : {e} — aucun refus appliqué")
+        logger.warning(f"{table.capitalize()} illisibles ({nature}) : {e} — rien d'appliqué")
         return []
     gardees = []
     for r in lignes:
@@ -195,8 +197,11 @@ def _lignes(track, nature: str) -> list[dict]:
     return gardees
 
 
-def _memoriser(track, nature: str, valeur) -> bool:
-    """Consigne un refus pour la fiche. Rend False s'il y était déjà."""
+def _memoriser(
+    track, nature: str, valeur, table: str = "refus", origine: str | None = None
+) -> bool:
+    """Consigne un refus (ou une acceptation) pour la fiche. Rend False s'il y
+    était déjà."""
     artiste = track.artist.name if track.artist else None
     if moteur is None or not artiste or valeur in (None, ""):
         return False
@@ -211,10 +216,23 @@ def _memoriser(track, nature: str, valeur) -> bool:
         nature,
         valeur,
         datetime.now().isoformat(timespec="seconds"),
+        table=table,
+        origine=origine,
     )
 
 
-def _inserer(designation, artiste, titre, album, nature, valeur, le, conn=None) -> bool:
+def _inserer(
+    designation,
+    artiste,
+    titre,
+    album,
+    nature,
+    valeur,
+    le,
+    conn=None,
+    table: str = "refus",
+    origine: str | None = None,
+) -> bool:
     from sqlalchemy import text
 
     params = {
@@ -228,10 +246,16 @@ def _inserer(designation, artiste, titre, album, nature, valeur, le, conn=None) 
         "detail": json.dumps(valeur, ensure_ascii=False) if isinstance(valeur, dict) else None,
         "le": le,
     }
+    # `origine` n'existe que dans `refus` (e59) : les acceptations sont toujours
+    # à la main.
+    avec_origine = table == "refus" and origine is not None
+    if avec_origine:
+        params["origine"] = origine
     sql = text(
-        "INSERT OR IGNORE INTO refus (cle_fiche, genius_id, artiste, titre, album, nature, "
-        "valeur, detail, decide_le) VALUES (:cle_fiche, :gid, :artiste, :titre, :album, "
-        ":nature, :valeur, :detail, :le)"
+        f"INSERT OR IGNORE INTO {table} (cle_fiche, genius_id, artiste, titre, album, nature, "
+        f"valeur, detail, decide_le{', origine' if avec_origine else ''}) VALUES (:cle_fiche, "
+        ":gid, :artiste, :titre, :album, :nature, :valeur, :detail, "
+        f":le{', :origine' if avec_origine else ''})"
     )
     if conn is not None:
         return bool(conn.execute(sql, params).rowcount)
@@ -239,7 +263,7 @@ def _inserer(designation, artiste, titre, album, nature, valeur, le, conn=None) 
         return bool(c.execute(sql, params).rowcount)
 
 
-def _oublier(track, nature: str, valeur) -> bool:
+def _oublier(track, nature: str, valeur, table: str = "refus") -> bool:
     """Pendant de `_memoriser` : retire le refus de la fiche (une correction
     automatique qu'on RÉTABLIT). Rend False s'il n'y était pas."""
     artiste = track.artist.name if track.artist else None
@@ -251,7 +275,7 @@ def _oublier(track, nature: str, valeur) -> bool:
         return bool(
             conn.execute(
                 text(
-                    "DELETE FROM refus WHERE cle_fiche = :c AND artiste = :a "
+                    f"DELETE FROM {table} WHERE cle_fiche = :c AND artiste = :a "
                     "AND nature = :n AND valeur = :v"
                 ),
                 {
@@ -266,6 +290,84 @@ def _oublier(track, nature: str, valeur) -> bool:
 
 def ids_refuses(track) -> set[str]:
     return {r["valeur"] for r in _lignes(track, "id_spotify")}
+
+
+def origine_du_refus(track, nature: str, valeur) -> str | None:
+    """« regle:<code> » quand une RÈGLE a posé ce refus, None quand c'est une
+    décision à la main (ou un refus d'avant e59, 2026-10-19). Le gate s'en sert
+    pour ne plus dire « retiré à la main » d'un refus automatique."""
+    cle = _cle(nature, valeur)
+    return next((r.get("origine") for r in _lignes(track, nature) if r["valeur"] == cle), None)
+
+
+def refus_videos_a_la_fusion(conn, keep_id: int, delete_id: int) -> set[str]:
+    """Une fusion dans `keep_id` (2026-10-19) : les vidéos de `delete_id` que
+    `keep_id` a refusées. Le refus d'une RÈGLE tombe — son motif, « elle est à
+    l'autre fiche », disparaît avec la fusion (Médine « 17-Oct » fusionnée dans
+    « 17 Octobre » le 2026-10-13 : le refus restait, la vidéo revenait). Celui
+    fait À LA MAIN tient : ces vidéos sont rendues pour ne PAS être transférées.
+    `conn` : la transaction de la fusion (une seconde connexion se bloquerait)."""
+    from sqlalchemy import text
+
+    fiche = conn.execute(
+        text(
+            "SELECT t.genius_id, t.title, t.album, a.name FROM tracks t "
+            "LEFT JOIN artists a ON a.id = t.artist_id WHERE t.id = :k"
+        ),
+        {"k": keep_id},
+    ).first()
+    videos = [
+        r[0]
+        for r in conn.execute(
+            text("SELECT video_id FROM track_videos WHERE track_id = :d"), {"d": delete_id}
+        )
+    ]
+    if fiche is None or not fiche[3] or not videos:
+        return set()
+    genius_id, titre, album, artiste = fiche
+    designation = {"genius_id": genius_id} if genius_id else {"titre": titre, "album": album}
+    marques = ", ".join(f":v{n}" for n in range(len(videos)))
+    params = {
+        "c": _cle_fiche(designation),
+        "a": artiste,
+        **{f"v{n}": v for n, v in enumerate(videos)},
+    }
+    # Clé par page Genius : vaut pour tout artiste (PAR_ENREGISTREMENT) ; par
+    # titre + album : pour l'artiste de la fiche seulement.
+    portee = "cle_fiche = :c" + ("" if genius_id else " AND artiste = :a")
+    conn.execute(
+        text(
+            f"DELETE FROM refus WHERE {portee} AND nature = 'video' "
+            f"AND origine LIKE 'regle:%' AND valeur IN ({marques})"
+        ),
+        params,
+    )
+    return {
+        r[0]
+        for r in conn.execute(
+            text(
+                f"SELECT valeur FROM refus WHERE {portee} AND nature = 'video' "
+                f"AND valeur IN ({marques})"
+            ),
+            params,
+        )
+    }
+
+
+def ids_acceptes(track) -> set[str]:
+    """IDs Spotify ACCEPTÉS à la main (table `acceptations`, e58) : le gate ne
+    leur oppose plus ni l'artiste, ni l'homonyme, ni le titre — la durée garde.
+    Spotify ne crédite que 113 sur le « Température - Live 2006 » de Diam's ;
+    SDM « Dans la ride » est rangé sous le profil d'un autre SDM."""
+    return {r["valeur"] for r in _lignes(track, "id_spotify", "acceptations")}
+
+
+def memoriser_id_accepte(track, spotify_id: str) -> bool:
+    return _memoriser(track, "id_spotify", spotify_id, "acceptations")
+
+
+def oublier_id_accepte(track, spotify_id: str) -> bool:
+    return _oublier(track, "id_spotify", spotify_id, "acceptations")
 
 
 def deezer_refuses(track) -> set[int]:
@@ -285,6 +387,50 @@ def genius_ids_absorbes(artiste: str) -> set[int]:
         for e in charger().get(artiste, [])
         if e.get("fusionner_dans") and (e.get("fiche") or {}).get("genius_id") is not None
     }
+
+
+def fiches_par_id(track_ids) -> dict:
+    """`{track_id: Track}` réduits à leur DÉSIGNATION (artiste, titre, album,
+    page Genius) et à ce que le gate Spotify regarde (durée, durées observées,
+    featuring) — de quoi lire leurs refus et acceptations hors de l'app
+    (scripts de réparation et d'acceptation)."""
+    ids = sorted({int(t) for t in track_ids or []})
+    if moteur is None or not ids:
+        return {}
+    from sqlalchemy import text
+
+    from src.models import Artist, Track
+
+    marques = ", ".join(f":t{n}" for n in range(len(ids)))
+    with moteur.connect() as conn:
+        lignes = conn.execute(
+            text(
+                "SELECT t.id, t.title, t.album, t.genius_id, a.name, t.duration, "
+                "t.is_featuring, t.primary_artist_name FROM tracks t "
+                f"JOIN artists a ON a.id = t.artist_id WHERE t.id IN ({marques})"
+            ),
+            {f"t{n}": tid for n, tid in enumerate(ids)},
+        ).all()
+        durees = conn.execute(
+            text(
+                "SELECT track_id, source, value FROM observations "
+                f"WHERE field = 'duration' AND track_id IN ({marques})"
+            ),
+            {f"t{n}": tid for n, tid in enumerate(ids)},
+        ).all()
+    fiches = {}
+    for tid, titre, album, genius_id, artiste, duree, feat, principal in lignes:
+        fiche = Track(title=titre, artist=Artist(name=artiste), album=album)
+        fiche.id, fiche.genius_id, fiche.duration = tid, genius_id, duree
+        fiche.is_featuring, fiche.primary_artist_name = bool(feat), principal
+        fiche.durations_observees = {}
+        fiches[tid] = fiche
+    for tid, source, valeur in durees:
+        try:
+            fiches[tid].durations_observees[source] = int(float(valeur))
+        except (TypeError, ValueError):
+            continue
+    return fiches
 
 
 def designation_de(track) -> dict:
@@ -363,8 +509,8 @@ def certifs_refusees(track) -> set[tuple]:
     return {tuple(json.loads(r["valeur"])) for r in _lignes(track, "certif")}
 
 
-def memoriser_certif_refusee(track, entree: dict) -> None:
-    _memoriser(track, "certif", _sous_entree_certif(entree))
+def memoriser_certif_refusee(track, entree: dict, origine: str | None = None) -> None:
+    _memoriser(track, "certif", _sous_entree_certif(entree), origine=origine)
 
 
 def oublier_certif_refusee(track, entree: dict) -> bool:
@@ -378,8 +524,8 @@ def videos_refusees(track) -> set[str]:
     return {r["valeur"] for r in _lignes(track, "video")}
 
 
-def memoriser_video_refusee(track, video_id: str) -> None:
-    _memoriser(track, "video", video_id)
+def memoriser_video_refusee(track, video_id: str, origine: str | None = None) -> None:
+    _memoriser(track, "video", video_id, origine=origine)
 
 
 def empreinte_lrc(lrc: str | None) -> str:
@@ -397,8 +543,8 @@ def lrc_refuses(track) -> set[str]:
     return {r["valeur"] for r in _lignes(track, "lrc")}
 
 
-def memoriser_lrc_refuse(track, lrc: str) -> None:
-    _memoriser(track, "lrc", empreinte_lrc(lrc))
+def memoriser_lrc_refuse(track, lrc: str, origine: str | None = None) -> None:
+    _memoriser(track, "lrc", empreinte_lrc(lrc), origine=origine)
 
 
 def oublier_lrc_refuse(track, lrc: str) -> bool:

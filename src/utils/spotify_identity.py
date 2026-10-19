@@ -339,12 +339,18 @@ def noms_attendus(track) -> list[str]:
     Pour un FEATURING, c'est l'artiste PRINCIPAL qu'il faut retrouver : Spotify
     ne crédite pas toujours l'invité, et exiger le nom de la ligne produirait des
     faux positifs (mesuré : 6 sur 86).
+
+    Hors featuring, une fiche dont la page Genius est à un AUTRE (principal ≠
+    artiste) est la piste de cet autre sur un disque de l'artiste : interlude
+    instrumental de Mani Deïz sur *… (points de suspension)* de Lucio
+    Bukowski, titres d'invités des compilations de Booba (86 fiches,
+    2026-10-19). Spotify crédite cet autre seul — c'est lui qu'on attend.
     """
     artiste = track.artist
     # Frontière d'objet : `track.artist` est un `Artist` dans l'application, une
     # chaîne dans certains harnais — idiome déjà en place dans le provider.
     noms = [artiste.name if hasattr(artiste, "name") else str(artiste)]
-    if track.is_featuring and track.primary_artist_name:
+    if track.primary_artist_name:
         noms.append(track.primary_artist_name)
     return [n for n in noms if n]
 
@@ -355,6 +361,7 @@ def identite_concorde(
     *,
     tolerance: int = TOLERANCE_DUREE,
     titres_tranches: bool = False,
+    accepte: bool = False,
 ):
     """Le morceau servi par Spotify est-il celui-ci ? → `(verdict, motif)`.
 
@@ -391,6 +398,10 @@ def identite_concorde(
     aux décisions HUMAINES (dialogue Kworb, où l'utilisateur a lu les deux
     titres et dit que la ligne « Dolce Camara - Snight B Remix » EST « DCR
     (Dolce Camara Remix) »). L'artiste et la durée continuent de garder.
+
+    `accepte=True` : l'ID est ACCEPTÉ à la main (`est_accepte`, table
+    `acceptations`) — l'artiste, l'homonyme et le titre sont désarmés, la
+    DURÉE garde seule (un ID accepté dont la piste change ne passe plus).
     """
     if not identite:
         return True, ""
@@ -398,7 +409,8 @@ def identite_concorde(
     artistes = [a for a in identite.get("artists") or [] if a]
     attendus = noms_attendus(track)
     if (
-        artistes
+        not accepte
+        and artistes
         and attendus
         and not uri_attendue_creditee(track, identite)
         and not any(names_match_as_words(n, a) for n in attendus for a in artistes)
@@ -406,9 +418,10 @@ def identite_concorde(
         return False, (
             f"artiste : Spotify crédite {', '.join(artistes)}, attendu {' ou '.join(attendus)}"
         )
-    homonyme = artiste_homonyme(track, identite)
+    homonyme = None if accepte else artiste_homonyme(track, identite)
     if homonyme:
         return False, homonyme
+    titres_tranches = titres_tranches or accepte
 
     titre_spotify = identite.get("name") or ""
     if not titres_tranches and variante_etrangere(track, identite):
@@ -662,13 +675,29 @@ def _juger(
     """
     # Un ID retiré À LA MAIN (data/corrections/fiches.json) ne revient pas,
     # quelle que soit la source qui le repropose.
-    from src.utils.corrections_fiches import ids_refuses
+    from src.utils.corrections_fiches import ids_refuses, origine_du_refus
 
     if spotify_id in ids_refuses(track):
-        # Décision déjà prise par un humain : rien à regarder (INFO, 2026-10-19 —
-        # en WARNING, chaque run la remontait comme un problème).
-        logger.info(f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — retiré à la main")
+        # Décision déjà prise : rien à regarder (INFO, 2026-10-19 — en WARNING,
+        # chaque run la remontait comme un problème). Son origine est dite :
+        # une règle n'est pas une main (e59).
+        origine = origine_du_refus(track, "id_spotify", spotify_id)
+        par = (
+            f"retiré par la règle {origine.removeprefix('regle:')}"
+            if origine
+            else "retiré à la main"
+        )
+        logger.info(f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — {par}")
         return False
+    if est_accepte(track, spotify_id):
+        # Le pendant : un ID ACCEPTÉ à la main ne se juge plus que sur sa durée.
+        accepte, motif = identite_concorde(track, identite, tolerance=tolerance, accepte=True)
+        if not accepte:
+            logger.warning(
+                f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — accepté à la "
+                f"main, mais {motif}"
+            )
+        return accepte
     autre = None if titres_tranches else fiche_du_titre_spotify(track, identite)
     if autre is not None:
         logger.warning(
@@ -695,6 +724,16 @@ def _juger(
     if not accepte:
         logger.warning(f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — {motif}")
     return accepte
+
+
+def est_accepte(track, spotify_id: str | None) -> bool:
+    """L'ID a-t-il été ACCEPTÉ à la main pour cette fiche (`acceptations`) ?
+    Lu par le gate et par l'audit, qui jugent ainsi du même verdict."""
+    if not spotify_id:
+        return False
+    from src.utils.corrections_fiches import ids_acceptes
+
+    return spotify_id in ids_acceptes(track)
 
 
 def valider_identite(

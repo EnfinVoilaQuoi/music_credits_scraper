@@ -22,7 +22,11 @@ from src.models.track import CreditRole
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.codes_barres import cle_upc
-from src.utils.corrections_fiches import credits_refuses, videos_refusees
+from src.utils.corrections_fiches import (
+    credits_refuses,
+    refus_videos_a_la_fusion,
+    videos_refusees,
+)
 from src.utils.credits_genius_api import (
     purger_provisoires_couverts,
     sans_provisoires_couverts,
@@ -1355,6 +1359,15 @@ class TrackRepository:
                 # 1.4) : les deux fiches ont pu relever la même vidéo à des dates
                 # différentes.
                 total_sans_video = self._total_sans_video(conn, (keep_id, delete_id))
+                # Refus de vidéo du morceau conservé (2026-10-19) : celui d'une
+                # RÈGLE tombe avec la fusion, celui fait À LA MAIN tient — la
+                # vidéo du doublon ne passe alors pas.
+                refusees = refus_videos_a_la_fusion(conn, keep_id, delete_id)
+                for video_id in refusees:
+                    conn.execute(
+                        text("DELETE FROM track_videos WHERE track_id = :d AND video_id = :v"),
+                        {"d": delete_id, "v": video_id},
+                    )
                 conn.execute(
                     text("""
                     UPDATE track_videos SET

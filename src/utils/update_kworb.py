@@ -34,6 +34,7 @@ from src.utils.discogs_identity import nom_sans_suffixe
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import (
     artiste_etranger,
+    est_accepte,
     identite_concorde,
     valider_identite,
 )
@@ -492,9 +493,13 @@ def _departager_homonymes(lignes: list[dict], track, lire_identite) -> tuple[lis
     retenues, ecartees = [], []
     for x in lignes:
         identite = identites.get(x.get("spotify_id"))
-        etranger = identite is not None and (
-            artiste_etranger(track, identite)
-            or (generique and not identite_concorde(track, identite)[0])
+        etranger = (
+            identite is not None
+            and not est_accepte(track, x.get("spotify_id"))
+            and (
+                artiste_etranger(track, identite)
+                or (generique and not identite_concorde(track, identite)[0])
+            )
         )
         (ecartees if etranger else retenues).append(x)
     if not retenues:

@@ -962,7 +962,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         vid_counts[track_id].pop(video_id, None)
         videos_vues.get(track_id, {}).pop(video_id, None)
         fiche = tracks_par_id[track_id]
-        memoriser_video_refusee(fiche, video_id)
+        memoriser_video_refusee(fiche, video_id, origine="regle:autre_version")
         data_manager.forget_track_video(track_id, video_id)
         if video_id in (fiche.youtube_url or ""):
             data_manager.clear_track_youtube_link(track_id)

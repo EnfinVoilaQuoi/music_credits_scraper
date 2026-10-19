@@ -1504,7 +1504,7 @@ class TrackDetailsWindow:
         emporte 4 observations sans le dire serait une mauvaise surprise.
         """
         from src.utils.spotify_audit import rejeter_spotify_id
-        from src.utils.spotify_identity import identite_concorde, lire_identite_http
+        from src.utils.spotify_identity import est_accepte, identite_concorde, lire_identite_http
 
         principal = track.spotify_id
         if not principal:
@@ -1522,7 +1522,7 @@ class TrackDetailsWindow:
                     "Un identifiant non vérifiable n'est pas pour autant fautif.",
                 )
                 return
-            ok, motif = identite_concorde(track, identite)
+            ok, motif = identite_concorde(track, identite, accepte=est_accepte(track, principal))
             artistes = ", ".join(identite["artists"])
             duree = f"{identite['duration']} s" if identite["duration"] else "durée inconnue"
             detail = f"Spotify sert :\n\n« {identite['name'] }»\n{artistes}\n{duree}"

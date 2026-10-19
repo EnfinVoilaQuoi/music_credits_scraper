@@ -721,10 +721,36 @@ refus = Table(
     Column("valeur", Text, nullable=False),
     Column("detail", Text),
     Column("decide_le", TIMESTAMP),
+    # e59 (2026-10-19) : qui a refusé — NULL = à la main (ou d'avant e59),
+    # « regle:<code> » = une règle automatique, dont le motif peut tomber.
+    Column("origine", Text),
     UniqueConstraint("cle_fiche", "artiste", "nature", "valeur"),
     sqlite_autoincrement=True,
 )
 Index("ix_refus_genius_nature", refus.c.genius_id, refus.c.nature)
+
+
+# Le pendant de `refus` (e58, 2026-10-19) : une valeur ACCEPTÉE à la main contre
+# un gate qui ne peut pas la prouver — un ID Spotify juste dont Spotify ne
+# crédite pas l'artiste (« Température - Live 2006 » de Diam's, crédité à 113),
+# ou rangé sur le profil d'un homonyme (SDM). Même désignation que `refus`.
+acceptations = Table(
+    "acceptations",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("cle_fiche", Text, nullable=False),
+    Column("genius_id", Integer),
+    Column("artiste", Text, nullable=False),
+    Column("titre", Text),
+    Column("album", Text),
+    Column("nature", Text, nullable=False),
+    Column("valeur", Text, nullable=False),
+    Column("detail", Text),
+    Column("decide_le", TIMESTAMP),
+    UniqueConstraint("cle_fiche", "artiste", "nature", "valeur"),
+    sqlite_autoincrement=True,
+)
+Index("ix_acceptations_genius_nature", acceptations.c.genius_id, acceptations.c.nature)
 
 
 # Les CORRECTIONS de fiches décidées à la main (e49, chantier C lot 3) : le

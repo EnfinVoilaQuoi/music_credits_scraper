@@ -855,3 +855,52 @@ class TestProfilsComposes:
         }
         ok, motif = identite_concorde(t, identite)
         assert not ok and "homonyme" in motif
+
+
+class TestAccepteALaMain:
+    """2026-10-19 : un ID accepté à la main ne se juge plus que sur sa durée."""
+
+    def test_artiste_titre_et_homonyme_desarmes(self):
+        skit = _track("Skit - Dream Bank", "Médine", duree=39)
+        servi = _identite("Skit - Dream Bank", ["Sofiane Pamart"], 39)
+        assert identite_concorde(skit, servi)[0] is False
+        assert identite_concorde(skit, servi, accepte=True) == (True, "")
+        autre_titre = _identite("Dream Bank (Interlude)", ["Sofiane Pamart"], 39)
+        assert identite_concorde(skit, autre_titre, accepte=True) == (True, "")
+
+    def test_la_duree_garde(self):
+        skit = _track("Skit - Dream Bank", "Médine", duree=39)
+        ok, motif = identite_concorde(
+            skit, _identite("Skit - Dream Bank", ["Sofiane Pamart"], 180), accepte=True
+        )
+        assert ok is False and motif.startswith("durée")
+
+
+def test_la_piste_d_un_autre_sur_le_disque_de_l_artiste():
+    """Lucio Bukowski, *… (points de suspension)* : « N'ouvrez pas ce cercueil ! »
+    est l'instrumental de Mani Deïz (page Genius à lui, pas un featuring) —
+    Spotify ne crédite que Mani Deïz, à raison (2026-10-19)."""
+    cercueil = _track("N’ouvrez pas ce cercueil !", "Lucio Bukowski", duree=89)
+    cercueil.primary_artist_name = "Mani Deïz"
+    servi = _identite("N'ouvrez pas ce cercueil !", ["Mani Deïz"], 90)
+    assert identite_concorde(cercueil, servi) == (True, "")
+    assert identite_concorde(cercueil, _identite("Autre chose", ["Mani Deïz"], 300))[0] is False
+    assert (
+        identite_concorde(cercueil, _identite("N'ouvrez pas ce cercueil !", ["Swing"], 90))[0]
+        is False
+    )
+
+
+def test_un_refus_de_regle_ne_se_dit_pas_a_la_main(monkeypatch, caplog):
+    """e59 (2026-10-19) : « retiré à la main » se disait aussi des refus posés
+    par une règle automatique."""
+    import logging
+
+    from src.utils import corrections_fiches
+    from src.utils import spotify_identity as si
+
+    monkeypatch.setattr(corrections_fiches, "ids_refuses", lambda t: {"SP"})
+    monkeypatch.setattr(corrections_fiches, "origine_du_refus", lambda t, n, v: "regle:essai")
+    with caplog.at_level(logging.INFO, logger=si.logger.name):
+        assert si.valider_identite(_track(), "SP", lambda s: None) is False
+    assert any("retiré par la règle essai" in r.getMessage() for r in caplog.records)

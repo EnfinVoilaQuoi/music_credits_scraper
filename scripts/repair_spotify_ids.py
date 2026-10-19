@@ -110,6 +110,21 @@ def depuis_json(chemin: str, *, variantes: bool = True) -> list[dict]:
         ]
 
 
+def acceptes(fautifs: list[dict]) -> set[tuple[int, str]]:
+    """Les `(track_id, spotify_id)` ACCEPTÉS à la main (table `acceptations`,
+    2026-10-19) : jamais retirés, même depuis un JSON d'audit plus ancien que
+    l'acceptation. Remplace les `--exclure` tenus à la main."""
+    from src.utils.corrections_fiches import fiches_par_id
+    from src.utils.spotify_identity import est_accepte
+
+    fiches = fiches_par_id(f["track_id"] for f in fautifs)
+    return {
+        (f["track_id"], f["spotify_id"])
+        for f in fautifs
+        if f["track_id"] in fiches and est_accepte(fiches[f["track_id"]], f["spotify_id"])
+    }
+
+
 def rapport(fautifs: list[dict]) -> None:
     print(f"\n{'─' * 78}")
     print(f"{len(fautifs)} identifiant(s) à retirer\n")
@@ -174,6 +189,14 @@ def main() -> int:
             track_ids=args.seulement,
         )
     )
+    if args.depuis and args.seulement:
+        # `--seulement` filtrait le balayage, pas le JSON : rejoué tel quel, il
+        # retirait TOUT le fichier (2026-10-19).
+        fautifs = [f for f in fautifs if f["track_id"] in set(args.seulement)]
+    epargnes = acceptes(fautifs)
+    if epargnes:
+        fautifs = [f for f in fautifs if (f["track_id"], f["spotify_id"]) not in epargnes]
+        print(f"({len(epargnes)} ligne(s) épargnée(s) : ID accepté(s) à la main)")
     if args.exclure:
         avant = len(fautifs)
         fautifs = [f for f in fautifs if f["track_id"] not in set(args.exclure)]

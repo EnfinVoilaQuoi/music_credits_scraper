@@ -54,15 +54,22 @@ def lignes_a_verifier(
     requete = f"""
         SELECT t.id, t.title, t.duration, t.is_featuring, t.primary_artist_name,
                a.name AS artiste, t.spotify_id AS sid, 1 AS principal,
-               a.id AS artist_id, a.spotify_id AS artiste_spotify_id
+               a.id AS artist_id, a.spotify_id AS artiste_spotify_id,
+               t.genius_id, t.album, 0 AS duree_d_edition
           FROM tracks t JOIN artists a ON a.id = t.artist_id
          WHERE t.spotify_id IS NOT NULL AND t.spotify_id != '' {filtre}
          UNION
-        SELECT t.id, t.title, t.duration, t.is_featuring, t.primary_artist_name,
-               a.name, s.spotify_id, 0, a.id, a.spotify_id
+        SELECT t.id, t.title, COALESCE(e.duration, t.duration), t.is_featuring,
+               t.primary_artist_name, a.name, s.spotify_id, 0, a.id, a.spotify_id,
+               t.genius_id, t.album, e.duration IS NOT NULL
           FROM track_spotify_ids s
           JOIN tracks t ON t.id = s.track_id
           JOIN artists a ON a.id = t.artist_id
+          -- L'ID d'une ÉDITION connue (radio edit, version de *0.9* de
+          -- « Garcimore ») se juge sur la durée de l'édition, pas sur celle de
+          -- l'original (2026-10-19).
+          LEFT JOIN track_editions e
+                 ON e.track_id = t.id AND e.spotify_id = s.spotify_id
          WHERE s.kind = 'edition' {filtre}
          ORDER BY 6, 2
     """
@@ -101,7 +108,11 @@ def lignes_a_verifier(
                 if d:
                     durees.setdefault(int(r[0]), {})[r[1]] = d
     for ligne in uniques:
-        ligne["durations_observees"] = durees.get(ligne["id"], {})
+        # Les durées observées sur la fiche sont celles de l'ORIGINAL : elles ne
+        # témoignent pas pour l'ID d'une édition (jugé sur la durée de l'édition).
+        ligne["durations_observees"] = (
+            {} if ligne.get("duree_d_edition") else durees.get(ligne["id"], {})
+        )
     return uniques
 
 
@@ -120,8 +131,10 @@ def track_de_la_ligne(ligne: dict) -> Track:
         name=ligne["artiste"],
         spotify_id=ligne.get("artiste_spotify_id"),
     )
-    track = Track(title=ligne["title"], artist=artiste)
+    track = Track(title=ligne["title"], artist=artiste, album=ligne.get("album"))
     track.id = ligne["id"]
+    # La désignation de la fiche : ses acceptations à la main s'y lisent.
+    track.genius_id = ligne.get("genius_id")
     track.duration = ligne["duration"]
     track.is_featuring = bool(ligne["is_featuring"])
     track.primary_artist_name = ligne["primary_artist_name"]
@@ -211,6 +224,7 @@ def verifier_lignes(
         TOLERANCE_DUREE,
         artiste_etranger,
         artiste_homonyme,
+        est_accepte,
         identite_concorde,
         lire_identite_http,
         profils_homonymes,
@@ -234,7 +248,12 @@ def verifier_lignes(
         else:
             track = track_de_la_ligne(ligne)
             lectures.append((track, identite))
-            ok, motif = identite_concorde(track, identite, tolerance=tolerance)
+            ok, motif = identite_concorde(
+                track,
+                identite,
+                tolerance=tolerance,
+                accepte=est_accepte(track, ligne["sid"]),
+            )
             if not ok:
                 ecarts.append(
                     {

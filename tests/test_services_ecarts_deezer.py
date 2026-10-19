@@ -67,6 +67,57 @@ class TestClasser:
         ecarts, _ = ed.classer(albums, base, [], NOUS)
         assert {e.nature for e in ecarts} == {"link"}
 
+    def test_titre_a_la_graphie_pres_est_connu(self):
+        """2026-10-18 : Booba « Strass & paillettes » (*Temps mort* 2018) et
+        Flynt « 1 pour la plume » proposés absents — la base les écrit « Strass
+        et paillettes » et « Un pour la plume »."""
+        base = [_track("Strass et paillettes", "Temps mort"), _track("Un pour la plume", "X")]
+        albums = [
+            _album(1, "Temps mort", [_piste(10, "Strass & paillettes")]),
+            _album(2, "X", [_piste(20, "1 pour la plume")]),
+        ]
+        ecarts, _ = ed.classer(albums, base, [], NOUS)
+        assert [(e.nature, e.existing_track.title) for e in ecarts] == [
+            ("link", "Strass et paillettes"),
+            ("link", "Un pour la plume"),
+        ]
+
+    def test_intro_nommee_par_son_disque(self):
+        """Genius écrit « Intro (0.9) », Deezer « Intro » sur *0.9* (Booba,
+        2026-10-18 : proposée absente et cochée). L'Intro d'un AUTRE disque
+        n'en profite pas."""
+        intro_09 = _track("Intro (0.9)", "0.9")
+        base = [_track("Intro", "Autopsie Vol. 3"), intro_09]
+        albums = [_album(1, "0.9", [_piste(10, "Intro")])]
+        ecarts, _ = ed.classer(albums, base, [], NOUS)
+        # Sans durée, un titre générique reste à confirmer — sur la BONNE fiche.
+        assert [(e.nature, e.existing_track.title) for e in ecarts] == [
+            ("link_candidate", "Intro (0.9)")
+        ]
+        intro_09.duration = 200
+        ecarts, _ = ed.classer(albums, base, [], NOUS)
+        assert [(e.nature, e.existing_track.title) for e in ecarts] == [("link", "Intro (0.9)")]
+
+    def test_disque_d_un_autre_connu_par_un_feat_n_est_pas_le_notre(self):
+        """Freeze Corleone invité chez Jack Many (2026-10-18) : le disque était
+        « connu » par sa ligne d'invité, ses 13 autres pistes proposées
+        « absentes » et cochées."""
+        feat = _track("Pas la peine (feat. Nous)", "MJ")
+        feat.is_featuring, feat.primary_artist_name = True, "Ocho"
+        albums = [
+            _album(
+                7,
+                "MJ",
+                [
+                    _piste(70, "Ziak", artist_id=999, contributors=[(999, "Ocho")]),
+                    _piste(71, "MJ", artist_id=999, contributors=[(999, "Ocho"), (NOUS, "Nous")]),
+                ],
+                artist_id=999,
+            )
+        ]
+        ecarts, _ = ed.classer(albums, [feat], [], NOUS)
+        assert [(e.nature, e.titre, e.coche) for e in ecarts] == [("apparition", "MJ", False)]
+
     def test_disque_absent_de_l_artiste_principal(self):
         albums = [_album(2, "Hourvari", [_piste(20, "Wunderlich"), _piste(21, "Ceux qui")])]
         ecarts, _ = ed.classer(albums, [_track("Autre chose")], [], NOUS)
@@ -548,6 +599,13 @@ def test_resume_lisible():
     b.ecarts = [ed.Ecart("absent", _album(1, "Chardons Bleus", [piste]), piste, coche=True)]
     texte = ed.resume(b, "Lucio Bukowski")
     assert "1 écart(s) dont 1 coché(s)" in texte and "[x] ✚ Coal lla" in texte
+
+
+def test_resume_nomme_l_artiste_sans_qu_on_le_passe():
+    """Le hook headless ne passe que le bilan : l'en-tête sortait
+    « Deezer —  (id 390) » (2026-10-18)."""
+    b = ed.BilanEcarts(deezer_id=390, artiste="Booba")
+    assert ed.resume(b).startswith("Deezer — Booba (id 390)")
 
 
 def test_une_edition_de_diffusion_ne_touche_pas_la_fiche():

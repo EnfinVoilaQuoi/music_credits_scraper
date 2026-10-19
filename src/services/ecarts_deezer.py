@@ -56,8 +56,11 @@ from src.utils.title_matching import (
 from src.utils.version_descriptors import (
     MOTS_DE_MEME_MORCEAU,
     Kind,
+    graphies_equivalentes,
     meme_prise,
     parse_variant,
+    titre_generique,
+    titre_sans_son_disque,
     titres_confondus,
 )
 
@@ -214,6 +217,9 @@ class Ecart:
 @dataclass
 class BilanEcarts(Bilan):
     deezer_id: int | None = None
+    #: Nom de l'artiste lu, pour l'en-tête du résumé (le hook headless ne
+    #: reçoit que le bilan : l'en-tête sortait « Deezer —  (id 390) »).
+    artiste: str = ""
     albums_lus: int = 0
     pistes_lues: int = 0
     ecarts: list[Ecart] = field(default_factory=list)
@@ -339,10 +345,31 @@ def _match_existing(
             if normalize_title(track.title) == title_key:
                 return track, "isrc"
     candidats = by_title.get(title_key, [])
+    if album and titre_generique(piste.title):
+        # Genius distingue un titre générique par son DISQUE (« Intro (0.9) »,
+        # « Intro (Vieilles merdes vol.II) ») là où Deezer écrit « Intro » :
+        # Booba, l'Intro de *0.9* proposée absente (2026-10-18). La fiche de CE
+        # disque passe avant toute « Intro » d'un autre.
+        du_disque = [
+            t
+            for ts in by_title.values()
+            for t in ts
+            if t.album
+            and cle_album(t.album) == cle_album(album)
+            and normalize_title(titre_sans_son_disque(t.title, t.album)) == title_key
+        ]
+        candidats = du_disque or candidats
     if not candidats and by_compact:
         # Même titre à l'ESPACE près : « 3 G » / « 3G », « A V L D » / « AVLD »,
         # « POL-AK » / « Polak » — créés en double par les écarts (CORRECTIFS 1.3).
         candidats = by_compact.get(title_key.replace(" ", ""), [])
+    if not candidats:
+        # Même titre à la GRAPHIE près (« Strass & paillettes » / « Strass et
+        # paillettes », « 1 pour la plume » / « Un pour la plume ») : le juge
+        # commun des titres, pas une clé de plus (2026-10-19).
+        candidats = [
+            t for ts in by_title.values() for t in ts if graphies_equivalentes(t.title, piste.title)
+        ]
     if not candidats:
         return None, None
     # Une piste DÉLIÉE à la main ne revient pas sur cette fiche.
@@ -454,6 +481,17 @@ def classer(
             socles.setdefault(k, t)
     cles_albums = {cle_album(t.album) for t in base if t.album}
     cles_albums |= {cle_album(a.get("title")) for a in albums_base if a.get("title")}
+    # Disques que la base ne connaît QUE par des lignes d'invité : celui d'un
+    # autre où l'artiste fait un feat (Freeze Corleone chez Jack Many, *MJ Des
+    # flingues et des roses* : 13 pistes proposées « absentes » et cochées,
+    # 2026-10-18). Pour un disque crédité à un autre, ce n'est pas le nôtre.
+    par_disque: dict[str, list[Track]] = {}
+    for t in base:
+        if t.album:
+            par_disque.setdefault(cle_album(t.album), []).append(t)
+    cles_invite_seulement = {
+        c for c, fiches in par_disque.items() if all(t.is_featuring for t in fiches)
+    }
     ids_albums = {int(a["deezer_album_id"]) for a in albums_base if a.get("deezer_album_id")}
     ecarts: list[Ecart] = []
     jumelles: list[str] = []
@@ -464,7 +502,7 @@ def classer(
             album.id in ids_albums
             or cle in cles_albums
             or base_album_key(normalize_title(album.title), cles_albums) is not None
-        )
+        ) and not (not est_a_nous and cle in cles_invite_seulement)
         inconnues: list[tuple[PisteDeezer, Track | None, bool]] = []
         for p in album.pistes:
             # « Album Version » est parfois porté hors du titre principal : le
@@ -714,7 +752,7 @@ async def detecter_async(
     client, http, dm, artist, *, deezer_id: int, should_stop=None, genius_api=None
 ) -> BilanEcarts:
     """Lit la discographie Deezer et classe les écarts. `client` = `DeezerAPI`."""
-    bilan = BilanEcarts(deezer_id=deezer_id)
+    bilan = BilanEcarts(deezer_id=deezer_id, artiste=artist.name or "")
     should_stop = should_stop or (lambda: False)
     base = dm.discographie_reunie(artist)
     albums_base = dm.get_albums_for_artist(artist.id)
@@ -1243,7 +1281,8 @@ def creer_lignes(
 def resume(bilan: BilanEcarts, artist_name: str = "") -> str:
     c = bilan.compteurs()
     lignes = [
-        f"Deezer — {artist_name} (id {bilan.deezer_id}) : {bilan.albums_lus} disques lus, "
+        f"Deezer — {artist_name or bilan.artiste} (id {bilan.deezer_id}) : "
+        f"{bilan.albums_lus} disques lus, "
         f"{bilan.pistes_lues} pistes, {len(bilan.ecarts)} écart(s) dont {len(bilan.coches())} coché(s)"
     ]
     if not bilan.complete:

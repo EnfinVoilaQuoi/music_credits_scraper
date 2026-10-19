@@ -1896,8 +1896,8 @@
  "attendu": {
   "ecarts": [
    "{\"album\": 298437, \"coche\": false, \"fiche\": 1248, \"motifs\": [\"lien existant : Deezer 307 s / fiche 292 s (reccobeats) — cocher pour délier\"], \"nature\": \"link_review\", \"piste\": 3080194, \"socle\": null, \"titre\": \"La gueule de l'emploi (feat. Sidi Omar)\"}",
-   "{\"album\": 298437, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 3080189, \"socle\": null, \"titre\": \"1 pour la plume\"}",
-   "{\"album\": 512878331, \"coche\": true, \"fiche\": null, \"motifs\": [], \"nature\": \"absent\", \"piste\": 2543399721, \"socle\": null, \"titre\": \"1 pour la plume\"}",
+   "{\"album\": 298437, \"coche\": true, \"fiche\": 1233, \"motifs\": [\"parution déjà connue — fiche à compléter (id Deezer)\"], \"nature\": \"link\", \"piste\": 3080189, \"socle\": null, \"titre\": \"1 pour la plume\"}",
+   "{\"album\": 512878331, \"coche\": true, \"fiche\": 1233, \"motifs\": [\"parution déjà connue — fiche à compléter (id Deezer)\"], \"nature\": \"link\", \"piste\": 2543399721, \"socle\": null, \"titre\": \"1 pour la plume\"}",
    "{\"album\": 6944218, \"coche\": false, \"fiche\": 9720, \"motifs\": [\"même titre, durée différente (Deezer 195 s / base 137 s) — à confirmer\"], \"nature\": \"link_candidate\", \"piste\": 70725368, \"socle\": null, \"titre\": \"Choc frontal\"}",
    "{\"album\": 6944218, \"coche\": false, \"fiche\": null, \"motifs\": [\"version de « Choc frontal »\"], \"nature\": \"version\", \"piste\": 70725369, \"socle\": 9720, \"titre\": \"Choc Frontal (Instrumental)\"}",
    "{\"album\": 6944218, \"coche\": false, \"fiche\": null, \"motifs\": [\"version de « Fidèle à son contexte »\"], \"nature\": \"version\", \"piste\": 70725366, \"socle\": 1237, \"titre\": \"Fidèle à son contexte (Instrumental)\"}",

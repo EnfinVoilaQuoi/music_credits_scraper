@@ -2015,7 +2015,10 @@ class TrackRepository:
         Refuse si une autre fiche de l'artiste porte déjà ce genius_id.
         """
         try:
-            with self.engine.begin() as conn:
+            # Chantier A : paroles et observations bougent (verdicts LRC, date),
+            # et la fiche change de FAMILLE — recalculée avec ses nouvelles sœurs.
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 deja = conn.execute(
                     text(
                         "SELECT id FROM tracks WHERE genius_id = :g AND id != :id AND artist_id = "
@@ -2580,7 +2583,8 @@ class TrackRepository:
         réparer un défaut constaté.
         """
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 conn.execute(
                     text("UPDATE tracks SET relationships = :rels WHERE id = :id"),
                     {"rels": json.dumps(relationships or []), "id": track_id},
@@ -3299,7 +3303,8 @@ class TrackRepository:
         if not candidats:
             return {}
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 avant = (
                     conn.execute(
                         text(
@@ -5197,7 +5202,8 @@ class TrackRepository:
         sans catégorie ne l'efface pas.
         """
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 conn.execute(
                     text(
                         "UPDATE tracks SET youtube_video_views = :views, "
@@ -5237,7 +5243,8 @@ class TrackRepository:
                 )
                 .values(youtube_url=url, youtube_url_source=source, updated_at=datetime.now())
             )
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 conn.execute(stmt)
             return True
         except SQLAlchemyError as e:
@@ -5293,7 +5300,8 @@ class TrackRepository:
         ne le remplace. Vaut pour les lignes SŒURS (même `genius_id`) : c'est
         le même enregistrement, comme ses autres identifiants."""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 gid = conn.execute(
                     text("SELECT genius_id FROM tracks WHERE id = :id"), {"id": track_id}
                 ).scalar()
@@ -5361,7 +5369,8 @@ class TrackRepository:
         rétractable (`force_paroles` a le même besoin pour `instrumental`).
         """
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 conn.execute(
                     text("UPDATE tracks SET unreleased = :v, updated_at = :now WHERE id = :id"),
                     {"v": valeur, "now": datetime.now(), "id": track_id},
@@ -5451,7 +5460,8 @@ class TrackRepository:
                 .where(tracks.c.id == track_id)
                 .values(youtube_url=None, youtube_url_source=None, updated_at=datetime.now())
             )
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
                 conn.execute(stmt)
             return True
         except SQLAlchemyError as e:
@@ -5578,15 +5588,18 @@ class TrackRepository:
         """Réinsère des observations retirées par une correction qu'on RÉTABLIT.
         Une observation plus récente de la même (fiche, champ, source) l'emporte :
         la source a reparlé depuis, on ne la contredit pas. Rend le nombre
-        réinséré. Les champs de DISCOGRAPHIE (durée…) sont ré-arbitrés ici ; les
-        paroles synchronisées le sont par l'appelant (`reverifier_lrc`)."""
+        réinséré. Chantier A : chaque fiche concernée (et ses sœurs) est
+        recalculée en fin de transaction — durée, streams, LRC… — au lieu des
+        seuls champs de discographie (une mesure de streams rétablie laissait la
+        colonne sur le verdict d'avant)."""
         from src.enrichment.reconcile import DISCOGRAPHY_PRIORITIES
 
         n = 0
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
                 a_arbitrer: dict[int, set] = {}
                 for o in lignes:
+                    self._toucher(conn, o["track_id"])
                     if o.get("field") in DISCOGRAPHY_PRIORITIES:
                         a_arbitrer.setdefault(o["track_id"], set()).add(o["field"])
                     n += conn.execute(

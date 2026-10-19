@@ -195,6 +195,25 @@ class TestApresChaqueEcrivain:
         data_manager.delete_track(base["doublon"].id)
         assert _invariants(data_manager) == {}
 
+    def test_mesure_retablie(self, data_manager, base):
+        """`restaurer_observations` (« Rétablir » du panneau) ne ré-arbitrait
+        que la durée, la date et l'ISRC : une mesure de streams rétablie
+        laissait la colonne sur le verdict d'avant (passé par `_ecrire`, revue
+        du 2026-10-19)."""
+        data_manager.restaurer_observations(
+            [
+                {
+                    "track_id": base["durag"].id,
+                    "field": "spotify_streams",
+                    "value": "1234567",
+                    "source": "kworb",
+                    "confidence": None,
+                    "seen_at": "2026-10-01 12:00:00",
+                }
+            ]
+        )
+        assert _invariants(data_manager) == {}
+
     def test_rematerialiser_ne_change_rien_sur_une_base_saine(self, data_manager, base):
         assert data_manager.rematerialiser() == {}
 

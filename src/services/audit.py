@@ -20,6 +20,11 @@ Deux natures de familles, à ne pas confondre :
 
 Le panneau « À trancher » (`services.revue`) reste distinct : il produit des cas
 pour un HUMAIN, avec mémoire des verdicts ; l'audit, lui, compte.
+
+Chaque cas porte une NATURE (2026-10-19) : `erreur` pour les familles de
+l'audit, celle du panneau pour ses cas (décision, à faire par un run, pour
+information). Le CRITÈRE de fin du gel (AUDIT §7) ne compte que les erreurs et
+les décisions ; c'est aussi lui qu'une fin de run compare (`en_hausse`).
 """
 
 from __future__ import annotations
@@ -35,7 +40,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from src.services import vues_comptees
-from src.services.revue import _titre_sans_feat, video_nomme
+from src.services.revue import DECISION, INFORMATION, RUN, _titre_sans_feat, video_nomme
 from src.utils.concordance_paroles import (
     jugeable,
     paroles_de_reference,
@@ -57,12 +62,26 @@ _ABSENCE = re.compile(
 )
 
 
+#: Nature des cas des familles de l'audit (suspicions et invariants).
+ERREUR = "erreur"
+#: Les natures, dans l'ordre d'affichage, et celles que compte le critère de
+#: fin du gel (décision utilisateur 2026-10-19).
+NATURES = {
+    ERREUR: "erreurs",
+    DECISION: "décisions",
+    RUN: "à faire par un run",
+    INFORMATION: "pour information",
+}
+NATURES_DU_CRITERE = (ERREUR, DECISION)
+
+
 @dataclass
 class Cas:
     famille: str
     artiste: str
     pistes: list[int]
     libelle: str
+    nature: str = ERREUR
 
 
 @dataclass
@@ -74,11 +93,30 @@ class Audit:
     def compte(self) -> dict[str, int]:
         return dict(collections.Counter(c.famille for c in self.cas))
 
+    def compte_critere(self) -> dict[str, int]:
+        """`compte()` restreint aux cas du critère (erreurs et décisions)."""
+        return dict(
+            collections.Counter(c.famille for c in self.cas if c.nature in NATURES_DU_CRITERE)
+        )
+
+    def par_nature(self) -> dict[str, int]:
+        compte = dict.fromkeys(NATURES, 0)
+        for c in self.cas:
+            compte[c.nature] += 1
+        return compte
+
+    def critere(self) -> int:
+        """Le chiffre du critère de fin du gel : erreurs + décisions."""
+        return sum(n for nature, n in self.par_nature().items() if nature in NATURES_DU_CRITERE)
+
     def vers_dict(self) -> dict:
         return {
             "date": self.date,
             "perimetre": self.perimetre,
             "compte": self.compte(),
+            "compte_critere": self.compte_critere(),
+            "par_nature": self.par_nature(),
+            "critere": self.critere(),
             "cas": [asdict(x) for x in self.cas],
         }
 
@@ -726,7 +764,7 @@ def familles_revue() -> dict[str, str]:
     créé des cas à trancher »."""
     from src.services import revue
 
-    return {f"revue:{d.code}": f"À TRANCHER — {d.libelle}" for d in revue.tous_les_detecteurs()}
+    return {f"revue:{d.code}": f"panneau — {d.libelle}" for d in revue.tous_les_detecteurs()}
 
 
 def toutes_les_familles() -> dict[str, str]:
@@ -752,6 +790,7 @@ def a_trancher(dm, noms: list[str]) -> list[Cas]:
                     artiste.name,
                     [c.track_id] if c.track_id else [],
                     f"{c.morceau} — {c.motif}",
+                    c.nature,
                 )
             )
     return cas
@@ -811,11 +850,16 @@ def en_hausse(audit: Audit, reference: dict | None) -> dict[str, tuple[int, int]
     """Les familles qui MONTENT par rapport à `reference` (un `vers_dict`) :
     `{famille: (avant, après)}`. Sans référence, rien ne monte — un premier
     audit n'a rien à quoi se comparer, sauf les INVARIANTS dont la cible est
-    zéro : non nuls, ils « montent » toujours."""
-    compte = audit.compte()
+    zéro : non nuls, ils « montent » toujours.
+
+    Seuls comptent les cas du CRITÈRE (erreurs et décisions) : un run qui
+    ajoute des crédits 🎫 à relire ou des vidéos déjà exclues des totaux n'a
+    rien dégradé. Une référence d'avant les natures n'a que `compte` (tous les
+    cas) : la comparaison ne peut qu'y être plus indulgente, une fois."""
+    compte = audit.compte_critere()
     if reference is None:
         return {f: (0, compte[f]) for f in INVARIANTS if compte.get(f)}
-    avant = reference.get("compte", {})
+    avant = reference.get("compte_critere", reference.get("compte", {}))
     return {
         f: (avant.get(f, 0), compte.get(f, 0))
         for f in toutes_les_familles()
@@ -823,24 +867,55 @@ def en_hausse(audit: Audit, reference: dict | None) -> dict[str, tuple[int, int]
     }
 
 
+def _par_nature_et_famille(cas) -> dict[str, collections.Counter]:
+    """`{nature: Counter(famille)}` d'une liste de cas (objets, ou dicts d'un
+    `vers_dict`). Un cas d'une référence d'avant les natures n'en a pas : une
+    famille de l'audit est une erreur, un cas du panneau une décision."""
+    sortie = {nature: collections.Counter() for nature in NATURES}
+    for c in cas:
+        famille = c["famille"] if isinstance(c, dict) else c.famille
+        nature = c.get("nature") if isinstance(c, dict) else c.nature
+        if nature is None:
+            nature = DECISION if famille.startswith("revue:") else ERREUR
+        sortie[nature][famille] += 1
+    return sortie
+
+
 def tableau(audit: Audit, reference: dict | None = None) -> str:
-    compte = audit.compte()
-    ref = (reference or {}).get("compte", {})
+    """Les erreurs de l'audit, puis les cas du panneau en trois blocs —
+    décisions, à faire par un run, pour information — et le CRITÈRE de fin du
+    gel (erreurs + décisions)."""
+    par = _par_nature_et_famille(audit.cas)
+    ref_par = _par_nature_et_famille((reference or {}).get("cas", []))
     lignes = [f"Audit des données — {audit.perimetre} — {audit.date}"]
     if reference:
         lignes.append(f"comparé à : {reference.get('perimetre')} — {reference.get('date')}")
-    lignes.append("")
     revue = familles_revue()
-    for code, libelle in {**FAMILLES, **revue}.items():
-        n = compte.get(code, 0)
-        if code in revue and not n and not ref.get(code):
-            continue  # ~25 détecteurs : seuls ceux qui ont des cas s'affichent
+
+    def ligne(n: int, avant: int, code: str, libelle: str) -> str:
         delta = ""
         if reference:
-            d = n - ref.get(code, 0)
+            d = n - avant
             delta = f"  ({'+' if d > 0 else ''}{d})" if d else "  (=)"
-        lignes.append(f"{n:6}{delta:10}  {code:28} {libelle}")
-    lignes.append(f"\n{len(audit.cas)} cas au total")
+        return f"{n:6}{delta:10}  {code:28} {libelle}"
+
+    lignes.append(f"\n── erreurs : suspicions et invariants ({sum(par[ERREUR].values())}) ──")
+    for code, libelle in FAMILLES.items():
+        lignes.append(ligne(par[ERREUR][code], ref_par[ERREUR][code], code, libelle))
+    for nature in (DECISION, RUN, INFORMATION):
+        lignes.append(f"\n── panneau : {NATURES[nature]} ({sum(par[nature].values())}) ──")
+        for code, libelle in revue.items():
+            n, avant = par[nature][code], ref_par[nature][code]
+            if n or avant:  # ~45 détecteurs : seuls ceux qui ont des cas s'affichent
+                lignes.append(ligne(n, avant, code, libelle))
+    detail_natures = " · ".join(
+        f"{NATURES[nature]} {n}" for nature, n in audit.par_nature().items()
+    )
+    lignes.append(f"\n{len(audit.cas)} cas au total — {detail_natures}")
+    critere = f"CRITÈRE de fin du gel (erreurs + décisions) : {audit.critere()}"
+    if reference and "critere" in reference:
+        critere += f" (avant : {reference['critere']})"
+    lignes.append(critere)
     return "\n".join(lignes)
 
 
@@ -906,7 +981,10 @@ def apres_run(dm, artiste, dossier: Path | None = None) -> tuple[Audit, dict, bo
 def resume_fin_de_run(audit: Audit, hausse: dict, avait_reference: bool) -> str:
     """Le texte unique du bilan d'audit (CLI ; la GUI pourra le reprendre)."""
     compte = audit.compte()
-    lignes = [f"{len(audit.cas)} cas ({audit.perimetre})"]
+    lignes = [
+        f"{len(audit.cas)} cas ({audit.perimetre}), dont {audit.critere()} au critère "
+        "(erreurs + décisions)"
+    ]
     invariants = {f: compte[f] for f in INVARIANTS if compte.get(f)}
     if invariants:
         lignes.append(

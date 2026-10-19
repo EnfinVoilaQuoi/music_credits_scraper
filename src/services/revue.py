@@ -46,7 +46,7 @@ from src.utils.concordance_paroles import (
     paroles_de_reference,
     recouvrement,
 )
-from src.utils.credits_genius_api import SOURCE_API
+from src.utils.credits_genius_api import SOURCE_API, SOURCE_SCRAPE
 from src.utils.duree_youtube import SOURCE_AUDIO
 from src.utils.spotify_identity import CHAMP_ID_PROPOSE, variante_etrangere
 from src.utils.title_matching import cle_album, developper_ligatures, names_match_as_words
@@ -77,6 +77,19 @@ RAPPORT_YTM_SPOTIFY = 10
 #: Recouvrement flou minimal entre le titre d'une fiche et celui d'une vidéo.
 SIMILARITE_VIDEO = 0.8
 
+#: Ce qu'un cas DEMANDE (2026-10-19, mesure de la file : 1 464 cas, dont 601
+#: crédits 🎫 et 143 vidéos 🎬 déjà sans effet). Seules les DÉCISIONS attendent
+#: un humain ; le critère de fin du gel (AUDIT §7) ne compte qu'elles, avec les
+#: erreurs de l'audit. Les deux autres natures restent affichées et comptées,
+#: à part.
+DECISION = "decision"
+#: Un run le tranchera (une donnée encore à lire), pas un humain.
+RUN = "run"
+#: Déjà neutralisé : le cas ne change aucune donnée comptée (des vues exclues
+#: des totaux, une ligne Kworb rattachée à rien).
+INFORMATION = "information"
+NATURES = {DECISION: "à trancher", RUN: "à faire par un run", INFORMATION: "pour information"}
+
 
 @dataclass(frozen=True)
 class Cas:
@@ -90,6 +103,9 @@ class Cas:
     #: EMPREINTE de ses preuves. Un verdict la mémorise ; de nouvelles preuves
     #: (un autre BPM, une autre vidéo) font une autre clé, donc le cas revient.
     cle: str = ""
+    #: `DECISION`, `RUN` ou `INFORMATION` — hors de la clé : changer la nature
+    #: d'un détecteur ne fait revenir aucun cas déjà tranché.
+    nature: str = field(default=DECISION, compare=False)
 
 
 def cle_du_cas(track, preuves: dict) -> str:
@@ -120,6 +136,10 @@ class Detecteur:
     #: La preuve est FORMELLE : le cas se corrige sans attendre l'utilisateur
     #: (`services/revue_auto`, journalisé et rétablissable).
     formel: bool = False
+    #: Nature des cas (`DECISION`, `RUN`, `INFORMATION`) ; `nature_du_cas`,
+    #: `(fiche, preuves, contexte) -> nature`, la décide cas par cas.
+    nature: str = DECISION
+    nature_du_cas: Callable | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +149,9 @@ class DetecteurArtiste:
     icone: str
     #: `contexte -> [(libellé, motif, preuves)]`
     juger: Callable
+    nature: str = DECISION
+    #: `(preuves, contexte) -> nature`
+    nature_du_cas: Callable | None = None
 
 
 @dataclass
@@ -880,6 +903,17 @@ def credits_api_seuls(track, _ctx=None):
     return None
 
 
+def nature_credits_api(track, _preuves, _ctx) -> str:
+    """Sans AUCUN crédit scrapé, la section crédits n'a rien donné : l'étape
+    Crédits la relira (`est_manquant(CREDITS_GENIUS)` ne regarde que la source
+    `genius`) — un run, pas une décision. À côté de crédits scrapés, ce sont
+    les compléments que la page ne montre pas, GARDÉS en 🎫 par décision
+    utilisateur (2026-09-26) : une information."""
+    if any(c.source == SOURCE_SCRAPE for c in track.credits):
+        return INFORMATION
+    return RUN
+
+
 def cle_doublon(titre: str | None) -> str:
     """Le titre à la casse, aux accents et à la ponctuation près — mais AVEC ses
     descripteurs : « Heartless » et « Heartless (Live) » sont deux fiches
@@ -1106,6 +1140,15 @@ def video_etrangere(track, ctx=None):
     )
 
 
+def nature_video_etrangere(track, preuves, _ctx) -> str:
+    """Un lien posé par la page Genius qui ne nomme pas le morceau ne compte
+    déjà pas ses vues (`vues_comptees`, décision utilisateur 2026-10-10) : le
+    cas n'est qu'une information. Venue d'une autre provenance (notre
+    recherche, la page d'album YTM), la vidéo COMPTE : à trancher."""
+    v = next((x for x in track.videos or [] if x.video_id == preuves.get("video_id")), None)
+    return INFORMATION if v is not None and v.source == "genius_media" else DECISION
+
+
 def video_partagee(ctx):
     """Une vidéo portée par PLUSIEURS fiches qui n'en nomme pas au moins une
     (album entier, EP complet, film, freestyle collectif mal rattaché) : UN
@@ -1136,6 +1179,18 @@ def video_partagee(ctx):
             )
         )
     return cas
+
+
+def nature_video_partagee(preuves, ctx) -> str:
+    """Une vidéo que deux fiches d'un MÊME artiste portent n'est comptée chez
+    aucune des deux (`_recalculer_vues_ytm`) : information. Portée par une
+    seule fiche d'un artiste (l'autre ligne est d'un groupe, d'un invité), ses
+    vues comptent chez lui : à trancher."""
+    fiches = _proprietaires_des_videos(ctx).get(preuves.get("video_id"), [])
+    artistes = [t.artist.id if t.artist else None for t in fiches]
+    if fiches and all(a is not None and artistes.count(a) > 1 for a in artistes):
+        return INFORMATION
+    return DECISION
 
 
 def soeurs_identite_divergente(ctx):
@@ -1269,7 +1324,13 @@ def liens_proposes(ctx):
 
 
 DETECTEURS: tuple[Detecteur, ...] = (
-    Detecteur("video_etrangere", "Vidéo qui ne nomme pas le morceau", "🎬", video_etrangere),
+    Detecteur(
+        "video_etrangere",
+        "Vidéo qui ne nomme pas le morceau",
+        "🎬",
+        video_etrangere,
+        nature_du_cas=nature_video_etrangere,
+    ),
     Detecteur("vues_ytm", "Vues YouTube anormales", "📈", vues_youtube_anormales),
     Detecteur("duree_songbpm", "Durée SongBPM démentie par YouTube", "⏱️", duree_songbpm_dementie),
     Detecteur("duree_spotify", "Durée de l'ID Spotify démentie", "🎧", duree_spotify_dementie),
@@ -1309,14 +1370,26 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("doublon", "Doublon de titre", "👯", doublon_de_titre),
     Detecteur("doublon_lrc", "Même morceau ? (LRC d'une version sœur)", "👯", doublon_par_lrc),
     Detecteur("doublon_inedit", "Inédit en double", "👻", doublon_inedit),
-    Detecteur("credits_api", "Crédits 🎫 non confirmés", "🎫", credits_api_seuls),
+    Detecteur(
+        "credits_api",
+        "Crédits 🎫 non confirmés",
+        "🎫",
+        credits_api_seuls,
+        nature_du_cas=nature_credits_api,
+    ),
     Detecteur("annotee", "Page « Non-Music » sans trace", "🏷️", page_annotee_sans_trace),
     Detecteur("sans_info", "Page Genius sans info", "🕳️", page_sans_info),
 )
 
 DETECTEURS_ARTISTE: tuple[DetecteurArtiste, ...] = (
     DetecteurArtiste("liens_proposes", "Alias / formations proposés", "👥", liens_proposes),
-    DetecteurArtiste("video_partagee", "Vidéo portée par plusieurs fiches", "🎞️", video_partagee),
+    DetecteurArtiste(
+        "video_partagee",
+        "Vidéo portée par plusieurs fiches",
+        "🎞️",
+        video_partagee,
+        nature_du_cas=nature_video_partagee,
+    ),
     DetecteurArtiste(
         "soeurs_identite", "Lignes sœurs : identité divergente", "🧬", soeurs_identite_divergente
     ),
@@ -1349,13 +1422,15 @@ def detecter(ctx: Contexte, detecteurs=DETECTEURS, detecteurs_artiste=DETECTEURS
                 if d.icone == "👯":
                     motif += _appoint_des_places(t, preuves, ctx)
                 poids = preuves.get("impact", impact(t))
-                cas.append(
-                    Cas(d.code, t.id, t.title, motif, poids, preuves, cle_du_cas(t, preuves))
-                )
+                nature = d.nature_du_cas(t, preuves, ctx) if d.nature_du_cas else d.nature
+                cle = cle_du_cas(t, preuves)
+                cas.append(Cas(d.code, t.id, t.title, motif, poids, preuves, cle, nature))
     for d in detecteurs_artiste:
         for libelle, motif, preuves in d.juger(ctx):
             cle = f"artiste|{libelle}|{preuves.get('kind', '')}"
-            cas.append(Cas(d.code, None, libelle, motif, preuves.get("impact", 0), preuves, cle))
+            nature = d.nature_du_cas(preuves, ctx) if d.nature_du_cas else d.nature
+            poids = preuves.get("impact", 0)
+            cas.append(Cas(d.code, None, libelle, motif, poids, preuves, cle, nature))
     return sorted(cas, key=lambda c: (-c.impact, c.detecteur, c.morceau))
 
 
@@ -1368,7 +1443,10 @@ DETECTEURS_DE_RUN: tuple[DetecteurArtiste, ...] = (
     DetecteurArtiste("kworb_doublon", "Kworb : doublon évident", "🔁", None),
     DetecteurArtiste("kworb_ecartee", "Kworb : ligne écartée", "⤫", None),
     DetecteurArtiste("kworb_flou", "Kworb : rapprochement flou", "≈", None),
-    DetecteurArtiste("kworb_non_relie", "Kworb : introuvable en base", "❔", None),
+    # Ses streams ne sont rattachés à rien : rien de faux n'est compté.
+    DetecteurArtiste(
+        "kworb_non_relie", "Kworb : introuvable en base", "❔", None, nature=INFORMATION
+    ),
     DetecteurArtiste("kworb_a_confirmer", "Kworb : même morceau ?", "≟", None),
     DetecteurArtiste("kworb_proposition", "Kworb : variante / remix à classer", "🎚️", None),
     DetecteurArtiste("deezer_absent", "Deezer : morceau absent", "✚", None),
@@ -1552,6 +1630,7 @@ def _cas_des_signalements(signalements, ids_disco: set, tracks=None) -> list[Cas
             s["impact"] or 0,
             s["preuves"] or {},
             s["cle"],
+            nature_de(s["detecteur"]),
         )
         for s in signalements
         if vivant(s)
@@ -1616,4 +1695,19 @@ def par_detecteur(cas: list[Cas]) -> dict[str, int]:
     compte: dict[str, int] = {}
     for c in cas:
         compte[c.detecteur] = compte.get(c.detecteur, 0) + 1
+    return compte
+
+
+def nature_de(code: str) -> str:
+    """La nature PAR DÉFAUT des cas d'un détecteur (un détecteur à
+    `nature_du_cas` peut en donner une autre cas par cas)."""
+    d = next((d for d in tous_les_detecteurs() if d.code == code), None)
+    return d.nature if d is not None else DECISION
+
+
+def par_nature(cas: list[Cas]) -> dict[str, int]:
+    """`{nature: nombre}`, les trois natures toujours présentes."""
+    compte = dict.fromkeys(NATURES, 0)
+    for c in cas:
+        compte[c.nature] += 1
     return compte

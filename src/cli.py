@@ -637,12 +637,20 @@ def _executer_revue(a: argparse.Namespace, runtime: Runtime) -> int:
         _imprimer_bilan("À trancher — corrections automatiques", texte or "rien à corriger")
     r = revue.analyser(runtime.data_manager, art)
     libelles = {d.code: f"{d.icone} {d.libelle}" for d in revue.tous_les_detecteurs()}
-    lignes = [
-        f"{n:5}  {libelles.get(code, code)}"
-        + ("  (formel : corrigé en fin de run)" if code in revue.CODES_FORMELS else "")
-        for code, n in sorted(revue.par_detecteur(r.actifs).items(), key=lambda x: -x[1])
-    ]
-    lignes.append(f"\n{len(r.actifs)} cas à trancher, {len(r.masques)} marqué(s) normal(aux)")
+    lignes = []
+    for nature, titre in revue.NATURES.items():
+        cas = [c for c in r.actifs if c.nature == nature]
+        lignes.append(f"── {titre} ({len(cas)}) ──")
+        lignes += [
+            f"{n:5}  {libelles.get(code, code)}"
+            + ("  (formel : corrigé en fin de run)" if code in revue.CODES_FORMELS else "")
+            for code, n in sorted(revue.par_detecteur(cas).items(), key=lambda x: -x[1])
+        ]
+    compte = revue.par_nature(r.actifs)
+    lignes.append(
+        f"\n{compte[revue.DECISION]} cas à trancher ({compte[revue.RUN]} à faire par un run, "
+        f"{compte[revue.INFORMATION]} pour information), {len(r.masques)} marqué(s) normal(aux)"
+    )
     _imprimer_bilan(f"À trancher — {art.name}", "\n".join(lignes))
     return COMPLET
 

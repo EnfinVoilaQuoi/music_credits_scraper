@@ -123,6 +123,30 @@ class TestHausse:
             "id_partage": (2, 3)
         }
 
+    def test_seuls_les_cas_du_critere_montent(self):
+        """2026-10-19 : un run qui ajoute des cas « à faire par un run » ou
+        « pour information » n'a rien dégradé — le critère du gel ne compte que
+        les erreurs et les décisions."""
+        ref = self._audit(**{"revue:credits_api": 1}).vers_dict()
+        audit = self._audit()
+        audit.cas += [au.Cas("revue:credits_api", "A", [], "", au.RUN) for _ in range(3)]
+        audit.cas += [au.Cas("revue:video_etrangere", "A", [], "", au.INFORMATION)]
+        audit.cas += [au.Cas("revue:doublon", "A", [], "", au.DECISION)]
+        assert au.en_hausse(audit, ref) == {"revue:doublon": (0, 1)}
+        assert audit.critere() == 1
+        assert audit.par_nature() == {au.ERREUR: 0, au.DECISION: 1, au.RUN: 3, au.INFORMATION: 1}
+        texte = au.tableau(audit, ref)
+        assert "panneau : à faire par un run (3)" in texte and "pour information (1)" in texte
+        assert "CRITÈRE de fin du gel (erreurs + décisions) : 1 (avant : 1)" in texte
+
+    def test_reference_d_avant_les_natures(self):
+        """Une référence sans `compte_critere` : tous ses cas comptaient — la
+        comparaison est plus indulgente, jamais une fausse hausse."""
+        ref = {"compte": {"revue:credits_api": 5}, "cas": []}
+        audit = self._audit()
+        audit.cas += [au.Cas("revue:credits_api", "A", [], "", au.RUN) for _ in range(9)]
+        assert au.en_hausse(audit, ref) == {}
+
     def test_sans_reference_seuls_les_invariants_montent(self):
         audit = self._audit(duree_aberrante=4, colonne_verdict=1)
         assert au.en_hausse(audit, None) == {"colonne_verdict": (0, 1)}

@@ -406,6 +406,83 @@ class TestPagesEtCredits:
         assert revue.credits_api_seuls(t) is None
 
 
+class TestNatures:
+    """Ce qu'un cas DEMANDE (2026-10-19) : seules les décisions attendent un
+    humain ; « à faire par un run » et « pour information » sont comptés à part."""
+
+    def _v(self, source, vid="vid"):
+        return TrackVideo(video_id=vid, title="LA PAIX", views=2027, source=source)
+
+    def _nature(self, code, *tracks):
+        d = [x for x in revue.DETECTEURS if x.code == code]
+        return [
+            c.nature for c in revue.detecter(_ctx(*tracks), detecteurs=d, detecteurs_artiste=())
+        ]
+
+    def test_video_de_la_page_genius_deja_exclue_des_vues(self):
+        assert self._nature(
+            "video_etrangere", _t("TOTAL 90", videos=[self._v("genius_media")])
+        ) == [revue.INFORMATION]
+        # Venue de notre recherche, elle COMPTE ses vues : à trancher.
+        assert self._nature("video_etrangere", _t("TOTAL 90", videos=[self._v("search_auto")])) == [
+            revue.DECISION
+        ]
+
+    def test_credits_api_sans_scrape_attendent_un_run(self):
+        from datetime import datetime
+
+        t = _t("X", last_scraped=datetime(2026, 10, 13))
+        t.credits = [Credit("Kid Cudi", CreditRole.PROGRAMMER, source="genius_api")]
+        assert self._nature("credits_api", t) == [revue.RUN]
+        # À côté de crédits scrapés : le complément gardé en 🎫, une information.
+        t.credits.append(Credit("Plain Pat", CreditRole.PRODUCER, source="genius"))
+        assert self._nature("credits_api", t) == [revue.INFORMATION]
+
+    def test_video_partagee_comptee_nulle_part_ou_chez_un_seul(self):
+        autre = Artist(name="Lunatic")
+        autre.id, _A.id = 2, 1
+        try:
+            a = _t("Strass", 1, videos=[self._v("genius_media")])
+            b = _t("Kiffes", 2, videos=[self._v("genius_media")])
+            ctx = _ctx(a, b)
+            (cas,) = revue.detecter(ctx, detecteurs=(), detecteurs_artiste=revue.DETECTEURS_ARTISTE)
+            assert cas.detecteur == "video_partagee" and cas.nature == revue.INFORMATION
+            # La seconde ligne est celle d'un AUTRE artiste : chacun la compte.
+            b.artist = autre
+            (cas,) = revue.detecter(
+                _ctx(a, b), detecteurs=(), detecteurs_artiste=revue.DETECTEURS_ARTISTE
+            )
+            assert cas.nature == revue.DECISION
+        finally:
+            _A.id = None
+
+    def test_signalement_de_run_prend_la_nature_de_son_detecteur(self):
+        s = {
+            "detecteur": "kworb_non_relie",
+            "track_id": None,
+            "morceau": "E.T.",
+            "motif": "",
+            "impact": 0,
+            "preuves": {},
+            "cle": "k",
+        }
+        (cas,) = revue._cas_des_signalements([s], set())
+        assert cas.nature == revue.INFORMATION
+        (cas,) = revue._cas_des_signalements([{**s, "detecteur": "kworb_proposition"}], set())
+        assert cas.nature == revue.DECISION
+
+    def test_par_nature_et_cle_inchangee(self):
+        t = _t("TOTAL 90", videos=[self._v("genius_media")])
+        (cas,) = revue.detecter(
+            _ctx(t),
+            detecteurs=[x for x in revue.DETECTEURS if x.code == "video_etrangere"],
+            detecteurs_artiste=(),
+        )
+        assert revue.par_nature([cas]) == {revue.DECISION: 0, revue.RUN: 0, revue.INFORMATION: 1}
+        # La nature n'entre pas dans la clé : un « ✓ Normal » déjà posé tient.
+        assert cas.cle == revue.cle_du_cas(t, {"video_id": "vid", "titre": "LA PAIX"})
+
+
 def test_liens_proposes_au_niveau_artiste():
     rel = SimpleNamespace(related_name="Panama Bende", kind="member_of", detail=None)
     cas = revue.detecter(_ctx(relations=[rel]), detecteurs=())
@@ -633,6 +710,14 @@ def test_fenetre_se_construit(racine_tk):
         w._changer_vue(next(k for k, v in w._libelles_vues().items() if v == "journal"))
         assert w.vue == "journal" and len(w.liste.winfo_children()) == 1
         assert w.bouton_surs.cget("state") == "disabled"  # aucun cas formel ici
+        # Une vue par nature : la vue « À trancher » ne montre que les décisions.
+        c.videos = [TrackVideo(video_id="v", title="LA PAIX", views=5, source="genius_media")]
+        w._recalculer()
+        w._changer_vue(next(k for k, v in w._libelles_vues().items() if v == "cas"))
+        assert len(w.cas) == 2 and all(x.nature == revue.DECISION for x in w.cas)
+        w._changer_vue(next(k for k, v in w._libelles_vues().items() if v == "info"))
+        assert [x.detecteur for x in w.cas] == ["video_etrangere"]
+        assert "pour information" in w.titre.cget("text")
     finally:
         w.destroy()
 

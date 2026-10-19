@@ -13,6 +13,10 @@ Calculée à l'ouverture sur la discographie chargée — zéro réseau.
 Niveau FORMEL (2026-09-27) : les cas dont la preuve suffit (`revue_auto`) sont
 corrigés en fin de run ; « ⚡ Corriger les N cas sûrs » fait la même chose à la
 demande, et la vue « Corrections auto » liste le journal avec « ↩ Rétablir ».
+
+Natures (2026-10-19) : la vue « À trancher » ne montre que les DÉCISIONS ; ce
+qu'un run tranchera et ce qui est déjà neutralisé ont chacun leur vue, comptée
+à part (`revue.NATURES`).
 """
 
 from tkinter import messagebox
@@ -20,14 +24,26 @@ from tkinter import messagebox
 import customtkinter as ctk
 
 from src.services import revue_actions, revue_auto
-from src.services.revue import Cas, Revue, analyser, par_detecteur, tous_les_detecteurs
+from src.services.revue import (
+    DECISION,
+    INFORMATION,
+    RUN,
+    Cas,
+    Revue,
+    analyser,
+    par_detecteur,
+    tous_les_detecteurs,
+)
 from src.services.vues_comptees import apres_verdict
 
 #: Au-delà, la fenêtre deviendrait lente à construire ; le tri par impact met
 #: de toute façon en haut ce qui compte.
 _MAX_LIGNES = 300
 _TOUT = "Tout"
-_VUE_CAS, _VUE_NORMAUX, _VUE_JOURNAL = "cas", "normaux", "journal"
+_VUE_CAS, _VUE_RUN, _VUE_INFO = "cas", "run", "info"
+_VUE_NORMAUX, _VUE_JOURNAL = "normaux", "journal"
+#: Les vues des cas ACTIFS, par nature.
+_NATURE_DE_LA_VUE = {_VUE_CAS: DECISION, _VUE_RUN: RUN, _VUE_INFO: INFORMATION}
 
 
 def _format_impact(n: int) -> str:
@@ -99,11 +115,19 @@ class ATrancherWindow(ctk.CTkToplevel):
 
     @property
     def cas(self) -> list[Cas]:
-        return self.revue.masques if self.vue == _VUE_NORMAUX else self.revue.actifs
+        if self.vue == _VUE_NORMAUX:
+            return self.revue.masques
+        nature = _NATURE_DE_LA_VUE.get(self.vue, DECISION)
+        return [c for c in self.revue.actifs if c.nature == nature]
+
+    def _actifs(self, nature: str) -> int:
+        return sum(1 for c in self.revue.actifs if c.nature == nature)
 
     def _libelles_vues(self) -> dict[str, str]:
         return {
-            f"À trancher ({len(self.revue.actifs)})": _VUE_CAS,
+            f"À trancher ({self._actifs(DECISION)})": _VUE_CAS,
+            f"🔄 Un run tranchera ({self._actifs(RUN)})": _VUE_RUN,
+            f"ℹ️ Pour information ({self._actifs(INFORMATION)})": _VUE_INFO,
             f"Marqués normaux ({len(self.revue.masques)})": _VUE_NORMAUX,
             f"⚡ Corrections auto ({len(self.journal)})": _VUE_JOURNAL,
         }
@@ -139,12 +163,13 @@ class ATrancherWindow(ctk.CTkToplevel):
         self.filtre.configure(values=list(self.choix))
         choisi = next((k for k, v in self.choix.items() if v == ancien and v), None)
         self.filtre.set(choisi or next(iter(self.choix)))
+        titres = {
+            _VUE_NORMAUX: f"{len(self.cas)} cas marqué(s) normal(aux)",
+            _VUE_RUN: f"{len(self.cas)} cas qu'un run tranchera — rien à décider",
+            _VUE_INFO: f"{len(self.cas)} cas déjà neutralisés — pour information",
+        }
         self.titre.configure(
-            text=(
-                f"{len(self.revue.masques)} cas marqué(s) normal(aux)"
-                if self.vue == _VUE_NORMAUX
-                else f"{len(self.revue.actifs)} cas à trancher — triés par impact"
-            )
+            text=titres.get(self.vue, f"{len(self.cas)} cas à trancher — triés par impact")
         )
         self._afficher()
 

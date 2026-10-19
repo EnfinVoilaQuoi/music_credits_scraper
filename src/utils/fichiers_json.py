@@ -34,13 +34,17 @@ class MemoireIllisible(Exception):
 
 def ecrire_atomique(path, donnees, *, indent: int | None = 2, fin: str = "") -> None:
     """Sérialise `donnees` dans `path` sans jamais laisser un fichier à moitié écrit."""
+    ecrire_texte_atomique(path, json.dumps(donnees, ensure_ascii=False, indent=indent) + fin)
+
+
+def ecrire_texte_atomique(path, texte: str) -> None:
+    """Écrit `texte` dans `path` sans jamais laisser un fichier à moitié écrit
+    (un JSON déjà mis en forme : la sauvegarde des décisions, une entrée par ligne)."""
     chemin = Path(path)
     chemin.parent.mkdir(parents=True, exist_ok=True)
     temporaire = chemin.with_name(f"{chemin.name}.{os.getpid()}.tmp")
     try:
-        temporaire.write_text(
-            json.dumps(donnees, ensure_ascii=False, indent=indent) + fin, encoding="utf-8"
-        )
+        temporaire.write_text(texte, encoding="utf-8")
         os.replace(temporaire, chemin)
     finally:
         if temporaire.exists():

@@ -840,7 +840,18 @@ def main(argv: list[str] | None = None) -> int:
         logger.exception("Échec de la commande")
         return ERREUR
     finally:
+        _exporter_decisions(runtime)
         _fermer(runtime)
+
+
+def _exporter_decisions(runtime: Runtime) -> None:
+    """La sauvegarde versionnée des décisions humaines (`DECISIONS_DIR`), après
+    TOUT run — un run interrompu a pu en écrire aussi. Ne lève pas."""
+    from src.services import decisions
+
+    ligne = decisions.exporter_en_fin_de_run(runtime.data_manager.engine)
+    if ligne:
+        print(ligne)
 
 
 if __name__ == "__main__":

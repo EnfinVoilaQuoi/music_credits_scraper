@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # Dossier des exports « studio » (SVG Bubble Prod…). Vide → BASE_DIR/exports.
     # Pas de mkdir à l'import : création lazy dans dataviz.bubble_prod (gitignoré).
     exports_dir: str = ""
+    # Dossier de la sauvegarde VERSIONNÉE des décisions humaines (refus,
+    # acceptations, corrections, décisions Kworb, verdicts de revue), écrite en
+    # fin de run CLI et par `scripts/exporter_decisions.py` (décision
+    # utilisateur 2026-10-19 : elles vivent en base, hors git). Vide → aucun
+    # export automatique. Un chemin relatif part de la racine du dépôt. Le dépôt
+    # public ne connaît aucun autre dépôt : le chemin vient de l'environnement.
+    decisions_dir: str = ""
 
     # --- Scraping ---
     selenium_timeout: int = 30  # secondes
@@ -281,3 +288,7 @@ DATA_PATH = str(DATA_DIR)
 # Dossier des exports studio (SVG Bubble Prod…). PAS de mkdir ici : la création
 # est lazy (dataviz.bubble_prod.default_output_path). Dossier gitignoré.
 EXPORTS_DIR = Path(settings.exports_dir) if settings.exports_dir else (BASE_DIR / "exports")
+
+# Sauvegarde versionnée des décisions (`src/services/decisions.py`) ; None = pas
+# d'export automatique en fin de run.
+DECISIONS_DIR = (BASE_DIR / settings.decisions_dir).resolve() if settings.decisions_dir else None

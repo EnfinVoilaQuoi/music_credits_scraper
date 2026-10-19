@@ -164,6 +164,17 @@ def _aucun_chrome_de_debug(monkeypatch):
     monkeypatch.setattr("src.scrapers.cdp_chrome.ensure_cdp_chrome", lambda *a, **k: None)
 
 
+@pytest.fixture(autouse=True)
+def _aucun_export_de_decisions(monkeypatch):
+    """AUCUN test n'écrit dans le dossier versionné des décisions.
+
+    `cli.main` exporte les décisions en fin de run vers `DECISIONS_DIR`
+    (2026-10-19) — sur la machine du développeur, un dépôt git réel. Un test qui
+    veut l'export pose lui-même `config.DECISIONS_DIR`.
+    """
+    monkeypatch.setattr("src.config.DECISIONS_DIR", None)
+
+
 @pytest.fixture(scope="session")
 def _gabarit_base_migree(tmp_path_factory):
     """UNE base migrée jusqu'à `head` pour toute la session, copiée par test.

@@ -489,6 +489,26 @@ _MOTS_DU_SUPPORT = frozenset(
         "deluxe",
     }
 )
+
+
+def titre_sans_support(titre: str | None) -> str:
+    """PUR. Le titre sans une mention d'édition de SUPPORT seule (« Bonus
+    Track », « Album Version », « Clean », « Explicit », « Single Version ») :
+    le même enregistrement sur un autre support, pas une autre version. Une
+    mention de MONTAGE (« Radio Edit », « Extended ») reste. Invités retirés.
+    Sert la ressemblance de la recherche YouTube (2026-10-20 : Kanye « Love
+    Lockdown » ← « Love Lockdown (Album Version) » tombait sous le seuil)."""
+    v = parse_variant(strip_featuring(titre or ""))
+    if (
+        v.kind == Kind.NONE
+        and v.edition
+        and v.socle
+        and set(_tokens(v.edition)) <= _MOTS_DU_SUPPORT | {"version"}
+    ):
+        return v.socle
+    return strip_featuring(titre or "")
+
+
 #: La même prise, autre MONTAGE : coupée, rallongée, celle du clip, mixée par
 #: un DJ (« Edit », « Extended », « Version longue », « UnCut 9 Min », « Video
 #: Version », « Version clip », « [Mixed] »).

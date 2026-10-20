@@ -20,12 +20,12 @@ from src.utils.title_matching import (
     names_match_as_words,
     normalize_name,
     normalize_title,
-    strip_featuring,
 )
 from src.utils.version_descriptors import (
     meme_version_publiee,
     titre_generique,
     titre_sans_son_disque,
+    titre_sans_support,
 )
 
 logger = get_logger(__name__)
@@ -202,26 +202,18 @@ _JOUR_ET_MOIS = re.compile(
 )
 
 
-#: Une mention « Bonus » / « Bonus Track » SEULE, en fin de titre.
-_BONUS_SEUL = re.compile(
-    r"\s*(?:[\(\[]\s*bonus(?:\s+track)?\s*[\)\]]|\s[-–]\s*bonus(?:\s+track)?)\s*$",
-    re.IGNORECASE,
-)
-
-
 _DATE = re.compile(r"\b\d{1,2} m\d\d\b")
 
 
 def _titre_compare(titre: str) -> str:
     """Le titre tel que la RESSEMBLANCE le compare : normalisé, sans mention
-    « Bonus » seule (la place sur une édition, pas une autre version : le
-    « Bonus Track » de Flynt EST « Champions du monde », décision utilisateur
-    2026-10-15 — mais pas « Radio Edit » ni « Clean », mesuré le 2026-10-20 :
-    retirer tout descripteur neutre faisait poser 15 de ces montages), et une
-    date « jour mois » écrite pareil quelle que soit la graphie : la plateforme
-    abîme « 17 Octobre » de Médine en « 17-Oct », comme un tableur."""
-    sans_invites = strip_featuring(titre)  # « PITLANE [Bonus] (feat. …) »
-    texte = normalize_title(_BONUS_SEUL.sub("", sans_invites) or titre)
+    d'édition de SUPPORT (`titre_sans_support` : « Bonus Track », « Album
+    Version », « Clean » — le même enregistrement : le « Bonus Track » de
+    Flynt EST « Champions du monde », décision utilisateur 2026-10-15 ; jamais
+    un montage, « Radio Edit » ou « Extended »), et une date « jour mois »
+    écrite pareil quelle que soit la graphie : la plateforme abîme « 17
+    Octobre » de Médine en « 17-Oct », comme un tableur."""
+    texte = normalize_title(titre_sans_support(titre) or titre)
     return _JOUR_ET_MOIS.sub(lambda m: f"{m[1]} m{_NUMERO_DU_MOIS[m[2]]:02d}", texte)
 
 

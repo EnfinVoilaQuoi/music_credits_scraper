@@ -420,9 +420,25 @@ class TestRefusATortDuScore:
             == 1.0
         )
 
+    def test_une_edition_de_support_vaut_le_morceau(self):
+        """Kanye « Love Lockdown » ← « (Album Version) » : même enregistrement
+        (taxonomie : `_MOTS_DU_SUPPORT`), il tombait à 0,79."""
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert (
+            relevance_score(
+                "Love Lockdown (Album Version)", ["Kanye West"], "Kanye West", "Love Lockdown"
+            )
+            == 1.0
+        )
+        assert (
+            relevance_score("Eaters (Clean)", ["Young Stoner Life"], "Young Stoner Life", "Eaters")
+            == 1.0
+        )
+
     def test_un_autre_montage_reste_sous_le_seuil(self):
-        """Mesuré : retirer TOUT descripteur neutre faisait poser des Radio
-        Edit et des versions Clean. Seul « Bonus » est retiré."""
+        """Un MONTAGE n'est pas une édition de support : « Radio Edit »,
+        « Extended » restent dans la ressemblance."""
         from src.youtube.youtube_searcher import relevance_score
 
         assert relevance_score("Evasion (Radio Edit)", ["Diam's"], "Diam's", "Evasion") < 0.85

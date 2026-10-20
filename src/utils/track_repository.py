@@ -2955,6 +2955,27 @@ class TrackRepository:
         "lyrics_synced_source",
     )
 
+    def _duree_confirmee(self, conn, track_id: int, duree) -> int | None:
+        """La durée de la fiche si deux catalogues indépendants la donnent
+        (`lrc_garde.duree_confirmee`, la règle de la garde du résolveur)."""
+        from types import SimpleNamespace
+
+        from src.utils.lrc_garde import duree_confirmee
+
+        observees = {
+            r[0]: _clean_duration(r[1])
+            for r in conn.execute(
+                text(
+                    "SELECT source, value FROM observations "
+                    "WHERE track_id = :t AND field = 'duration'"
+                ),
+                {"t": track_id},
+            )
+        }
+        return duree_confirmee(
+            SimpleNamespace(duration=_clean_duration(duree), durations_observees=observees)
+        )
+
     def _rearbitrer_lrc(self, conn, track_id: int) -> None:
         """Le verdict LRC (`reconcile._reconcile_lyrics_synced` — la MÊME
         fonction que la lecture appliquait : départage par la durée, démenti
@@ -2994,6 +3015,7 @@ class TrackRepository:
             _clean_duration(ligne["duration"]),
             paroles_de_reference(ligne["lyrics"], ligne["lyrics_source"]),
             bool(ligne["instrumental"]),
+            duree_confirmee=self._duree_confirmee(conn, track_id, ligne["duration"]),
         )
         if res is None:
             return

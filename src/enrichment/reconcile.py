@@ -371,7 +371,11 @@ def _as_resolution(field: str, obs) -> Resolution:
 
 
 def _reconcile_lyrics_synced(
-    observations: list, track_duration, paroles: str | None = None, instrumental: bool = False
+    observations: list,
+    track_duration,
+    paroles: str | None = None,
+    instrumental: bool = False,
+    duree_confirmee: int | None = None,
 ) -> Resolution | None:
     """Départage les LRC synchronisés par source (réutilise `compare_synced`).
 
@@ -390,8 +394,19 @@ def _reconcile_lyrics_synced(
     50 % des LRC YTM et 1,8 % des LRCLIB étaient ceux d'un autre morceau, et le
     départage par la durée ne le voyait pas). Sans paroles jugeables, rien
     n'est écarté.
+
+    `duree_confirmee` (deux catalogues indépendants, `lrc_garde.duree_confirmee`) :
+    un LRC minuté plus de 5 s au-delà est celui d'un autre audio, écarté comme un
+    démenti (2026-10-20). La garde du résolveur le refusait à la POSE ; sans lui,
+    un LRC posé AVANT que la durée soit confirmée restait en colonne (9 fiches,
+    dont Médine « Skit - Dream Bank » : 39 s, LRC jusqu'à 3 min 47).
     """
     from src.utils.concordance_paroles import lrc_dementi
+    from src.utils.lrc_garde import ECART_DUREE_S, fin_du_lrc
+
+    def trop_long(lrc) -> bool:
+        fin = fin_du_lrc(lrc) if duree_confirmee else None
+        return bool(fin and fin > duree_confirmee + ECART_DUREE_S)
 
     if instrumental:
         # Un instrumental CONSTATÉ n'a aucun LRC (décision utilisateur
@@ -400,7 +415,11 @@ def _reconcile_lyrics_synced(
         if any(o.source in _SOURCES_LRC for o in observations):
             return Resolution(LYRICS_SYNCED_FIELD, None, None, None)
         return None
-    by_source = {o.source: o for o in observations if not lrc_dementi(paroles, o.value)}
+    by_source = {
+        o.source: o
+        for o in observations
+        if not lrc_dementi(paroles, o.value) and not trop_long(o.value)
+    }
     lrclib = by_source.get("lrclib")
     ytm = by_source.get("ytmusic")
     if lrclib is not None or ytm is not None:
@@ -418,8 +437,9 @@ def _reconcile_lyrics_synced(
     if mxm is not None:
         return Resolution(LYRICS_SYNCED_FIELD, mxm.value, "Musixmatch", 1.0)
     if any(o.source in _SOURCES_LRC for o in observations):
-        # Des sources ont répondu et les paroles les DÉMENTENT toutes : le
-        # verdict est « pas de LRC » — sans lui la colonne garderait le faux.
+        # Des sources ont répondu et les paroles (ou la durée confirmée) les
+        # DÉMENTENT toutes : le verdict est « pas de LRC » — sans lui la colonne
+        # garderait le faux.
         return Resolution(LYRICS_SYNCED_FIELD, None, None, None)
     return None
 

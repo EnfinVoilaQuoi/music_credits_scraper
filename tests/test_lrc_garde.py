@@ -292,3 +292,44 @@ class TestTropLong:
 
         assert fin_du_lrc(self._LONG) == 199
         assert fin_du_lrc("pas de minutage") is None
+
+
+class TestTropLongEnColonne:
+    """2026-10-20 : la garde ne jugeait le LRC qu'à la POSE. Une durée confirmée
+    APRÈS laissait le LRC en colonne (9 fiches — Médine « Skit - Dream Bank »
+    39 s, LRC jusqu'à 3 min 47) : le verdict de la colonne l'applique désormais."""
+
+    _LONG = "[00:00.00] ♪\n[03:47.00] fin"
+
+    def _fiche(self, data_manager):
+        a = Artist(name="Médine")
+        a.id = data_manager.save_artist(a)
+        t = Track(title="Skit - Dream Bank", artist=a)
+        data_manager.save_track(t)
+        data_manager.upsert_observations(
+            t.id, [Observation("lyrics_synced", self._LONG, "ytmusic")]
+        )
+        return t
+
+    def _lrc(self, data_manager, tid):
+        from sqlalchemy import text
+
+        with data_manager.engine.connect() as conn:
+            return conn.execute(
+                text("SELECT lyrics_synced FROM tracks WHERE id = :t"), {"t": tid}
+            ).scalar()
+
+    def test_une_duree_confirmee_apres_coup_retire_le_lrc(self, data_manager):
+        t = self._fiche(data_manager)
+        assert self._lrc(data_manager, t.id) == self._LONG
+        data_manager.upsert_observations(
+            t.id,
+            [Observation("duration", 39, "deezer"), Observation("duration", 39, "spotify_web")],
+        )
+        assert self._lrc(data_manager, t.id) is None
+
+    def test_une_duree_isolee_ne_retire_rien(self, data_manager):
+        """« Swagger Like Us » à 167 s : c'est peut-être la durée qui ment."""
+        t = self._fiche(data_manager)
+        data_manager.upsert_observations(t.id, [Observation("duration", 39, "apple_music")])
+        assert self._lrc(data_manager, t.id) == self._LONG

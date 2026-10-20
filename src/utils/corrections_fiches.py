@@ -469,11 +469,16 @@ def memoriser_fusion(artiste: str, absorbee: dict, gardee: dict) -> None:
     ecrire_atomique(FICHIER, donnees, fin="\n")
 
 
-def memoriser_id_refuse(track, spotify_id: str) -> None:
-    """Consigne un ID Spotify retiré À LA MAIN (panneau « À trancher ») : relu par
-    le gate d'identité (`ids_refuses`), sans quoi Kworb ou le scraper le
-    reposeraient au prochain run."""
-    _memoriser(track, "id_spotify", spotify_id)
+def memoriser_id_refuse(track, spotify_id: str, origine: str | None = None) -> None:
+    """Consigne un ID Spotify retiré (panneau « À trancher » à la main, ou une
+    règle — `origine` « regle:<code> ») : relu par le gate d'identité
+    (`ids_refuses`), sans quoi Kworb ou le scraper le reposeraient au prochain run."""
+    _memoriser(track, "id_spotify", spotify_id, origine=origine)
+
+
+def oublier_id_refuse(track, spotify_id: str) -> bool:
+    """Pendant : une correction automatique de l'ID qu'on RÉTABLIT."""
+    return _oublier(track, "id_spotify", spotify_id)
 
 
 def memoriser_deezer_refuse(track, deezer_id: int) -> None:

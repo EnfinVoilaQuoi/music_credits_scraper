@@ -13,6 +13,13 @@ artistes de la base (2026-09-27) :
 - `songbpm_original` — une autre prise sans plateforme (démo, référence, live
   inédit, remix) aux durée ET tempo SongBPM de son original (2026-09-28).
 
+S'y ajoutent les POLITIQUES d'arbitrage validées par l'utilisateur
+(`politiques_revue.REGLES_VALIDEES`, 2026-10-20 : durées) : leur cas se
+corrige comme un cas formel (retrait SongBPM, retrait de l'ID Spotify d'un
+autre enregistrement) ou se marque « ✓ Normal » PAR RÈGLE — note
+`regle:<détecteur>`, distincte d'un verdict humain. Interrupteur :
+`REGLES_BRANCHEES`, levé seulement après accord sur le passage à blanc.
+
 Chaque correction passe par l'écrivain qui existe déjà (`retirer_lrc`,
 `record_certifications`), pose la MÉMOIRE de refus que relisent les
 producteurs (sans elle, le run suivant reposerait la donnée) et est consignée
@@ -24,7 +31,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from src.services.revue import CODES_FORMELS, Cas, Revue, analyser
+from src.services.revue import (
+    CODES_FORMELS,
+    DECISION,
+    Cas,
+    Revue,
+    analyser,
+    charger_contexte,
+)
 from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
@@ -48,8 +62,32 @@ class BilanCorrections:
         return texte + " — détail et « ↩ Rétablir » dans « À trancher »."
 
 
+#: Les politiques VALIDÉES (`politiques_revue.REGLES_VALIDEES`) ne
+#: s'appliquent qu'interrupteur levé : il le sera après l'accord de
+#: l'utilisateur sur le passage à blanc (`scripts/simuler_regles_validees.py`).
+REGLES_BRANCHEES = False
+
+#: Préfixe de la note d'un « ✓ Normal » posé par une règle (et de l'origine
+#: d'un refus) — un humain n'en pose jamais.
+PREFIXE_REGLE = "regle:"
+
+
 def cas_surs(revue: Revue) -> list[Cas]:
     return [c for c in revue.actifs if c.detecteur in CODES_FORMELS]
+
+
+def cas_par_regle(revue: Revue, tracks: dict, ctx) -> list[tuple[Cas, object]]:
+    """`[(cas, arbitrage)]` que tranche une règle VALIDÉE (décisions seules)."""
+    from src.services.politiques_revue import arbitrage_valide
+
+    sortie = []
+    for c in revue.actifs:
+        if c.nature != DECISION or c.detecteur in CODES_FORMELS:
+            continue
+        arbitrage = arbitrage_valide(c, tracks.get(c.track_id), ctx)
+        if arbitrage is not None:
+            sortie.append((c, arbitrage))
+    return sortie
 
 
 # ── Les corrections ─────────────────────────────────────────────────────────
@@ -101,6 +139,67 @@ def _corriger_songbpm(dm, track, cas: Cas) -> tuple[str, dict]:
     )
 
 
+def _rendus_a_l_humain(dm, artist_id: int) -> set[tuple[str, str]]:
+    """Les cas dont une correction PAR RÈGLE a été défaite (« ↩ Rétablir ») :
+    l'humain a dit non, la règle ne les reprend plus."""
+    return {
+        (c["detecteur"], c["cle"])
+        for c in dm.corrections_revue(artist_id, retablies=True)
+        if c.get("retablie_at") and str(c.get("action") or "").startswith(PREFIXE_REGLE)
+    }
+
+
+def _corriger_spotify(dm, track, cas: Cas) -> tuple[str, dict]:
+    from src.utils.corrections_fiches import memoriser_id_refuse
+    from src.utils.spotify_audit import rejeter_spotify_id
+
+    sid = cas.preuves.get("spotify_id")
+    if not sid or sid not in {track.spotify_id, *(track.spotify_ids or [])}:
+        raise LookupError("la fiche ne porte plus cet ID Spotify")
+    from src.utils.track_repository import TrackRepository
+
+    # Le rapport du retrait ne garde que (champ, source) : les VALEURS, de quoi
+    # rétablir, se lisent avant.
+    liees = TrackRepository.SOURCES_LIEES_A_L_ID_SPOTIFY
+    retirees = [
+        {
+            "track_id": track.id,
+            "field": o.field,
+            "source": o.source,
+            "value": o.value,
+            "confidence": o.confidence,
+            "seen_at": str(o.seen_at) if o.seen_at else None,
+        }
+        for o in dm.get_artist_observations(track.artist.id).get(track.id, [])
+        if o.source in liees
+    ]
+    # Mémorisé d'abord, avec son origine : le gate ne le reposera plus.
+    memoriser_id_refuse(track, sid, origine=f"{PREFIXE_REGLE}{cas.detecteur}")
+    rejeter_spotify_id(dm, track, sid)
+    return (
+        f"ID Spotify {sid} retiré de « {track.title} » — {cas.motif}",
+        {"type": "spotify", "spotify_id": sid, "observations": retirees},
+    )
+
+
+def _marquer_normal(dm, artist_id: int, cas: Cas) -> tuple[str, dict]:
+    dm.trancher_cas(
+        artist_id,
+        cas.detecteur,
+        cas.cle,
+        morceau=cas.morceau,
+        motif=cas.motif,
+        note=f"{PREFIXE_REGLE}{cas.detecteur}",
+    )
+    return (f"« {cas.morceau} » marqué normal par règle — {cas.motif}", {"type": "verdict"})
+
+
+#: Correcteurs des RÈGLES validées, par action de la politique.
+_CORRECTEURS_DE_REGLE = {
+    "retirer_songbpm": _corriger_songbpm,
+    "retirer_spotify": _corriger_spotify,
+}
+
 _CORRECTEURS = {
     "lrc_autre_fiche": ("retirer_lrc", _corriger_lrc),
     "certif_autre_titre": ("retirer_certif", _corriger_certif),
@@ -120,13 +219,33 @@ def corriger(dm, artiste) -> BilanCorrections:
     tracks = {t.id: t for t in artiste.tracks or []}
     deja: set[tuple[str, str]] = set()
     for _ in range(_PASSES_MAX):
-        nouveaux = [c for c in cas_surs(analyser(dm, artiste)) if (c.detecteur, c.cle) not in deja]
+        ctx = charger_contexte(dm, artiste)
+        revue = analyser(dm, artiste, ctx)
+        a_faire = [(c, None) for c in cas_surs(revue)]
+        if REGLES_BRANCHEES:
+            rendus = _rendus_a_l_humain(dm, artiste.id)
+            a_faire += [
+                (c, a)
+                for c, a in cas_par_regle(revue, tracks, ctx)
+                if (c.detecteur, c.cle) not in rendus
+            ]
+        nouveaux = [(c, a) for c, a in a_faire if (c.detecteur, c.cle) not in deja]
         if not nouveaux:
             break
-        for cas in nouveaux:
+        for cas, arbitrage in nouveaux:
             deja.add((cas.detecteur, cas.cle))
             track = tracks.get(cas.track_id)
-            action, corriger_cas = _CORRECTEURS[cas.detecteur]
+            if arbitrage is None:
+                action, corriger_cas = _CORRECTEURS[cas.detecteur]
+            elif arbitrage.action == "normal":
+                action = f"{PREFIXE_REGLE}normal"
+
+                def corriger_cas(_dm, _track, c):
+                    return _marquer_normal(_dm, artiste.id, c)
+
+            else:
+                action = f"{PREFIXE_REGLE}{arbitrage.action}"
+                corriger_cas = _CORRECTEURS_DE_REGLE[arbitrage.action]
             if track is None:
                 bilan.echecs.append(f"{cas.morceau} : fiche introuvable")
                 continue
@@ -169,7 +288,11 @@ def corriger_apres_run(dm, artiste) -> BilanCorrections:
 def retablir(dm, artiste, correction: dict) -> str:
     """Défait une correction du journal et marque son cas « normal » (sinon la
     passe suivante la referait). Lève si la fiche n'est plus là."""
-    from src.utils.corrections_fiches import oublier_certif_refusee, oublier_lrc_refuse
+    from src.utils.corrections_fiches import (
+        oublier_certif_refusee,
+        oublier_id_refuse,
+        oublier_lrc_refuse,
+    )
 
     track = next((t for t in artiste.tracks or [] if t.id == correction["track_id"]), None)
     if track is None:
@@ -195,6 +318,21 @@ def retablir(dm, artiste, correction: dict) -> str:
     elif annulation.get("type") == "observations":
         n = dm.restaurer_observations(annulation.get("observations") or [])
         compte_rendu = f"{n} mesure(s) rétablie(s) sur « {track.title} »"
+    elif annulation.get("type") == "spotify":
+        sid = annulation["spotify_id"]
+        oublier_id_refuse(track, sid)
+        dm.update_track_spotify_id(track.id, sid, source="retabli")
+        dm.restaurer_observations(annulation.get("observations") or [])
+        compte_rendu = f"ID Spotify {sid} rétabli sur « {track.title} »"
+    elif annulation.get("type") == "verdict":
+        # Défaire le « ✓ Normal » d'une règle, c'est RENDRE le cas à l'humain :
+        # le verdict part, rien ne le remplace, et la règle ne le reprend plus
+        # (`_rendus_a_l_humain` lit le journal des corrections rétablies).
+        dm.annuler_verdict(artiste.id, correction["detecteur"], correction["cle"])
+        dm.marquer_correction_retablie(correction["id"])
+        compte_rendu = f"« {correction['morceau']} » rendu à l'humain (règle défaite)"
+        logger.info(f"À trancher — {compte_rendu}")
+        return compte_rendu
     else:
         raise ValueError(f"correction de type inconnu : {annulation.get('type')!r}")
     dm.marquer_correction_retablie(correction["id"])

@@ -229,3 +229,31 @@ def test_alias_confirme_par_deux_sources_ou_par_le_type_musicbrainz():
     assert juger("Chen Zen").action == "confirmer_lien"
     assert juger("Global") is None  # page Discogs sans type : l'humain
     assert juger("Go Getters", "member_of") is None  # une formation : jamais
+
+
+def test_les_regles_validees_sont_gelees():
+    """Une règle n'entre ici qu'après la validation de l'utilisateur (2026-10-20)."""
+    assert {
+        ("duree_songbpm", "retirer_songbpm"),
+        ("duree_spotify", "retirer_spotify"),
+        ("duree_spotify", "normal"),
+        ("duree_isolee", "normal"),
+    } == pol.REGLES_VALIDEES
+
+
+def test_un_retrait_exige_trois_catalogues():
+    """Validé sur la variante à 3 : à 2 catalogues contre, l'ID reste."""
+    t = _t(
+        spotify_id="SP",
+        durations_observees={"spotify_web": 202, "reccobeats": 202, "deezer": 224, "youtube": 225},
+    )
+    assert pol.arbitrage_valide(_cas("duree_spotify", t), t, None) is None
+    t.durations_observees["apple_music"] = 224
+    assert pol.arbitrage_valide(_cas("duree_spotify", t), t, None).action == "retirer_spotify"
+
+
+def test_generique_retirer_songbpm_n_est_pas_valide():
+    """Kanye « Skit #3 » : l'utilisateur vérifie lui-même."""
+    t = _t("Skit #3", duration=31, durations_observees={"songbpm": 31})
+    assert pol.politique_durees(3)(_cas("generique_duree", t), t, None).action == "retirer_songbpm"
+    assert pol.arbitrage_valide(_cas("generique_duree", t), t, None) is None

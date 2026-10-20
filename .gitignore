@@ -110,6 +110,7 @@ scripts/*
 !scripts/invariants_apres_rejeu.py
 !scripts/simuler_priorites.py
 !scripts/simuler_politiques_revue.py
+!scripts/simuler_regles_validees.py
 # Tests / santé des sources
 !scripts/warm_cf_profile.py
 !scripts/capture_fixtures.py

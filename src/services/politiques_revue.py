@@ -134,6 +134,13 @@ def politique_durees(minimum: int) -> Callable:
                 f"Deezer {durees['deezer']} s contre {ref} s",
             )
         if d == "duree_isolee":
+            # Décision utilisateur 2026-10-20 : pour un ORIGINAL, une divergence de
+            # durée ne dit pas grand-chose ; une version (remix, live…) ou un
+            # titre générique (« Intro », « Outro ») se vérifie à la main.
+            from src.utils.version_descriptors import Kind, parse_variant, titre_generique
+
+            if parse_variant(track.title).kind != Kind.NONE or titre_generique(track.title):
+                return None
             for source in revue._TEMOINS_ISOLABLES:
                 if not durees.get(source):
                     continue
@@ -548,6 +555,44 @@ def politique_alias(cas, _track, ctx):
         return Arbitrage(
             "confirmer l'alias", "confirmer_lien", "MusicBrainz : nom d'artiste (Artist name)"
         )
+    return None
+
+
+# ── Règles VALIDÉES (décisions utilisateur 2026-10-20) ─────────────────────
+
+#: (détecteur, action) que l'utilisateur a validés sur le passage à blanc du
+#: 2026-10-20 — gelé par `tests/test_politiques_revue.py`. Une règle ne s'ajoute
+#: ici qu'après SA validation, famille par famille.
+REGLES_VALIDEES = frozenset(
+    {
+        # « dès qu'on est sûr que c'est pas la bonne version, on retire »
+        ("duree_songbpm", "retirer_songbpm"),
+        # « les données viennent d'un autre morceau ça dégage »
+        ("duree_spotify", "retirer_spotify"),
+        ("duree_spotify", "normal"),
+        # un ORIGINAL seulement (la politique écarte versions et génériques)
+        ("duree_isolee", "normal"),
+        # PAS `generique_duree` : « Intro », « Outro »… se vérifient à la main (2026-10-20).
+    }
+)
+
+#: Seuil de la politique des durées par nature d'action : un RETRAIT exige 3
+#: catalogues solides d'accord contre la valeur (la variante validée), un
+#: « ✓ Normal », qui ne change aucune donnée, 2.
+_DUREES_POUR_RETIRER = politique_durees(3)
+_DUREES_POUR_NORMAL = politique_durees(2)
+
+
+def arbitrage_valide(cas, track, ctx) -> Arbitrage | None:
+    """L'arbitrage qu'une règle VALIDÉE donne à ce cas, sinon None."""
+    for juger in (_DUREES_POUR_NORMAL, _DUREES_POUR_RETIRER):
+        arbitrage = juger(cas, track, ctx)
+        if arbitrage is None:
+            continue
+        if juger is _DUREES_POUR_NORMAL and arbitrage.action != "normal":
+            continue  # un retrait ne se décide qu'au seuil de 3
+        if (cas.detecteur, arbitrage.action) in REGLES_VALIDEES:
+            return arbitrage
     return None
 
 

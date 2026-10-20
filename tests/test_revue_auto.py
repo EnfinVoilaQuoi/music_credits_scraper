@@ -141,3 +141,81 @@ def test_mesures_songbpm_de_l_original_retirees_puis_retablies(data_manager, art
     ref = _charger(data_manager, artiste)["All Day (Kendrick Lamar Reference)"]
     assert ref.audio.bpm == 123 and ref.duration == 311
     assert not revue_auto.corriger(data_manager, artiste).appliquees  # marqué normal
+
+
+# ── Règles VALIDÉES (politiques_revue.REGLES_VALIDEES, 2026-10-20) ──────────
+
+
+def _fiche_durees(dm, artiste, titre, gid, durees, **kw):
+    t = Track(title=titre, artist=artiste, genius_id=gid, **kw)
+    t.observations += [Observation("duration", d, s) for s, d in durees.items()]
+    dm.save_track(t)
+
+
+@pytest.fixture
+def regles(monkeypatch):
+    monkeypatch.setattr(revue_auto, "REGLES_BRANCHEES", True)
+
+
+def test_interrupteur_baisse_rien_par_regle(data_manager, artiste):
+    durees = {"deezer": 146, "spotify_web": 146, "apple_music": 147, "youtube": 337}
+    _fiche_durees(data_manager, artiste, "Chaos", 10, durees)
+    _charger(data_manager, artiste)
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
+def test_temoin_isole_d_un_original_marque_normal_par_regle(data_manager, artiste, regles):
+    durees = {"deezer": 146, "spotify_web": 146, "apple_music": 147, "youtube": 337}
+    _fiche_durees(data_manager, artiste, "Chaos", 10, durees)
+    # Une VERSION aux mêmes durées reste à l'humain (décision utilisateur).
+    _fiche_durees(data_manager, artiste, "Chaos (Remix)", 11, durees)
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1 and "Chaos" in bilan.appliquees[0]
+    verdicts = data_manager.verdicts_revue(artiste.id)
+    ((det, _cle),) = [k for k, v in verdicts.items() if v["note"] == "regle:duree_isolee"]
+    assert det == "duree_isolee"
+    actifs = revue.analyser(data_manager, artiste).actifs
+    assert [c.morceau for c in actifs if c.detecteur == "duree_isolee"] == ["Chaos (Remix)"]
+
+    # « ↩ Rétablir » : le cas revient à l'humain, et la règle ne le reprend plus.
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:normal"
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert not data_manager.verdicts_revue(artiste.id)
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+    actifs = revue.analyser(data_manager, artiste).actifs
+    assert sorted(c.morceau for c in actifs if c.detecteur == "duree_isolee") == [
+        "Chaos",
+        "Chaos (Remix)",
+    ]
+
+
+def test_id_spotify_d_un_autre_enregistrement_retire_puis_retabli(data_manager, artiste, regles):
+    from src.utils.corrections_fiches import ids_refuses, origine_du_refus
+
+    durees = {
+        "spotify_web": 202,
+        "reccobeats": 202,
+        "deezer": 224,
+        "youtube": 225,
+        "apple_music": 224,
+    }
+    _fiche_durees(data_manager, artiste, "I’m Leanin’", 12, durees, spotify_id="SPX")
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert any("SPX" in a for a in bilan.appliquees), bilan
+    fiche = _charger(data_manager, artiste)["I’m Leanin’"]
+    assert fiche.spotify_id is None and "SPX" in ids_refuses(fiche)
+    assert origine_du_refus(fiche, "id_spotify", "SPX") == "regle:duree_spotify"
+
+    (correction,) = [
+        c
+        for c in data_manager.corrections_revue(artiste.id)
+        if c["action"] == "regle:retirer_spotify"
+    ]
+    revue_auto.retablir(data_manager, artiste, correction)
+    fiche = _charger(data_manager, artiste)["I’m Leanin’"]
+    assert fiche.spotify_id == "SPX" and "SPX" not in ids_refuses(fiche)

@@ -210,12 +210,19 @@ def _gabarit_base_migree(tmp_path_factory):
 def data_manager(tmp_path, monkeypatch, _gabarit_base_migree):
     # DataManager n'importe plus les certifications au démarrage (elles vivent
     # dans certif_snep.csv) : seule la base à isoler reste à monkeypatcher.
-    import shutil
+    import sqlite3
+    from contextlib import closing
 
     import src.utils.data_manager as dm_mod
 
     db_file = tmp_path / "test_music_credits.db"
-    shutil.copyfile(_gabarit_base_migree, db_file)
+    # Par l'API de sauvegarde, pas fichier par fichier : en WAL (2026-10-20),
+    # des écritures peuvent n'être que dans le `-wal` du gabarit.
+    with (
+        closing(sqlite3.connect(_gabarit_base_migree)) as src,
+        closing(sqlite3.connect(db_file)) as dest,
+    ):
+        src.backup(dest)
     monkeypatch.setattr(dm_mod, "DATABASE_URL", f"sqlite:///{db_file.as_posix()}")
     return dm_mod.DataManager()
 

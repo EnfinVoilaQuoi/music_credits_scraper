@@ -29,6 +29,7 @@ import sqlite3
 from contextlib import closing
 from pathlib import Path
 
+from src.persistence.moteur import creer_moteur
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -98,12 +99,9 @@ def _stamp_legacy(db_path: str) -> None:
     `upgrade_to_head` appliquer les révisions suivantes (e4 observations…). La
     stamper au head sauterait ces révisions (tables jamais créées).
     """
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import NullPool
-
     from alembic import command
 
-    engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}", poolclass=NullPool)
+    engine = creer_moteur(db_path)
     try:
         with engine.connect() as connection:
             command.stamp(make_alembic_config(connection), LEGACY_HEAD_REVISION)
@@ -140,10 +138,8 @@ def ensure_stamped(db_path: str) -> None:
 def _current_revision(db_path: str) -> str | None:
     """Révision Alembic courante de la base (None si pas d'`alembic_version`)."""
     from alembic.runtime.migration import MigrationContext
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import NullPool
 
-    engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}", poolclass=NullPool)
+    engine = creer_moteur(db_path)
     try:
         with engine.connect() as conn:
             return MigrationContext.configure(conn).get_current_revision()
@@ -194,9 +190,6 @@ def upgrade_to_head(db_path: str) -> None:
     seulement si elle a déjà un schéma à protéger — une base vierge n'a rien à
     sauvegarder). FATAL : sans schéma applicable, l'app ne peut pas tourner.
     """
-    from sqlalchemy import create_engine
-    from sqlalchemy.pool import NullPool
-
     from alembic import command
 
     current = _current_revision(db_path)
@@ -208,7 +201,7 @@ def upgrade_to_head(db_path: str) -> None:
     # Décision factorisée (partagée avec `alembic/env.py`, cf. son docstring).
     backup_before_upgrade(db_path)
 
-    engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}", poolclass=NullPool)
+    engine = creer_moteur(db_path)
     try:
         with engine.connect() as connection:
             command.upgrade(make_alembic_config(connection), "head")

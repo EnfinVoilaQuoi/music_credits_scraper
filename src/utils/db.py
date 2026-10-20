@@ -21,11 +21,8 @@ par `bootstrap` :
 
 import sqlite3
 from datetime import date, datetime
-from pathlib import Path
 
-from sqlalchemy import create_engine
-from sqlalchemy.pool import NullPool
-
+from src.persistence.moteur import creer_moteur
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -63,7 +60,7 @@ class Database:
         # opération, reproduit EXACTEMENT le comportement de `connect()`
         # (sqlite3). Les deux visent le même fichier ; QueuePool = optimisation à
         # évaluer plus tard (au plus tôt en F).
-        self.engine = create_engine(f"sqlite:///{Path(db_path).as_posix()}", poolclass=NullPool)
+        self.engine = creer_moteur(db_path)
         self._ensure_schema()
 
     def _ensure_schema(self):

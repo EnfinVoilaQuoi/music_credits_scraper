@@ -100,6 +100,32 @@ def fin_du_lrc(lrc: str | None) -> int | None:
     return max(fins) if fins else None
 
 
+def limite_du_lrc(titre: str | None, duree, confirmee: int | None) -> int | None:
+    """PUR. La durée au-delà de laquelle (+ `ECART_DUREE_S`) un LRC minute un
+    autre audio, ou None si rien ne permet de le dire.
+
+    · durée CONFIRMÉE par deux catalogues (2026-10-13) ;
+    · sinon, pour une VERSION d'un autre enregistrement (remix, live, mixed,
+      acoustique… — `_autre_enregistrement`), sa durée même isolée (décision
+      utilisateur 2026-10-20) : un LRC plus long que la version est celui de
+      l'original ou d'une autre prise — 53 fiches. Pour un original, une durée
+      isolée peut mentir (« Swagger Like Us » à 167 s) : elle ne tranche pas.
+    """
+    if confirmee:
+        return confirmee
+    try:
+        d = int(duree)
+    except (TypeError, ValueError):
+        return None
+    return d if d > 0 and titre and _autre_enregistrement(titre) else None
+
+
+def depasse(lrc: str | None, limite: int | None) -> int | None:
+    """PUR. La fin du LRC si elle dépasse `limite` de plus de `ECART_DUREE_S`."""
+    fin = fin_du_lrc(lrc) if limite else None
+    return fin if fin and fin > limite + ECART_DUREE_S else None
+
+
 def _durees_dementent(track, autre) -> bool:
     try:
         a, b = int(track.duration), int(autre.duration)
@@ -130,10 +156,14 @@ class GardeLrc:
             return "instrumental : aucun LRC"
         # Un LRC ne court pas après la fin du morceau : au-delà de la durée
         # CONFIRMÉE, il minute un autre audio (30 fiches mesurées le 2026-10-13 :
-        # « Pharaon revient » 66 s portait un LRC de 8 min 34).
-        duree, fin = duree_confirmee(track), fin_du_lrc(lrc)
-        if duree and fin and fin > duree + ECART_DUREE_S:
-            return f"LRC minuté jusqu'à {fin} s, fiche de {duree} s (durée confirmée)"
+        # « Pharaon revient » 66 s portait un LRC de 8 min 34) ; pour une
+        # version, sa durée même isolée suffit (`limite_du_lrc`).
+        confirmee = duree_confirmee(track)
+        limite = limite_du_lrc(track.title, track.duration, confirmee)
+        fin = depasse(lrc, limite)
+        if fin:
+            nature = "durée confirmée" if confirmee else "durée de la version"
+            return f"LRC minuté jusqu'à {fin} s, fiche de {limite} s ({nature})"
         for autre in self._par_lrc.get(_cle(lrc), []):
             if autre is track or (track.id is not None and autre.id == track.id):
                 continue

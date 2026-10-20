@@ -333,3 +333,50 @@ class TestTropLongEnColonne:
         t = self._fiche(data_manager)
         data_manager.upsert_observations(t.id, [Observation("duration", 39, "apple_music")])
         assert self._lrc(data_manager, t.id) == self._LONG
+
+
+class TestTropLongPourUneVersion:
+    """Décision utilisateur 2026-10-20 : pour une VERSION d'un autre
+    enregistrement, sa durée même isolée suffit — un LRC plus long que la
+    version est celui de l'original ou d'une autre prise (53 fiches)."""
+
+    _LONG = "[00:00.00] ♪\n[04:46.00] fin"
+
+    def _fiche(self, titre, **durees):
+        t = _t(titre, tid=1)
+        t.duration = 75
+        t.durations_observees = durees
+        return t
+
+    def test_une_version_a_duree_isolee_refuse_le_lrc_plus_long(self):
+        t = self._fiche("American Boy [Riordan Remix] [Mixed]", apple_music=75)
+        assert "durée de la version" in GardeLrc().motif(t, self._LONG)
+
+    def test_un_original_a_duree_isolee_garde_le_lrc(self):
+        """« Swagger Like Us » à 167 s : pour un original, c'est peut-être la
+        durée qui ment."""
+        assert GardeLrc().motif(self._fiche("American Boy", apple_music=75), self._LONG) is None
+
+    def test_une_edition_du_meme_enregistrement_garde_le_lrc(self):
+        t = self._fiche("American Boy (Remastered)", apple_music=75)
+        assert GardeLrc().motif(t, self._LONG) is None
+
+    def test_le_verdict_de_la_colonne_applique_la_meme_regle(self, data_manager):
+        from sqlalchemy import text
+
+        a = Artist(name="Kanye West")
+        a.id = data_manager.save_artist(a)
+        t = Track(title="American Boy [Riordan Remix] [Mixed]", artist=a)
+        data_manager.save_track(t)
+        data_manager.upsert_observations(
+            t.id,
+            [
+                Observation("lyrics_synced", self._LONG, "ytmusic"),
+                Observation("duration", 75, "apple_music"),
+            ],
+        )
+        with data_manager.engine.connect() as conn:
+            lrc = conn.execute(
+                text("SELECT lyrics_synced FROM tracks WHERE id = :t"), {"t": t.id}
+            ).scalar()
+        assert lrc is None

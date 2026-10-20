@@ -3000,7 +3000,7 @@ class TrackRepository:
         ligne = (
             conn.execute(
                 text(
-                    "SELECT lyrics, lyrics_source, duration, instrumental, lyrics_synced, "
+                    "SELECT title, lyrics, lyrics_source, duration, instrumental, lyrics_synced, "
                     "lyrics_synced_source, lyrics_synced_confidence FROM tracks WHERE id = :t"
                 ),
                 {"t": track_id},
@@ -3016,6 +3016,7 @@ class TrackRepository:
             paroles_de_reference(ligne["lyrics"], ligne["lyrics_source"]),
             bool(ligne["instrumental"]),
             duree_confirmee=self._duree_confirmee(conn, track_id, ligne["duration"]),
+            titre=ligne["title"],
         )
         if res is None:
             return

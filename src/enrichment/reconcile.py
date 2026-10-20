@@ -376,6 +376,7 @@ def _reconcile_lyrics_synced(
     paroles: str | None = None,
     instrumental: bool = False,
     duree_confirmee: int | None = None,
+    titre: str | None = None,
 ) -> Resolution | None:
     """Départage les LRC synchronisés par source (réutilise `compare_synced`).
 
@@ -399,14 +400,17 @@ def _reconcile_lyrics_synced(
     un LRC minuté plus de 5 s au-delà est celui d'un autre audio, écarté comme un
     démenti (2026-10-20). La garde du résolveur le refusait à la POSE ; sans lui,
     un LRC posé AVANT que la durée soit confirmée restait en colonne (9 fiches,
-    dont Médine « Skit - Dream Bank » : 39 s, LRC jusqu'à 3 min 47).
+    dont Médine « Skit - Dream Bank » : 39 s, LRC jusqu'à 3 min 47). Avec le
+    `titre` d'une VERSION d'un autre enregistrement, sa durée même isolée
+    suffit (`lrc_garde.limite_du_lrc`, décision utilisateur du 2026-10-20).
     """
     from src.utils.concordance_paroles import lrc_dementi
-    from src.utils.lrc_garde import ECART_DUREE_S, fin_du_lrc
+    from src.utils.lrc_garde import depasse, limite_du_lrc
+
+    limite = limite_du_lrc(titre, track_duration, duree_confirmee)
 
     def trop_long(lrc) -> bool:
-        fin = fin_du_lrc(lrc) if duree_confirmee else None
-        return bool(fin and fin > duree_confirmee + ECART_DUREE_S)
+        return depasse(lrc, limite) is not None
 
     if instrumental:
         # Un instrumental CONSTATÉ n'a aucun LRC (décision utilisateur

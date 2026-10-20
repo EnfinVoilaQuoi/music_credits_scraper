@@ -90,6 +90,11 @@ class Settings(BaseSettings):
     # AUTRE disque que `data/`. Vide → aucune copie (et le run le dit).
     brut_backup_dir: str = ""
     brut_backup_jours: int = 7
+    # Copie HORS DISQUE des sauvegardes de `music_credits.db` (`data/backups/`,
+    # toutes sur le disque de la base) : la dernière de chaque jour sur 7 jours
+    # + la dernière de chaque semaine sur 4 (`src/utils/sauvegardes_hors_disque`),
+    # en fin de run CLI. Vide → aucune copie.
+    base_backup_externe_dir: str = ""
 
     # --- Scraping ---
     selenium_timeout: int = 30  # secondes
@@ -303,4 +308,10 @@ DECISIONS_DIR = (BASE_DIR / settings.decisions_dir).resolve() if settings.decisi
 # Copies du brut (`brut_sauvegarde`) ; None = aucune copie automatique.
 BRUT_BACKUP_DIR = (
     (BASE_DIR / settings.brut_backup_dir).resolve() if settings.brut_backup_dir else None
+)
+# Copie hors disque des sauvegardes de la base ; None = aucune.
+BASE_BACKUP_EXTERNE_DIR = (
+    (BASE_DIR / settings.base_backup_externe_dir).resolve()
+    if settings.base_backup_externe_dir
+    else None
 )

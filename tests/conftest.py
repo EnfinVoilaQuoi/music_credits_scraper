@@ -181,6 +181,7 @@ def _aucune_copie_du_brut(monkeypatch):
     développeur, souvent un autre disque). Un test qui veut la copie pose
     lui-même `config.BRUT_BACKUP_DIR`."""
     monkeypatch.setattr("src.config.BRUT_BACKUP_DIR", None)
+    monkeypatch.setattr("src.config.BASE_BACKUP_EXTERNE_DIR", None)
 
 
 @pytest.fixture(scope="session")

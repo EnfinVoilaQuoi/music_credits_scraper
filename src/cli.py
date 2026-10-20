@@ -851,6 +851,7 @@ def main(argv: list[str] | None = None) -> int:
         _exporter_decisions(runtime)
         _fermer(runtime)
         _sauvegarder_brut()
+        _copier_sauvegardes_hors_disque()
 
 
 def _exporter_decisions(runtime: Runtime) -> None:
@@ -869,6 +870,16 @@ def _sauvegarder_brut() -> None:
     from src.persistence import brut_sauvegarde
 
     ligne = brut_sauvegarde.sauvegarder_en_fin_de_run()
+    if ligne:
+        print(ligne)
+
+
+def _copier_sauvegardes_hors_disque() -> None:
+    """Le miroir hors disque des sauvegardes de la base
+    (`BASE_BACKUP_EXTERNE_DIR`), après tout run. Ne lève pas."""
+    from src.utils import sauvegardes_hors_disque
+
+    ligne = sauvegardes_hors_disque.synchroniser_en_fin_de_run()
     if ligne:
         print(ligne)
 

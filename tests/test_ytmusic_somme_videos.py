@@ -1,5 +1,10 @@
 """`ytm_streams` = somme DÉDUPLIQUÉE par videoId de toutes les vidéos connues.
 
+Depuis le 2026-10-20, le run n'écrit plus ce total : il enregistre des FAITS
+(vidéos et vues exactes, compteurs sans mesure exacte) et le repository calcule
+le total. `FakeDM.totaux()` applique la règle du repository (vidéos propres
+mesurées + compteurs) à ce que le run a enregistré.
+
 Le défaut réparé le 2026-09-07 : le clip officiel d'un morceau porte un videoId
 différent de sa version audio et ne vit pas sur le canal « - Topic ». Il n'était
 additionné que pour les feats repérés par Kworb (`spotify_streams` renseigné) —
@@ -73,21 +78,42 @@ class FakeAPI:
 
     @staticmethod
     def resolve_streams(entry, view_counts):
-        return view_counts.get(entry.get("video_id"))
+        # Repli : le compteur ARRONDI d'ytmusicapi (« 1,2 M »).
+        return view_counts.get(entry.get("video_id"), entry.get("vues_arrondies"))
 
 
 class FakeDM:
     def __init__(self, tracks):
         self._tracks = tracks
-        self.stream_writes = []
         self.album_writes = []
         self.video_writes = []
         self.durees = []
+        self.vues = {}  # {track_id: {video_id: vues ou None}} enregistrées
+        self.compteurs = {}  # {track_id: {clé: vues}} (`record_ytm_compteurs`)
+
+    def totaux(self) -> dict:
+        """La règle du repository (`_recalculer_vues_ytm`) sur les faits reçus :
+        vidéos PROPRES mesurées + compteurs (sans videoId, ou vidéo propre non
+        mesurée). Rien de comptable : None."""
+        totaux = {}
+        for tid in sorted(set(self.vues) | set(self.compteurs)):
+            autres = {v for t, vids in self.vues.items() if t != tid for v in vids}
+            propres = {v: n for v, n in self.vues.get(tid, {}).items() if v not in autres}
+            comptees = [n for n in propres.values() if n is not None] + [
+                n
+                for cle, n in self.compteurs.get(tid, {}).items()
+                if cle.startswith("_novid_") or (cle in propres and propres[cle] is None)
+            ]
+            totaux[tid] = sum(comptees) if comptees else None
+        return totaux
 
     def get_artist_ytm_channel_info(self, artist_id):
         return ("UCok", "manual")
 
     def get_artist_tracks(self, artist_id):
+        # Relu par les totaux d'album de fin de run, comme la vraie base.
+        for t in self._tracks:
+            t.streams.ytm_streams = self.totaux().get(t.id, t.streams.ytm_streams)
         return self._tracks
 
     def set_artist_ytm_channel(self, artist_id, channel_id, source="manual"):
@@ -99,12 +125,8 @@ class FakeDM:
     def update_artist_monthly_listeners(self, artist_id, **kwargs):
         return True
 
-    def update_track_ytm_streams(self, track_id, total):
-        self.stream_writes.append((track_id, total))
-        # Relu par les totaux d'album de fin de run, comme la vraie base.
-        for t in self._tracks:
-            if t.id == track_id:
-                t.streams.ytm_streams = total
+    def record_ytm_compteurs(self, track_id, compteurs):
+        self.compteurs[track_id] = dict(compteurs)
         return True
 
     def update_album_ytm_streams(self, artist_id, album_title, total):
@@ -115,8 +137,7 @@ class FakeDM:
         return {}
 
     def recalculer_vues_ytm(self, track_id, exclues=frozenset()):
-        self.stream_writes.append((track_id, None))
-        return None
+        return self.totaux().get(track_id)
 
     def record_duration_observation(self, track_id, secondes, source):
         self.durees.append((track_id, secondes, source))
@@ -124,6 +145,7 @@ class FakeDM:
 
     def forget_track_video(self, track_id, video_id):
         self.oublis = getattr(self, "oublis", []) + [(track_id, video_id)]
+        self.vues.get(track_id, {}).pop(video_id, None)
         return True
 
     def clear_track_youtube_link(self, track_id):
@@ -131,6 +153,9 @@ class FakeDM:
 
     def record_track_videos(self, track_id, videos):
         self.video_writes.append((track_id, sorted(v.video_id for v in videos)))
+        vues = self.vues.setdefault(track_id, {})
+        for v in videos:
+            vues[v.video_id] = v.views if v.views is not None else vues.get(v.video_id)
         for t in self._tracks:
             if t.id == track_id:
                 connues = {v.video_id for v in t.videos}
@@ -170,7 +195,7 @@ def test_le_clip_sajoute_a_laudio_du_canal(sans_recherche):
 
     dm, result = _lancer(api, tracks)
 
-    assert dict(dm.stream_writes)[1] == 1500
+    assert dm.totaux()[1] == 1500
     assert result["multi_video"] == 1
 
 
@@ -186,7 +211,7 @@ def test_une_video_partagee_nest_comptee_quune_fois(sans_recherche):
 
     dm, result = _lancer(api, tracks)
 
-    assert dm.stream_writes == [(1, 500)]
+    assert dm.totaux() == {1: 500}
     assert result["multi_video"] == 0
     # Et la vidéo déjà chiffrée par la passe canal n'est pas redemandée.
     assert api.batches == [["audioaudioa"]]
@@ -210,7 +235,7 @@ def test_les_videos_deja_connues_en_base_sont_additionnees(sans_recherche):
 
     dm, _ = _lancer(api, tracks)
 
-    assert dm.stream_writes == [(1, 1750)]
+    assert dm.totaux() == {1: 1750}
 
 
 def test_un_morceau_hors_canal_est_couvert_par_son_lien(sans_recherche):
@@ -221,7 +246,7 @@ def test_un_morceau_hors_canal_est_couvert_par_son_lien(sans_recherche):
 
     dm, result = _lancer(api, tracks)
 
-    assert dm.stream_writes == [(1, 900)]
+    assert dm.totaux() == {1: 900}
     assert result["feats_covered"] == 1
 
 
@@ -250,8 +275,27 @@ def test_une_video_sans_compteur_nest_pas_sommee(sans_recherche):
 
     dm, _ = _lancer(api, tracks)
 
-    assert dm.stream_writes == [(1, 500)]
+    assert dm.totaux() == {1: 500}
     assert dm.video_writes == [(1, ["audioaudioa"])]
+
+
+def test_les_compteurs_sans_mesure_exacte_sont_des_faits(sans_recherche):
+    """Une piste d'album sans videoId et une vidéo sans `viewCount` exact
+    (compteur arrondi) sont comptées : le run les enregistre comme FAITS, la
+    vidéo mesurée exactement non (ses vues sont dans `track_videos`)."""
+    api = FakeAPI(
+        raw_tracks=[
+            {"title": "Magot", "video_id": None, "vues_arrondies": 1000},
+            {"title": "Magot", "video_id": "arrondiarr", "vues_arrondies": 1_200_000},
+            {"title": "Magot", "video_id": "exacteexac", "vues_arrondies": 9},
+        ],
+        vues={"exacteexac": 500},
+    )
+
+    dm, _ = _lancer(api, [_track(1, "Magot")])
+
+    assert dm.compteurs == {1: {"_novid_Alb_magot": 1000, "arrondiarr": 1_200_000}}
+    assert dm.totaux() == {1: 1000 + 1_200_000 + 500}
 
 
 class TestSelectionDeMorceaux:
@@ -272,7 +316,7 @@ class TestSelectionDeMorceaux:
     def test_seules_les_ecritures_des_morceaux_coches_ont_lieu(self, sans_recherche):
         dm = FakeDM(self._tracks())
         mod.update_ytmusic_streams(_ARTIST, dm, api=self._api(), track_ids={1})
-        assert dm.stream_writes == [(1, 500)]
+        assert dm.totaux() == {1: 500}
         assert dm.video_writes == [(1, ["cocheococh"])]
 
     def test_le_batch_youtube_est_restreint(self, sans_recherche):
@@ -300,7 +344,7 @@ class TestSelectionDeMorceaux:
     def test_sans_selection_rien_ne_change(self, sans_recherche):
         dm = FakeDM(self._tracks())
         mod.update_ytmusic_streams(_ARTIST, dm, api=self._api())
-        assert sorted(dm.stream_writes) == [(1, 500), (2, 800)]
+        assert dm.totaux() == {1: 500, 2: 800}
         assert dm.album_writes == [("Alb", 1300)]
 
 
@@ -339,7 +383,7 @@ class TestVideoPartagee:
     def test_le_clip_double_nest_compte_pour_aucun_des_deux(self, sans_recherche):
         dm, result = _lancer(*self._clip_double())
         # Chacun garde SON audio, et rien de la vidéo commune.
-        assert sorted(dm.stream_writes) == [(1, 100), (2, 200)]
+        assert dm.totaux() == {1: 100, 2: 200}
         assert result["vues_non_attribuees"] == 5252528
 
     def test_la_video_va_au_seul_morceau_qu_elle_nomme(self, sans_recherche):
@@ -352,7 +396,7 @@ class TestVideoPartagee:
 
         assert dm.oublis == [(2, "clipdouble0")]
         assert result["videos_partagees"] == []
-        assert sorted(dm.stream_writes) == [(1, 100 + 5252528), (2, 200)]
+        assert dm.totaux() == {1: 100 + 5252528, 2: 200}
 
     def test_sans_titre_connu_le_lien_suffit_a_verifier(self, sans_recherche):
         _, result = _lancer(*self._clip_double())
@@ -369,7 +413,7 @@ class TestVideoPartagee:
         ]
         dm, result = _lancer(api, tracks)
         assert result["videos_partagees"] == [] and result["partages_evidents"] == 1
-        assert sorted(dm.stream_writes) == [(1, 100), (2, 200)]
+        assert dm.totaux() == {1: 100, 2: 200}
         assert result["vues_non_attribuees"] == 5252528
 
     def test_des_doublons_de_fiche_ne_sont_pas_listes(self, sans_recherche):
@@ -397,7 +441,7 @@ class TestVideoPartagee:
             _track(2, "Interlude", youtube_url="https://youtu.be/partageeee0"),
         ]
         dm, _ = _lancer(api, tracks)
-        assert sorted(dm.stream_writes) == [(1, None), (2, None)]
+        assert dm.totaux() == {1: None, 2: None}
 
     def test_la_regle_se_resout_quand_lambiguite_est_levee(self, sans_recherche):
         """Après un ✖️ Rejeter sur le mauvais lien, la vidéo n'est plus partagée
@@ -405,7 +449,7 @@ class TestVideoPartagee:
         api = FakeAPI(raw_tracks=[], vues={"partageeee0": 900})
         tracks = [_track(1, "Innocent", youtube_url="https://youtu.be/partageeee0")]
         dm, result = _lancer(api, tracks)
-        assert dm.stream_writes == [(1, 900)]
+        assert dm.totaux() == {1: 900}
         assert result["videos_partagees"] == []
 
 
@@ -621,4 +665,4 @@ def test_un_album_bride_est_saute_et_ses_videos_connues_restent_mesurees(sans_re
 
     assert result["albums_brides"] == ["Alb"]
     assert result["albums_processed"] == 0
-    assert dm.stream_writes == [(1, 500)]
+    assert dm.totaux() == {1: 500}

@@ -48,6 +48,7 @@ from src.utils.concordance_paroles import (
 )
 from src.utils.duree_youtube import NON_MORCEAU, est_un_clip
 from src.utils.title_matching import cle_album, normalize_title
+from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
     Kind,
     meme_socle,
@@ -137,7 +138,7 @@ FAMILLES = {
     "certif_autre": "certif à titre non équivalent (autre écart)",
     "streams_double": "même compteur Spotify sur deux pages Genius",
     "video_partagee": "même vidéo sur plusieurs fiches (vues comptées NULLE PART)",
-    "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres (> 5 %)",
+    "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
@@ -495,7 +496,7 @@ def streams(c, par) -> list[Cas]:
                 )
     ids = {t["id"]: t for ts in par.values() for t in ts}
     vids = collections.defaultdict(list)
-    sommes = collections.Counter()
+    exclues = collections.defaultdict(set)
     # Règle des vues comptées (`services.vues_comptees`) : un lien Genius qui
     # ne nomme pas le morceau ne compte pas, sauf « ✓ Normal ».
     valides = collections.defaultdict(set)
@@ -510,19 +511,30 @@ def streams(c, par) -> list[Cas]:
             if not vues_comptees.vue_comptee(
                 fiche, r["video_id"], r["title"], r["source"], valides[t["artist_id"]]
             ):
-                r = {"track_id": r["track_id"], "video_id": r["video_id"], "views": 0}
+                exclues[r["track_id"]].add(r["video_id"])
             # Par ARTISTE : les lignes sœurs (même enregistrement chez l'invité)
             # partagent leurs vidéos par construction, ce n'est pas un double compte.
             vids[(ids[r["track_id"]]["artist_id"], r["video_id"])].append(
-                (r["track_id"], r["views"] or 0)
+                (r["track_id"], r["views"])
             )
-    # Règle du run YTM (`update_ytmusic`, étape 6) : une vidéo portée par
-    # plusieurs fiches d'un artiste n'est comptée par AUCUNE.
-    partagees = {cle for cle, liste in vids.items() if len(liste) > 1}
-    for cle, liste in vids.items():
-        if cle not in partagees:
-            for tid, n in liste:
-                sommes[tid] += n
+    # Le total attendu : LE calcul de la colonne (`track_repository.total_ytm`),
+    # sur les vidéos PROPRES (une vidéo portée par plusieurs fiches d'un artiste
+    # n'est comptée par aucune) et les compteurs sans mesure exacte du run YTM.
+    propres = collections.defaultdict(dict)
+    for (_, vid), liste in vids.items():
+        if len(liste) == 1:
+            propres[liste[0][0]][vid] = liste[0][1]
+    compteurs = {
+        r["track_id"]: lire_compteurs_ytm(r["value"], r["track_id"])
+        for r in c.execute(
+            "SELECT track_id, value FROM observations WHERE field = ?", (CHAMP_COMPTEURS_YTM,)
+        )
+        if r["track_id"] in ids
+    }
+    sommes = {
+        tid: total_ytm(propres.get(tid, {}), compteurs.get(tid, {}), exclues.get(tid, set()))
+        for tid in set(propres) | set(compteurs)
+    }
     for (_, vid), liste in vids.items():
         if (
             len(liste) > 1
@@ -542,7 +554,7 @@ def streams(c, par) -> list[Cas]:
                     "video_partagee",
                     t["artiste"],
                     [x[0] for x in liste],
-                    f"{vid} {max(v for _, v in liste):,} vues : "
+                    f"{vid} {max(v or 0 for _, v in liste):,} vues : "
                     + " | ".join(_lib(ids[x[0]]) for x in liste),
                 )
             )
@@ -555,7 +567,7 @@ def streams(c, par) -> list[Cas]:
                     "ytm_incoherent",
                     t["artiste"],
                     [tid],
-                    f"{_lib(t)} colonne {col:,} / vidéos {s:,}",
+                    f"{_lib(t)} colonne {col:,} / vidéos et compteurs {s:,}",
                 )
             )
     return cas

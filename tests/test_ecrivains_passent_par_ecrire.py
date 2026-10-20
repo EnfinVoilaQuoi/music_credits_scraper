@@ -74,10 +74,6 @@ EXCEPTIONS: dict[str, str] = {
         "recalcul générique (exclusions relues en base) défairait"
     ),
     # ── Décisions documentées (CORRECTIFS, chantier A lot 2) ──
-    "update_track_ytm_streams": (
-        "total du run YTM, qui compte aussi des pistes d'album SANS vidéo identifiée : "
-        "le recalcul depuis les vidéos le remplacerait"
-    ),
     "declarer_provenance_legacy": (
         "par lots ; déclare `legacy` la valeur DÉJÀ en colonne, et `legacy` ne sert que "
         "seul — aucun verdict ne change"

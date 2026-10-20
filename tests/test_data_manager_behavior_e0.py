@@ -360,7 +360,7 @@ class TestUpdateTrackStreams:
         artist = _artiste(data_manager)
         track_id = _sauve_track(data_manager, artist, "T1")
 
-        assert data_manager.update_track_ytm_streams(track_id, 98765) is True
+        assert data_manager.record_ytm_compteurs(track_id, {"_novid_Alb_t1": 98765}) is True
         assert _lire_track(data_manager, artist.id, track_id).streams.ytm_streams == 98765
 
     def test_spotify_streams_ecrit_une_observation(self, data_manager):
@@ -380,8 +380,10 @@ class TestUpdateTrackStreams:
         artist = _artiste(data_manager)
         track_id = _sauve_track(data_manager, artist, "T1")
 
-        data_manager.update_track_ytm_streams(track_id, 98765)
+        data_manager.record_ytm_compteurs(track_id, {"_novid_Alb_t1": 98765})
         obs = {o.field: o for o in data_manager.get_observations(track_id)}
+        # Le FAIT (compteur du run) et le verdict dérivé qui en découle.
+        assert obs["ytm_compteurs"].value == '{"_novid_Alb_t1": 98765}'
         assert obs["ytm_streams"].value == "98765"
         assert obs["ytm_streams"].source == "ytmusic"
 

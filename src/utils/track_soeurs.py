@@ -380,13 +380,14 @@ def _unir_observations(conn, ids: list[int]) -> int:
     # `ytm_streams` n'est pas une mesure de l'ENREGISTREMENT : c'est le total
     # propre à CHAQUE ligne, qui dépend des vidéos partagées chez SON artiste et
     # que la ligne réécrit à chaque recalcul. L'unir ne faisait que tourner en
-    # rond (176 « conflits » mesurés le 2026-10-12 après réalignement).
+    # rond (176 « conflits » mesurés le 2026-10-12 après réalignement). Ses
+    # compteurs sans mesure exacte (`ytm_compteurs`) aussi : le run de SON artiste.
     meilleures = (
         conn.execute(
             text(
                 "SELECT field, source, value, confidence, MAX(seen_at) AS seen_at "
                 f"FROM observations WHERE track_id IN ({marques}) "  # noqa: S608
-                "AND field != 'ytm_streams' GROUP BY field, source"
+                "AND field NOT IN ('ytm_streams', 'ytm_compteurs') GROUP BY field, source"
             ),
             params,
         )

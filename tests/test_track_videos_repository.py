@@ -267,8 +267,6 @@ class TestVuesYtmApresFusion:
         _, garde, doublon = self._paire(data_manager)
         data_manager.record_track_videos(garde.id, [TrackVideo(video_id="a" * 11, views=100)])
         data_manager.record_track_videos(doublon.id, [TrackVideo(video_id="b" * 11, views=50)])
-        data_manager.update_track_ytm_streams(garde.id, 100)
-        data_manager.update_track_ytm_streams(doublon.id, 50)
 
         assert data_manager.merge_tracks(garde.id, doublon.id)
 
@@ -297,27 +295,31 @@ class TestVuesYtmApresFusion:
         assert self._ytm(data_manager, garde.id) == 100
 
     def test_un_total_sans_video_derriere_ne_l_emporte_plus(self, data_manager):
-        """Décision utilisateur 2026-10-12 : un total YTM vaut TOUJOURS la somme
-        des vidéos mesurées. Josman « Boss » gardait 68 182 vues relevées avant
+        """Décision utilisateur 2026-10-12 : un total YTM vaut TOUJOURS ce que
+        ses faits expliquent. Josman « Boss » gardait 68 182 vues relevées avant
         e20 sans vidéo derrière, contre la vidéo mesurée de la fiche gardée."""
         _, garde, doublon = self._paire(data_manager)
         data_manager.record_track_videos(garde.id, [TrackVideo(video_id="a" * 11, views=66)])
-        data_manager.update_track_ytm_streams(garde.id, 66)
-        data_manager.update_track_ytm_streams(doublon.id, 68182)
+        with data_manager.engine.begin() as conn:  # total d'avant e20, sans aucun fait
+            conn.exec_driver_sql(
+                "UPDATE tracks SET ytm_streams = 68182 WHERE id = ?", (doublon.id,)
+            )
 
         assert data_manager.merge_tracks(garde.id, doublon.id)
 
         assert self._ytm(data_manager, garde.id) == 66
 
-    def test_sans_aucune_video_mesuree_le_plus_grand_total_reste(self, data_manager):
-        """Rien à sommer : la fusion ne perd pas un total en silence."""
+    def test_les_compteurs_sans_video_des_deux_fiches_sont_reunis(self, data_manager):
+        """Chacun une fois : même clé (même piste d'album) = même compteur."""
         _, garde, doublon = self._paire(data_manager)
-        data_manager.update_track_ytm_streams(garde.id, 66)
-        data_manager.update_track_ytm_streams(doublon.id, 68182)
+        data_manager.record_ytm_compteurs(garde.id, {"_novid_A_deluge": 66})
+        data_manager.record_ytm_compteurs(
+            doublon.id, {"_novid_A_deluge": 66, "_novid_B_deluge": 68182}
+        )
 
         assert data_manager.merge_tracks(garde.id, doublon.id)
 
-        assert self._ytm(data_manager, garde.id) == 68182
+        assert self._ytm(data_manager, garde.id) == 66 + 68182
 
     def test_la_garde_sans_lien_reprend_la_video_principale(self, data_manager):
         _, garde, doublon = self._paire(data_manager)
@@ -461,3 +463,86 @@ def test_la_fusion_re_arbitre_la_duree(data_manager):
             conn.execute(text("SELECT duration FROM tracks WHERE id = :i"), {"i": page.id}).scalar()
             == 256
         )
+
+
+class TestCompteursYtmSansMesure:
+    """Le run YTM compte aussi des pistes d'album SANS videoId et des vidéos sans
+    `viewCount` exact (compteur arrondi d'ytmusicapi). Jusqu'au 2026-10-20, il
+    écrivait son TOTAL, que le recalcul suivant (depuis `track_videos`)
+    remplaçait : la valeur dépendait du dernier écrivain. Ces compteurs sont
+    désormais des FAITS ; `ytm_streams` n'a plus qu'un calcul."""
+
+    @staticmethod
+    def _ytm(dm, track_id):
+        with dm.engine.connect() as conn:
+            return conn.exec_driver_sql(
+                "SELECT ytm_streams FROM tracks WHERE id = ?", (track_id,)
+            ).scalar()
+
+    def test_un_recalcul_ulterieur_ne_perd_pas_le_compteur_du_run(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        # Le run : une piste d'album sans videoId (1 000) + une vidéo mesurée (500).
+        data_manager.record_ytm_compteurs(track.id, {"_novid_Alb_magot": 1000})
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="a" * 11, views=500)])
+        assert self._ytm(data_manager, track.id) == 1500
+        # Une écriture sans rapport rematérialise la fiche : le total tient.
+        data_manager.update_track_video_views(track.id, 500, kind="clip")
+        assert self._ytm(data_manager, track.id) == 1500
+
+    def test_la_mesure_exacte_remplace_le_compteur_arrondi(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="a" * 11)])
+        data_manager.record_ytm_compteurs(track.id, {"a" * 11: 1_200_000})
+        assert self._ytm(data_manager, track.id) == 1_200_000
+
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="a" * 11, views=1_234_567)])
+
+        assert self._ytm(data_manager, track.id) == 1_234_567
+
+    def test_une_video_oubliee_emporte_son_compteur_arrondi(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="a" * 11)])
+        data_manager.record_ytm_compteurs(track.id, {"a" * 11: 1_200_000})
+
+        data_manager.forget_track_video(track.id, "a" * 11)
+
+        assert self._ytm(data_manager, track.id) is None
+
+    def test_une_video_partagee_ne_compte_pas_son_compteur_arrondi(self, data_manager):
+        artist = _artiste(data_manager)
+        track, autre = _morceau(data_manager, artist), _morceau(data_manager, artist, "Déluge")
+        data_manager.record_track_videos(autre.id, [TrackVideo(video_id="a" * 11)])
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="a" * 11)])
+
+        data_manager.record_ytm_compteurs(track.id, {"a" * 11: 900})
+
+        assert self._ytm(data_manager, track.id) is None
+
+    def test_un_total_qu_aucun_fait_n_explique_est_vide(self, data_manager):
+        """Diam's « A quand mon heure ? » (2026-10-20) gardait les 13 357 vues
+        d'une vidéo refusée : sans vidéo mesurée restante, le recalcul était
+        sauté."""
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="r" * 11, views=13357)])
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="m" * 11)])
+        assert self._ytm(data_manager, track.id) == 13357
+
+        data_manager.forget_track_video(track.id, "r" * 11)
+
+        assert self._ytm(data_manager, track.id) is None
+
+    def test_une_lecture_vide_retire_le_fait(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_ytm_compteurs(track.id, {"_novid_Alb_magot": 1000})
+
+        assert data_manager.record_ytm_compteurs(track.id, {}) is True
+
+        assert self._ytm(data_manager, track.id) is None
+        assert not [
+            o for o in data_manager.get_observations(track.id) if o.field == "ytm_compteurs"
+        ]

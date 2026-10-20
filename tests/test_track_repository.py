@@ -137,7 +137,7 @@ class TestStreamsEtVues:
         assert _colonne(data_manager, morceau.id, "spotify_streams") == (1_000,)
 
     def test_streams_ytm(self, data_manager, morceau):
-        assert data_manager.update_track_ytm_streams(morceau.id, 2_000) is True
+        assert data_manager.record_ytm_compteurs(morceau.id, {"_novid_Alb_t": 2_000}) is True
         assert _colonne(data_manager, morceau.id, "ytm_streams") == (2_000,)
 
     def test_vues_de_clip(self, data_manager, morceau):
@@ -148,7 +148,7 @@ class TestStreamsEtVues:
         moteur_casse(data_manager)
 
         assert data_manager.record_spotify_streams(morceau.id, 1, "kworb", daily_streams=0) is False
-        assert data_manager.update_track_ytm_streams(morceau.id, 1) is False
+        assert data_manager.record_ytm_compteurs(morceau.id, {"_novid_A_t": 1}) is False
         assert data_manager.update_track_video_views(morceau.id, 1) is False
 
 

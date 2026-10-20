@@ -2,6 +2,8 @@
 (`src/services/politiques_revue.py`, 2026-10-19). Chaque test fixe un sens
 mesuré au passage à blanc, ou une garde trouvée en le relisant."""
 
+from types import SimpleNamespace
+
 from src.models import Artist, Track
 from src.services import politiques_revue as pol
 from src.services import revue
@@ -202,3 +204,28 @@ def test_kworb_ligne_rattachee_par_le_rejeu_d_aujourd_hui():
     assert pol.politique_kworb(cas, None, None, rejoues=rejoue).action == "run"
     rejoue["Slow Jamz"]["suggestion"] = True  # toujours une proposition : pas périmé
     assert pol.politique_kworb(cas, None, None, rejoues=rejoue) is None
+
+
+def test_alias_confirme_par_deux_sources_ou_par_le_type_musicbrainz():
+    def rel(nom, source, detail=None, kind="alias"):
+        return SimpleNamespace(related_name=nom, kind=kind, source=source, detail=detail)
+
+    ctx = revue.contexte(
+        [],
+        relations_proposees=[
+            rel("Yeezy", "discogs+musicbrainz", "Artist name"),
+            rel("Chen Zen", "musicbrainz", "Artist name"),
+            rel("Global", "discogs"),
+            rel("Go Getters", "discogs", kind="member_of"),
+        ],
+    )
+
+    def juger(nom, kind="alias"):
+        return pol.politique_alias(
+            _cas("liens_proposes", None, {"nom": nom, "kind": kind}), None, ctx
+        )
+
+    assert juger("Yeezy").action == "confirmer_lien"
+    assert juger("Chen Zen").action == "confirmer_lien"
+    assert juger("Global") is None  # page Discogs sans type : l'humain
+    assert juger("Go Getters", "member_of") is None  # une formation : jamais

@@ -517,6 +517,40 @@ def politique_kworb(cas, _track, _ctx, rejoues: dict | None = None):
     return None
 
 
+# ── Alias proposés ──────────────────────────────────────────────────────────
+
+
+def politique_alias(cas, _track, ctx):
+    """Un ALIAS proposé (jamais une formation : sa nature groupe / collectif se
+    tranche dans la fenêtre Groupes) est confirmé quand MusicBrainz ET Discogs
+    le donnent, ou quand MusicBrainz le type « nom d'artiste ». Une page
+    d'alias Discogs sans type reste à l'humain : nom civil (« Eli Yaffa ») ou
+    nom douteux (« Global » chez Médine), rien ne les distingue. Prudence : un
+    alias confirmé devient un nom de RECHERCHE (certifications, collectifs) et
+    un profil Spotify connu."""
+    preuves = cas.preuves or {}
+    if preuves.get("kind") != "alias":
+        return None
+    rel = next(
+        (
+            r
+            for r in ctx.relations_proposees
+            if r.kind == "alias" and r.related_name == preuves.get("nom")
+        ),
+        None,
+    )
+    if rel is None:
+        return None
+    sources = set((rel.source or "").split("+"))
+    if {"discogs", "musicbrainz"} <= sources:
+        return Arbitrage("confirmer l'alias", "confirmer_lien", "MusicBrainz ET Discogs")
+    if "musicbrainz" in sources and rel.detail == "Artist name":
+        return Arbitrage(
+            "confirmer l'alias", "confirmer_lien", "MusicBrainz : nom d'artiste (Artist name)"
+        )
+    return None
+
+
 POLITIQUES: tuple[Politique, ...] = (
     Politique(
         "durees_vote_3",
@@ -554,5 +588,11 @@ POLITIQUES: tuple[Politique, ...] = (
         "LRC : celui d'une autre fiche (≥ 90 %), minuté au-delà de la durée, "
         "ou d'une autre prise",
         politique_lrc,
+    ),
+    Politique(
+        "alias",
+        ("liens_proposes",),
+        "Alias proposés : MusicBrainz ET Discogs, ou MusicBrainz « nom d'artiste »",
+        politique_alias,
     ),
 )

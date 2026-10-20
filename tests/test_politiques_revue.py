@@ -4,6 +4,8 @@ mesuré au passage à blanc, ou une garde trouvée en le relisant."""
 
 from types import SimpleNamespace
 
+import pytest
+
 from src.models import Artist, Track
 from src.services import politiques_revue as pol
 from src.services import revue
@@ -257,3 +259,33 @@ def test_generique_retirer_songbpm_n_est_pas_valide():
     t = _t("Skit #3", duration=31, durations_observees={"songbpm": 31})
     assert pol.politique_durees(3)(_cas("generique_duree", t), t, None).action == "retirer_songbpm"
     assert pol.arbitrage_valide(_cas("generique_duree", t), t, None) is None
+
+
+def test_les_regles_ne_touchent_ni_versions_ni_generiques():
+    """« On garde les cas ambigus […] à la main, intro outro interlude remix
+    live » (2026-10-20) : Travis « Niagara Falls […] [ChoppedNotSlopped] »
+    perdait son SongBPM au passage à blanc."""
+    durees = {"songbpm": 207, "deezer": 252, "spotify_web": 252, "youtube": 253}
+    original = _t("Niagara Falls", durations_observees=dict(durees))
+    version = _t("Niagara Falls [ChoppedNotSlopped]", durations_observees=dict(durees))
+    assert pol.arbitrage_valide(_cas("duree_songbpm", original), original, None).action == (
+        "retirer_songbpm"
+    )
+    assert pol.arbitrage_valide(_cas("duree_songbpm", version), version, None) is None
+
+
+@pytest.mark.parametrize(
+    "titre, original",
+    [
+        ("Chaos", True),
+        ("I Get It", True),
+        ("Nuit (Interlude)", False),
+        ("Niagara Falls (Foot or 2) [ChoppedNotSlopped]", False),
+        ("Intro", False),
+        ("Dans ma bulle - Live 2006", False),
+        ("Kayna (Remix)", False),
+        ("Freestyle CKO", False),
+    ],
+)
+def test_titre_d_original(titre, original):
+    assert pol.titre_d_original(titre) is original

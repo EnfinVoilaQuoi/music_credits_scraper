@@ -18,6 +18,7 @@ Chaque politique est PURE : `(cas, fiche, contexte) -> Arbitrage | None`
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -583,8 +584,39 @@ _DUREES_POUR_RETIRER = politique_durees(3)
 _DUREES_POUR_NORMAL = politique_durees(2)
 
 
+#: Mots d'un titre AMBIGU (version, prise, titre générique) — en mots entiers.
+_MOTS_AMBIGUS = re.compile(
+    r"\b(?:intro|outro|interlude|skit|prelude|prélude|remix|rmx|mix|live|edit|version|"
+    r"demo|démo|acoustic|acoustique|instrumental|chopped|screwed|slowed|sped|reprise|"
+    r"freestyle|session|snippet|extended|radio)\b",
+    re.IGNORECASE,
+)
+
+
+def titre_d_original(titre: str | None) -> bool:
+    """Le titre est celui d'un ORIGINAL sans ambiguïté — PRUDENT à dessein : un
+    groupe entre parenthèses ou crochets, un « - » suffixe, un mot de version
+    ou de titre générique suffisent à le rendre à l'humain (« Nuit
+    (Interlude) », « … [ChoppedNotSlopped] » que `parse_variant` ne lit pas)."""
+    from src.utils.version_descriptors import Kind, parse_variant, titre_generique
+
+    if not titre:
+        return False
+    if re.search(r"[\(\[]| - ", titre) or _MOTS_AMBIGUS.search(titre):
+        return False
+    return parse_variant(titre).kind == Kind.NONE and not titre_generique(titre)
+
+
 def arbitrage_valide(cas, track, ctx) -> Arbitrage | None:
-    """L'arbitrage qu'une règle VALIDÉE donne à ce cas, sinon None."""
+    """L'arbitrage qu'une règle VALIDÉE donne à ce cas, sinon None.
+
+    Décision utilisateur 2026-10-20 : « on garde les cas ambigus ou source
+    d'erreur facile pour l'instant à la main, intro outro interlude remix
+    live » — toute règle ne vaut que pour un ORIGINAL (titre sans descripteur
+    de version) au titre non générique."""
+    titre = track.title if track is not None else cas.morceau
+    if not titre_d_original(titre):
+        return None
     for juger in (_DUREES_POUR_NORMAL, _DUREES_POUR_RETIRER):
         arbitrage = juger(cas, track, ctx)
         if arbitrage is None:

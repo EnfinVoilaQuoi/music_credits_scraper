@@ -121,6 +121,17 @@ def rejouer_deezer(runtime, art) -> set | None:
     return {(e.nature, e.piste.id) for e in bilan.ecarts}
 
 
+def rejouer_kworb(runtime, art) -> dict | None:
+    """`{titre Kworb: verdict}` du rapprochement d'AUJOURD'HUI, rejoué hors
+    ligne depuis le brut ; None sans page Kworb gardée."""
+    from src.persistence import brut
+    from src.utils import update_kworb
+
+    with brut.rejeu():
+        lignes = update_kworb.rapprochements(art, runtime.data_manager)
+    return {x["titre"]: x for x in lignes} if lignes is not None else None
+
+
 def main(argv=None) -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -189,6 +200,7 @@ def simuler(dm, noms=None, *, reseau: bool = False, runtime=None) -> list[str]:
             "Kworb : la proposition ★ qui ne crée rien (variante, morceau existant)",
             pol.politique_kworb,
         ),
+        # Les autres signalements Kworb : seulement « périmé ou non » (rejeu).
     ]
     tranches = collections.defaultdict(list)  # code -> [(artiste, cas, arbitrage)]
     pourquoi = collections.Counter()
@@ -202,6 +214,13 @@ def simuler(dm, noms=None, *, reseau: bool = False, runtime=None) -> list[str]:
         ids_deezer = {art.deezer_id} | {
             t.artist.deezer_id for t in art.tracks if t.artist and t.artist.deezer_id
         }
+        kworb_rejoue = rejouer_kworb(runtime, art) if runtime else None
+        kworb = pol.Politique(
+            "kworb",
+            ("kworb_proposition", "kworb_a_confirmer", "kworb_ecartee", "kworb_flou"),
+            "Kworb : rejeu d'aujourd'hui, puis la proposition ★ qui ne crée rien",
+            lambda c, t, x, r=kworb_rejoue: pol.politique_kworb(c, t, x, rejoues=r),
+        )
         deezer = pol.Politique(
             "ecarts_deezer",
             ("deezer_absent", "deezer_album_absent", "deezer_version", "deezer_apparition"),
@@ -220,7 +239,7 @@ def simuler(dm, noms=None, *, reseau: bool = False, runtime=None) -> list[str]:
             if cas.detecteur == "id_spotify_propose":
                 lue = lire(cas.preuves.get("spotify_id_propose")) is not None
                 pourquoi["page embed lue" if lue else "page embed illisible ou jamais lue"] += 1
-            for politique in [*politiques, deezer]:
+            for politique in [*(p for p in politiques if p.code != "kworb"), kworb, deezer]:
                 if cas.detecteur not in politique.detecteurs:
                     continue
                 arbitrage = politique.juger(cas, track, ctx)

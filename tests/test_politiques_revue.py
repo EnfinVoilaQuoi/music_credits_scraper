@@ -46,7 +46,9 @@ class TestDurees:
         assert self.juger(_cas("duree_spotify", t), t, None) is None
 
     def test_relecture_reccobeats_d_accord_ne_prouve_pas_l_id(self):
-        """ReccoBeats lit d'abord par l'ISRC : rien n'est retiré, action à définir."""
+        """ReccoBeats lit d'abord par l'ISRC : l'ID n'est jamais retiré. Hors de
+        la colonne, la durée démentie ne fausse rien : ✓ Normal ; si elle tient
+        la colonne, l'action reste à définir."""
         t = _t(
             spotify_id="SP",
             durations_observees={
@@ -56,8 +58,10 @@ class TestDurees:
                 "youtube": 276,
             },
         )
-        arb = self.juger(_cas("duree_spotify", t), t, None)
-        assert arb is not None and arb.action == ""
+        t.duration_source = "deezer"
+        assert self.juger(_cas("duree_spotify", t), t, None).action == "normal"
+        t.duration_source = "spotify_web"
+        assert self.juger(_cas("duree_spotify", t), t, None).action == ""
 
     def test_catalogue_en_desaccord_avec_lui_meme_ne_prouve_rien(self):
         """« Guess Who's Back » : page Spotify 241 s, ReccoBeats 255 s."""
@@ -190,3 +194,11 @@ def test_id_propose_gate_et_duree_independante():
     assert jamais_lue(cas, t, None) is None
     t.spotify_id = "AUTRE"  # une fiche à un autre ID n'est jamais tranchée
     assert pol.politique_id_propose(lire, lambda *_: True)(cas, t, None) is None
+
+
+def test_kworb_ligne_rattachee_par_le_rejeu_d_aujourd_hui():
+    cas = _cas("kworb_ecartee", None, {"titre_kworb": "Slow Jamz"})
+    rejoue = {"Slow Jamz": {"fiche": {"id": 1, "titre": "Slow Jamz"}, "suggestion": False}}
+    assert pol.politique_kworb(cas, None, None, rejoues=rejoue).action == "run"
+    rejoue["Slow Jamz"]["suggestion"] = True  # toujours une proposition : pas périmé
+    assert pol.politique_kworb(cas, None, None, rejoues=rejoue) is None

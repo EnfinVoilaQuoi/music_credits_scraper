@@ -245,6 +245,47 @@ def _deezer_appliquer(ctx: ContexteAction, cas: Cas) -> str:
     return compte
 
 
+def _deezer_rattacher_isrc(ctx: ContexteAction, cas: Cas) -> str:
+    """La piste Deezer « absente » dont l'ISRC est DÉJÀ celui d'une fiche, sous
+    un autre titre (« Strass & paillettes » / « Strass et paillettes ») : la
+    création s'y refuse sans conclure ; l'humain dit que c'est elle."""
+    from src.services import ecarts_deezer
+
+    ecart = ecarts_deezer.ecart_depuis(cas.preuves["ecart"], ctx.tracks)
+    isrc = (ecart.piste.isrc or "").upper()
+    fiches = [t for t in ctx.tracks.values() if t.isrc and str(t.isrc).upper() == isrc]
+    if len(fiches) != 1:
+        raise LookupError(
+            f"{len(fiches)} fiche(s) portent l'ISRC {isrc or '—'} — rattachement à faire à la main"
+        )
+    ecart.nature, ecart.existing_track, ecart.matched_by = "link", fiches[0], "isrc_autre_titre"
+    (compte,) = ecarts_deezer.creer_lignes(ctx.data_manager, ctx.artiste, [ecart]) or ["rien"]
+    return compte
+
+
+def _deezer_edition(ctx: ContexteAction, cas: Cas) -> str:
+    """Une version Deezer qui est une ÉDITION de son morceau d'origine (radio
+    edit, bonus, « Main Version » — décision utilisateur 2026-10-19 : une
+    fiche, l'édition avec SA durée) : notée sur la fiche d'origine."""
+    from src.services import editions
+
+    ecart = cas.preuves["ecart"]
+    socle = ctx.tracks.get(ecart.get("socle_id"))
+    if socle is None:
+        raise LookupError("le morceau d'origine n'est plus dans la discographie")
+    piste = ecart.get("piste") or {}
+    editions.rattacher(
+        ctx.data_manager,
+        socle,
+        piste.get("title") or cas.morceau,
+        "deezer",
+        duration=piste.get("duration"),
+        deezer_id=piste.get("id"),
+        isrc=piste.get("isrc"),
+    )
+    return f"« {piste.get('title') or cas.morceau} » noté en édition de « {socle.title} »"
+
+
 def _kworb_links():
     from src.utils.kworb_links_manager import KworbLinksManager
 
@@ -480,7 +521,30 @@ def actions_pour(cas: Cas) -> list[Action]:
             "deezer_link_review": "✂️ Délier",
         }
         libelle = libelles.get(d, "✚ Créer la fiche")
-        return [
+        ecart = cas.preuves["ecart"]
+        en_plus = []
+        if d not in libelles and (ecart.get("piste") or {}).get("isrc"):
+            # La création s'y refuse (« l'ISRC d'une fiche peut être faux ») :
+            # c'est à l'humain de dire que c'est bien le même enregistrement.
+            en_plus.append(
+                Action(
+                    "deezer_rattacher_isrc",
+                    "🔗 Rattacher à la fiche du même ISRC",
+                    _deezer_rattacher_isrc,
+                    f"Rattacher « {cas.morceau} » à la fiche qui porte déjà son ISRC ?",
+                )
+            )
+        if d == "deezer_version" and ecart.get("socle_id"):
+            en_plus.append(
+                Action(
+                    "deezer_edition",
+                    "📎 Édition du morceau d'origine",
+                    _deezer_edition,
+                    f"Noter « {cas.morceau} » comme ÉDITION de son morceau d'origine (sa "
+                    "durée gardée à part), sans créer de fiche ?",
+                )
+            )
+        return en_plus + [
             Action(
                 "deezer_appliquer",
                 libelle,

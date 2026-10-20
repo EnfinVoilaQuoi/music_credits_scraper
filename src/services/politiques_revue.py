@@ -120,7 +120,8 @@ def politique_durees(minimum: int) -> Callable:
                 f"{faux[0]} {durees[faux[0]]} s démentie ; {juste} {durees[juste]} s = les "
                 "catalogues : ID d'une autre édition, ou lecture fausse"
                 + (" — elle tient la colonne" if _colonne_impactee(track, faux[0]) else ""),
-                "",
+                # Hors colonne, rien de faux n'est affiché ni compté : ✓ Normal.
+                "" if _colonne_impactee(track, faux[0]) else "normal",
                 f"démentie par {minimum}+ catalogues d'accord entre eux",
             )
         if d == "duree_deezer":
@@ -430,7 +431,7 @@ def politique_ecarts_deezer(
         if isrc and isrc in isrcs_connus:
             return Arbitrage(
                 f"ISRC déjà porté par « {isrcs_connus[isrc]} » : rattacher, ne pas créer",
-                "",
+                "deezer_rattacher_isrc",
                 isrc,
             )
         if d in ("deezer_absent", "deezer_album_absent"):
@@ -454,7 +455,7 @@ def politique_ecarts_deezer(
                     return Arbitrage(
                         "ÉDITION de la fiche du socle (décision du 2026-10-19 : une "
                         "fiche, la version en édition avec SA durée), pas de fiche",
-                        "",
+                        "deezer_edition",
                         f"{nature} : « {titre} »",
                     )
             if fam in ("instrumental", "a_cappella"):
@@ -483,12 +484,27 @@ def politique_ecarts_deezer(
     return juger
 
 
-def politique_kworb(cas, _track, _ctx):
+#: Les signalements Kworb qui désignent une LIGNE par son titre.
+_TITRE_KWORB = ("kworb_title", "titre_kworb")
+
+
+def politique_kworb(cas, _track, _ctx, rejoues: dict | None = None):
     """Une proposition Kworb « ★ » qui ne crée rien : rattacher comme VARIANTE
     au socle connu (`rendition` : ID gardé à part, jamais sommé) ou au morceau
     qui EST déjà ce remix (`existant`). Les voies qui créent une fiche ou
-    somment des streams (`collab`, `tiers`, `edition`) restent à l'humain."""
+    somment des streams (`collab`, `tiers`, `edition`) restent à l'humain.
+    `rejoues` : `{titre Kworb: verdict}` du rapprochement d'AUJOURD'HUI, rejoué
+    hors ligne depuis le brut (`update_kworb.rapprochements`) — une ligne
+    désormais rattachée sans suggestion rend le signalement périmé."""
     preuves = cas.preuves or {}
+    titre = next((preuves[k] for k in _TITRE_KWORB if preuves.get(k)), None)
+    verdict = (rejoues or {}).get(titre) if titre else None
+    if verdict and verdict.get("fiche") and not verdict.get("suggestion"):
+        return Arbitrage(
+            "le rapprochement d'aujourd'hui rattache la ligne : un run Kworb le retire",
+            "run",
+            f"« {titre} » → « {verdict['fiche']['titre']} » ({verdict.get('via')})",
+        )
     propose = preuves.get("proposition")
     if propose == "rendition" and preuves.get("parent_track_id"):
         return Arbitrage(

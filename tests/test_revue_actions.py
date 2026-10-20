@@ -383,3 +383,55 @@ def test_refuser_des_paroles_de_secours(data_manager):
     data_manager.save_track(genius)
     with pytest.raises(LookupError):
         refuser_paroles_ytm(data_manager, genius)
+
+
+def test_ecart_deezer_rattache_a_la_fiche_du_meme_isrc(monkeypatch):
+    """« Strass & paillettes » (Deezer) = « Strass et paillettes » (fiche), même
+    ISRC : la création s'y refuse sans conclure, l'humain rattache."""
+    from src.services import ecarts_deezer as ed
+
+    recus = []
+    monkeypatch.setattr(
+        ed, "creer_lignes", lambda dm, a, ecarts, **kw: recus.extend(ecarts) or ["ok"]
+    )
+    alb = ed.AlbumDeezer(id=10, title="Temps mort")
+    e = ed.Ecart("absent", alb, ed.PisteDeezer(id=1, title="Strass & paillettes", isrc="fr1"))
+    cas = _cas("deezer_absent", None, {"ecart": ed.ecart_vers_dict(e), "piste_deezer": 1}, cle="c")
+    rattacher = revue_actions.actions_pour(cas)[0]
+    assert rattacher.code == "deezer_rattacher_isrc"
+    fiche = SimpleNamespace(id=7, isrc="FR1", title="Strass et paillettes")
+    ctx = revue_actions.ContexteAction(
+        SimpleNamespace(retirer_signalement=lambda *a: True),
+        SimpleNamespace(id=1, name="Booba"),
+        {7: fiche},
+    )
+    assert revue_actions.executer(rattacher, ctx, cas) == "ok"
+    (ecart,) = recus
+    assert (ecart.nature, ecart.existing_track, ecart.matched_by) == (
+        "link",
+        fiche,
+        "isrc_autre_titre",
+    )
+    ctx.tracks[8] = SimpleNamespace(id=8, isrc="FR1", title="Doublon")
+    with pytest.raises(LookupError):  # deux fiches au même ISRC : à la main
+        revue_actions.executer(rattacher, ctx, cas)
+
+
+def test_version_deezer_notee_en_edition_du_socle():
+    from src.services import ecarts_deezer as ed
+
+    alb = ed.AlbumDeezer(id=10, title="Bitume Caviar")
+    piste = ed.PisteDeezer(id=5, title="CR600 (Bonus Track)", isrc="X1", duration=180)
+    e = ed.Ecart("version", alb, piste, socle=SimpleNamespace(id=3))
+    cas = _cas("deezer_version", None, {"ecart": ed.ecart_vers_dict(e)}, cle="c")
+    edition = next(a for a in revue_actions.actions_pour(cas) if a.code == "deezer_edition")
+    notes = []
+    dm = SimpleNamespace(
+        retirer_signalement=lambda *a: True,
+        record_track_edition=lambda tid, label, **kw: notes.append((tid, label, kw)) or True,
+    )
+    socle = SimpleNamespace(id=3, title="CR600")
+    ctx = revue_actions.ContexteAction(dm, SimpleNamespace(id=1, name="Isha"), {3: socle})
+    assert "édition de « CR600 »" in revue_actions.executer(edition, ctx, cas)
+    ((tid, label, kw),) = notes
+    assert tid == 3 and kw["duration"] == 180 and kw["deezer_id"] == 5 and kw["source"] == "deezer"

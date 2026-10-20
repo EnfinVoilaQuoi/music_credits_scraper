@@ -157,7 +157,8 @@ def regles(monkeypatch):
     monkeypatch.setattr(revue_auto, "REGLES_BRANCHEES", True)
 
 
-def test_interrupteur_baisse_rien_par_regle(data_manager, artiste):
+def test_interrupteur_baisse_rien_par_regle(data_manager, artiste, monkeypatch):
+    monkeypatch.setattr(revue_auto, "REGLES_BRANCHEES", False)
     durees = {"deezer": 146, "spotify_web": 146, "apple_music": 147, "youtube": 337}
     _fiche_durees(data_manager, artiste, "Chaos", 10, durees)
     _charger(data_manager, artiste)

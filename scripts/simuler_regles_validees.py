@@ -10,6 +10,11 @@ actives (LRC d'une autre fiche, certif d'un autre titre…) sont listées à par
 elles sont de toute façon faites en fin de run.
 
     python scripts/simuler_regles_validees.py [--artiste A2H] [--sortie rapport.md]
+    python scripts/simuler_regles_validees.py --apply   # VRAIE base : sauvegarde d'abord
+
+`--apply` (après l'accord de l'utilisateur sur le passage à blanc, et JAMAIS
+pendant un run) : même geste sur la vraie base, après une sauvegarde ; le mode
+de journal de la base est affiché (WAL depuis `9c27c01`).
 """
 
 from __future__ import annotations
@@ -46,8 +51,11 @@ def main(argv=None) -> int:
         type=Path,
         default=Path(DATA_DIR) / "diagnostics" / f"regles_validees_{date.today()}.md",
     )
+    p.add_argument("--apply", action="store_true", help="appliquer sur la VRAIE base")
     a = p.parse_args(argv)
 
+    if a.apply:
+        return appliquer(a)
     dossier = Path(tempfile.mkdtemp(prefix="regles_validees_"))
     copie = dossier / "copie.db"
     try:
@@ -72,6 +80,32 @@ def main(argv=None) -> int:
     a.sortie.write_text("\n".join(lignes) + "\n", encoding="utf-8")
     print("\n".join(lignes[:40]))
     print(f"\n→ {a.sortie}")
+    return 0
+
+
+def appliquer(a) -> int:
+    from src.services import revue_auto
+    from src.utils.data_manager import DataManager
+    from src.utils.database_backup import get_backup_manager
+
+    with closing(sqlite3.connect(f"file:{BASE.as_posix()}?mode=ro", uri=True)) as c:
+        mode = c.execute("PRAGMA journal_mode").fetchone()[0]
+    print(f"Base : {BASE} — journal_mode={mode}")
+    backup = get_backup_manager().create_backup("regles_validees")
+    if backup is None:
+        print("❌ sauvegarde impossible — rien n'est écrit")
+        return 1
+    print(f"💾 {backup}")
+    revue_auto.REGLES_BRANCHEES = True
+    dm = DataManager()
+    lignes = simuler(dm, a.artiste)
+    lignes[0] = lignes[0].replace("Passage à blanc", "APPLICATION")
+    lignes[2] = f"Appliquées sur la VRAIE base (sauvegarde : {backup.name})."
+    sortie = a.sortie.with_name(a.sortie.stem + "_applique.md")
+    sortie.parent.mkdir(parents=True, exist_ok=True)
+    sortie.write_text("\n".join(lignes) + "\n", encoding="utf-8")
+    print("\n".join(lignes[:12]))
+    print(f"\n→ {sortie}")
     return 0
 
 

@@ -18,7 +18,7 @@ S'y ajoutent les POLITIQUES d'arbitrage validées par l'utilisateur
 corrige comme un cas formel (retrait SongBPM, retrait de l'ID Spotify d'un
 autre enregistrement) ou se marque « ✓ Normal » PAR RÈGLE — note
 `regle:<détecteur>`, distincte d'un verdict humain. Interrupteur :
-`REGLES_BRANCHEES`, levé seulement après accord sur le passage à blanc.
+`REGLES_BRANCHEES`, levé le 2026-10-20 après accord sur le passage à blanc.
 
 Chaque correction passe par l'écrivain qui existe déjà (`retirer_lrc`,
 `record_certifications`), pose la MÉMOIRE de refus que relisent les
@@ -63,9 +63,10 @@ class BilanCorrections:
 
 
 #: Les politiques VALIDÉES (`politiques_revue.REGLES_VALIDEES`) ne
-#: s'appliquent qu'interrupteur levé : il le sera après l'accord de
-#: l'utilisateur sur le passage à blanc (`scripts/simuler_regles_validees.py`).
-REGLES_BRANCHEES = False
+#: s'appliquent qu'interrupteur levé — levé le 2026-10-20, l'utilisateur ayant
+#: validé les 36 corrections du passage à blanc (« Je valide pour les 36
+#: corrections », `scripts/simuler_regles_validees.py`).
+REGLES_BRANCHEES = True
 
 #: Préfixe de la note d'un « ✓ Normal » posé par une règle (et de l'origine
 #: d'un refus) — un humain n'en pose jamais.

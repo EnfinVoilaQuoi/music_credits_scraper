@@ -31,6 +31,7 @@ from src.utils.credits_genius_api import (
     purger_provisoires_couverts,
     sans_provisoires_couverts,
 )
+from src.utils.credits_genius_api import unir as unir_credits
 from src.utils.dates import completer, la_plus_ancienne, meme_jour
 from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
@@ -252,10 +253,31 @@ class TrackRepository:
                     f"{brute!r} → {track.duration!r} (normalisée à l'entrée)"
                 )
 
+            # Un objet NEUF (sans id) n'a jamais lu les crédits de la fiche sur
+            # laquelle il retombe : réécrire la table depuis lui les effacerait
+            # (2026-10-15/16 : Diam's, Népal, OrelSan relancés sous un nom
+            # mal accentué, discographie vue VIDE — 528 fiches ont perdu leurs
+            # crédits scrapés au profit des seuls 🎫 de l'API).
+            objet_neuf = track.id is None
             existing_track = self._fiche_existante(conn, track)
 
             if existing_track:
                 track.id = existing_track["id"]
+                if objet_neuf:
+                    # Une source RELUE par cet objet (page Genius, disque
+                    # Discogs) remplace la sienne : seules les autres s'unissent.
+                    relues = {
+                        source
+                        for frais, source in (
+                            (track._credits_genius_frais, "genius"),
+                            (track._credits_discogs_frais, "discogs"),
+                        )
+                        if frais
+                    }
+                    en_base = [
+                        c for c in self._get_track_credits(conn, track.id) if c.source not in relues
+                    ]
+                    track.credits = unir_credits(en_base, track.credits)
                 self._signaler_identites_concurrentes(track, existing_track)
                 if track.is_featuring is None:
                     # L'objet reflète ce que la base garde (COALESCE ci-dessous).

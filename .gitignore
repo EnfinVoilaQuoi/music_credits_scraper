@@ -127,6 +127,7 @@ scripts/*
 # Certifications : réécriture des rattachements par sous-chaîne (2026-09-06)
 !scripts/repair_certifications.py
 !scripts/repair_lrc_garde.py
+!scripts/retablir_credits_perdus.py
 !scripts/repair_durees_video.py
 !scripts/fusionner_doublons_deezer.py
 !scripts/repair_vues_videos_genius.py

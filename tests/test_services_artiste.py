@@ -116,6 +116,21 @@ class TestChargerOuAjouter:
         artiste.charger_ou_ajouter(_runtime(dm), "Swing")
         assert dm.saved == []
 
+    def test_nom_mal_accentue_retrouve_l_artiste_avec_sa_discographie(self, monkeypatch):
+        """2026-10-16 : « Nepal » ratait « Népal » ; l'artiste était « ajouté »
+        avec une discographie VIDE, et la Discographie réécrivait ses fiches
+        depuis l'API (crédits scrapés perdus sur 528 fiches)."""
+        nepal = Artist(name="Népal", genius_id=19547)
+        dm = _FakeDM()
+        dm.get_artist_by_name = lambda nom: nepal if nom == "Népal" else None
+        monkeypatch.setattr(
+            artiste,
+            "fetch_artist_from_genius_url",
+            lambda *a: Artist(name="Népal", genius_id=19547),
+        )
+        a = artiste.charger_ou_ajouter(_runtime(dm), "Nepal")
+        assert a is nepal and a.tracks == ["morceau-reuni"] and dm.saved == []
+
 
 def _track(tid, **kw):
     t = Track(title=f"T{tid}", artist=Artist(name="A"))

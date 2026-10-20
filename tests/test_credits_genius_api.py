@@ -429,6 +429,41 @@ class TestPersistance:
         tid = data_manager.save_track(t)
         assert _credits_en_base(data_manager, tid) == [("A", "genius"), ("C", "genius_api")]
 
+    def test_un_objet_neuf_n_efface_pas_les_credits_scrapes(self, data_manager, artiste):
+        """2026-10-15/16 : la Discographie, croyant l'artiste vide, a sauvé des
+        objets NEUFS aux seuls crédits 🎫 sur des fiches scrapées — la table était
+        réécrite depuis eux, les crédits de la page perdus (Népal « Sundance »)."""
+        t = Track(title="Sundance", artist=artiste)
+        t.genius_id = 8364
+        t.credits = [_c("Ponko", CreditRole.PRODUCER), _c("Népal", CreditRole.WRITER)]
+        tid = data_manager.save_track(t)
+
+        neuve = Track(title="Sundance", artist=artiste)
+        neuve.genius_id = 8364
+        neuve.credits = [_api("Ponko", CreditRole.PRODUCER), _api("Lomepal", CreditRole.WRITER)]
+        assert data_manager.save_track(neuve) == tid
+        assert _credits_en_base(data_manager, tid) == [
+            ("Lomepal", "genius_api"),
+            ("Népal", "genius"),
+            ("Ponko", "genius"),
+        ]
+
+    def test_un_objet_neuf_qui_a_relu_la_page_remplace_ses_credits(self, data_manager, artiste):
+        t = Track(title="T", artist=artiste)
+        t.genius_id = 9
+        t.credits = [_c("Ancien", CreditRole.PRODUCER), _c("Discogs", CreditRole.WRITER, "discogs")]
+        tid = data_manager.save_track(t)
+
+        neuve = Track(title="T", artist=artiste)
+        neuve.genius_id = 9
+        neuve.credits = [_c("Nouveau", CreditRole.PRODUCER)]
+        neuve._credits_genius_frais = True
+        data_manager.save_track(neuve)
+        assert _credits_en_base(data_manager, tid) == [
+            ("Discogs", "discogs"),
+            ("Nouveau", "genius"),
+        ]
+
     def test_save_track_garde_les_provisoires_seuls(self, data_manager, artiste):
         t = Track(title="T", artist=artiste)
         t.credits = [_api("A", CreditRole.PRODUCER)]

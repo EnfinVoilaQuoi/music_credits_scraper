@@ -150,6 +150,15 @@ def charger_ou_ajouter(runtime: Runtime, nom: str, *, genius_id: int | None = No
     if artist is not None:
         return artist
     artist = resoudre(runtime, nom, genius_id=genius_id)
+    # Le nom tapé rate parfois l'artiste que Genius NOMME autrement (« Nepal »,
+    # « Diams », « Orelsan ») : sous son nom Genius, il est déjà en base. Le
+    # « rajouter » le rendait avec une discographie VIDE — sa ligne était la
+    # même (nom unique), mais la Discographie voyait « 0 morceau en base » et
+    # réécrivait ses fiches depuis l'API (2026-10-15/16, crédits scrapés perdus).
+    deja = charger(runtime, artist.name) if artist.name and artist.name != nom else None
+    if deja is not None:
+        logger.info(f"✅ « {nom} » = « {deja.name} » (nom Genius), déjà en base")
+        return deja
     runtime.data_manager.save_artist(artist)
     artist.tracks = []
     logger.info(f"✅ Artiste ajouté : {artist.name} (ID Genius {artist.genius_id})")

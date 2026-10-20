@@ -286,3 +286,63 @@ def test_un_id_deezer_change_n_expire_que_les_constats_deezer(data_manager):
     data_manager.update_artist_deezer_id(artiste.id, 42)
 
     assert _constats(data_manager, absent.id)[absent.id] == ("2026-10-01T00:00:00", None)
+
+
+class TestIdentiteDeLArtiste:
+    """`genius_id` et `spotify_id` sont des colonnes d'IDENTITÉ : `save_artist`
+    les REMPLIT, ne les remplace ni ne les efface (2026-10-20 — un
+    `Artist(id, name)` les effaçait toutes deux, `discogs_id` était déjà
+    protégé). Un changement voulu passe par `update_artist_spotify_id`."""
+
+    @staticmethod
+    def _colonnes(dm, artist_id):
+        with dm.engine.connect() as conn:
+            return tuple(
+                conn.exec_driver_sql(
+                    "SELECT genius_id, spotify_id FROM artists WHERE id = ?", (artist_id,)
+                ).one()
+            )
+
+    def test_un_artiste_sans_identifiants_ne_les_efface_pas(self, data_manager):
+        from src.models import Artist
+
+        artiste = Artist(name="Swing", genius_id=42, spotify_id="SP1")
+        artiste.id = data_manager.save_artist(artiste)
+
+        data_manager.save_artist(Artist(id=artiste.id, name="Swing"))
+
+        assert self._colonnes(data_manager, artiste.id) == (42, "SP1")
+
+    def test_un_autre_identifiant_ne_remplace_pas(self, data_manager):
+        from src.models import Artist
+
+        artiste = Artist(name="Swing", genius_id=42, spotify_id="SP1")
+        artiste.id = data_manager.save_artist(artiste)
+
+        data_manager.save_artist(Artist(id=artiste.id, name="Swing", genius_id=7, spotify_id="SP2"))
+
+        assert self._colonnes(data_manager, artiste.id) == (42, "SP1")
+
+    def test_un_identifiant_vide_se_remplit(self, data_manager, notes):
+        from src.models import Artist
+
+        artiste = Artist(name="Swing")
+        artiste.id = data_manager.save_artist(artiste)
+        notes.clear()
+
+        data_manager.save_artist(
+            Artist(id=artiste.id, name="Swing", genius_id=42, spotify_id="SP1")
+        )
+
+        assert self._colonnes(data_manager, artiste.id) == (42, "SP1")
+        assert notes == [{artiste.id: {"identite_spotify"}}]
+
+    def test_l_ecrivain_dedie_change_l_id_spotify(self, data_manager):
+        from src.models import Artist
+
+        artiste = Artist(name="Swing", spotify_id="SP1")
+        artiste.id = data_manager.save_artist(artiste)
+
+        data_manager.update_artist_spotify_id(artiste.id, "SP2")
+
+        assert self._colonnes(data_manager, artiste.id)[1] == "SP2"

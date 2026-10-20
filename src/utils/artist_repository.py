@@ -146,7 +146,10 @@ class ArtistRepository:
             if artist.id:
                 avant = (
                     conn.execute(
-                        text("SELECT name, spotify_id, discogs_id FROM artists WHERE id = :id"),
+                        text(
+                            "SELECT name, genius_id, spotify_id, discogs_id FROM artists "
+                            "WHERE id = :id"
+                        ),
                         {"id": artist.id},
                     )
                     .mappings()
@@ -156,18 +159,32 @@ class ArtistRepository:
                     if avant["name"] != artist.name:
                         # Le nom est celui sous lequel on le cherche partout.
                         self._invalider(conn, artist.id, *PORTIERS_DE_L_ARTISTE)
-                    if artist.spotify_id and avant["spotify_id"] != artist.spotify_id:
+                    if artist.spotify_id and not avant["spotify_id"]:
                         self._invalider(conn, artist.id, "identite_spotify")
+                    for col, neuf in (
+                        ("genius_id", artist.genius_id),
+                        ("spotify_id", artist.spotify_id),
+                    ):
+                        if avant[col] and neuf and str(neuf) != str(avant[col]):
+                            logger.warning(
+                                f"⚠️ {artist.name} : {col} {avant[col]} gardé, {neuf} ignoré "
+                                "(identité : se remplit, ne se remplace pas — "
+                                "`update_artist_spotify_id` pour un changement voulu)"
+                            )
                     if artist.discogs_id is not None and avant["discogs_id"] != artist.discogs_id:
                         self._invalider(conn, artist.id, "identite_discogs")
                 # Mise à jour. `discogs_id` en COALESCE (2026-09-23) : il est
                 # désormais posé par l'oracle `services/discogs_identite` via
                 # son écrivain dédié, et un `Artist` construit sans lui (la
-                # plupart des appelants) l'EFFACERAIT sinon.
+                # plupart des appelants) l'EFFACERAIT sinon. `genius_id` et
+                # `spotify_id` (2026-10-20) : colonnes d'IDENTITÉ, elles se
+                # REMPLISSENT et ne se remplacent jamais ici — un `Artist(id,
+                # name)` les effaçait toutes deux.
                 conn.execute(
                     text(
-                        "UPDATE artists SET name = :name, genius_id = :genius_id, "
-                        "spotify_id = :spotify_id, "
+                        "UPDATE artists SET name = :name, "
+                        "genius_id = COALESCE(genius_id, :genius_id), "
+                        "spotify_id = COALESCE(spotify_id, :spotify_id), "
                         "discogs_id = COALESCE(:discogs_id, discogs_id), updated_at = :now "
                         "WHERE id = :id"
                     ),

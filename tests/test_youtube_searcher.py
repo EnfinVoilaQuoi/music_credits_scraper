@@ -338,3 +338,178 @@ class TestAutreVersion:
         assert not meme_version_publiee("Harley Davidson", "Harley Davidson (Instrumental)")
         # Jamais l'inverse : la fiche du live ne reçoit pas le clip studio.
         assert not meme_version_publiee("Double Discours - Live", "Double discours")
+
+
+class TestRefusATortDuScore:
+    """2026-10-20 : en rejouant les 2 260 vidéos posées par la recherche, des
+    liens JUSTES tombaient sous le seuil — défauts du score, pas de la vidéo."""
+
+    def test_le_rappel_final_de_youtube_music_ne_compte_pas(self):
+        """« (Pt. 1; Live 2006) » répète les groupes précédents : la Boulette
+        de Diam's tombait à 0 (version jugée autre)."""
+        from src.youtube.youtube_searcher import formes_publiees, relevance_score
+
+        video = "La Boulette (Pt. 1) [Live 2006] (Pt. 1; Live 2006)"
+        assert formes_publiees(video) == [
+            "La Boulette (Pt. 1) [Live 2006]",
+            "La Boulette (Pt. 1; Live 2006)",
+        ]
+        assert relevance_score(video, ["Diam's"], "Diam's", "La Boulette - Pt. 1- Live 2006") > 0.95
+        # La fiche peut garder l'écriture du rappel lui-même.
+        assert (
+            relevance_score(
+                "Ma France à moi (Version Yann Tiersen) [Live 2006] (Version Yann Tiersen; Live 2006)",
+                ["Yann Tiersen", "Diam's"],
+                "Diam’s",
+                "Ma France à moi (Version Yann Tiersen; Live 2006)",
+            )
+            > 0.95
+        )
+        # Un dernier groupe qui dit autre chose reste là.
+        assert formes_publiees("Tony (Remix) (Live)") == ["Tony (Remix) (Live)"]
+        # Et la partie reste jugée : la Pt. 2 n'est pas la Pt. 1.
+        assert (
+            relevance_score(
+                "La Boulette (Pt. 2) [Live 2006] (Pt. 2; Live 2006)",
+                ["Diam's"],
+                "Diam's",
+                "La Boulette - Pt. 1- Live 2006",
+            )
+            == 0
+        )
+
+    def test_un_artiste_nomme_en_invite_dans_le_titre(self):
+        """YouTube Music ne liste que Bruler pour « Moscou (feat. Sadek &
+        Rabah) » : Sadek, nommé dans le titre, est bien un artiste du résultat."""
+        from src.youtube.youtube_searcher import invites_nommes, relevance_score
+
+        assert relevance_score("Moscou (feat. Sadek & Rabah)", ["Bruler"], "Sadek", "Moscou") == 1.0
+        assert relevance_score("Moscou", ["Bruler"], "Sadek", "Moscou") < 0.85
+        # Un « (with … Remix) » n'est pas une liste d'invités.
+        assert invites_nommes("Hold On (With You Remix)") == []
+
+    def test_une_date_abimee_par_la_plateforme(self):
+        """Médine « 17 Octobre » est publié « 17-Oct », « 11 Septembre » « 11-Sep »."""
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert relevance_score("17-Oct", ["Medine"], "Médine", "17 Octobre") == 1.0
+        assert relevance_score("11-Sep", ["Medine"], "Médine", "11 Septembre") == 1.0
+        # Un autre jour n'est pas la même date.
+        assert relevance_score("18-Oct", ["Medine"], "Médine", "17 Octobre") < 0.85
+
+    def test_bonus_seul_ne_pese_pas_dans_la_ressemblance(self):
+        """Le « Bonus Track » de Flynt EST le morceau (décision 2026-10-15) :
+        il plafonnait à 0,85, sous le seuil de 0,90 d'un lien de fiche."""
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert (
+            relevance_score(
+                "Champions du monde", ["Flynt"], "Flynt", "Champions du monde (Bonus Track)"
+            )
+            == 1.0
+        )
+        assert relevance_score("DKR (Bonus Track)", ["Booba"], "Booba", "DKR") == 1.0
+        # Les invités après la mention ne la masquent pas.
+        assert (
+            relevance_score(
+                "PITLANE [Bonus] (feat. ElGrandeToto, Zed & Zamdane)",
+                ["GP Explorer"],
+                "GP Explorer",
+                "PITLANE (Bonus)",
+            )
+            == 1.0
+        )
+
+    def test_un_autre_montage_reste_sous_le_seuil(self):
+        """Mesuré : retirer TOUT descripteur neutre faisait poser des Radio
+        Edit et des versions Clean. Seul « Bonus » est retiré."""
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert relevance_score("Evasion (Radio Edit)", ["Diam's"], "Diam's", "Evasion") < 0.85
+
+    def test_une_partie_1_publiee_sans_son_numero(self):
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert (
+            relevance_score("Arabian panthers", ["Medine"], "Médine", "Arabian Panthers 1") > 0.95
+        )
+        # Jamais une autre partie, ni un « #1 » qui numérote une version.
+        assert relevance_score("Leer", ["Shurik'n"], "Shurik'n", "Leer 2") == 0
+        assert (
+            relevance_score(
+                "If I Ain't Got You (Kanye West Radio Mix #1)",
+                ["Alicia Keys"],
+                "Alicia Keys",
+                "If I Ain’t Got You (Kanye West Remix)",
+            )
+            == 0
+        )
+
+    def test_un_titre_generique_se_juge_sur_son_disque(self):
+        """« Intro (Table d'écoute) » est l'Intro de *Table d'écoute* — mais
+        une « Intro » ne désigne une fiche que sur le MÊME disque : la même
+        vidéo à 5 M de vues était posée sur trois Intro de Freeze Corleone."""
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert (
+            relevance_score(
+                "Intro",
+                ["Medine"],
+                "Médine",
+                "Intro (Table d’écoute)",
+                album="Table d’écoute",
+                result_album="Table d'écoute",
+            )
+            == 1.0
+        )
+        assert (
+            relevance_score(
+                "Intro",
+                ["Freeze Corleone"],
+                "Freeze Corleone",
+                "Intro",
+                album="Projet Blue Beam",
+                result_album="RIYAD SADIO",
+            )
+            == 0
+        )
+        # Une édition du disque reste le disque.
+        assert (
+            relevance_score(
+                "Interlude",
+                ["Booba"],
+                "Booba",
+                "Interlude",
+                album="Temps mort (Réédition)",
+                result_album="Temps mort",
+            )
+            == 1.0
+        )
+        assert (
+            relevance_score(
+                "Outro",
+                ["Népal"],
+                "Népal",
+                "Outro",
+                album="444Nuits (Version rouge)",
+                result_album="444 Nuits",
+            )
+            == 1.0
+        )
+        # Disque inconnu d'un côté : rien ne prouve que c'est la bonne Intro.
+        assert relevance_score("Intro", ["Booba"], "Booba", "Intro") == 0
+
+    def test_la_recherche_garde_artistes_et_disque(self, searcher):
+        """Pour REJUGER un lien quand le score change : la chaîne ne nomme que
+        le premier artiste (« Simorgh » pour un disque avec Lucio Bukowski)."""
+        resultat = _resultat_ytm(titre="Intro", artiste="Freeze Corleone")
+        resultat["artists"].append({"name": "Osirus Jack"})
+        resultat["album"] = {"name": "Projet Blue Beam", "id": "MPRE"}
+        searcher.ytmusic = _FauxYT(resultats=[resultat])
+        searcher.ytmusic_available = True
+
+        res = searcher.search_track("Freeze Corleone", "Intro", album="Projet Blue Beam")
+        assert res[0]["artists"] == ["Freeze Corleone", "Osirus Jack"]
+        assert res[0]["album"] == "Projet Blue Beam"
+        assert res[0]["relevance_score"] == 1.0
+        assert searcher.search_track("Freeze Corleone", "Intro")[0]["album"] == "Projet Blue Beam"

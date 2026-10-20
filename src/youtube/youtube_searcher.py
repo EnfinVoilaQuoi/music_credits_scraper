@@ -13,11 +13,20 @@ from ytmusicapi.exceptions import YTMusicError
 from src.config import DATA_DIR, YOUTUBE_CACHE_TTL_HOURS
 from src.utils.logger import get_logger
 from src.utils.title_matching import (
+    _GROUPE_D_INVITES,
+    _retirer_si_invites,
+    base_album_key,
+    cle_album,
     names_match_as_words,
     normalize_name,
     normalize_title,
+    strip_featuring,
 )
-from src.utils.version_descriptors import meme_version_publiee
+from src.utils.version_descriptors import (
+    meme_version_publiee,
+    titre_generique,
+    titre_sans_son_disque,
+)
 
 logger = get_logger(__name__)
 
@@ -29,7 +38,13 @@ def cache_key(artist: str, title: str) -> str:
 
 
 def relevance_score(
-    result_title: str, result_artists: list[str], target_artist: str, target_title: str
+    result_title: str,
+    result_artists: list[str],
+    target_artist: str,
+    target_title: str,
+    *,
+    album: str | None = None,
+    result_album: str | None = None,
 ) -> float:
     """Pertinence d'un résultat de recherche, entre 0 et 1 (titre 60 %, artiste 40 %).
 
@@ -50,7 +65,31 @@ def relevance_score(
     le cas des vrais homonymes reste traité en amont (`ambiguous` d'
     `update_ytmusic`). Le seuil de persistance, lui, n'est PAS abaissé : la
     contrepartie de ce relâchement est la validation humaine (✔️/✖️).
+
+    `album` (celui de la fiche) et `result_album` (celui du résultat) jugent un
+    titre GÉNÉRIQUE : « Intro » ne désigne une fiche que sur le MÊME disque
+    (2026-10-20 : l'« Intro » de *RIYAD SADIO* et celle de *Projet Blue Beam*
+    de Freeze Corleone portaient la même vidéo à 5 M de vues).
+
+    Un artiste NOMMÉ en invité dans le titre du résultat compte comme un
+    artiste du résultat : YouTube Music ne liste souvent que le principal
+    (« Moscou (feat. Sadek & Rabah) » de Bruler, 2026-10-20).
     """
+    # Le nom du disque que Genius ajoute à un titre générique n'en fait pas
+    # partie : « Intro (Table d'écoute) » est l'« Intro » de *Table d'écoute*.
+    target_title = titre_sans_son_disque(target_title, album)
+    if titre_generique(target_title) and not meme_album(album, result_album):
+        return 0.0
+    artistes = [*result_artists, *invites_nommes(result_title)]
+    return max(
+        _pertinence(forme, artistes, target_artist, target_title)
+        for forme in formes_publiees(result_title)
+    )
+
+
+def _pertinence(
+    result_title: str, result_artists: list[str], target_artist: str, target_title: str
+) -> float:
     # Une AUTRE VERSION n'est pas le morceau, quelle que soit la ressemblance
     # du texte : « Black Skinhead » passait au-dessus du seuil pour « Black
     # Skinhead (Remix) » et ses 42 M de vues entraient dans le total du remix
@@ -60,16 +99,130 @@ def relevance_score(
         return 0.0
     # Ni une autre PARTIE (2026-10-11) : « Mission Cobra Part. 3 » ressemblait à
     # 97 % à « Part. 2 », « Gimme A Second 2 » à « Gimme A Second ».
-    if result_title and numeros_de_partie(
-        target_title, [target_artist, *result_artists]
-    ) != numeros_de_partie(result_title, [target_artist, *result_artists]):
+    if result_title and not memes_parties_publiees(
+        target_title, result_title, [target_artist, *result_artists]
+    ):
         return 0.0
-    cible_titre = normalize_title(target_title)
-    title_similarity = difflib.SequenceMatcher(
-        None, cible_titre, normalize_title(result_title or "")
-    ).ratio()
+    cible_compare, resultat_compare = _titre_compare(target_title), _titre_compare(
+        result_title or ""
+    )
+    # Deux DATES différentes ne se ressemblent pas : « 18-Oct » n'est pas « 17 Octobre ».
+    if {d for d in _DATE.findall(cible_compare)} ^ {d for d in _DATE.findall(resultat_compare)}:
+        return 0.0
+    title_similarity = difflib.SequenceMatcher(None, cible_compare, resultat_compare).ratio()
 
     return (title_similarity * 0.6) + (_similarite_artiste(target_artist, result_artists) * 0.4)
+
+
+#: Le rappel que YouTube Music ajoute en FIN de titre, entre parenthèses, des
+#: versions déjà nommées : « La Boulette (Pt. 1) [Live 2006] (Pt. 1; Live 2006) ».
+_RAPPEL_FINAL = re.compile(r"\s*\(([^()\[\]]*)\)\s*$")
+_GROUPE = re.compile(r"[\(\[]([^()\[\]]*)[\)\]]")
+
+
+def formes_publiees(titre: str | None) -> list[str]:
+    """PUR. Les écritures d'un titre de résultat à juger : le titre lui-même,
+    ou — s'il finit par un RAPPEL de ses groupes (« La Boulette (Pt. 1) [Live
+    2006] (Pt. 1; Live 2006) ») — le titre sans le rappel, et le socle suivi
+    du seul rappel (« Ma France à moi (Version Yann Tiersen; Live 2006) »,
+    l'écriture qu'en garde la fiche).
+
+    Ce rappel, propre aux titres de YouTube Music, faisait lire deux fois
+    chaque descripteur : la version était jugée autre, et les lives de Diam's
+    tombaient à 0 (2026-10-20)."""
+    titre = titre or ""
+    m = _RAPPEL_FINAL.search(titre)
+    if not m:
+        return [titre]
+    groupes = list(_GROUPE.finditer(titre[: m.start()]))
+    avant = {normalize_title(g[1]) for g in groupes}
+    rappel = [normalize_title(p) for p in m.group(1).split(";")]
+    if not avant or not all(p and p in avant for p in rappel):
+        return [titre]
+    socle = titre[: groupes[0].start()].rstrip()
+    return [titre[: m.start()].rstrip(), f"{socle} ({m.group(1).strip()})"]
+
+
+def invites_nommes(titre: str | None) -> list[str]:
+    """PUR. Les listes d'invités qu'un titre NOMME (« (feat. Sadek & Rabah) »
+    → « Sadek & Rabah ») — jamais un « (with You Remix) » (`title_matching`)."""
+    return [
+        m.group(2).strip()
+        for m in _GROUPE_D_INVITES.finditer(titre or "")
+        if _retirer_si_invites(m) == "" and m.group(2).strip()
+    ]
+
+
+def meme_album(album: str | None, autre: str | None) -> bool:
+    """Deux noms de disque désignent-ils le même disque (ou une édition de
+    lui : « Temps mort » / « Temps mort (Réédition) », « 444 Nuits » /
+    « 444Nuits (Version rouge) ») ? Faux si l'un manque."""
+    if not album or not autre:
+        return False
+    a, b = (re.sub(r"(?<=\d) (?=[a-z])", "", cle_album(x)) for x in (album, autre))
+    return base_album_key(a, {b}) is not None or base_album_key(b, {a}) is not None
+
+
+def memes_parties_publiees(cible: str, resultat: str, artistes=()) -> bool:
+    """La même PARTIE (`numeros_de_partie`), un « 1 » FINAL pouvant manquer à
+    la publication : « Arabian Panthers 1 » est sorti « Arabian panthers »
+    (Médine, 2026-10-20). Jamais une autre partie (« Gimme A Second 2 » n'est
+    pas « Gimme A Second »), ni un « #1 » ou « Pt. 1 » qui numérote une version
+    ou une suite (« Kanye West Radio Mix #1 », mesuré le 2026-10-20)."""
+    a, b = numeros_de_partie(cible, artistes), numeros_de_partie(resultat, artistes)
+    if a == b:
+        return True
+    vide = frozenset()
+    un = frozenset({1})
+    return (a, b) in ((un, vide), (vide, un)) and _finit_par_un(cible if a else resultat)
+
+
+def _finit_par_un(titre: str) -> bool:
+    principal = re.split(r"\s[-–]\s|[(\[]", titre or "", maxsplit=1)[0].strip()
+    return re.search(r"\s1$", principal) is not None
+
+
+_MOIS = {
+    1: ("janvier", "january", "jan", "janv"),
+    2: ("fevrier", "february", "feb", "fev", "fevr"),
+    3: ("mars", "march", "mar"),
+    4: ("avril", "april", "apr", "avr"),
+    5: ("mai", "may"),
+    6: ("juin", "june", "jun"),
+    7: ("juillet", "july", "jul", "juil"),
+    8: ("aout", "august", "aug"),
+    9: ("septembre", "september", "sep", "sept"),
+    10: ("octobre", "october", "oct"),
+    11: ("novembre", "november", "nov"),
+    12: ("decembre", "december", "dec"),
+}
+_NUMERO_DU_MOIS = {nom: n for n, noms in _MOIS.items() for nom in noms}
+_JOUR_ET_MOIS = re.compile(
+    r"\b(\d{1,2}) (" + "|".join(sorted(_NUMERO_DU_MOIS, key=len, reverse=True)) + r")\b"
+)
+
+
+#: Une mention « Bonus » / « Bonus Track » SEULE, en fin de titre.
+_BONUS_SEUL = re.compile(
+    r"\s*(?:[\(\[]\s*bonus(?:\s+track)?\s*[\)\]]|\s[-–]\s*bonus(?:\s+track)?)\s*$",
+    re.IGNORECASE,
+)
+
+
+_DATE = re.compile(r"\b\d{1,2} m\d\d\b")
+
+
+def _titre_compare(titre: str) -> str:
+    """Le titre tel que la RESSEMBLANCE le compare : normalisé, sans mention
+    « Bonus » seule (la place sur une édition, pas une autre version : le
+    « Bonus Track » de Flynt EST « Champions du monde », décision utilisateur
+    2026-10-15 — mais pas « Radio Edit » ni « Clean », mesuré le 2026-10-20 :
+    retirer tout descripteur neutre faisait poser 15 de ces montages), et une
+    date « jour mois » écrite pareil quelle que soit la graphie : la plateforme
+    abîme « 17 Octobre » de Médine en « 17-Oct », comme un tableur."""
+    sans_invites = strip_featuring(titre)  # « PITLANE [Bonus] (feat. …) »
+    texte = normalize_title(_BONUS_SEUL.sub("", sans_invites) or titre)
+    return _JOUR_ET_MOIS.sub(lambda m: f"{m[1]} m{_NUMERO_DU_MOIS[m[2]]:02d}", texte)
 
 
 _MARQUEUR_DE_PARTIE = re.compile(
@@ -113,6 +266,13 @@ def numeros_de_partie(titre: str, artistes=()) -> frozenset[int]:
     if m := re.search(r"\s(\d{1,3})$", principal):
         numeros.add(int(m.group(1)))
     return frozenset(numeros)
+
+
+def _nom_d_album(album) -> str | None:
+    """Le nom du disque d'un résultat ytmusicapi (`{"name", "id"}`, ou rien)."""
+    if isinstance(album, dict):
+        return album.get("name") or None
+    return album or None
 
 
 def _similarite_artiste(cible: str, artistes: list[str]) -> float:
@@ -180,8 +340,11 @@ class YouTubeSearcher:
         conn.commit()
         conn.close()
 
-    def search_track(self, artist: str, title: str, max_results: int = 25) -> list[dict]:
-        """Recherche principale avec cache et fallbacks"""
+    def search_track(
+        self, artist: str, title: str, max_results: int = 25, album: str | None = None
+    ) -> list[dict]:
+        """Recherche principale avec cache et fallbacks. `album` : le disque de
+        la fiche, qui juge un titre générique (`relevance_score`)."""
 
         # Vérifier le cache d'abord
         cle = cache_key(artist, title)
@@ -195,7 +358,7 @@ class YouTubeSearcher:
         # Méthode 1: ytmusicapi (recommandée)
         if self.ytmusic_available:
             try:
-                results = self._search_with_ytmusic(artist, title, max_results)
+                results = self._search_with_ytmusic(artist, title, max_results, album)
                 logger.info(f"ytmusicapi: {len(results)} résultats pour {artist} - {title}")
             except (YTMusicError, requests.RequestException, KeyError, TypeError, IndexError) as e:
                 logger.warning(f"Erreur ytmusicapi: {e}")
@@ -238,7 +401,9 @@ class YouTubeSearcher:
             logger.warning(f"Purge du cache YouTube échouée ({artist} - {title}): {e}")
             return False
 
-    def _search_with_ytmusic(self, artist: str, title: str, max_results: int) -> list[dict]:
+    def _search_with_ytmusic(
+        self, artist: str, title: str, max_results: int, album: str | None = None
+    ) -> list[dict]:
         """Recherche avec ytmusicapi"""
 
         search_queries = [
@@ -260,7 +425,7 @@ class YouTubeSearcher:
                         seen_video_ids.add(video_id)
 
                         # Calculer score de pertinence
-                        score = self._calculate_relevance_score(result, artist, title)
+                        score = self._calculate_relevance_score(result, artist, title, album)
 
                         # Extraire les artistes
                         artists = []
@@ -274,6 +439,10 @@ class YouTubeSearcher:
                             "video_id": video_id,
                             "title": result.get("title", ""),
                             "channel_title": artists[0] if artists else "Inconnu",
+                            # Gardés pour REJUGER le lien quand le score change :
+                            # la chaîne seule ne nomme que le premier artiste.
+                            "artists": artists,
+                            "album": _nom_d_album(result.get("album")),
                             "channel_id": None,  # ytmusicapi ne fournit pas toujours l'ID
                             "duration": result.get("duration", ""),
                             "thumbnail_url": self._get_best_thumbnail(result.get("thumbnails", [])),
@@ -333,14 +502,21 @@ class YouTubeSearcher:
         return results
 
     def _calculate_relevance_score(
-        self, result: dict, target_artist: str, target_title: str
+        self, result: dict, target_artist: str, target_title: str, album: str | None = None
     ) -> float:
         """Score de pertinence d'un résultat ytmusicapi (délègue au calcul pur)."""
         result_artists = [
             (a.get("name", "") if isinstance(a, dict) else str(a))
             for a in result.get("artists", [])
         ]
-        return relevance_score(result.get("title", ""), result_artists, target_artist, target_title)
+        return relevance_score(
+            result.get("title", ""),
+            result_artists,
+            target_artist,
+            target_title,
+            album=album,
+            result_album=_nom_d_album(result.get("album")),
+        )
 
     def _get_best_thumbnail(self, thumbnails: list[dict]) -> str | None:
         """Récupère la meilleure thumbnail disponible"""

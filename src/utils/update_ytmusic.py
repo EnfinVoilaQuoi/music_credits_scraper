@@ -870,7 +870,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                 # Règle PARTAGÉE (`youtube_utils`) : c'est elle qui détermine la
                 # clé du cache de recherche, qu'un rejet doit pouvoir purger.
                 results = searcher.search_track(
-                    artiste_de_recherche(t, artist.name), t.title, max_results=5
+                    artiste_de_recherche(t, artist.name), t.title, max_results=5, album=t.album
                 )
                 best = results[0] if results else None
                 if (

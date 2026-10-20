@@ -269,3 +269,34 @@ def test_lrc_minute_au_dela_de_la_duree(data_manager, isha):
 
     _sql(data_manager, "UPDATE tracks SET lyrics_synced = '[00:30.00] a' WHERE id = :t", t=t.id)
     assert not _familles(au.auditer(data_manager, ["Isha"])).get("lrc_trop_long")
+
+
+class TestYtmIncoherent:
+    """`ytm_incoherent` juge la colonne avec LE calcul de la colonne
+    (`track_repository.total_ytm`) : vidéos propres + compteurs du run YTM sans
+    mesure exacte (2026-10-20). Il comparait aux seules vidéos : une fiche à
+    compteur sans videoId sortait à tort."""
+
+    def test_un_compteur_sans_video_fait_partie_du_total(self, data_manager, isha):
+        from src.models import TrackVideo
+
+        _, t = isha
+        data_manager.record_ytm_compteurs(t.id, {"_novid_Alb_durag": 1000})
+        data_manager.record_track_videos(t.id, [TrackVideo(video_id="a" * 11, views=500)])
+
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+
+        assert "ytm_incoherent" not in _familles(audit)
+
+    def test_une_colonne_fausse_sort_toujours(self, data_manager, isha):
+        from src.models import TrackVideo
+
+        _, t = isha
+        data_manager.record_ytm_compteurs(t.id, {"_novid_Alb_durag": 1000})
+        data_manager.record_track_videos(t.id, [TrackVideo(video_id="a" * 11, views=500)])
+        _sql(data_manager, "UPDATE tracks SET ytm_streams = 9000 WHERE id = :t", t=t.id)
+
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+
+        (cas,) = [c for c in audit.cas if c.famille == "ytm_incoherent"]
+        assert "colonne 9,000 / vidéos et compteurs 1,500" in cas.libelle

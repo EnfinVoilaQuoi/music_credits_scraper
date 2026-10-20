@@ -71,6 +71,38 @@ _AUDIO_OBS_FIELDS = ("bpm", "bpm_alt", "key", "mode", "time_signature")
 #: pas avoir chacun leur ordre de priorité (leçon du 2026-09-06).
 _YT_SOURCES_PROTEGEES = ("manual", "genius_media")
 
+#: Observation des compteurs YTM sans mesure exacte (`record_ytm_compteurs`).
+CHAMP_COMPTEURS_YTM = "ytm_compteurs"
+#: Préfixe de la clé d'un compteur de piste d'album SANS videoId.
+COMPTEUR_SANS_VIDEO = "_novid_"
+
+
+def lire_compteurs_ytm(valeur, track_id=None) -> dict[str, int]:
+    """PUR. La valeur (JSON) de l'observation `ytm_compteurs` ; illisible → {}."""
+    try:
+        return {str(k): int(n) for k, n in json.loads(valeur).items()} if valeur else {}
+    except (ValueError, TypeError, AttributeError):
+        logger.warning(f"⚠️ Compteurs YTM illisibles (track_id={track_id}) : {valeur!r}")
+        return {}
+
+
+def total_ytm(propres: dict, compteurs: dict[str, int], exclues=frozenset()) -> int | None:
+    """PUR. LE calcul de `ytm_streams` (2026-10-20), partagé par
+    `_rematerialiser_fiche` et l'audit (`ytm_incoherent`) : les vues des
+    vidéos PROPRES à la fiche (`propres` : {videoId: vues ou None}, celles
+    qu'aucune autre fiche de l'artiste ne porte) hors `exclues`, plus les
+    compteurs sans mesure exacte — sans videoId, ou dont la vidéo est toujours
+    propre, NON mesurée (la mesure exacte l'emporte) et recevable : oubliée,
+    refusée ou partagée, elle tombe. Rien de comptable → None (jamais 0)."""
+    comptees = [int(n) for vid, n in propres.items() if n is not None and vid not in exclues]
+    comptees += [
+        n
+        for cle, n in compteurs.items()
+        if cle.startswith(COMPTEUR_SANS_VIDEO)
+        or (cle in propres and propres[cle] is None and cle not in exclues)
+    ]
+    return sum(comptees) if comptees else None
+
 
 def release_identity_key(
     title: str,
@@ -5224,10 +5256,8 @@ class TrackRepository:
             logger.error(f"Erreur record_ytm_compteurs (track_id={track_id}): {e}")
             return False
 
-    #: Observation des compteurs YTM sans mesure exacte (`record_ytm_compteurs`).
-    CHAMP_COMPTEURS_YTM = "ytm_compteurs"
-    #: Préfixe de la clé d'un compteur de piste d'album SANS videoId.
-    COMPTEUR_SANS_VIDEO = "_novid_"
+    CHAMP_COMPTEURS_YTM = CHAMP_COMPTEURS_YTM
+    COMPTEUR_SANS_VIDEO = COMPTEUR_SANS_VIDEO
 
     @classmethod
     def _compteurs_ytm(cls, conn, track_id: int) -> dict[str, int]:
@@ -5235,11 +5265,7 @@ class TrackRepository:
             text("SELECT value FROM observations WHERE track_id = :t AND field = :f"),
             {"t": track_id, "f": cls.CHAMP_COMPTEURS_YTM},
         ).scalar()
-        try:
-            return {str(k): int(n) for k, n in json.loads(valeur).items()} if valeur else {}
-        except (ValueError, TypeError, AttributeError):
-            logger.warning(f"⚠️ Compteurs YTM illisibles (track_id={track_id}) : {valeur!r}")
-            return {}
+        return lire_compteurs_ytm(valeur, track_id)
 
     def recalculer_vues_ytm(self, track_id: int, exclues=None) -> int | None:
         """Recalcule `ytm_streams` depuis les vidéos de la fiche déjà mesurées et
@@ -5277,18 +5303,8 @@ class TrackRepository:
         )
         if exclues is None:
             exclues = self._videos_exclues(conn, track_id, aid)
-        comptees = [int(n) for vid, n in propres.items() if n is not None and vid not in exclues]
-        # Un compteur sans mesure exacte compte s'il n'a pas de videoId, ou si
-        # sa vidéo est toujours propre à la fiche, NON mesurée (la mesure exacte
-        # l'emporte), et recevable — oubliée, refusée ou partagée, il tombe.
-        comptees += [
-            n
-            for cle, n in self._compteurs_ytm(conn, track_id).items()
-            if cle.startswith(self.COMPTEUR_SANS_VIDEO)
-            or (cle in propres and propres[cle] is None and cle not in exclues)
-        ]
-        if comptees:
-            total = sum(comptees)
+        total = total_ytm(propres, self._compteurs_ytm(conn, track_id), exclues)
+        if total is not None:
             maintenant = datetime.now()
             conn.execute(
                 update(tracks)

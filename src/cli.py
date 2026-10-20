@@ -850,6 +850,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         _exporter_decisions(runtime)
         _fermer(runtime)
+        _sauvegarder_brut()
 
 
 def _exporter_decisions(runtime: Runtime) -> None:
@@ -858,6 +859,16 @@ def _exporter_decisions(runtime: Runtime) -> None:
     from src.services import decisions
 
     ligne = decisions.exporter_en_fin_de_run(runtime.data_manager.engine)
+    if ligne:
+        print(ligne)
+
+
+def _sauvegarder_brut() -> None:
+    """La copie hebdomadaire du brut (`BRUT_BACKUP_DIR`), après TOUT run et
+    après la fermeture (le brut n'est plus écrit). Ne lève pas."""
+    from src.persistence import brut_sauvegarde
+
+    ligne = brut_sauvegarde.sauvegarder_en_fin_de_run()
     if ligne:
         print(ligne)
 

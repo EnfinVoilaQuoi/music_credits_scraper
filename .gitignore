@@ -137,6 +137,7 @@ scripts/*
 !scripts/accepter_id_spotify.py
 !scripts/exporter_decisions.py
 !scripts/importer_decisions.py
+!scripts/sauvegarder_brut.py
 !scripts/garde_git_add.py
 !scripts/repair_deezer_ids.py
 !scripts/repair_chimeres_genius.py

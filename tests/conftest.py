@@ -175,6 +175,14 @@ def _aucun_export_de_decisions(monkeypatch):
     monkeypatch.setattr("src.config.DECISIONS_DIR", None)
 
 
+@pytest.fixture(autouse=True)
+def _aucune_copie_du_brut(monkeypatch):
+    """AUCUN test ne copie de brut vers `BRUT_BACKUP_DIR` (le dossier réel du
+    développeur, souvent un autre disque). Un test qui veut la copie pose
+    lui-même `config.BRUT_BACKUP_DIR`."""
+    monkeypatch.setattr("src.config.BRUT_BACKUP_DIR", None)
+
+
 @pytest.fixture(scope="session")
 def _gabarit_base_migree(tmp_path_factory):
     """UNE base migrée jusqu'à `head` pour toute la session, copiée par test.

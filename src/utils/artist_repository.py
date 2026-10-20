@@ -8,6 +8,7 @@ Comportement constant vs l'ancien `data_manager.py` (refonte 1.5 puis bascule
 Core phase E2).
 """
 
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
@@ -47,14 +48,82 @@ def _signe_par_une_formation(track, formations: set[str]) -> bool:
     return any(names_match_as_words(signataire, nom) for nom in formations)
 
 
+#: Les PORTIERS qu'une décision sur l'artiste peut invalider — la façon dont ses
+#: MORCEAUX sont jugés change sans qu'aucun fait de fiche ne bouge :
+#: - `certifs` : noms recherchés (alias), tête du crédit (formations) ;
+#: - `identite_spotify` : profils attendus par le gate (`ids_spotify_connus` :
+#:   `artists.spotify_id`, `artist_spotify_ids`, ID des alias confirmés) ;
+#: - `identite_deezer` : `artists.deezer_id`, noms acceptés (alias, formations) ;
+#: - `identite_discogs` : `artists.discogs_id` (oracle `discogs_identity`).
+PORTIERS_DE_L_ARTISTE = ("certifs", "identite_spotify", "identite_deezer", "identite_discogs")
+#: Une relation confirmée change les noms et les profils sous lesquels on le juge.
+_PAR_LES_RELATIONS = ("certifs", "identite_spotify", "identite_deezer")
+
+
 class ArtistRepository:
     """Persistance des artistes. Requiert `self.engine` et
     `self.get_artist_tracks` (fournis par DataManager/TrackRepository)."""
 
+    #: Clé de `conn.info` : {artist_id: portiers invalidés} de la transaction.
+    _A_REJUGER = "artistes_a_rejuger"
+
+    @contextmanager
+    def _ecrire_artiste(self):
+        """La transaction d'un écrivain d'artiste. Une écriture qui change la
+        façon dont ses morceaux sont jugés le DÉCLARE (`_invalider`) ; au
+        commit, les artistes notés sont signalés à rejuger (`_noter_a_rejuger`).
+        Pendant de `TrackRepository._ecrire` : un écrivain n'a pas à se souvenir
+        de ce qu'il faut relancer. → garde : `tests/test_ecrivains_d_artiste.py`."""
+        with self.engine.begin() as conn:
+            conn.info[self._A_REJUGER] = {}
+            try:
+                yield conn
+                self._noter_a_rejuger(conn)
+            finally:
+                conn.info.pop(self._A_REJUGER, None)
+
+    @classmethod
+    def _invalider(cls, conn, artist_id, *portiers: str) -> None:
+        inconnus = set(portiers) - set(PORTIERS_DE_L_ARTISTE)
+        if inconnus:
+            raise ValueError(f"Portier(s) inconnu(s) : {sorted(inconnus)}")
+        notes = conn.info.get(cls._A_REJUGER)
+        if notes is not None and artist_id is not None:
+            notes.setdefault(artist_id, set()).update(portiers)
+
+    def _noter_a_rejuger(self, conn) -> None:
+        """Le point unique où le REJUGEMENT se branchera, une fois validé par
+        l'utilisateur (2026-10-20 : quels portiers, quel coût). Pour l'instant,
+        il dit ce qu'il faut relancer à la main."""
+        for artist_id, portiers in sorted((conn.info.get(self._A_REJUGER) or {}).items()):
+            nom = conn.execute(
+                text("SELECT name FROM artists WHERE id = :a"), {"a": artist_id}
+            ).scalar()
+            logger.info(
+                f"🔁 Décision sur {nom or artist_id} : ses morceaux sont à rejuger "
+                f"({', '.join(sorted(portiers))})"
+            )
+
     def save_artist(self, artist: Artist) -> int:
         """Sauvegarde ou met à jour un artiste"""
-        with self.engine.begin() as conn:
+        with self._ecrire_artiste() as conn:
             if artist.id:
+                avant = (
+                    conn.execute(
+                        text("SELECT name, spotify_id, discogs_id FROM artists WHERE id = :id"),
+                        {"id": artist.id},
+                    )
+                    .mappings()
+                    .first()
+                )
+                if avant is not None:
+                    if avant["name"] != artist.name:
+                        # Le nom est celui sous lequel on le cherche partout.
+                        self._invalider(conn, artist.id, *PORTIERS_DE_L_ARTISTE)
+                    if avant["spotify_id"] != artist.spotify_id:
+                        self._invalider(conn, artist.id, "identite_spotify")
+                    if artist.discogs_id is not None and avant["discogs_id"] != artist.discogs_id:
+                        self._invalider(conn, artist.id, "identite_discogs")
                 # Mise à jour. `discogs_id` en COALESCE (2026-09-23) : il est
                 # désormais posé par l'oracle `services/discogs_identite` via
                 # son écrivain dédié, et un `Artist` construit sans lui (la
@@ -227,7 +296,18 @@ class ArtistRepository:
     def delete_artist(self, artist_name: str) -> bool:
         """Supprime un artiste et toutes ses données associées"""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire_artiste() as conn:
+                # Ceux dont il était l'alias CONFIRMÉ perdent son profil Spotify
+                # (`ids_spotify_connus` lit l'ID des alias en base).
+                cible = normalize_name(artist_name)
+                for r in conn.execute(
+                    text(
+                        "SELECT artist_id, related_name FROM artist_relations "
+                        "WHERE kind = 'alias' AND status = 'confirmed'"
+                    )
+                ).mappings():
+                    if cible and normalize_name(r["related_name"]) == cible:
+                        self._invalider(conn, r["artist_id"], "identite_spotify")
                 # Récupérer l'ID de l'artiste
                 artist_row = (
                     conn.execute(
@@ -559,7 +639,8 @@ class ArtistRepository:
         maintenant = datetime.now()
         ecrits = 0
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire_artiste() as conn:
+                self._invalider(conn, artist_id, *_PAR_LES_RELATIONS)
                 for rel in relations:
                     lie = rel.related_artist_id or self._id_par_nom(conn, rel.related_name)
                     deja = self._id_relation(conn, artist_id, rel.related_name, rel.kind)
@@ -686,10 +767,17 @@ class ArtistRepository:
         if status not in self.STATUTS_RELATION:
             raise ValueError(f"Statut de lien inconnu : {status!r}")
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire_artiste() as conn:
                 rid = self._id_relation(conn, artist_id, related_name, kind)
                 if rid is None:
                     return False
+                # Seul un lien CONFIRMÉ juge (`get_artist_relations`) : passer
+                # de proposé à refusé ne change rien aux morceaux.
+                avant = conn.execute(
+                    text("SELECT status FROM artist_relations WHERE id = :rid"), {"rid": rid}
+                ).scalar()
+                if "confirmed" in (avant, status):
+                    self._invalider(conn, artist_id, *_PAR_LES_RELATIONS)
                 conn.execute(
                     text(
                         "UPDATE artist_relations SET status = :status, "
@@ -752,10 +840,15 @@ class ArtistRepository:
     def forget_artist_relation(self, artist_id: int, related_name: str, kind: str) -> bool:
         """Retire UN lien (l'utilisateur le décoche). Pendant de l'additivité."""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire_artiste() as conn:
                 rid = self._id_relation(conn, artist_id, related_name, kind)
                 if rid is None:
                     return False
+                avant = conn.execute(
+                    text("SELECT status FROM artist_relations WHERE id = :rid"), {"rid": rid}
+                ).scalar()
+                if avant == "confirmed":
+                    self._invalider(conn, artist_id, *_PAR_LES_RELATIONS)
                 conn.execute(text("DELETE FROM artist_relations WHERE id = :rid"), {"rid": rid})
             return True
         except SQLAlchemyError as e:
@@ -853,7 +946,17 @@ class ArtistRepository:
         de tout relire) ; les autres sources restent. Rend le nombre écrit."""
         maintenant = datetime.now()
         uniques = sorted({i for i in ids or () if i})
-        with self.engine.begin() as conn:
+        with self._ecrire_artiste() as conn:
+            avant = set(
+                conn.execute(
+                    select(artist_spotify_ids.c.spotify_id).where(
+                        (artist_spotify_ids.c.artist_id == artist_id)
+                        & (artist_spotify_ids.c.source == source)
+                    )
+                ).scalars()
+            )
+            if avant != set(uniques):
+                self._invalider(conn, artist_id, "identite_spotify")
             conn.execute(
                 delete(artist_spotify_ids).where(
                     (artist_spotify_ids.c.artist_id == artist_id)
@@ -881,7 +984,8 @@ class ArtistRepository:
         False s'il était déjà confirmé."""
         if spotify_id in self._profils_manuels(artist_id):
             return False
-        with self.engine.begin() as conn:
+        with self._ecrire_artiste() as conn:
+            self._invalider(conn, artist_id, "identite_spotify")
             conn.execute(
                 insert(artist_spotify_ids).values(
                     artist_id=artist_id,
@@ -1273,7 +1377,12 @@ class ArtistRepository:
                 .where(artists.c.id == artist_id)
                 .values(deezer_id=deezer_id, updated_at=datetime.now())
             )
-            with self.engine.begin() as conn:
+            with self._ecrire_artiste() as conn:
+                avant = conn.execute(
+                    text("SELECT deezer_id FROM artists WHERE id = :a"), {"a": artist_id}
+                ).scalar()
+                if str(avant) != str(deezer_id):
+                    self._invalider(conn, artist_id, "identite_deezer")
                 conn.execute(stmt)
             logger.info(f"deezer_id artiste #{artist_id} mis à jour: {deezer_id}")
             return True
@@ -1298,7 +1407,12 @@ class ArtistRepository:
                     updated_at=datetime.now(),
                 )
             )
-            with self.engine.begin() as conn:
+            with self._ecrire_artiste() as conn:
+                avant = conn.execute(
+                    text("SELECT discogs_id FROM artists WHERE id = :a"), {"a": artist_id}
+                ).scalar()
+                if str(avant) != str(discogs_id):
+                    self._invalider(conn, artist_id, "identite_discogs")
                 conn.execute(stmt)
             logger.info(f"discogs_id artiste #{artist_id} mis à jour: {discogs_id}")
             return True
@@ -1314,7 +1428,12 @@ class ArtistRepository:
                 .where(artists.c.id == artist_id)
                 .values(spotify_id=spotify_id, updated_at=datetime.now())
             )
-            with self.engine.begin() as conn:
+            with self._ecrire_artiste() as conn:
+                avant = conn.execute(
+                    text("SELECT spotify_id FROM artists WHERE id = :a"), {"a": artist_id}
+                ).scalar()
+                if str(avant) != str(spotify_id):
+                    self._invalider(conn, artist_id, "identite_spotify")
                 conn.execute(stmt)
             logger.info(f"spotify_id artiste #{artist_id} mis à jour: {spotify_id}")
             return True

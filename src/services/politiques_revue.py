@@ -212,6 +212,23 @@ def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
         temoins = ", ".join(f"{s} {d} s" for s, d in sorted(durees.items()) if d) or "aucune"
         servi = f"Spotify sert « {identite.get('name')} » ({identite.get('duration')} s)"
         if not gate(track, sid):
+            # Le gate compare la durée de Spotify à la COLONNE de la fiche : si
+            # deux catalogues indépendants confirment celle de Spotify, c'est la
+            # colonne (souvent une autre édition Deezer) qui dément, pas l'ID —
+            # Kanye « Comfy » : Spotify 212 s, YTM 212, ReccoBeats 211, Deezer
+            # 206 en colonne (2026-10-21). L'humain tranche.
+            servie = identite.get("duration")
+            confirment = [
+                s
+                for s, d in durees.items()
+                if s not in FRAGILES
+                and s not in ("legacy", "heritage", "manual", "youtube_video", "deezer")
+                and d
+                and servie
+                and abs(d - servie) <= ECART_FICHIER_S
+            ]
+            if len({famille(s) for s in confirment}) >= 2:
+                return None
             return Arbitrage(
                 "le gate d'identité refuse l'ID : refuser",
                 "refuser_id",

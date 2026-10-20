@@ -307,3 +307,15 @@ def test_id_propose_titre_servi_et_clip():
     assert juger("Heartless").action == "poser_id"
     assert juger("Heartless - The Voice Performance") is None
     assert juger("Heartless", {"youtube_video": 208}) is None
+
+
+def test_id_propose_un_refus_de_duree_dementi_par_les_catalogues_va_a_l_humain():
+    """Kanye « Comfy » : le gate refusait (212 s contre 206 s en colonne,
+    Deezer) alors que YTM et ReccoBeats confirment Spotify."""
+    t = _t("Comfy", durations_observees={"deezer": 206, "reccobeats": 211, "ytmusic": 212})
+    cas = _cas("id_spotify_propose", t, {"spotify_id_propose": "SID"})
+    lire = lambda _s: {"name": "Comfy", "duration": 212}  # noqa: E731
+    assert pol.arbitrage_id_propose(cas, t, None, lire=lire, gate=lambda *_: False) is None
+    t.durations_observees = {"songbpm": 94}  # rien ne confirme : le refus tient
+    arb = pol.arbitrage_id_propose(cas, t, None, lire=lire, gate=lambda *_: False)
+    assert arb.action == "refuser_id"

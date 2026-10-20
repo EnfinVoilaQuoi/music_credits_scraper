@@ -7,7 +7,6 @@ MÊMES décisions, à l'octet ; un import n'écrase ni n'efface jamais rien.
 """
 
 import json
-import shutil
 import sqlite3
 from contextlib import closing
 
@@ -133,7 +132,12 @@ def test_base_neuve_ce_qui_designe_une_fiche_attend_la_discographie(
     second import, discographie refaite, les pose."""
     decisions.exporter(base[0].engine, tmp_path / "export")
     neuve = tmp_path / "neuve.db"
-    shutil.copyfile(_gabarit_base_migree, neuve)
+    # Par l'API de sauvegarde : le gabarit est en WAL (cf. conftest).
+    with (
+        closing(sqlite3.connect(_gabarit_base_migree)) as src,
+        closing(sqlite3.connect(neuve)) as dest,
+    ):
+        src.backup(dest)
     engine = Database(str(neuve)).engine
     donnees = decisions.charger(tmp_path / "export")
 

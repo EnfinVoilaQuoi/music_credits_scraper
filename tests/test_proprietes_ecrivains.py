@@ -16,7 +16,7 @@ Propriétés :
   ressusciterait un retrait fait sur une seule ligne.
 """
 
-import shutil
+import sqlite3
 import uuid
 from contextlib import closing
 
@@ -76,7 +76,9 @@ def _nouvelle_base(gabarit, dossier):
     import src.utils.data_manager as dm_mod
 
     chemin = dossier / f"prop_{uuid.uuid4().hex}.db"
-    shutil.copyfile(gabarit, chemin)
+    # Par l'API de sauvegarde : le gabarit est en WAL (cf. conftest).
+    with closing(sqlite3.connect(gabarit)) as src, closing(sqlite3.connect(chemin)) as dest:
+        src.backup(dest)
     origine = dm_mod.DATABASE_URL
     dm_mod.DATABASE_URL = f"sqlite:///{chemin.as_posix()}"
     try:

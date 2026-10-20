@@ -54,7 +54,7 @@ def main(argv=None) -> int:
     p.add_argument("--apply", action="store_true", help="appliquer sur la VRAIE base")
     p.add_argument(
         "--famille",
-        choices=("durees", "id_spotify_propose"),
+        choices=("durees", "id_spotify_propose", "deezer"),
         default="durees",
         help="la famille à passer : durées (validée) ou ID Spotify proposé (en essai)",
     )
@@ -81,6 +81,7 @@ def main(argv=None) -> int:
             return 1
         revue_auto.REGLES_BRANCHEES = a.famille == "durees"
         revue_auto.REGLES_ID_PROPOSE_BRANCHEES = a.famille == "id_spotify_propose"
+        revue_auto.REGLES_DEEZER_BRANCHEES = a.famille == "deezer"
         lignes = simuler(dm, a.artiste, famille=a.famille)
         dm.engine.dispose()
     finally:
@@ -108,6 +109,7 @@ def appliquer(a) -> int:
     # Une famille à la fois, comme au passage à blanc qui l'a fait valider.
     revue_auto.REGLES_BRANCHEES = a.famille == "durees"
     revue_auto.REGLES_ID_PROPOSE_BRANCHEES = a.famille == "id_spotify_propose"
+    revue_auto.REGLES_DEEZER_BRANCHEES = a.famille == "deezer"
     dm = DataManager()
     lignes = simuler(dm, a.artiste, famille=a.famille)
     lignes[0] = lignes[0].replace("Passage à blanc", "APPLICATION")
@@ -122,7 +124,9 @@ def appliquer(a) -> int:
 
 def simuler(dm, noms=None, famille: str = "durees") -> list[str]:
     from src.services import revue, revue_auto
-    from src.services.politiques_revue import titre_d_original
+    from src.services.politiques_revue import REGLES_DEEZER, titre_d_original
+
+    codes = {d for d, _ in REGLES_DEEZER} if famille == "deezer" else {famille}
 
     par_action = collections.defaultdict(list)
     echecs = []
@@ -133,9 +137,10 @@ def simuler(dm, noms=None, famille: str = "durees") -> list[str]:
         art.tracks = dm.discographie_reunie(art)
         if famille != "durees":
             for c in revue.analyser(dm, art).actifs:
-                if c.detecteur == famille and c.nature == revue.DECISION:
+                if c.detecteur in codes and c.nature == revue.DECISION:
                     vus += 1
-                    if not titre_d_original(c.morceau):
+                    piste = ((c.preuves or {}).get("ecart") or {}).get("piste") or {}
+                    if not titre_d_original(piste.get("title") or c.morceau):
                         hors_restriction.append((nom, c))
         # Le journal est HISTORIQUE : seules comptent les entrées de ce passage.
         avant = {c["id"] for c in dm.corrections_revue(art.id, retablies=True)}

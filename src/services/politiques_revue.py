@@ -670,6 +670,51 @@ def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | N
     return None
 
 
+# ── Famille « écarts Deezer » — PAS ENCORE validée ─────────────────────────
+
+#: Restreinte aux originaux sans ambiguïté (piste ET fiche) : toute version
+#: Deezer (live, remix, radio edit…) reste à l'humain, donc aussi les éditions
+#: d'un socle ; un lien à revoir (délier) aussi. Interrupteur :
+#: `revue_auto.REGLES_DEEZER_BRANCHEES`, baissé tant que non validée.
+REGLES_DEEZER = frozenset(
+    {
+        ("deezer_absent", "deezer_appliquer"),
+        ("deezer_album_absent", "deezer_appliquer"),
+        ("deezer_apparition", "deezer_appliquer"),
+        ("deezer_absent", "deezer_rattacher_isrc"),
+        ("deezer_album_absent", "deezer_rattacher_isrc"),
+        ("deezer_apparition", "deezer_rattacher_isrc"),
+        ("deezer_link_candidate", "deezer_appliquer"),
+        ("deezer_link_candidate", "normal"),
+    }
+)
+
+
+def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
+    """L'arbitrage de la famille « écarts Deezer », restreint aux originaux
+    sans ambiguïté — le titre de la PISTE Deezer et celui de la fiche."""
+    if not any(cas.detecteur == d for d, _ in REGLES_DEEZER):
+        return None
+    piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
+    if not titre_d_original(piste.get("title") or cas.morceau):
+        return None
+    if track is not None and not titre_d_original(track.title):
+        return None
+    if cas.detecteur == "deezer_link_candidate":
+        # Un rapprochement par titre AMBIGU (ligne d'invité d'un autre
+        # principal, titre générique, plusieurs fiches au même titre) reste à
+        # l'humain : c'est l'ambiguïté même que le classement signale.
+        preuve = ((cas.preuves or {}).get("ecart") or {}).get("matched_by")
+        if preuve in ("title_autre_principal", "title_generique", "title_ambigu"):
+            return None
+        arbitrage = politique_liens_deezer(cas, track, ctx)
+    else:
+        arbitrage = politique_ecarts_deezer(isrcs_connus, ids_artiste)(cas, track, ctx)
+    if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_DEEZER:
+        return arbitrage
+    return None
+
+
 POLITIQUES: tuple[Politique, ...] = (
     Politique(
         "durees_vote_3",

@@ -29,6 +29,7 @@ marque le cas « normal » : la passe suivante ne la refait pas.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 
 from src.services.revue import (
@@ -73,6 +74,14 @@ REGLES_BRANCHEES = True
 #: à blanc restreint (« Je valide les 46 »).
 REGLES_ID_PROPOSE_BRANCHEES = True
 
+#: Famille « écarts Deezer » (`politiques_revue.REGLES_DEEZER`) : BAISSÉ tant
+#: que l'utilisateur n'a pas validé son passage à blanc.
+REGLES_DEEZER_BRANCHEES = False
+
+#: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
+#: encore sur aucune.
+_SANS_FICHE = frozenset({"deezer_appliquer", "deezer_rattacher_isrc"})
+
 #: Préfixe de la note d'un « ✓ Normal » posé par une règle (et de l'origine
 #: d'un refus) — un humain n'en pose jamais.
 PREFIXE_REGLE = "regle:"
@@ -82,12 +91,40 @@ def cas_surs(revue: Revue) -> list[Cas]:
     return [c for c in revue.actifs if c.detecteur in CODES_FORMELS]
 
 
+def contexte_deezer(dm, artiste) -> tuple[dict, set]:
+    """`({ISRC: titre} de toute la base, ID Deezer de l'artiste et de ses
+    formations)` — ce que la politique des écarts Deezer consulte."""
+    from sqlalchemy import text
+
+    with dm.engine.connect() as conn:
+        isrcs = {
+            str(i).upper(): t
+            for i, t in conn.execute(
+                text("SELECT isrc, title FROM tracks WHERE isrc IS NOT NULL")
+            ).all()
+        }
+    ids = {artiste.deezer_id} | {
+        t.artist.deezer_id for t in artiste.tracks or [] if t.artist and t.artist.deezer_id
+    }
+    return isrcs, {int(i) for i in ids if i}
+
+
 def cas_par_regle(
-    revue: Revue, tracks: dict, ctx, *, durees: bool = True, id_propose: bool = False
+    revue: Revue,
+    tracks: dict,
+    ctx,
+    *,
+    durees: bool = True,
+    id_propose: bool = False,
+    deezer: tuple | None = None,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
-    from src.services.politiques_revue import arbitrage_id_propose, arbitrage_valide
+    from src.services.politiques_revue import (
+        arbitrage_deezer,
+        arbitrage_id_propose,
+        arbitrage_valide,
+    )
 
     sortie = []
     for c in revue.actifs:
@@ -99,6 +136,8 @@ def cas_par_regle(
             arbitrage = arbitrage_valide(c, track, ctx)
         if arbitrage is None and id_propose:
             arbitrage = arbitrage_id_propose(c, track, ctx)
+        if arbitrage is None and deezer is not None:
+            arbitrage = arbitrage_deezer(c, track, ctx, *deezer)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -238,8 +277,48 @@ def _refuser_id(dm, track, cas: Cas) -> tuple[str, dict]:
     )
 
 
+def _contexte_action(dm, artiste):
+    from src.services import revue_actions
+
+    tracks = {t.id: t for t in artiste.tracks or []}
+    return revue_actions.ContexteAction(dm, artiste, tracks, renvois={})
+
+
+def _deezer_appliquer(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Crée la fiche d'une piste « absente », ou rattache une parution à
+    confirmer — l'action du panneau, telle quelle (`creer_lignes`)."""
+    from src.services import revue_actions
+
+    ctx = _contexte_action(dm, artiste)
+    piste = cas.preuves["ecart"]["piste"]
+    compte_rendu = revue_actions._deezer_appliquer(ctx, cas)
+    if cas.detecteur == "deezer_link_candidate":
+        return compte_rendu, {
+            "type": "lien_deezer",
+            "track_id": cas.track_id,
+            "ecart": cas.preuves["ecart"],
+        }
+    return compte_rendu, {"type": "fiche_deezer", "deezer_id": piste.get("id")}
+
+
+def _deezer_rattacher_isrc(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    from src.services import revue_actions
+
+    ctx = _contexte_action(dm, artiste)
+    isrc = str(cas.preuves["ecart"]["piste"].get("isrc") or "").upper()
+    fiche = next((t for t in ctx.tracks.values() if t.isrc and str(t.isrc).upper() == isrc), None)
+    compte_rendu = revue_actions._deezer_rattacher_isrc(ctx, cas)
+    return compte_rendu, {
+        "type": "lien_deezer",
+        "track_id": fiche.id if fiche else None,
+        "ecart": cas.preuves["ecart"],
+    }
+
+
 #: Correcteurs des RÈGLES, par action de la politique.
 _CORRECTEURS_DE_REGLE = {
+    "deezer_appliquer": _deezer_appliquer,
+    "deezer_rattacher_isrc": _deezer_rattacher_isrc,
     "retirer_songbpm": _corriger_songbpm,
     "retirer_spotify": _corriger_spotify,
     "poser_id": _poser_id,
@@ -268,7 +347,7 @@ def corriger(dm, artiste) -> BilanCorrections:
         ctx = charger_contexte(dm, artiste)
         revue = analyser(dm, artiste, ctx)
         a_faire = [(c, None) for c in cas_surs(revue)]
-        if REGLES_BRANCHEES or REGLES_ID_PROPOSE_BRANCHEES:
+        if REGLES_BRANCHEES or REGLES_ID_PROPOSE_BRANCHEES or REGLES_DEEZER_BRANCHEES:
             rendus = _rendus_a_l_humain(dm, artiste.id)
             a_faire += [
                 (c, a)
@@ -278,6 +357,7 @@ def corriger(dm, artiste) -> BilanCorrections:
                     ctx,
                     durees=REGLES_BRANCHEES,
                     id_propose=REGLES_ID_PROPOSE_BRANCHEES,
+                    deezer=contexte_deezer(dm, artiste) if REGLES_DEEZER_BRANCHEES else None,
                 )
                 if (c.detecteur, c.cle) not in rendus
             ]
@@ -298,12 +378,15 @@ def corriger(dm, artiste) -> BilanCorrections:
             else:
                 action = f"{PREFIXE_REGLE}{arbitrage.action}"
                 correcteur = _CORRECTEURS_DE_REGLE[arbitrage.action]
+                if arbitrage.action in _SANS_FICHE:
+                    correcteur = functools.partial(correcteur, artiste=artiste)
 
                 def corriger_cas(_dm, _track, c, f=correcteur, arb=arbitrage):
                     compte_rendu, annulation = f(_dm, _track, c)
                     return f"{compte_rendu} [{arb.raison}]", annulation
 
-            if track is None:
+            sans_fiche = arbitrage is not None and arbitrage.action in _SANS_FICHE
+            if track is None and not sans_fiche:
                 bilan.echecs.append(f"{cas.morceau} : fiche introuvable")
                 continue
             try:
@@ -351,10 +434,11 @@ def retablir(dm, artiste, correction: dict) -> str:
         oublier_lrc_refuse,
     )
 
-    track = next((t for t in artiste.tracks or [] if t.id == correction["track_id"]), None)
-    if track is None:
-        raise LookupError("la fiche n'est plus dans la discographie chargée")
     annulation = correction["annulation"]
+    track = next((t for t in artiste.tracks or [] if t.id == correction["track_id"]), None)
+    # Une piste Deezer « absente » n'avait pas de fiche : l'annulation la retrouve.
+    if track is None and annulation.get("type") not in ("fiche_deezer", "lien_deezer"):
+        raise LookupError("la fiche n'est plus dans la discographie chargée")
     if annulation.get("type") == "lrc":
         lrc = annulation["lrc"]
         oublier_lrc_refuse(track, lrc)
@@ -389,6 +473,28 @@ def retablir(dm, artiste, correction: dict) -> str:
     elif annulation.get("type") == "refus_spotify":
         oublier_id_refuse(track, annulation["spotify_id"])
         compte_rendu = f"refus de l'ID {annulation['spotify_id']} levé pour « {track.title} »"
+    elif annulation.get("type") == "fiche_deezer":
+        creee = next(
+            (
+                t
+                for t in dm.get_artist_tracks(artiste.id)
+                if t.deezer_id and int(t.deezer_id) == int(annulation["deezer_id"])
+            ),
+            None,
+        )
+        if creee is None:
+            raise LookupError("la fiche créée n'est plus là")
+        dm.delete_track(creee.id)
+        compte_rendu = f"fiche « {creee.title} » (créée par règle) supprimée"
+    elif annulation.get("type") == "lien_deezer":
+        from src.services import ecarts_deezer
+
+        fiche = next((t for t in artiste.tracks or [] if t.id == annulation.get("track_id")), None)
+        if fiche is None:
+            raise LookupError("la fiche rattachée n'est plus dans la discographie")
+        e = ecarts_deezer.ecart_depuis(annulation["ecart"], {fiche.id: fiche})
+        e.nature, e.existing_track = "link_review", fiche
+        compte_rendu = ecarts_deezer.delier(dm, artiste, e)
     elif annulation.get("type") == "verdict":
         # Défaire le « ✓ Normal » d'une règle, c'est RENDRE le cas à l'humain :
         # le verdict part, rien ne le remplace, et la règle ne le reprend plus

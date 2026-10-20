@@ -300,3 +300,50 @@ def test_id_propose_refuse_par_le_gate_puis_retabli(data_manager, artiste, monke
     (correction,) = data_manager.corrections_revue(artiste.id)
     revue_auto.retablir(data_manager, artiste, correction)
     assert "SPG" not in ids_refuses(_charger(data_manager, artiste)["Gold Digger"])
+
+
+# ── Famille « écarts Deezer » (NON validée : interrupteur baissé) ────────────
+
+
+def _ecarts_deezer(dm, artiste, *pistes):
+    from src.services import ecarts_deezer as ed
+
+    artiste.deezer_id = 77
+    alb = ed.AlbumDeezer(id=500, title="Hourvari", artist_id=77, artist_name=artiste.name)
+    bilan = ed.BilanEcarts(deezer_id=77, artiste=artiste.name)
+    bilan.ecarts = [ed.Ecart("absent", alb, p) for p in pistes]
+    ed.enregistrer_signalements(dm, artiste, bilan)
+
+
+def test_deezer_interrupteur_baisse_par_defaut(data_manager, artiste):
+    from src.services import ecarts_deezer as ed
+
+    _ecarts_deezer(data_manager, artiste, ed.PisteDeezer(id=9, title="Inédit", duration=200))
+    _charger(data_manager, artiste)
+    assert revue_auto.REGLES_DEEZER_BRANCHEES is False
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
+def test_deezer_fiche_absente_creee_puis_retablie(data_manager, artiste, monkeypatch):
+    from src.services import ecarts_deezer as ed
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    _ecarts_deezer(
+        data_manager,
+        artiste,
+        ed.PisteDeezer(id=9, title="Inédit", duration=200, isrc="FRX1"),
+        ed.PisteDeezer(id=10, title="Inédit (Live)", duration=230, isrc="FRX2"),
+    )
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1, bilan
+    fiches = _charger(data_manager, artiste)
+    assert "Inédit" in fiches and "Inédit (Live)" not in fiches  # une version : l'humain
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:deezer_appliquer"
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert "Inédit" not in _charger(data_manager, artiste)
+    # Défaite : la règle ne la recrée pas.
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []

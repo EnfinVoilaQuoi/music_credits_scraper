@@ -125,6 +125,16 @@ def run(
                         _epingler_canal_ytm(runtime, artist, options.ytm_channel)
                     ids = set(options.track_ids) if options.track_ids is not None else None
                     results["ytm"] = provider.fetch_ytm(artist, dm, track_ids=ids)
+                    if ids is None and (results["ytm"].get("identity") or {}).get("status") not in (
+                        "aborted",
+                        None,
+                    ):
+                        # Tous les totaux de l'artiste viennent du verdict ACTUEL
+                        # des vues comptées : un score changé ensuite les fera
+                        # recalculer (`regles`, portier « recherche_youtube »).
+                        from src.services import regles
+
+                        regles.marquer(dm, artist.name, "recherche_youtube")
                     if results["ytm"].get("canal_introuvable"):
                         # Pas « zéro stream » : aucun canal lisible. Un bilan
                         # propre cachait un artiste resté à 0 run après run.

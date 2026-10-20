@@ -37,7 +37,7 @@ from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
 from src.utils.positions_disque import position_retenue
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
-from src.utils.track_mapper import _clean_duration, track_from_row
+from src.utils.track_mapper import _clean_duration, recherche_de_ligne, track_from_row
 from src.utils.track_soeurs import (
     CLES_LOCALES_DES_RELATIONS,
     avec_relations_manuelles,
@@ -141,6 +141,21 @@ def source_lien_retenue(ancienne: str | None, nouvelle: str | None) -> str | Non
     if ancienne in _YT_SOURCES_PROTEGEES:
         return ancienne
     return nouvelle
+
+
+def _recherche_en_json(recherche: dict | None) -> str | None:
+    """`TrackVideo.recherche` → colonne `track_videos.recherche` (e60). None
+    laisse la valeur en place (COALESCE de l'écrivain)."""
+    if not recherche or not recherche.get("titre"):
+        return None
+    return json.dumps(
+        {
+            "titre": recherche["titre"],
+            "artistes": list(recherche.get("artistes") or []),
+            "album": recherche.get("album"),
+        },
+        ensure_ascii=False,
+    )
 
 
 #: Condition SQL « cet homonyme est interdit » pour le RETRAIT DU MARQUEUR
@@ -1701,19 +1716,40 @@ class TrackRepository:
         from src.persistence.schema import revue_verdicts
         from src.services.vues_comptees import DETECTEUR, videos_exclues
 
-        fiche = (
+        ligne = (
             conn.execute(
-                text("SELECT id, title, genius_id FROM tracks WHERE id = :t"), {"t": track_id}
+                text(
+                    "SELECT t.id, t.title, t.genius_id, t.album, t.primary_artist_name, "
+                    "a.name AS artiste FROM tracks t LEFT JOIN artists a ON a.id = t.artist_id "
+                    "WHERE t.id = :t"
+                ),
+                {"t": track_id},
             )
             .mappings()
             .first()
         )
-        if fiche is None:
+        if ligne is None:
             return set()
+        fiche = SimpleNamespace(
+            id=ligne["id"],
+            title=ligne["title"],
+            genius_id=ligne["genius_id"],
+            album=ligne["album"],
+            primary_artist_name=ligne["primary_artist_name"],
+            artist=SimpleNamespace(name=ligne["artiste"]),
+        )
         videos = [
-            SimpleNamespace(video_id=r["video_id"], title=r["title"], source=r["source"])
+            SimpleNamespace(
+                video_id=r["video_id"],
+                title=r["title"],
+                source=r["source"],
+                recherche=recherche_de_ligne(r["recherche"]),
+            )
             for r in conn.execute(
-                text("SELECT video_id, title, source FROM track_videos WHERE track_id = :t"),
+                text(
+                    "SELECT video_id, title, source, recherche FROM track_videos "
+                    "WHERE track_id = :t"
+                ),
                 {"t": track_id},
             ).mappings()
         ]
@@ -1726,7 +1762,7 @@ class TrackRepository:
                 )
             )
         }
-        return videos_exclues(SimpleNamespace(**fiche), videos, valides)
+        return videos_exclues(fiche, videos, valides)
 
     # ──────────────────────────────────────────────────────────────────────────
     # Streams Spotify (Kworb · Spotify web)
@@ -5850,8 +5886,9 @@ class TrackRepository:
                         conn.execute(
                             text(
                                 "INSERT INTO track_videos (track_id, video_id, url, kind, "
-                                "source, views, views_updated, created_at, title) VALUES "
-                                "(:tid, :vid, :url, :kind, :source, :views, :vu, :now, :title)"
+                                "source, views, views_updated, created_at, title, recherche) "
+                                "VALUES (:tid, :vid, :url, :kind, :source, :views, :vu, :now, "
+                                ":title, :recherche)"
                             ),
                             {
                                 "tid": track_id,
@@ -5863,6 +5900,7 @@ class TrackRepository:
                                 "vu": now if video.views is not None else None,
                                 "now": now,
                                 "title": video.title,
+                                "recherche": _recherche_en_json(video.recherche),
                             },
                         )
                     else:
@@ -5870,7 +5908,8 @@ class TrackRepository:
                             text(
                                 "UPDATE track_videos SET url = :url, kind = :kind, "
                                 "source = :source, views = :views, title = :title, "
-                                "views_updated = COALESCE(:vu, views_updated) "
+                                "views_updated = COALESCE(:vu, views_updated), "
+                                "recherche = COALESCE(:recherche, recherche) "
                                 "WHERE track_id = :tid AND video_id = :vid"
                             ),
                             {
@@ -5884,12 +5923,43 @@ class TrackRepository:
                                     video.views if video.views is not None else ancienne["views"]
                                 ),
                                 "vu": now if video.views is not None else None,
+                                "recherche": _recherche_en_json(video.recherche),
                             },
                         )
                     ecrites += 1
             return ecrites
         except SQLAlchemyError as e:
             logger.error(f"Erreur record_track_videos (track_id={track_id}): {e}")
+            return 0
+
+    def poser_recherches_videos(self, faits) -> int:
+        """Remplit `track_videos.recherche` (e60) des vidéos `search_auto` posées
+        AVANT qu'on garde ce que la recherche avait vu. `faits` : `(track_id,
+        video_id, {"titre", "artistes", "album"})`. Ne remplace jamais une
+        valeur en place ; les totaux YTM concernés suivent en fin de
+        transaction (le verdict des vues comptées les rejuge). Rend le nombre
+        de vidéos remplies."""
+        faits = [(t, v, _recherche_en_json(r)) for t, v, r in faits or []]
+        faits = [(t, v, r) for t, v, r in faits if r]
+        if not faits:
+            return 0
+        remplies = 0
+        try:
+            with self._ecrire() as conn:
+                for track_id, video_id, recherche in faits:
+                    n = conn.execute(
+                        text(
+                            "UPDATE track_videos SET recherche = :r WHERE track_id = :t "
+                            "AND video_id = :v AND source = 'search_auto' AND recherche IS NULL"
+                        ),
+                        {"r": recherche, "t": track_id, "v": video_id},
+                    ).rowcount
+                    if n:
+                        self._toucher(conn, track_id)
+                        remplies += n
+            return remplies
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur poser_recherches_videos : {e}")
             return 0
 
     def forget_track_video(self, track_id: int, video_id: str) -> bool:
@@ -6100,7 +6170,7 @@ class TrackRepository:
                     conn.execute(
                         text(
                             "SELECT track_id, video_id, url, kind, source, views, "
-                            "views_updated, title FROM track_videos WHERE track_id = :tid"
+                            "views_updated, title, recherche FROM track_videos WHERE track_id = :tid"
                         ),
                         {"tid": track_id},
                     )
@@ -6127,7 +6197,7 @@ class TrackRepository:
             conn.execute(
                 text(
                     "SELECT v.track_id, v.video_id, v.url, v.kind, v.source, v.views, "
-                    "v.views_updated, v.title FROM track_videos v "
+                    "v.views_updated, v.title, v.recherche FROM track_videos v "
                     "JOIN tracks t ON t.id = v.track_id WHERE t.artist_id = :aid"
                 ),
                 {"aid": artist_id},
@@ -6155,6 +6225,7 @@ class TrackRepository:
                     views=r["views"],
                     views_updated=r["views_updated"],
                     title=r["title"],
+                    recherche=recherche_de_ligne(r["recherche"]),
                 )
             )
         for videos in par_track.values():

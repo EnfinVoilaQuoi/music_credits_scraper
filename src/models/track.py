@@ -586,6 +586,10 @@ class TrackVideo:
     # Titre de la vidéo tel que YouTube le publie (e21). Il dit ce que la vidéo
     # COUVRE : « B.B. Jacques - Donjon & 2h22 » est un clip double légitime.
     title: str | None = None
+    # Ce que la RECHERCHE a vu en la posant (e60) : `{"titre", "artistes",
+    # "album"}` du résultat ytmusicapi — le verdict des vues comptées la
+    # rejuge au score courant. None = inconnu (autre provenance, ou d'avant).
+    recherche: dict | None = None
 
 
 @dataclass(eq=False)

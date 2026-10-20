@@ -48,6 +48,7 @@ from src.utils.concordance_paroles import (
 )
 from src.utils.duree_youtube import NON_MORCEAU, est_un_clip
 from src.utils.title_matching import cle_album, normalize_title
+from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
     Kind,
@@ -139,6 +140,7 @@ FAMILLES = {
     "streams_double": "même compteur Spotify sur deux pages Genius",
     "video_partagee": "même vidéo sur plusieurs fiches (vues comptées NULLE PART)",
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
+    "recherche_perimee": "vidéo de la recherche que le score courant refuse (vues non comptées)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
@@ -504,14 +506,40 @@ def streams(c, par) -> list[Cas]:
         "SELECT artist_id, cle FROM revue_verdicts WHERE detecteur = ?", (vues_comptees.DETECTEUR,)
     ):
         valides[r["artist_id"]].add(r["cle"])
-    for r in c.execute("SELECT track_id, video_id, views, title, source FROM track_videos"):
+    # Une vidéo de la recherche ne compte que si ce que la recherche a vu passe
+    # le score COURANT (e60, 2026-10-20) — base d'avant e60 : on ne conclut pas.
+    a_recherche = "recherche" in {x[1] for x in c.execute("PRAGMA table_info(track_videos)")}
+    for r in c.execute(
+        "SELECT track_id, video_id, views, title, source, "
+        f"{'recherche' if a_recherche else 'NULL AS recherche'} FROM track_videos"
+    ):
         if r["track_id"] in ids:
             t = ids[r["track_id"]]
-            fiche = SimpleNamespace(id=t["id"], title=t["title"], genius_id=t["genius_id"])
+            fiche = SimpleNamespace(
+                id=t["id"],
+                title=t["title"],
+                genius_id=t["genius_id"],
+                album=t["album"],
+                primary_artist_name=t["primary_artist_name"],
+                artist=SimpleNamespace(name=t["artiste"]),
+            )
+            recherche = recherche_de_ligne(r["recherche"])
             if not vues_comptees.vue_comptee(
-                fiche, r["video_id"], r["title"], r["source"], valides[t["artist_id"]]
+                fiche, r["video_id"], r["title"], r["source"], valides[t["artist_id"]], recherche
             ):
                 exclues[r["track_id"]].add(r["video_id"])
+                if r["source"] == "search_auto":
+                    cas.append(
+                        Cas(
+                            "recherche_perimee",
+                            t["artiste"],
+                            [t["id"]],
+                            f"{_lib(t)} ← « {recherche['titre']} » "
+                            f"({', '.join(recherche['artistes']) or '?'}) "
+                            f"{r['video_id']} {r['views'] or 0:,} vues",
+                            nature=DECISION,
+                        )
+                    )
             # Par ARTISTE : les lignes sœurs (même enregistrement chez l'invité)
             # partagent leurs vidéos par construction, ce n'est pas un double compte.
             vids[(ids[r["track_id"]]["artist_id"], r["video_id"])].append(

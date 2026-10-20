@@ -887,6 +887,14 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                             video_id=video_id,
                             url=f"https://www.youtube.com/watch?v={video_id}",
                             source="search_auto",
+                            # Ce que la recherche a vu : le verdict des vues
+                            # comptées la rejuge au score courant (e60).
+                            recherche={
+                                "titre": best.get("title"),
+                                "artistes": best.get("artists")
+                                or [best.get("channel_title") or ""],
+                                "album": best.get("album"),
+                            },
                         ),
                     )
             except (AttributeError, TypeError, KeyError, IndexError) as e:
@@ -990,6 +998,11 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
 
     valides = cles_validees(data_manager, artist.id)
     titres_connus = {(t.id, v.video_id): v.title for t in db_tracks for v in (t.videos or [])}
+    recherches = {(t.id, v.video_id): v.recherche for t in db_tracks for v in (t.videos or [])}
+    for track_id, vids in videos_vues.items():
+        for video_id, video in vids.items():
+            if video.recherche:
+                recherches[(track_id, video_id)] = video.recherche
     result["vues_ecartees"] = 0
     for track_id, vids in sorted(vid_counts.items()):
         fiche = tracks_par_id.get(track_id)
@@ -1002,6 +1015,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                         title=(details_videos.get(v) or {}).get("title")
                         or titres_connus.get((track_id, v)),
                         source=sources.get((track_id, v)),
+                        recherche=recherches.get((track_id, v)),
                     )
                     for v in vids
                 ],
@@ -1063,6 +1077,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     # seulement hors plateformes (cf. `duree_youtube`). Une vidéo partagée par
     # plusieurs fiches (clip double compris) ne dit la durée d'aucune.
     from src.services.revue import video_nomme
+    from src.services.vues_comptees import recherche_valide
     from src.utils.chaines_youtube import nature_de
 
     result["durees_youtube"] = 0
@@ -1074,6 +1089,13 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
             {**details_videos[v], "source": sources.get((track_id, v))}
             for v in vids
             if v not in partagees and v in details_videos
+            # Ni une vidéo de la recherche que le score courant refuse, fût-elle
+            # l'audio d'une chaîne Topic : Django « Chaos » prenait les 5:37 du
+            # « Chaos » de Jango Jack (2026-10-20).
+            and (
+                sources.get((track_id, v)) != "search_auto"
+                or recherche_valide(fiche, recherches.get((track_id, v)))
+            )
         ]
         verdict = duree_a_declarer(
             propres,

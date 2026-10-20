@@ -300,3 +300,26 @@ class TestYtmIncoherent:
 
         (cas,) = [c for c in audit.cas if c.famille == "ytm_incoherent"]
         assert "colonne 9,000 / vidéos et compteurs 1,500" in cas.libelle
+
+
+class TestRecherchePerimee:
+    """Une vidéo de la recherche que le score courant refuse : ses vues ne
+    comptent pas, et l'audit la montre à trancher (retirer, ou ✔️)."""
+
+    def test_la_video_refusee_est_a_trancher(self, data_manager):
+        from src.models import TrackVideo
+
+        a = Artist(name="Django")
+        a.id = data_manager.save_artist(a)
+        t = Track(title="Chaos", artist=a, album="Anthracite")
+        t.genius_id = 711
+        data_manager.save_track(t)
+        vu = {"titre": "Chaos", "artistes": ["Jango Jack"], "album": None}
+        data_manager.record_track_videos(
+            t.id,
+            [TrackVideo(video_id="FC05EcH6dUw", source="search_auto", views=400, recherche=vu)],
+        )
+        audit = au.auditer(data_manager, ["Django"], revue=False)
+        (cas,) = [c for c in audit.cas if c.famille == "recherche_perimee"]
+        assert cas.nature == au.DECISION and "Jango Jack" in cas.libelle
+        assert "ytm_incoherent" not in _familles(audit)

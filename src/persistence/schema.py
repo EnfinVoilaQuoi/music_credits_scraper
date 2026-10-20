@@ -554,6 +554,10 @@ track_videos = Table(
     # « B.B. Jacques - Donjon & 2h22 » est un clip double légitime, un titre qui
     # ne nomme qu'un morceau trahit un lien fautif.
     Column("title", Text),
+    # Ce que la RECHERCHE a vu en posant la vidéo (e60, JSON : `titre`,
+    # `artistes`, `album` du résultat ytmusicapi), `search_auto` seulement :
+    # le verdict des vues comptées rejuge le lien quand le score change.
+    Column("recherche", Text),
     UniqueConstraint("track_id", "video_id"),
     sqlite_autoincrement=True,
 )

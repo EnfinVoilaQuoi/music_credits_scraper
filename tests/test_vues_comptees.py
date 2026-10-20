@@ -170,3 +170,88 @@ def test_rejeter_la_video_partagee_rend_ses_vues_a_l_autre_fiche(data_manager):
         searcher=_Chercheur(),
     )
     assert _ytm(data_manager, original.id) == 64
+
+
+# ── Vidéos posées par la RECHERCHE (option A, décision utilisateur 2026-10-20) ──
+
+CHAOS = "FC05EcH6dUw"  # « Chaos » de Jango Jack, posé sur le « Chaos » de Django
+JANGO = {"titre": "Chaos", "artistes": ["Jango Jack"], "album": None}
+
+
+def _django():
+    return Track(title="Chaos", artist=Artist(name="Django"), album="Anthracite")
+
+
+def test_une_video_de_la_recherche_se_juge_au_score_courant():
+    """Django « Chaos » ← le « Chaos » de Jango Jack (2026-10-02, avant le
+    durcissement du score) : ses vues ne comptent plus."""
+    assert not vue_comptee(_django(), CHAOS, "Chaos", "search_auto", set(), JANGO)
+    juste = {"titre": "Chaos", "artistes": ["Django"], "album": "Anthracite"}
+    assert vue_comptee(_django(), "x" * 11, "Chaos", "search_auto", set(), juste)
+
+
+def test_sans_faits_de_pose_on_ne_conclut_pas():
+    assert vue_comptee(_django(), CHAOS, "Chaos", "search_auto", set(), None)
+
+
+def test_le_principal_d_un_featuring_compte():
+    """La recherche d'un feat se fait sous le principal (`artiste_de_recherche`)."""
+    fiche = Track(title="Moscou", artist=Artist(name="Sadek"), primary_artist_name="Bruler")
+    vu = {"titre": "Moscou", "artistes": ["Bruler"], "album": None}
+    assert vue_comptee(fiche, "x" * 11, "Moscou", "search_auto", set(), vu)
+
+
+def test_les_faits_de_pose_sont_gardes_et_rejugent_le_total(data_manager):
+    a = Artist(name="Django")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Chaos", artist=a, album="Anthracite", genius_id=711)
+    data_manager.save_track(t)
+    juste = {"titre": "Chaos", "artistes": ["Django"], "album": "Anthracite"}
+    data_manager.record_track_videos(
+        t.id,
+        [
+            TrackVideo(video_id=CHAOS, source="search_auto", views=400, recherche=JANGO),
+            TrackVideo(video_id="b" * 11, source="search_auto", views=86_496, recherche=juste),
+        ],
+    )
+    assert _ytm(data_manager, t.id) == 86_496
+    # Une passe qui ne connaît pas les faits (relevé de vues) ne les efface pas.
+    data_manager.record_track_videos(t.id, [TrackVideo(video_id=CHAOS, views=401)])
+    (video,) = [v for v in data_manager.get_track_videos(t.id) if v.video_id == CHAOS]
+    assert video.recherche == JANGO and video.views == 401
+    assert _ytm(data_manager, t.id) == 86_496
+
+
+def test_remplir_les_faits_d_une_video_d_avant_e60(data_manager):
+    a = Artist(name="Django")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Chaos", artist=a, album="Anthracite", genius_id=711)
+    data_manager.save_track(t)
+    data_manager.record_track_videos(
+        t.id, [TrackVideo(video_id=CHAOS, source="search_auto", views=400)]
+    )
+    assert _ytm(data_manager, t.id) == 400  # faits inconnus : elle compte
+    assert data_manager.poser_recherches_videos([(t.id, CHAOS, JANGO)]) == 1
+    assert _ytm(data_manager, t.id) is None
+    # Jamais remplacés.
+    autre = {"titre": "Chaos", "artistes": ["Django"], "album": None}
+    assert data_manager.poser_recherches_videos([(t.id, CHAOS, autre)]) == 0
+
+
+def test_le_portier_de_la_recherche_rejoue_les_totaux(data_manager):
+    from src.services import regles
+
+    a = Artist(name="Django")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Chaos", artist=a, album="Anthracite", genius_id=711)
+    data_manager.save_track(t)
+    data_manager.record_track_videos(
+        t.id, [TrackVideo(video_id=CHAOS, source="search_auto", views=400, recherche=JANGO)]
+    )
+    with data_manager.engine.begin() as conn:
+        conn.exec_driver_sql("UPDATE tracks SET ytm_streams = 400 WHERE id = ?", (t.id,))
+    a.tracks = data_manager.get_artist_tracks(a.id)
+    assert "recherche_youtube" in regles.PORTIERS
+    assert regles.rejouer_recherche_youtube(data_manager, a).startswith("1 total")
+    assert _ytm(data_manager, t.id) is None
+    assert regles.perimes(data_manager, "Django") == []

@@ -30,6 +30,26 @@ def _clean(value, default=None):
     return value
 
 
+def recherche_de_ligne(value) -> dict | None:
+    """`track_videos.recherche` (JSON, e60) → `{"titre", "artistes", "album"}`,
+    ou None si absente ou illisible (on ne conclut pas)."""
+    if _clean(value) is None:
+        return None
+    try:
+        faits = json.loads(value)
+    except (TypeError, ValueError):
+        logger.warning(f"track_videos.recherche illisible : {value!r:.80}")
+        return None
+    if not isinstance(faits, dict) or not faits.get("titre"):
+        return None
+    artistes = faits.get("artistes")
+    return {
+        "titre": str(faits["titre"]),
+        "artistes": [str(a) for a in artistes] if isinstance(artistes, list) else [],
+        "album": _clean(faits.get("album")),
+    }
+
+
 def _clean_datetime(value):
     """Horodatage DB (chemin `text()` : string ISO verbatim) → `datetime`.
 

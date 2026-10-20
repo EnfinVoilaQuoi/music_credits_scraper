@@ -13,8 +13,17 @@ détecteur 🎬, `revue.video_nomme`) reste affichée, mais ses vues ne comptent
 — sauf validation humaine : ✔️ dans la fiche (le lien passe en `manual`, une
 autre provenance que celle-ci) ou « ✓ Normal » dans le panneau (verdict mémorisé
 sur le cas 🎬 de cette vidéo). Les autres provenances ne sont pas concernées :
-la chaîne de l'artiste et notre recherche (seuil 0,90) n'en produisent presque
+la chaîne de l'artiste et notre recherche (seuil 0,85) n'en produisent presque
 pas (11 et 2, surtout des graphies — « BLKKK SKKKN HEAD »).
+
+Une vidéo posée par la RECHERCHE (`search_auto`) compte tant que ce que la
+recherche a vu en la posant (`TrackVideo.recherche`, e60 : titre, artistes,
+disque du résultat) passe le score COURANT (`youtube_searcher.relevance_score`,
+seuil de pose) — décision utilisateur 2026-10-20 (option A). Une règle de
+rapprochement durcie ne rejugeait pas les liens déjà posés : Django « Chaos »
+gardait le « Chaos » de Jango Jack. Réversible : la vidéo reste affichée, ses
+vues cessent de compter ; ✔️ dans la fiche (le lien passe en `manual`) la fait
+compter. Sans faits de pose (inconnus), on ne conclut pas : elle compte.
 """
 
 from __future__ import annotations
@@ -31,7 +40,43 @@ def cles_validees(dm, artist_id: int) -> set[str]:
     return {cle for (det, cle) in dm.verdicts_revue(artist_id) if det == DETECTEUR}
 
 
-def vue_comptee(fiche, video_id: str, titre: str | None, source: str | None, valides) -> bool:
+def recherche_valide(fiche, recherche: dict | None) -> bool:
+    """Ce que la recherche a vu passe-t-il le score COURANT pour cette fiche ?
+    Sous le nom de l'artiste de la fiche OU de son principal (la recherche
+    d'un featuring se fait sous le principal, `artiste_de_recherche`).
+    `fiche` : `title`, `album`, `artist.name`, `primary_artist_name`."""
+    from src.config import YOUTUBE_CONFIDENCE_THRESHOLD
+    from src.youtube.youtube_searcher import relevance_score
+
+    if not recherche:
+        return True  # faits inconnus : on ne conclut pas
+    noms = [
+        n for n in (fiche.artist.name if fiche.artist else None, fiche.primary_artist_name) if n
+    ]
+    return any(
+        relevance_score(
+            recherche["titre"],
+            recherche.get("artistes") or [],
+            nom,
+            fiche.title,
+            album=fiche.album,
+            result_album=recherche.get("album"),
+        )
+        >= YOUTUBE_CONFIDENCE_THRESHOLD
+        for nom in noms
+    )
+
+
+def vue_comptee(
+    fiche,
+    video_id: str,
+    titre: str | None,
+    source: str | None,
+    valides,
+    recherche: dict | None = None,
+) -> bool:
+    if source == "search_auto":
+        return recherche_valide(fiche, recherche)
     if source != "genius_media" or not titre:
         return True  # titre inconnu : on ne conclut pas
     video = SimpleNamespace(title=titre, source=source)
@@ -42,11 +87,12 @@ def vue_comptee(fiche, video_id: str, titre: str | None, source: str | None, val
 
 def videos_exclues(fiche, videos, valides) -> set[str]:
     """`video_id` des vidéos de `fiche` dont les vues ne comptent pas.
-    `videos` : objets à `video_id`, `title`, `source` (`TrackVideo`)."""
+    `videos` : objets à `video_id`, `title`, `source`, `recherche` (`TrackVideo`)."""
     return {
         v.video_id
         for v in videos
-        if v.video_id and not vue_comptee(fiche, v.video_id, v.title, v.source, valides)
+        if v.video_id
+        and not vue_comptee(fiche, v.video_id, v.title, v.source, valides, v.recherche)
     }
 
 

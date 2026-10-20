@@ -37,6 +37,15 @@ PORTIERS: dict[str, tuple[str, ...]] = {
         "src.utils.version_descriptors",
         "src.utils.title_matching",
     ),
+    # Les vidéos posées par la recherche ne comptent leurs vues que si ce que
+    # la recherche a vu passe le score COURANT (`vues_comptees`, 2026-10-20) :
+    # le score change, les totaux YTM de l'artiste se recalculent.
+    "recherche_youtube": (
+        "src.youtube.youtube_searcher",
+        "src.services.vues_comptees",
+        "src.utils.version_descriptors",
+        "src.utils.title_matching",
+    ),
 }
 
 
@@ -136,8 +145,26 @@ def _rejouer_certifs(dm, artiste) -> str:
     return certifs.recalculer(dm, artiste)
 
 
+def rejouer_recherche_youtube(dm, artiste) -> str:
+    """Le REJEU du portier « recherche_youtube » : le total YTM de chaque fiche
+    qui porte une vidéo de la recherche est recalculé (le verdict des vues
+    comptées y juge la vidéo au score courant). Hors ligne ; marque la règle."""
+    fiches = [
+        t.id
+        for t in artiste.tracks
+        if t.id and any(v.source == "search_auto" for v in t.videos or [])
+    ]
+    for track_id in fiches:
+        dm.recalculer_vues_ytm(track_id)
+    marquer(dm, artiste.name, "recherche_youtube")
+    return f"{len(fiches)} total(aux) YouTube Music recalculé(s)"
+
+
 #: Comment REJOUER chaque portier, hors ligne, sur un artiste chargé.
-REJOUEURS: dict[str, Callable] = {"certifs": _rejouer_certifs}
+REJOUEURS: dict[str, Callable] = {
+    "certifs": _rejouer_certifs,
+    "recherche_youtube": rejouer_recherche_youtube,
+}
 
 
 def rejouer_perimes(dm, artiste) -> list[str]:

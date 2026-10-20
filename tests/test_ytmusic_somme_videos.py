@@ -666,3 +666,62 @@ def test_un_album_bride_est_saute_et_ses_videos_connues_restent_mesurees(sans_re
     assert result["albums_brides"] == ["Alb"]
     assert result["albums_processed"] == 0
     assert dm.totaux() == {1: 500}
+
+
+class TestVideoDeLaRecherche:
+    """Option A (décision utilisateur 2026-10-20) : la recherche garde ce
+    qu'elle a vu, et une vidéo qu'elle a posée ne compte que si ces faits
+    passent le score COURANT."""
+
+    def test_la_pose_garde_ce_que_la_recherche_a_vu(self, sans_recherche, monkeypatch):
+        import src.youtube.youtube_searcher as ys
+
+        class _Chercheur:
+            def search_track(self, artist, title, max_results=5, album=None):
+                return [
+                    {
+                        "video_id": "trouveetrou",
+                        "title": "Feat",
+                        "channel_title": "Autre",
+                        "artists": ["Autre", "Isha"],
+                        "album": "Alb",
+                        "relevance_score": 1.0,
+                    }
+                ]
+
+        monkeypatch.setattr(ys, "YouTubeSearcher", _Chercheur)
+        api = FakeAPI(raw_tracks=[], vues={"trouveetrou": 300})
+        tracks = [_track(1, "Feat", spotify_streams=200_000)]
+        dm = FakeDM(tracks)
+        ecrites = []
+        enregistrer = dm.record_track_videos
+        monkeypatch.setattr(
+            dm, "record_track_videos", lambda tid, v: ecrites.extend(v) or enregistrer(tid, v)
+        )
+
+        mod.update_ytmusic_streams(_ARTIST, dm, api=api)
+
+        (video,) = ecrites
+        assert video.source == "search_auto"
+        assert video.recherche == {"titre": "Feat", "artistes": ["Autre", "Isha"], "album": "Alb"}
+
+    def test_une_video_que_le_score_refuse_ne_compte_ni_ne_donne_sa_duree(self, sans_recherche):
+        """Django « Chaos » ← le « Chaos » de Jango Jack (5:37) : ni vues, ni durée."""
+        api = FakeAPI(
+            raw_tracks=[],
+            vues={"jangojackch": 400},
+            details={"jangojackch": {"duration": 337, "channel": "Jango Jack - Topic"}},
+        )
+        jango = {"titre": "Chaos", "artistes": ["Jango Jack"], "album": None}
+        tracks = [
+            _track(
+                1,
+                "Chaos",
+                videos=[TrackVideo(video_id="jangojackch", source="search_auto", recherche=jango)],
+            )
+        ]
+
+        dm, result = _lancer(api, tracks)
+
+        assert result["vues_ecartees"] == 400
+        assert dm.durees == []

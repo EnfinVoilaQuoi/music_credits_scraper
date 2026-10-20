@@ -97,6 +97,27 @@ def marquer(dm, artiste: str, portier: str) -> None:
         )
 
 
+#: Empreinte posée par une DÉCISION (alias, formation… — `ArtistRepository.
+#: _ecrire_artiste`) : différente de toute empreinte de code, elle rend le
+#: portier périmé, donc rejoué en fin du prochain run (2026-10-20).
+A_REJOUER = "decision"
+
+
+def marquer_a_rejouer(conn, artiste: str, portier: str) -> None:
+    """Dans la transaction de l'appelant : les verdicts de `portier` pour
+    `artiste` ne valent plus (une décision a changé ce qu'il juge)."""
+    from sqlalchemy import text
+
+    conn.execute(
+        text(
+            "INSERT INTO regles_appliquees (artiste, portier, empreinte, applique_le) "
+            "VALUES (:a, :p, :e, :le) ON CONFLICT (artiste, portier) DO UPDATE SET "
+            "empreinte = excluded.empreinte, applique_le = excluded.applique_le"
+        ),
+        {"a": artiste, "p": portier, "e": A_REJOUER, "le": datetime.now()},
+    )
+
+
 def perimes(dm, artiste: str) -> list[str]:
     """Les portiers dont la règle a changé depuis leur dernier passage sur
     `artiste`. Un portier jamais passé N'EST PAS périmé : rien n'a été

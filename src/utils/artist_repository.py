@@ -91,17 +91,48 @@ class ArtistRepository:
         if notes is not None and artist_id is not None:
             notes.setdefault(artist_id, set()).update(portiers)
 
+    #: Constat « pas sur la plateforme » qu'une décision rend caduc : le
+    #: prochain run `identite` redemande ces fiches (`runtime.manquant`).
+    _CONSTATS_D_IDENTITE = {
+        "identite_spotify": ("spotify_id", "spotify_id_checked_at"),
+        "identite_deezer": ("deezer_id", "deezer_checked_at"),
+    }
+
     def _noter_a_rejuger(self, conn) -> None:
-        """Le point unique où le REJUGEMENT se branchera, une fois validé par
-        l'utilisateur (2026-10-20 : quels portiers, quel coût). Pour l'instant,
-        il dit ce qu'il faut relancer à la main."""
+        """Le REJUGEMENT, dans la transaction de la décision (validé par
+        l'utilisateur le 2026-10-20, coûts mesurés) :
+        - `certifs` : le portier est marqué périmé (`regles.marquer_a_rejouer`),
+          rejoué hors ligne en fin du prochain run (10 à 40 s par artiste) ;
+        - `identite_spotify` / `identite_deezer` : les constats « pas sur
+          Spotify / Deezer » de ses fiches sans ID expirent — le prochain run
+          `identite` les redemande (réseau ; jusqu'à ~2 700 fiches pour Kanye) ;
+        - `identite_discogs` : aucun constat stocké, le run suivant relit.
+        Un artiste pas encore en base (insertion) n'a rien à rejuger."""
+        from src.services import regles
+
         for artist_id, portiers in sorted((conn.info.get(self._A_REJUGER) or {}).items()):
             nom = conn.execute(
                 text("SELECT name FROM artists WHERE id = :a"), {"a": artist_id}
             ).scalar()
+            if nom is None:
+                continue
+            faits = []
+            if "certifs" in portiers:
+                regles.marquer_a_rejouer(conn, nom, "certifs")
+                faits.append("certifs rejouées au prochain run")
+            for portier, (id_col, constat) in self._CONSTATS_D_IDENTITE.items():
+                if portier in portiers:
+                    n = conn.execute(
+                        text(
+                            f"UPDATE tracks SET {constat} = NULL "  # noqa: S608 - colonnes fixes
+                            f"WHERE artist_id = :a AND {constat} IS NOT NULL "
+                            f"AND ({id_col} IS NULL OR {id_col} = '')"
+                        ),
+                        {"a": artist_id},
+                    ).rowcount
+                    faits.append(f"{n} constat(s) « {portier} » expiré(s)")
             logger.info(
-                f"🔁 Décision sur {nom or artist_id} : ses morceaux sont à rejuger "
-                f"({', '.join(sorted(portiers))})"
+                f"🔁 Décision sur {nom} ({', '.join(sorted(portiers))}) : {', '.join(faits) or '—'}"
             )
 
     def save_artist(self, artist: Artist) -> int:

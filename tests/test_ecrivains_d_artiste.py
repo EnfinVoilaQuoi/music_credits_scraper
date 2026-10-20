@@ -204,3 +204,77 @@ def _portiers():
     from src.utils.artist_repository import PORTIERS_DE_L_ARTISTE
 
     return PORTIERS_DE_L_ARTISTE
+
+
+# ── Le rejugement (validé par l'utilisateur le 2026-10-20) ───────────────────
+
+
+def _fiche(dm, artiste, titre, **colonnes):
+    from sqlalchemy import text
+
+    from src.models import Track
+
+    track = Track(title=titre, artist=artiste)
+    dm.save_track(track)
+    if colonnes:
+        champs = ", ".join(f"{c} = :{c}" for c in colonnes)
+        with dm.engine.begin() as conn:
+            conn.execute(
+                text(f"UPDATE tracks SET {champs} WHERE id = :id"), {**colonnes, "id": track.id}
+            )
+    return track
+
+
+def _constats(dm, *ids):
+    with dm.engine.connect() as conn:
+        return {
+            r[0]: (r[1], r[2])
+            for r in conn.exec_driver_sql(
+                "SELECT id, spotify_id_checked_at, deezer_checked_at FROM tracks "
+                f"WHERE id IN ({', '.join(str(i) for i in ids)})"
+            )
+        }
+
+
+def test_un_alias_confirme_rejuge_certifs_et_constats(data_manager):
+    from src.services import regles
+
+    artiste = _artiste(data_manager)
+    absent = _fiche(
+        data_manager,
+        artiste,
+        "Absent",
+        spotify_id_checked_at="2026-10-01T00:00:00",
+        deezer_checked_at="2026-10-01T00:00:00",
+    )
+    trouve = _fiche(
+        data_manager,
+        artiste,
+        "Trouvé",
+        spotify_id="SP",
+        spotify_id_checked_at="2026-10-01T00:00:00",
+    )
+    regles.marquer(data_manager, artiste.name, "certifs")
+    assert regles.perimes(data_manager, artiste.name) == []
+
+    data_manager.record_artist_relations(artiste.id, [_alias()])
+
+    assert regles.perimes(data_manager, artiste.name) == ["certifs"]
+    constats = _constats(data_manager, absent.id, trouve.id)
+    assert constats[absent.id] == (None, None)  # redemandée au prochain run
+    assert constats[trouve.id][0] == "2026-10-01T00:00:00"  # elle a son ID : rien à rejuger
+
+
+def test_un_id_deezer_change_n_expire_que_les_constats_deezer(data_manager):
+    artiste = _artiste(data_manager)
+    absent = _fiche(
+        data_manager,
+        artiste,
+        "Absent",
+        spotify_id_checked_at="2026-10-01T00:00:00",
+        deezer_checked_at="2026-10-01T00:00:00",
+    )
+
+    data_manager.update_artist_deezer_id(artiste.id, 42)
+
+    assert _constats(data_manager, absent.id)[absent.id] == ("2026-10-01T00:00:00", None)

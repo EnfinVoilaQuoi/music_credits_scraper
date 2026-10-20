@@ -69,8 +69,9 @@ class BilanCorrections:
 REGLES_BRANCHEES = True
 
 #: Famille « ID Spotify proposé » (`politiques_revue.REGLES_ID_PROPOSE`) :
-#: BAISSÉ tant que l'utilisateur n'a pas validé son passage à blanc.
-REGLES_ID_PROPOSE_BRANCHEES = False
+#: levé le 2026-10-20, l'utilisateur ayant validé les 46 corrections du passage
+#: à blanc restreint (« Je valide les 46 »).
+REGLES_ID_PROPOSE_BRANCHEES = True
 
 #: Préfixe de la note d'un « ✓ Normal » posé par une règle (et de l'origine
 #: d'un refus) — un humain n'en pose jamais.

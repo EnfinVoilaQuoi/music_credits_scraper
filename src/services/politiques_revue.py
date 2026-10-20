@@ -632,11 +632,10 @@ def arbitrage_valide(cas, track, ctx) -> Arbitrage | None:
     return None
 
 
-# ── Famille « ID Spotify proposé » — PAS ENCORE validée ───────────────────
+# ── Famille « ID Spotify proposé » — VALIDÉE le 2026-10-20 ─────────────────
 
-#: Passée au passage à blanc restreint (2026-10-20) ; l'utilisateur la
-#: validera ou non. Tant que non, `revue_auto.REGLES_ID_PROPOSE_BRANCHEES`
-#: reste baissé.
+#: Validée par l'utilisateur sur le passage à blanc restreint du 2026-10-20
+#: (46 corrections : 40 poses, 6 refus) — `revue_auto.REGLES_ID_PROPOSE_BRANCHEES`.
 REGLES_ID_PROPOSE = frozenset(
     {("id_spotify_propose", "poser_id"), ("id_spotify_propose", "refuser_id")}
 )

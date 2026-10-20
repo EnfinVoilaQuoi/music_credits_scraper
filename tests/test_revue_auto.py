@@ -259,10 +259,10 @@ def _id_propose(monkeypatch, verdict_du_gate: bool):
     )
 
 
-def test_id_propose_interrupteur_baisse_par_defaut(data_manager, artiste):
+def test_id_propose_interrupteur_baisse_rien(data_manager, artiste, monkeypatch):
+    monkeypatch.setattr(revue_auto, "REGLES_ID_PROPOSE_BRANCHEES", False)
     _fiche_proposee(data_manager, artiste, "Gold Digger", 20, "SPG")
     _charger(data_manager, artiste)
-    assert revue_auto.REGLES_ID_PROPOSE_BRANCHEES is False
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
 
 

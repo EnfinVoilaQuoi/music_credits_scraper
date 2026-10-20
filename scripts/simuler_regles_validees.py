@@ -60,8 +60,6 @@ def main(argv=None) -> int:
     )
     a = p.parse_args(argv)
     if a.famille != "durees":
-        if a.apply:
-            raise SystemExit("--apply : seule la famille VALIDÉE (durées) s'applique")
         a.sortie = a.sortie.with_name(f"regles_{a.famille}_{date.today()}.md")
 
     if a.apply:
@@ -107,9 +105,11 @@ def appliquer(a) -> int:
         print("❌ sauvegarde impossible — rien n'est écrit")
         return 1
     print(f"💾 {backup}")
-    revue_auto.REGLES_BRANCHEES = True
+    # Une famille à la fois, comme au passage à blanc qui l'a fait valider.
+    revue_auto.REGLES_BRANCHEES = a.famille == "durees"
+    revue_auto.REGLES_ID_PROPOSE_BRANCHEES = a.famille == "id_spotify_propose"
     dm = DataManager()
-    lignes = simuler(dm, a.artiste)
+    lignes = simuler(dm, a.artiste, famille=a.famille)
     lignes[0] = lignes[0].replace("Passage à blanc", "APPLICATION")
     lignes[2] = f"Appliquées sur la VRAIE base (sauvegarde : {backup.name})."
     sortie = a.sortie.with_name(a.sortie.stem + "_applique.md")

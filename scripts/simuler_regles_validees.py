@@ -33,6 +33,9 @@ from src.config import DATA_DIR
 
 BASE = Path(DATA_DIR) / "music_credits.db"
 
+#: Familles validées par l'utilisateur (leur interrupteur est levé dans `revue_auto`).
+FAMILLES_VALIDEES = ("durees", "id_spotify_propose")
+
 
 def copier_la_base(copie: Path) -> None:
     with (
@@ -151,7 +154,8 @@ def simuler(dm, noms=None, famille: str = "durees") -> list[str]:
                 par_action[c["action"]].append((nom, c))
     regles = {k: v for k, v in par_action.items() if k.startswith(revue_auto.PREFIXE_REGLE)}
     formelles = {k: v for k, v in par_action.items() if k not in regles}
-    titre = "règles validées" if famille == "durees" else f"famille « {famille} » (NON validée)"
+    validee = famille in FAMILLES_VALIDEES
+    titre = f"famille « {famille} » " + ("(validée)" if validee else "(NON validée)")
     lignes = [
         f"# Passage à blanc — {titre} — {date.today()}",
         "",
@@ -164,7 +168,7 @@ def simuler(dm, noms=None, famille: str = "durees") -> list[str]:
     lignes += [
         f"| `{k}` (formelle, déjà active) | {len(v)} |" for k, v in sorted(formelles.items())
     ]
-    nom_regles = "Règles validées" if famille == "durees" else "Règles (NON validées)"
+    nom_regles = "Règles validées" if validee else "Règles (NON validées)"
     for titre, groupe in ((nom_regles, regles), ("Formelles (déjà actives)", formelles)):
         for action, liste in sorted(groupe.items()):
             lignes += ["", f"## {titre} — `{action}` ({len(liste)})", ""]

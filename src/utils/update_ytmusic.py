@@ -7,7 +7,8 @@ Architecture quota-optimisée :
   Étape 3b — Vidéos HORS canal déjà connues de la base (`track_videos`, e20)
   Étape 4  — Découverte d'une version audio pour les morceaux hors canal
   Étape 5  — UN second batch pour toutes ces vidéos hors canal
-  Étape 6  — Un total par morceau : somme DÉDUPLIQUÉE par videoId
+  Étape 6  — Les FAITS par morceau, une vidéo une fois (dédup par videoId) ; le
+             total `ytm_streams` est calculé par le repository (2026-10-20)
 
 Ce que les étapes 3b/6 ont réparé (2026-09-07) : le clip officiel d'un morceau
 porte un videoId DIFFÉRENT de sa version audio et ne vit pas sur le canal
@@ -776,6 +777,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
             if matched_track:
                 if streams is not None and retenu(matched_track.id):
                     video_id = entry.get("video_id")
+                    # Préfixe = `TrackRepository.COMPTEUR_SANS_VIDEO`.
                     vid = video_id or f"_novid_{album_title}_{norm}"
                     vid_counts.setdefault(matched_track.id, {})[vid] = streams
                     covered_track_ids.add(matched_track.id)
@@ -912,7 +914,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                     covered_track_ids.add(track_id)
                     result["feats_covered"] += 1
 
-    # ── Étape 6 : écriture — un total par morceau, une vidéo comptée une fois ─
+    # ── Étape 6 : écriture des faits — une vidéo comptée une fois ────────────
     # La somme porte sur un dict indexé par videoId : si le lien Genius EST la
     # vidéo audio du canal, elle n'est comptée qu'une fois.
     #
@@ -1010,7 +1012,16 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         )
         result["vues_ecartees"] += sum(vids[v] for v in exclues if v in vids)
         comptees = {v: n for v, n in vids.items() if v not in partagees and v not in exclues}
-        total = sum(comptees.values())
+        # Le run ne calcule pas le total : il enregistre des FAITS — les vidéos
+        # et leurs vues exactes (`record_track_videos`, plus bas), et ici les
+        # compteurs sans mesure exacte (piste sans videoId, compteur arrondi
+        # d'ytmusicapi). `ytm_streams` n'est calculé que par le repository
+        # (`_rematerialiser_fiche`, 2026-10-20) ; vide, le fait précédent tombe.
+        mesurees = videos_vues.get(track_id, {})
+        data_manager.record_ytm_compteurs(
+            track_id,
+            {v: n for v, n in comptees.items() if v not in mesurees or mesurees[v].views is None},
+        )
         if not comptees and exclues:
             # Sa seule vidéo n'est pas le morceau : un ancien total la compterait
             # encore — il est recalculé (vidé s'il ne reste rien).
@@ -1028,11 +1039,10 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                 "aucune vidéo qui lui soit propre — total recalculé sans les partagées"
             )
             continue
-        data_manager.update_track_ytm_streams(track_id, total)
         if len(comptees) > 1:
             result["multi_video"] += 1
             titre = tracks_par_id[track_id].title if track_id in tracks_par_id else track_id
-            logger.debug(f"🎛️ « {titre} » : {len(comptees)} vidéos sommées → {total:,}")
+            logger.debug(f"🎛️ « {titre} » : {len(comptees)} vidéos comptées")
 
     for track_id, videos in videos_vues.items():
         data_manager.record_track_videos(track_id, list(videos.values()))

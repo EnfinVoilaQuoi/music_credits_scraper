@@ -170,8 +170,9 @@ class FakeDM:
         self.monthly_writes.append(ytm_listeners)
         return True
 
-    def update_track_ytm_streams(self, track_id, total):
-        self.stream_writes.append((track_id, total))
+    def record_ytm_compteurs(self, track_id, compteurs):
+        # Une lecture par fiche comptée : le run écrit ses faits (2026-10-20).
+        self.stream_writes.append((track_id, compteurs))
         return True
 
     def verdicts_revue(self, artist_id):

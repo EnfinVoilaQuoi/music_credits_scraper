@@ -1374,6 +1374,7 @@ class TrackRepository:
                     text("DELETE FROM source_track_absences WHERE track_id = :delete_id"),
                     {"delete_id": delete_id},
                 )
+                self._unir_compteurs_ytm(conn, keep_id, delete_id)
                 # Observations : dédup par la clé unique (field, source) — le keep
                 # gagne (on écarte celles du doublon déjà couvertes) — puis
                 # réaffectation du reste. Pas de cascade FK (E4).
@@ -1399,7 +1400,6 @@ class TrackRepository:
                 # de vues le plus RÉCENT passe sur la copie gardée (CORRECTIFS
                 # 1.4) : les deux fiches ont pu relever la même vidéo à des dates
                 # différentes.
-                total_sans_video = self._total_sans_video(conn, (keep_id, delete_id))
                 # Refus de vidéo du morceau conservé (2026-10-19) : celui d'une
                 # RÈGLE tombe avec la fusion, celui fait À LA MAIN tient — la
                 # vidéo du doublon ne passe alors pas.
@@ -1520,7 +1520,7 @@ class TrackRepository:
                 # pour la plume (Version équipe) » gardait une durée VIDE avec
                 # cinq observations à 256-257 s).
                 self._rearbitrer_duree_et_date(conn, keep_id)
-                self._ytm_apres_fusion(conn, keep_id, delete_id, total_sans_video)
+                self._ytm_apres_fusion(conn, keep_id, delete_id)
                 # `instrumental` (e27) n'est PAS symétrique comme `unreleased` :
                 # il doit rester cohérent avec les paroles que la ligne
                 # conserve. La règle vit dans `track_soeurs`, avec sa mesure.
@@ -1585,31 +1585,44 @@ class TrackRepository:
             logger.error(f"Erreur fusion track {delete_id} → {keep_id}: {e}")
             return False
 
-    def _ytm_apres_fusion(
-        self, conn, keep_id: int, delete_id: int, total_sans_video: bool = False
-    ) -> None:
-        """Vues YouTube Music et vidéo principale de la fiche gardée, APRÈS la
-        réunion des vidéos (CORRECTIFS 1.4, 2026-10-09).
+    def _unir_compteurs_ytm(self, conn, keep_id: int, delete_id: int) -> None:
+        """Fusion : les compteurs YTM sans mesure exacte des deux fiches sont
+        RÉUNIS, chacun une fois (même clé = même piste d'album ou même vidéo ;
+        celui de la fiche gardée l'emporte). Avant la dédup des observations,
+        qui n'en garderait qu'un."""
+        compteurs = {
+            **self._compteurs_ytm(conn, delete_id),
+            **self._compteurs_ytm(conn, keep_id),
+        }
+        if compteurs:
+            self._upsert_observations(
+                conn,
+                keep_id,
+                [
+                    Observation(
+                        self.CHAMP_COMPTEURS_YTM,
+                        json.dumps(dict(sorted(compteurs.items()))),
+                        "ytmusic",
+                        seen_at=datetime.now(),
+                    )
+                ],
+            )
 
-        Même règle que le run YTM (`update_ytmusic`, étape 6) : la somme des vues
-        des vidéos de la fiche, chacune une fois, HORS celles qu'une autre fiche
-        du même artiste porte encore (non attribuables). Deux doublons
-        partageaient souvent leur vidéo, qui ne comptait donc pour AUCUN des
-        deux : la fusion la rend attribuable. Une vidéo d'un AUTRE morceau ne se
-        règle pas ici — elle se rejette (✖️) avant de fusionner.
-
-        Sans aucune vue mesurée, ou quand l'une des fiches portait un total sans
-        vidéo connue derrière (antérieur à e20), on ne peut rien recalculer : on
-        garde le plus grand des deux totaux plutôt que d'en perdre un en silence
-        (Josman « Boss », 68 182 vues).
-        """
+    def _ytm_apres_fusion(self, conn, keep_id: int, delete_id: int) -> None:
+        """Vidéo principale de la fiche gardée, APRÈS la réunion des vidéos
+        (CORRECTIFS 1.4, 2026-10-09). Le total `ytm_streams` n'est plus calculé
+        ici (2026-10-20) : `_ecrire` le recalcule au commit depuis les vidéos
+        réunies et les compteurs réunis (`_unir_compteurs_ytm`) — une vidéo que
+        les deux doublons partageaient redevient attribuable. Un total d'avant
+        e20 sans aucun fait derrière ne l'emporte plus (décision 2026-10-12,
+        Josman « Boss »)."""
         lignes = {
             int(r["id"]): r
             for r in conn.execute(
                 text(
-                    "SELECT id, artist_id, ytm_streams, ytm_streams_updated, youtube_url, "
-                    "youtube_url_source, youtube_video_kind, youtube_video_views, "
-                    "youtube_video_views_updated FROM tracks WHERE id IN (:k, :d)"
+                    "SELECT id, youtube_url, youtube_url_source, youtube_video_kind, "
+                    "youtube_video_views, youtube_video_views_updated FROM tracks "
+                    "WHERE id IN (:k, :d)"
                 ),
                 {"k": keep_id, "d": delete_id},
             ).mappings()
@@ -1617,47 +1630,6 @@ class TrackRepository:
         garde, autre = lignes.get(keep_id), lignes.get(delete_id)
         if garde is None:
             return
-        exclues = self._videos_exclues(conn, keep_id, garde["artist_id"])
-        vues = conn.execute(
-            text("""
-            SELECT v.video_id, v.views FROM track_videos v
-            WHERE v.track_id = :k AND v.views IS NOT NULL AND NOT EXISTS (
-                SELECT 1 FROM track_videos o JOIN tracks t ON t.id = o.track_id
-                WHERE o.video_id = v.video_id AND o.track_id NOT IN (:k, :d)
-                  AND t.artist_id = :aid
-            )"""),
-            {"k": keep_id, "d": delete_id, "aid": garde["artist_id"]},
-        ).all()
-        totaux = [r["ytm_streams"] for r in (garde, autre) if r and r["ytm_streams"]]
-        comptees = [int(n) for vid, n in vues if vid not in exclues]
-        if comptees:
-            total = sum(comptees)
-            if total_sans_video and total < max(totaux, default=0):
-                total = max(totaux)
-        elif vues:
-            # Seules des vidéos qui ne sont pas le morceau : rien à compter.
-            conn.execute(update(tracks).where(tracks.c.id == keep_id).values(ytm_streams=None))
-            conn.execute(
-                text("DELETE FROM observations WHERE track_id = :t AND field = 'ytm_streams'"),
-                {"t": keep_id},
-            )
-            total = None
-        elif totaux:
-            total = max(totaux)
-        else:
-            total = None
-        if total is not None and total != garde["ytm_streams"]:
-            maintenant = datetime.now()
-            conn.execute(
-                update(tracks)
-                .where(tracks.c.id == keep_id)
-                .values(ytm_streams=total, ytm_streams_updated=maintenant)
-            )
-            self._upsert_observations(
-                conn,
-                keep_id,
-                [Observation("ytm_streams", total, "ytmusic", seen_at=maintenant)],
-            )
         # Vidéo principale : la gardée sans lien reprend celui de l'autre ; deux
         # liens différents, le PROTÉGÉ (manuel, Genius) l'emporte sur la recherche.
         if (
@@ -1723,21 +1695,6 @@ class TrackRepository:
             )
         }
         return videos_exclues(SimpleNamespace(**fiche), videos, valides)
-
-    @staticmethod
-    def _total_sans_video(conn, ids: tuple[int, ...]) -> bool:
-        """L'une des fiches porte-t-elle un total YTM sans AUCUNE vidéo mesurée
-        derrière (vues relevées avant e20) ? Lu AVANT la réunion des vidéos."""
-        return bool(
-            conn.execute(
-                text(
-                    "SELECT COUNT(*) FROM tracks t WHERE t.id IN :ids AND t.ytm_streams > 0 "
-                    "AND NOT EXISTS (SELECT 1 FROM track_videos v "
-                    "WHERE v.track_id = t.id AND v.views IS NOT NULL)"
-                ).bindparams(bindparam("ids", expanding=True)),
-                {"ids": list(ids)},
-            ).scalar()
-        )
 
     # ──────────────────────────────────────────────────────────────────────────
     # Streams Spotify (Kworb · Spotify web)
@@ -2902,17 +2859,6 @@ class TrackRepository:
             logger.error(f"Erreur rearbitrer_duree_et_date({track_id}): {e}")
             return False
 
-    @staticmethod
-    def _a_des_videos_mesurees(conn, track_id: int) -> bool:
-        return bool(
-            conn.execute(
-                text(
-                    "SELECT 1 FROM track_videos WHERE track_id = :t AND views IS NOT NULL LIMIT 1"
-                ),
-                {"t": track_id},
-            ).first()
-        )
-
     def _rearbitrer_duree_et_date(self, conn, track_id: int) -> None:
         """Ré-arbitre `duration` et `release_date` d'une ligne dont les
         observations ont bougé (fusion, propagation aux sœurs). Seulement les
@@ -3126,8 +3072,10 @@ class TrackRepository:
         valeurs = self._arbitrer_streams(conn, track_id)
         if valeurs:
             conn.execute(update(tracks).where(tracks.c.id == track_id).values(**valeurs))
-        if self._a_des_videos_mesurees(conn, track_id):
-            self._recalculer_vues_ytm(conn, track_id)
+        # Toujours : les compteurs du run sont des faits (`record_ytm_compteurs`),
+        # un total qu'aucun fait n'explique n'a plus à être épargné (2026-10-20 :
+        # Diam's « A quand mon heure ? » gardait les vues d'une vidéo refusée).
+        self._recalculer_vues_ytm(conn, track_id)
         conn.execute(
             text(
                 "UPDATE tracks SET has_lyrics = CASE WHEN lyrics IS NOT NULL AND lyrics <> '' "
@@ -5239,34 +5187,68 @@ class TrackRepository:
             logger.error(f"Erreur get_albums_for_artist (artist_id={artist_id}): {e}")
             return []
 
-    def update_track_ytm_streams(self, track_id: int, streams: int) -> bool:
-        """Met à jour les streams YouTube Music d'un morceau."""
+    def record_ytm_compteurs(self, track_id: int, compteurs: dict[str, int]) -> bool:
+        """Enregistre les compteurs YouTube Music qu'un run a COMPTÉS sans mesure
+        exacte derrière — piste d'album sans videoId (clé `COMPTEUR_SANS_VIDEO…`)
+        ou vidéo dont l'API n'a pas rendu de `viewCount` (clé = videoId, compteur
+        arrondi d'ytmusicapi). Ce sont des FAITS, lus tels quels : le total
+        `ytm_streams` n'est calculé que par `_rematerialiser_fiche`, qui les
+        ajoute aux vues des vidéos mesurées (2026-10-20 : le run écrivait son
+        total, que le recalcul suivant remplaçait — le dernier écrivain gagnait).
+
+        La lecture la plus récente REMPLACE la précédente (le run relit toute la
+        fiche) ; vide, elle retire le fait."""
         try:
-            stmt = (
-                update(tracks)
-                .where(tracks.c.id == track_id)
-                .values(ytm_streams=streams, ytm_streams_updated=datetime.now())
-            )
-            with self.engine.begin() as conn:
-                conn.execute(stmt)
-                # E7e : write-through de la provenance (mono-source, pas de vote).
-                self._upsert_observations(
-                    conn,
-                    track_id,
-                    [Observation("ytm_streams", streams, "ytmusic", seen_at=datetime.now())],
-                )
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
+                if compteurs:
+                    self._upsert_observations(
+                        conn,
+                        track_id,
+                        [
+                            Observation(
+                                self.CHAMP_COMPTEURS_YTM,
+                                json.dumps(dict(sorted(compteurs.items()))),
+                                "ytmusic",
+                                seen_at=datetime.now(),
+                            )
+                        ],
+                    )
+                else:
+                    conn.execute(
+                        text("DELETE FROM observations WHERE track_id = :t AND field = :f"),
+                        {"t": track_id, "f": self.CHAMP_COMPTEURS_YTM},
+                    )
             return True
         except SQLAlchemyError as e:
-            logger.error(f"Erreur update_track_ytm_streams (track_id={track_id}): {e}")
+            logger.error(f"Erreur record_ytm_compteurs (track_id={track_id}): {e}")
             return False
 
+    #: Observation des compteurs YTM sans mesure exacte (`record_ytm_compteurs`).
+    CHAMP_COMPTEURS_YTM = "ytm_compteurs"
+    #: Préfixe de la clé d'un compteur de piste d'album SANS videoId.
+    COMPTEUR_SANS_VIDEO = "_novid_"
+
+    @classmethod
+    def _compteurs_ytm(cls, conn, track_id: int) -> dict[str, int]:
+        valeur = conn.execute(
+            text("SELECT value FROM observations WHERE track_id = :t AND field = :f"),
+            {"t": track_id, "f": cls.CHAMP_COMPTEURS_YTM},
+        ).scalar()
+        try:
+            return {str(k): int(n) for k, n in json.loads(valeur).items()} if valeur else {}
+        except (ValueError, TypeError, AttributeError):
+            logger.warning(f"⚠️ Compteurs YTM illisibles (track_id={track_id}) : {valeur!r}")
+            return {}
+
     def recalculer_vues_ytm(self, track_id: int, exclues=None) -> int | None:
-        """Recalcule `ytm_streams` depuis les vidéos de la fiche déjà mesurées,
-        HORS `exclues` (vidéos qui ne sont pas le morceau, `services.vues_comptees`)
-        et hors celles qu'une autre fiche du même artiste porte (règle du run
-        YTM). Sans aucune vidéo comptable, le total est VIDÉ — une valeur ancienne
-        y compterait encore la vidéo écartée. `exclues=None` : relues en base
-        (verdicts « ✓ Normal » compris). Rend le nouveau total (ou None)."""
+        """Recalcule `ytm_streams` depuis les vidéos de la fiche déjà mesurées et
+        ses compteurs sans mesure exacte (`record_ytm_compteurs`), HORS `exclues`
+        (vidéos qui ne sont pas le morceau, `services.vues_comptees`) et hors
+        celles qu'une autre fiche du même artiste porte (règle du run YTM). Sans
+        rien de comptable, le total est VIDÉ — une valeur ancienne y compterait
+        encore la vidéo écartée. `exclues=None` : relues en base (verdicts
+        « ✓ Normal » compris). Rend le nouveau total (ou None)."""
         try:
             with self.engine.begin() as conn:
                 return self._recalculer_vues_ytm(conn, track_id, exclues)
@@ -5279,19 +5261,32 @@ class TrackRepository:
         aid = conn.execute(
             text("SELECT artist_id FROM tracks WHERE id = :t"), {"t": track_id}
         ).scalar()
-        lignes = conn.execute(
-            text("""
+        # Les vidéos PROPRES à la fiche (aucune autre fiche de l'artiste ne les
+        # porte), mesurées ou non.
+        propres = dict(
+            conn.execute(
+                text("""
             SELECT v.video_id, v.views FROM track_videos v
-            WHERE v.track_id = :t AND v.views IS NOT NULL AND NOT EXISTS (
+            WHERE v.track_id = :t AND NOT EXISTS (
                 SELECT 1 FROM track_videos o JOIN tracks t ON t.id = o.track_id
                 WHERE o.video_id = v.video_id AND o.track_id != :t
                   AND t.artist_id = :aid
             )"""),
-            {"t": track_id, "aid": aid},
-        ).all()
+                {"t": track_id, "aid": aid},
+            ).all()
+        )
         if exclues is None:
             exclues = self._videos_exclues(conn, track_id, aid)
-        comptees = [int(n) for vid, n in lignes if vid not in exclues]
+        comptees = [int(n) for vid, n in propres.items() if n is not None and vid not in exclues]
+        # Un compteur sans mesure exacte compte s'il n'a pas de videoId, ou si
+        # sa vidéo est toujours propre à la fiche, NON mesurée (la mesure exacte
+        # l'emporte), et recevable — oubliée, refusée ou partagée, il tombe.
+        comptees += [
+            n
+            for cle, n in self._compteurs_ytm(conn, track_id).items()
+            if cle.startswith(self.COMPTEUR_SANS_VIDEO)
+            or (cle in propres and propres[cle] is None and cle not in exclues)
+        ]
         if comptees:
             total = sum(comptees)
             maintenant = datetime.now()

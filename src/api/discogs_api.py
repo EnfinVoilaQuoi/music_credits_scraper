@@ -19,6 +19,7 @@ from src.utils.discogs_positions import concerne_la_piste, numeroter
 from src.utils.logger import get_logger, log_api
 from src.utils.title_matching import normalize_name
 from src.utils.track_mapper import _clean_duration
+from src.utils.version_heritage import est_herite
 
 __all__ = ["DiscogsClient", "nom_sans_suffixe", "release_concorde", "token_discogs"]
 
@@ -914,6 +915,19 @@ class DiscogsClient:
                             source="discogs",
                         )
 
+                        # Un crédit HÉRITÉ à la même clé cède la place : sinon
+                        # `add_credit` le garde et jette celui de Discogs (même
+                        # défaut que le scrape Genius, 2026-10-20).
+                        track.credits = [
+                            c
+                            for c in track.credits
+                            if not (
+                                est_herite(c.source)
+                                and c.name == credit.name
+                                and c.role == credit.role
+                                and c.role_detail == credit.role_detail
+                            )
+                        ]
                         track.add_credit(credit)
                         credits_added += 1
 

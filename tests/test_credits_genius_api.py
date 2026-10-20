@@ -324,6 +324,21 @@ class TestScrape:
         assert e.api_seuls == ["kid cudi (Writer)"]
         assert len(e.roles_divergents) == 1 and "Programmer" in e.roles_divergents[0]
 
+    def test_un_credit_herite_cede_la_place_au_credit_de_la_page(self, scraper):
+        """2026-10-20, Kanye « They Say (Instrumental) » : les auteurs HÉRITÉS
+        bloquaient ceux de la page dans `add_credit` — la fiche restait sans
+        aucun crédit scrapé."""
+        t = self._track(
+            _c("Kanye West", CreditRole.PRODUCER, "heritage"),
+            _c("Quelqu'un", CreditRole.WRITER, "heritage"),
+        )
+        scraper.scrape_track_credits(t, include_lyrics=False)
+        vus = {(c.name, c.role, c.source) for c in t.credits}
+        assert ("Kanye West", CreditRole.PRODUCER, "genius") in vus
+        assert ("Kanye West", CreditRole.PRODUCER, "heritage") not in vus
+        assert ("Quelqu'un", CreditRole.WRITER, "heritage") in vus  # non confirmé : gardé
+        assert cga.a_des_credits_scrapes(t.credits)
+
     def test_un_second_scrape_garde_les_complements(self, scraper):
         """Le scrape ne purge que SES crédits : un complément 🎫 retenu au
         premier passage survit aux suivants."""

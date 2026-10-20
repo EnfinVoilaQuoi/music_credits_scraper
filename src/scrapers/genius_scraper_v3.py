@@ -20,7 +20,7 @@ from src.utils.credit_roles import LIBELLES_HORS_CREDITS, map_role, valeur_vide
 from src.utils.inedits import titre_sans_marqueur
 from src.utils.logger import get_logger
 from src.utils.paroles_genius import inedit_par_le_texte, instrumental_par_le_texte
-from src.utils.version_heritage import est_instrumental
+from src.utils.version_heritage import est_herite, est_instrumental
 
 logger = get_logger(__name__)
 
@@ -213,12 +213,15 @@ class GeniusScraperV3(CrawlAIScraperBase):
         # Les `genius_api` que la page confirme partent AVANT l'ajout :
         # `add_credit` dédoublonne sans regarder la source, un provisoire resté
         # en place écarterait le crédit scrapé identique.
+        # Même chose pour un crédit HÉRITÉ d'une autre fiche (2026-10-20, Kanye
+        # « They Say (Instrumental) ») : à la même clé, il bloquait le crédit
+        # de la page, qui disparaissait — la fiche restait « jamais scrapée ».
         confirmes = {credits_genius_api.cle_credit(c) for c in credits}
         track.credits = [
             c
             for c in track.credits
             if not (
-                c.source == credits_genius_api.SOURCE_API
+                (c.source == credits_genius_api.SOURCE_API or est_herite(c.source))
                 and credits_genius_api.cle_credit(c) in confirmes
             )
         ]

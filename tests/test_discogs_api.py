@@ -435,6 +435,17 @@ class TestEnrichissementDuTrack:
             True,
         )
 
+    def test_un_credit_herite_cede_la_place_a_discogs(self, client, monkeypatch):
+        """2026-10-20 : à la même clé, l'héritage bloquait le crédit Discogs
+        dans `add_credit` (même défaut que le scrape Genius)."""
+        from src.models.track import Credit, CreditRole
+
+        self._stub(client, monkeypatch, _donnees(credits=[{"name": "Ponko", "role": "Producer"}]))
+        track = _track()
+        track.credits = [Credit("Ponko", CreditRole.PRODUCER, source="heritage")]
+        client.enrich_track_data(track)
+        assert [(c.name, c.source) for c in track.credits] == [("Ponko", "discogs")]
+
     def test_sans_code_barres_aucune_parution(self, client, monkeypatch):
         self._stub(client, monkeypatch, _donnees(album="X", position="A1", numero=1))
         track = _track()

@@ -58,6 +58,11 @@ def _signe_par_une_formation(track, formations: set[str]) -> bool:
 PORTIERS_DE_L_ARTISTE = ("certifs", "identite_spotify", "identite_deezer", "identite_discogs")
 #: Une relation confirmée change les noms et les profils sous lesquels on le juge.
 _PAR_LES_RELATIONS = ("certifs", "identite_spotify", "identite_deezer")
+#: Un RETRAIT (lien décoché, profil ou ID effacé) n'invalide que les certifs :
+#: rejouées hors ligne, elles détachent ce que le nom retiré rattachait. Il ne
+#: rend aucune fiche trouvable sur Spotify / Deezer — expirer les constats
+#: d'identité coûterait des recherches réseau pour rien (décision 2026-10-20).
+_PAR_UN_RETRAIT = ("certifs",)
 
 
 class ArtistRepository:
@@ -151,7 +156,7 @@ class ArtistRepository:
                     if avant["name"] != artist.name:
                         # Le nom est celui sous lequel on le cherche partout.
                         self._invalider(conn, artist.id, *PORTIERS_DE_L_ARTISTE)
-                    if avant["spotify_id"] != artist.spotify_id:
+                    if artist.spotify_id and avant["spotify_id"] != artist.spotify_id:
                         self._invalider(conn, artist.id, "identite_spotify")
                     if artist.discogs_id is not None and avant["discogs_id"] != artist.discogs_id:
                         self._invalider(conn, artist.id, "identite_discogs")
@@ -327,18 +332,7 @@ class ArtistRepository:
     def delete_artist(self, artist_name: str) -> bool:
         """Supprime un artiste et toutes ses données associées"""
         try:
-            with self._ecrire_artiste() as conn:
-                # Ceux dont il était l'alias CONFIRMÉ perdent son profil Spotify
-                # (`ids_spotify_connus` lit l'ID des alias en base).
-                cible = normalize_name(artist_name)
-                for r in conn.execute(
-                    text(
-                        "SELECT artist_id, related_name FROM artist_relations "
-                        "WHERE kind = 'alias' AND status = 'confirmed'"
-                    )
-                ).mappings():
-                    if cible and normalize_name(r["related_name"]) == cible:
-                        self._invalider(conn, r["artist_id"], "identite_spotify")
+            with self.engine.begin() as conn:
                 # Récupérer l'ID de l'artiste
                 artist_row = (
                     conn.execute(
@@ -807,8 +801,10 @@ class ArtistRepository:
                 avant = conn.execute(
                     text("SELECT status FROM artist_relations WHERE id = :rid"), {"rid": rid}
                 ).scalar()
-                if "confirmed" in (avant, status):
+                if status == "confirmed" and avant != "confirmed":
                     self._invalider(conn, artist_id, *_PAR_LES_RELATIONS)
+                elif avant == "confirmed" and status != "confirmed":
+                    self._invalider(conn, artist_id, *_PAR_UN_RETRAIT)
                 conn.execute(
                     text(
                         "UPDATE artist_relations SET status = :status, "
@@ -879,7 +875,7 @@ class ArtistRepository:
                     text("SELECT status FROM artist_relations WHERE id = :rid"), {"rid": rid}
                 ).scalar()
                 if avant == "confirmed":
-                    self._invalider(conn, artist_id, *_PAR_LES_RELATIONS)
+                    self._invalider(conn, artist_id, *_PAR_UN_RETRAIT)
                 conn.execute(text("DELETE FROM artist_relations WHERE id = :rid"), {"rid": rid})
             return True
         except SQLAlchemyError as e:
@@ -986,7 +982,7 @@ class ArtistRepository:
                     )
                 ).scalars()
             )
-            if avant != set(uniques):
+            if set(uniques) - avant:  # un profil AJOUTÉ (un retrait ne rend rien trouvable)
                 self._invalider(conn, artist_id, "identite_spotify")
             conn.execute(
                 delete(artist_spotify_ids).where(
@@ -1412,7 +1408,7 @@ class ArtistRepository:
                 avant = conn.execute(
                     text("SELECT deezer_id FROM artists WHERE id = :a"), {"a": artist_id}
                 ).scalar()
-                if str(avant) != str(deezer_id):
+                if deezer_id is not None and str(avant) != str(deezer_id):
                     self._invalider(conn, artist_id, "identite_deezer")
                 conn.execute(stmt)
             logger.info(f"deezer_id artiste #{artist_id} mis à jour: {deezer_id}")
@@ -1442,7 +1438,7 @@ class ArtistRepository:
                 avant = conn.execute(
                     text("SELECT discogs_id FROM artists WHERE id = :a"), {"a": artist_id}
                 ).scalar()
-                if str(avant) != str(discogs_id):
+                if discogs_id is not None and str(avant) != str(discogs_id):
                     self._invalider(conn, artist_id, "identite_discogs")
                 conn.execute(stmt)
             logger.info(f"discogs_id artiste #{artist_id} mis à jour: {discogs_id}")
@@ -1463,7 +1459,7 @@ class ArtistRepository:
                 avant = conn.execute(
                     text("SELECT spotify_id FROM artists WHERE id = :a"), {"a": artist_id}
                 ).scalar()
-                if str(avant) != str(spotify_id):
+                if spotify_id is not None and str(avant) != str(spotify_id):
                     self._invalider(conn, artist_id, "identite_spotify")
                 conn.execute(stmt)
             logger.info(f"spotify_id artiste #{artist_id} mis à jour: {spotify_id}")

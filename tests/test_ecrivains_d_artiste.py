@@ -35,6 +35,10 @@ EXCEPTIONS: dict[str, str] = {
     "clear_artist_ytm_channel": "idem `set_artist_ytm_channel` (ré-inférée au run suivant)",
     "update_artist_kworb_totals": "totaux du récapitulatif Kworb : affichage seul",
     "update_artist_monthly_listeners": "auditeurs mensuels et leur historique : affichage seul",
+    "delete_artist": (
+        "un RETRAIT : ses fiches partent avec lui, et les liens des autres vers "
+        "lui restent (par nom) — rien ne devient trouvable"
+    ),
     "propose_artist_relations": (
         "lien PROPOSÉ ou `info` : seuls les liens confirmés jugent "
         "(`get_artist_relations`) — c'est leur confirmation qui invalide"
@@ -155,7 +159,8 @@ def test_retirer_un_lien_confirme_invalide(data_manager, notes):
 
     assert data_manager.forget_artist_relation(artiste.id, "Swingo", "alias")
 
-    assert notes == [{artiste.id: {"certifs", "identite_spotify", "identite_deezer"}}]
+    # Un retrait : les certifs seules (rien ne devient trouvable sur Spotify / Deezer).
+    assert notes == [{artiste.id: {"certifs"}}]
 
 
 def test_un_id_deezer_inchange_n_invalide_rien(data_manager, notes):
@@ -165,8 +170,9 @@ def test_un_id_deezer_inchange_n_invalide_rien(data_manager, notes):
 
     data_manager.update_artist_deezer_id(artiste.id, 42)
     data_manager.update_artist_deezer_id(artiste.id, 43)
+    data_manager.update_artist_deezer_id(artiste.id, None)  # effacé : un retrait
 
-    assert notes == [{}, {artiste.id: {"identite_deezer"}}]
+    assert notes == [{}, {artiste.id: {"identite_deezer"}}, {}]
 
 
 def test_un_profil_spotify_confirme_invalide_le_gate(data_manager, notes):
@@ -176,10 +182,12 @@ def test_un_profil_spotify_confirme_invalide_le_gate(data_manager, notes):
     data_manager.confirmer_profil_spotify(artiste.id, "7ctD")
     data_manager.record_artist_spotify_ids(artiste.id, ["A", "B"], "musicbrainz")
     data_manager.record_artist_spotify_ids(artiste.id, ["B", "A"], "musicbrainz")
+    data_manager.record_artist_spotify_ids(artiste.id, ["A"], "musicbrainz")  # retrait
 
     assert notes == [
         {artiste.id: {"identite_spotify"}},
         {artiste.id: {"identite_spotify"}},
+        {},
         {},
     ]
 

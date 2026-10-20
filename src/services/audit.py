@@ -150,6 +150,9 @@ FAMILLES = {
     "refus_vivant": "INVARIANT — valeur refusée à la main encore portée par la fiche ou une sœur",
 }
 
+#: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
+FAMILLES_DECISION = ("recherche_perimee",)
+
 #: Les familles dont la cible est zéro (une seule ligne = un défaut de code).
 INVARIANTS = ("colonne_verdict", "soeurs_divergentes", "orphelin", "schema", "refus_vivant")
 
@@ -941,10 +944,12 @@ def tableau(audit: Audit, reference: dict | None = None) -> str:
 
     lignes.append(f"\n── erreurs : suspicions et invariants ({sum(par[ERREUR].values())}) ──")
     for code, libelle in FAMILLES.items():
-        lignes.append(ligne(par[ERREUR][code], ref_par[ERREUR][code], code, libelle))
+        if code not in FAMILLES_DECISION:
+            lignes.append(ligne(par[ERREUR][code], ref_par[ERREUR][code], code, libelle))
     for nature in (DECISION, RUN, INFORMATION):
         lignes.append(f"\n── panneau : {NATURES[nature]} ({sum(par[nature].values())}) ──")
-        for code, libelle in revue.items():
+        # Une famille de l'audit peut être une décision (`recherche_perimee`).
+        for code, libelle in {**{f: FAMILLES[f] for f in FAMILLES_DECISION}, **revue}.items():
             n, avant = par[nature][code], ref_par[nature][code]
             if n or avant:  # ~45 détecteurs : seuls ceux qui ont des cas s'affichent
                 lignes.append(ligne(n, avant, code, libelle))

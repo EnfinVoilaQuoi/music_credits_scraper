@@ -323,3 +323,6 @@ class TestRecherchePerimee:
         (cas,) = [c for c in audit.cas if c.famille == "recherche_perimee"]
         assert cas.nature == au.DECISION and "Jango Jack" in cas.libelle
         assert "ytm_incoherent" not in _familles(audit)
+        # Affichée dans le bloc des décisions.
+        decisions = au.tableau(audit).split("panneau : décisions")[1].split("── panneau")[0]
+        assert "recherche_perimee" in decisions

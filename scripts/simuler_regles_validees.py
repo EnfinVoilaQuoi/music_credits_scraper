@@ -52,7 +52,17 @@ def main(argv=None) -> int:
         default=Path(DATA_DIR) / "diagnostics" / f"regles_validees_{date.today()}.md",
     )
     p.add_argument("--apply", action="store_true", help="appliquer sur la VRAIE base")
+    p.add_argument(
+        "--famille",
+        choices=("durees", "id_spotify_propose"),
+        default="durees",
+        help="la famille à passer : durées (validée) ou ID Spotify proposé (en essai)",
+    )
     a = p.parse_args(argv)
+    if a.famille != "durees":
+        if a.apply:
+            raise SystemExit("--apply : seule la famille VALIDÉE (durées) s'applique")
+        a.sortie = a.sortie.with_name(f"regles_{a.famille}_{date.today()}.md")
 
     if a.apply:
         return appliquer(a)
@@ -71,8 +81,9 @@ def main(argv=None) -> int:
         if ouverte != copie.resolve() or refus != copie.resolve():
             print(f"❌ la base ouverte n'est pas la copie : {ouverte} / refus {refus}")
             return 1
-        revue_auto.REGLES_BRANCHEES = True
-        lignes = simuler(dm, a.artiste)
+        revue_auto.REGLES_BRANCHEES = a.famille == "durees"
+        revue_auto.REGLES_ID_PROPOSE_BRANCHEES = a.famille == "id_spotify_propose"
+        lignes = simuler(dm, a.artiste, famille=a.famille)
         dm.engine.dispose()
     finally:
         shutil.rmtree(dossier, ignore_errors=True)
@@ -109,14 +120,23 @@ def appliquer(a) -> int:
     return 0
 
 
-def simuler(dm, noms=None) -> list[str]:
-    from src.services import revue_auto
+def simuler(dm, noms=None, famille: str = "durees") -> list[str]:
+    from src.services import revue, revue_auto
+    from src.services.politiques_revue import titre_d_original
 
     par_action = collections.defaultdict(list)
     echecs = []
+    hors_restriction = []  # cas de la famille que la restriction rend à l'humain
+    vus = 0
     for nom in noms or dm.get_artist_names():
         art = dm.get_artist_by_name(nom)
         art.tracks = dm.discographie_reunie(art)
+        if famille != "durees":
+            for c in revue.analyser(dm, art).actifs:
+                if c.detecteur == famille and c.nature == revue.DECISION:
+                    vus += 1
+                    if not titre_d_original(c.morceau):
+                        hors_restriction.append((nom, c))
         # Le journal est HISTORIQUE : seules comptent les entrées de ce passage.
         avant = {c["id"] for c in dm.corrections_revue(art.id, retablies=True)}
         bilan = revue_auto.corriger(dm, art)
@@ -126,8 +146,9 @@ def simuler(dm, noms=None) -> list[str]:
                 par_action[c["action"]].append((nom, c))
     regles = {k: v for k, v in par_action.items() if k.startswith(revue_auto.PREFIXE_REGLE)}
     formelles = {k: v for k, v in par_action.items() if k not in regles}
+    titre = "règles validées" if famille == "durees" else f"famille « {famille} » (NON validée)"
     lignes = [
-        f"# Passage à blanc des règles validées — {date.today()}",
+        f"# Passage à blanc — {titre} — {date.today()}",
         "",
         "Appliquées sur une COPIE de la base ; la vraie n'est que lue.",
         "",
@@ -138,11 +159,20 @@ def simuler(dm, noms=None) -> list[str]:
     lignes += [
         f"| `{k}` (formelle, déjà active) | {len(v)} |" for k, v in sorted(formelles.items())
     ]
-    for titre, groupe in (("Règles validées", regles), ("Formelles (déjà actives)", formelles)):
+    nom_regles = "Règles validées" if famille == "durees" else "Règles (NON validées)"
+    for titre, groupe in ((nom_regles, regles), ("Formelles (déjà actives)", formelles)):
         for action, liste in sorted(groupe.items()):
             lignes += ["", f"## {titre} — `{action}` ({len(liste)})", ""]
             for nom, c in sorted(liste, key=lambda x: (x[1]["detecteur"], x[0])):
                 lignes.append(f"- [{nom}] `{c['detecteur']}` — {c['compte_rendu']}")
+    if famille != "durees":
+        lignes += [
+            "",
+            f"## Restriction aux originaux : {len(hors_restriction)} cas sur {vus} rendus à "
+            "l'humain",
+            "",
+        ]
+        lignes += [f"- [{n}] {c.morceau} — {c.motif}" for n, c in hors_restriction]
     if echecs:
         lignes += ["", f"## Échecs ({len(echecs)})", ""] + [f"- {e}" for e in echecs]
     return lignes

@@ -68,6 +68,10 @@ class BilanCorrections:
 #: corrections », `scripts/simuler_regles_validees.py`).
 REGLES_BRANCHEES = True
 
+#: Famille « ID Spotify proposé » (`politiques_revue.REGLES_ID_PROPOSE`) :
+#: BAISSÉ tant que l'utilisateur n'a pas validé son passage à blanc.
+REGLES_ID_PROPOSE_BRANCHEES = False
+
 #: Préfixe de la note d'un « ✓ Normal » posé par une règle (et de l'origine
 #: d'un refus) — un humain n'en pose jamais.
 PREFIXE_REGLE = "regle:"
@@ -77,15 +81,23 @@ def cas_surs(revue: Revue) -> list[Cas]:
     return [c for c in revue.actifs if c.detecteur in CODES_FORMELS]
 
 
-def cas_par_regle(revue: Revue, tracks: dict, ctx) -> list[tuple[Cas, object]]:
-    """`[(cas, arbitrage)]` que tranche une règle VALIDÉE (décisions seules)."""
-    from src.services.politiques_revue import arbitrage_valide
+def cas_par_regle(
+    revue: Revue, tracks: dict, ctx, *, durees: bool = True, id_propose: bool = False
+) -> list[tuple[Cas, object]]:
+    """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
+    durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
+    from src.services.politiques_revue import arbitrage_id_propose, arbitrage_valide
 
     sortie = []
     for c in revue.actifs:
         if c.nature != DECISION or c.detecteur in CODES_FORMELS:
             continue
-        arbitrage = arbitrage_valide(c, tracks.get(c.track_id), ctx)
+        track = tracks.get(c.track_id)
+        arbitrage = None
+        if durees:
+            arbitrage = arbitrage_valide(c, track, ctx)
+        if arbitrage is None and id_propose:
+            arbitrage = arbitrage_id_propose(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -195,10 +207,42 @@ def _marquer_normal(dm, artist_id: int, cas: Cas) -> tuple[str, dict]:
     return (f"« {cas.morceau} » marqué normal par règle — {cas.motif}", {"type": "verdict"})
 
 
-#: Correcteurs des RÈGLES validées, par action de la politique.
+def _poser_id(dm, track, cas: Cas) -> tuple[str, dict]:
+    from src.utils.spotify_identity import valider_identite
+
+    sid = cas.preuves["spotify_id_propose"]
+    if track.spotify_id:
+        raise LookupError("la fiche porte déjà un ID Spotify")
+    # Revalidé AU MOMENT D'ÉCRIRE (gate strict) : tout site qui pose un ID passe
+    # par le gate (`TestToutProducteurPasseParLeGate`), la politique n'en tient pas lieu.
+    if not valider_identite(track, sid, lire_album=lambda _sid: None):
+        raise LookupError(f"l'ID {sid} ne passe plus le contrôle d'identité")
+    if not dm.update_track_spotify_id(track.id, sid, source=cas.preuves.get("source") or "regle"):
+        raise LookupError(f"l'ID {sid} n'a pas pu être posé")
+    track.spotify_id = sid
+    return (
+        f"ID Spotify {sid} posé sur « {track.title} »",
+        {"type": "pose_spotify", "spotify_id": sid},
+    )
+
+
+def _refuser_id(dm, track, cas: Cas) -> tuple[str, dict]:
+    from src.utils.corrections_fiches import memoriser_id_refuse
+
+    sid = cas.preuves["spotify_id_propose"]
+    memoriser_id_refuse(track, sid, origine=f"{PREFIXE_REGLE}{cas.detecteur}")
+    return (
+        f"ID Spotify {sid} refusé pour « {track.title} »",
+        {"type": "refus_spotify", "spotify_id": sid},
+    )
+
+
+#: Correcteurs des RÈGLES, par action de la politique.
 _CORRECTEURS_DE_REGLE = {
     "retirer_songbpm": _corriger_songbpm,
     "retirer_spotify": _corriger_spotify,
+    "poser_id": _poser_id,
+    "refuser_id": _refuser_id,
 }
 
 _CORRECTEURS = {
@@ -223,11 +267,17 @@ def corriger(dm, artiste) -> BilanCorrections:
         ctx = charger_contexte(dm, artiste)
         revue = analyser(dm, artiste, ctx)
         a_faire = [(c, None) for c in cas_surs(revue)]
-        if REGLES_BRANCHEES:
+        if REGLES_BRANCHEES or REGLES_ID_PROPOSE_BRANCHEES:
             rendus = _rendus_a_l_humain(dm, artiste.id)
             a_faire += [
                 (c, a)
-                for c, a in cas_par_regle(revue, tracks, ctx)
+                for c, a in cas_par_regle(
+                    revue,
+                    tracks,
+                    ctx,
+                    durees=REGLES_BRANCHEES,
+                    id_propose=REGLES_ID_PROPOSE_BRANCHEES,
+                )
                 if (c.detecteur, c.cle) not in rendus
             ]
         nouveaux = [(c, a) for c, a in a_faire if (c.detecteur, c.cle) not in deja]
@@ -246,7 +296,12 @@ def corriger(dm, artiste) -> BilanCorrections:
 
             else:
                 action = f"{PREFIXE_REGLE}{arbitrage.action}"
-                corriger_cas = _CORRECTEURS_DE_REGLE[arbitrage.action]
+                correcteur = _CORRECTEURS_DE_REGLE[arbitrage.action]
+
+                def corriger_cas(_dm, _track, c, f=correcteur, arb=arbitrage):
+                    compte_rendu, annulation = f(_dm, _track, c)
+                    return f"{compte_rendu} [{arb.raison}]", annulation
+
             if track is None:
                 bilan.echecs.append(f"{cas.morceau} : fiche introuvable")
                 continue
@@ -325,6 +380,14 @@ def retablir(dm, artiste, correction: dict) -> str:
         dm.update_track_spotify_id(track.id, sid, source="retabli")
         dm.restaurer_observations(annulation.get("observations") or [])
         compte_rendu = f"ID Spotify {sid} rétabli sur « {track.title} »"
+    elif annulation.get("type") == "pose_spotify":
+        from src.utils.spotify_audit import rejeter_spotify_id
+
+        rejeter_spotify_id(dm, track, annulation["spotify_id"])
+        compte_rendu = f"ID Spotify {annulation['spotify_id']} retiré de « {track.title} »"
+    elif annulation.get("type") == "refus_spotify":
+        oublier_id_refuse(track, annulation["spotify_id"])
+        compte_rendu = f"refus de l'ID {annulation['spotify_id']} levé pour « {track.title} »"
     elif annulation.get("type") == "verdict":
         # Défaire le « ✓ Normal » d'une règle, c'est RENDRE le cas à l'humain :
         # le verdict part, rien ne le remplace, et la règle ne le reprend plus

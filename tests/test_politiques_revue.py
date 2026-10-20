@@ -289,3 +289,21 @@ def test_les_regles_ne_touchent_ni_versions_ni_generiques():
 )
 def test_titre_d_original(titre, original):
     assert pol.titre_d_original(titre) is original
+
+
+def test_id_propose_titre_servi_et_clip():
+    """« Heartless - The Voice Performance » passait le gate ; une durée de CLIP
+    ne confirme rien (2026-10-20)."""
+    t = _t("Heartless", durations_observees={"deezer": 208, "apple_music": 208})
+    cas = _cas("id_spotify_propose", t, {"spotify_id_propose": "SID"})
+
+    def juger(nom, durees=None):
+        if durees is not None:
+            t.durations_observees = durees
+        return pol.arbitrage_id_propose(
+            cas, t, None, lire=lambda _s: {"name": nom, "duration": 208}, gate=lambda *_: True
+        )
+
+    assert juger("Heartless").action == "poser_id"
+    assert juger("Heartless - The Voice Performance") is None
+    assert juger("Heartless", {"youtube_video": 208}) is None

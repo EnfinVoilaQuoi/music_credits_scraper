@@ -220,3 +220,83 @@ def test_id_spotify_d_un_autre_enregistrement_retire_puis_retabli(data_manager, 
     revue_auto.retablir(data_manager, artiste, correction)
     fiche = _charger(data_manager, artiste)["I’m Leanin’"]
     assert fiche.spotify_id == "SPX" and "SPX" not in ids_refuses(fiche)
+
+
+# ── Famille « ID Spotify proposé » (NON validée : interrupteur baissé) ───────
+
+
+def _fiche_proposee(dm, artiste, titre, gid, sid):
+    from src.utils.spotify_identity import CHAMP_ID_PROPOSE
+
+    t = Track(title=titre, artist=artiste, genius_id=gid)
+    t.observations += [
+        Observation("duration", 203, "deezer"),
+        Observation("duration", 203, "apple_music"),
+        Observation(CHAMP_ID_PROPOSE, sid, "songbpm"),
+    ]
+    dm.save_track(t)
+
+
+def _id_propose(monkeypatch, verdict_du_gate: bool):
+    from src.services import politiques_revue
+
+    vrai = politiques_revue.arbitrage_id_propose
+    monkeypatch.setattr(
+        politiques_revue,
+        "arbitrage_id_propose",
+        lambda c, t, x: vrai(
+            c,
+            t,
+            x,
+            lire=lambda _sid: {"name": "Gold Digger", "duration": 204},
+            gate=lambda *_: verdict_du_gate,
+        ),
+    )
+    monkeypatch.setattr(revue_auto, "REGLES_ID_PROPOSE_BRANCHEES", True)
+    # Le correcteur revalide au moment d'écrire : même verdict que la politique.
+    monkeypatch.setattr(
+        "src.utils.spotify_identity.valider_identite", lambda *a, **k: verdict_du_gate
+    )
+
+
+def test_id_propose_interrupteur_baisse_par_defaut(data_manager, artiste):
+    _fiche_proposee(data_manager, artiste, "Gold Digger", 20, "SPG")
+    _charger(data_manager, artiste)
+    assert revue_auto.REGLES_ID_PROPOSE_BRANCHEES is False
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
+def test_id_propose_pose_puis_retabli(data_manager, artiste, monkeypatch):
+    _fiche_proposee(data_manager, artiste, "Gold Digger", 20, "SPG")
+    _fiche_proposee(data_manager, artiste, "Gold Digger (Remix)", 21, "SPR")
+    _charger(data_manager, artiste)
+    _id_propose(monkeypatch, True)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1 and "SPG" in bilan.appliquees[0]
+    fiches = _charger(data_manager, artiste)
+    assert fiches["Gold Digger"].spotify_id == "SPG"
+    assert fiches["Gold Digger (Remix)"].spotify_id is None  # une version : l'humain
+
+    (correction,) = [
+        c for c in data_manager.corrections_revue(artiste.id) if c["action"] == "regle:poser_id"
+    ]
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert _charger(data_manager, artiste)["Gold Digger"].spotify_id is None
+
+
+def test_id_propose_refuse_par_le_gate_puis_retabli(data_manager, artiste, monkeypatch):
+    from src.utils.corrections_fiches import ids_refuses, origine_du_refus
+
+    _fiche_proposee(data_manager, artiste, "Gold Digger", 20, "SPG")
+    _charger(data_manager, artiste)
+    _id_propose(monkeypatch, False)
+
+    revue_auto.corriger(data_manager, artiste)
+    fiche = _charger(data_manager, artiste)["Gold Digger"]
+    assert fiche.spotify_id is None and "SPG" in ids_refuses(fiche)
+    assert origine_du_refus(fiche, "id_spotify", "SPG") == "regle:id_spotify_propose"
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert "SPG" not in ids_refuses(_charger(data_manager, artiste)["Gold Digger"])

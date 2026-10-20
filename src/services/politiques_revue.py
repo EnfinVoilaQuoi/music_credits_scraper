@@ -208,19 +208,22 @@ def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
         identite = lire(sid)
         if identite is None:
             return None
+        durees = _durees(track)
+        temoins = ", ".join(f"{s} {d} s" for s, d in sorted(durees.items()) if d) or "aucune"
+        servi = f"Spotify sert « {identite.get('name')} » ({identite.get('duration')} s)"
         if not gate(track, sid):
             return Arbitrage(
                 "le gate d'identité refuse l'ID : refuser",
                 "refuser_id",
-                f"Spotify sert « {identite.get('name')} » ({identite.get('duration')} s)",
+                f"{servi} ; durées de la fiche : {temoins}",
             )
-        durees = _durees(track)
         duree_id = identite.get("duration") or durees.get("songbpm")
         accord = sorted(
             s
             for s, d in durees.items()
             if s not in FRAGILES
-            and s not in ("legacy", "heritage", "manual")
+            # Un CLIP ne donne jamais la durée du morceau (règle du projet).
+            and s not in ("legacy", "heritage", "manual", "youtube_video")
             and d
             and duree_id
             and abs(d - duree_id) <= ECART_FICHIER_S
@@ -230,7 +233,8 @@ def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
         return Arbitrage(
             "poser l'ID",
             "poser_id",
-            f"gate strict passé ; {duree_id} s = {', '.join(accord)}",
+            f"{servi} ; gate strict passé ; {duree_id} s = {', '.join(accord)} "
+            f"(durées de la fiche : {temoins})",
         )
 
     return juger
@@ -625,6 +629,45 @@ def arbitrage_valide(cas, track, ctx) -> Arbitrage | None:
             continue  # un retrait ne se décide qu'au seuil de 3
         if (cas.detecteur, arbitrage.action) in REGLES_VALIDEES:
             return arbitrage
+    return None
+
+
+# ── Famille « ID Spotify proposé » — PAS ENCORE validée ───────────────────
+
+#: Passée au passage à blanc restreint (2026-10-20) ; l'utilisateur la
+#: validera ou non. Tant que non, `revue_auto.REGLES_ID_PROPOSE_BRANCHEES`
+#: reste baissé.
+REGLES_ID_PROPOSE = frozenset(
+    {("id_spotify_propose", "poser_id"), ("id_spotify_propose", "refuser_id")}
+)
+
+
+def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | None:
+    """L'arbitrage de la famille « ID Spotify proposé », restreint aux
+    ORIGINAUX sans ambiguïté (`titre_d_original`). `lire` (page embed) et
+    `gate` (gate d'identité STRICT) sont injectables ; par défaut, la page est
+    lue (réseau, gardée au brut) et le gate est celui des runs."""
+    if cas.detecteur != "id_spotify_propose" or track is None:
+        return None
+    if not titre_d_original(track.title):
+        return None
+    if lire is None:
+        from src.utils.spotify_identity import lire_identite_http as lire
+    if gate is None:
+        from src.utils.spotify_identity import valider_identite
+
+        def gate(t, sid):
+            return bool(valider_identite(t, sid, lire, lire_album=lambda _sid: None))
+
+    arbitrage = politique_id_propose(lire, gate)(cas, track, ctx)
+    if arbitrage is not None and arbitrage.action == "poser_id":
+        # Le titre SERVI doit lui aussi être un original sans ambiguïté :
+        # « Heartless - The Voice Performance » passait le gate (2026-10-20).
+        servi = (lire(cas.preuves.get("spotify_id_propose")) or {}).get("name")
+        if not titre_d_original(servi):
+            return None
+    if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_ID_PROPOSE:
+        return arbitrage
     return None
 
 

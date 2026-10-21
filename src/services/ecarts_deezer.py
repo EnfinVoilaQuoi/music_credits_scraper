@@ -676,6 +676,12 @@ def _lien_a_revoir(piste: PisteDeezer, track: Track) -> str | None:
     )
     if vote and vote.nature in (SOUTENUE, MAJORITAIRE):
         return None
+    # Des sources FRAGILES seules (Discogs, SongBPM, legacy) peuvent contredire,
+    # jamais prouver : sans aucun catalogue solide contre, le lien tient
+    # (décision utilisateur 2026-10-21, Kanye « FOREVER » : Deezer 136 s,
+    # Discogs 87 s — Spotify et YouTube à 2:15-2:16).
+    if vote and not vote.contre:
+        return None
     # Le motif nomme d'abord une source solide, s'il y en a une.
     source, duree = min(contredisent, key=lambda sd: sd[0] in FRAGILES)
     return (

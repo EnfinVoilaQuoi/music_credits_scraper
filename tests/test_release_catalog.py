@@ -421,11 +421,11 @@ class TestLienARevoir:
         return ed.classer([album], [track], [], 1, liens_connus={(1, 7)})[0]
 
     def test_divergent_avec_source_independante_est_a_revoir(self):
-        ecarts = self._cas(200, "songbpm")
+        ecarts = self._cas(200, "youtube")
         assert [(e.nature, e.matched_by, e.coche) for e in ecarts] == [
             ("link_review", "known_link", False)
         ]
-        assert "Deezer 240 s / fiche 200 s (songbpm)" in ecarts[0].motifs[0]
+        assert "Deezer 240 s / fiche 200 s (youtube)" in ecarts[0].motifs[0]
 
     def test_concordant_reste_muet(self):
         assert self._cas(236, "songbpm") == []  # 4 s : écart d'encodage
@@ -435,32 +435,36 @@ class TestLienARevoir:
         assert self._cas(200, None) == []
         assert self._cas(None, "songbpm") == []
 
-    def test_legacy_compte_comme_independante(self):
-        assert [e.nature for e in self._cas(200, "legacy")] == ["link_review"]
+    def test_une_source_fragile_seule_ne_leve_rien(self):
+        """Décision utilisateur 2026-10-21 (Kanye « FOREVER », Discogs 87 s
+        contre Deezer 136 s) : legacy, SongBPM, Discogs peuvent contredire,
+        jamais prouver — seuls contre Deezer, le lien tient."""
+        assert self._cas(200, "legacy") == []
+        assert self._cas(200, "songbpm") == []
 
     def test_une_duree_independante_perdante_a_l_arbitrage_contredit_quand_meme(self):
-        # deezer a gagné la colonne (240) ; songbpm (200) survit en observation.
-        ecarts = self._cas(240, "deezer", observees={"deezer": 240, "songbpm": 200})
+        # deezer a gagné la colonne (240) ; youtube (200) survit en observation.
+        ecarts = self._cas(240, "deezer", observees={"deezer": 240, "youtube": 200})
         assert [e.nature for e in ecarts] == ["link_review"]
-        assert "(songbpm)" in ecarts[0].motifs[0]
-        assert self._cas(240, "deezer", observees={"deezer": 240, "songbpm": 238}) == []
+        assert "(youtube)" in ecarts[0].motifs[0]
+        assert self._cas(240, "deezer", observees={"deezer": 240, "youtube": 238}) == []
 
 
 def test_delier_retire_le_lien_et_purge_deezer_si_l_id_vient_de_la_piste(data_manager):
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="Album")
-    data_manager.record_duration_observation(track.id, 200, "songbpm")
+    data_manager.record_duration_observation(track.id, 200, "youtube")
     best_of = _album(83, "Best-of", [_piste(77, track.title, duration=240)], artist)
     # 1ᵉʳ run : la fiche n'a pas encore de durée arbitrée en mémoire → lien au titre.
     track.duration = None
     ecarts, _ = ed.classer([best_of], [track], [], artist.deezer_id)
     ed.rattacher_liens_confirmes(data_manager, artist, ed.BilanEcarts(ecarts=ecarts))
     assert _colonnes(data_manager, track.id)["duration"] == 240  # deezer en tête
-    # 2ᵉ run, fiche relue : deezer a gagné la colonne, mais la durée songbpm
+    # 2ᵉ run, fiche relue : deezer a gagné la colonne, mais la durée youtube
     # (200 s) survit dans `durations_observees` et contredit le lien.
     relue = next(t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id)
     assert (relue.duration, relue.duration_source) == (240, "deezer")
-    assert relue.durations_observees == {"deezer": 240, "songbpm": 200}
+    assert relue.durations_observees == {"deezer": 240, "youtube": 200}
     ecarts, _ = ed.classer(
         [best_of],
         [relue],
@@ -487,7 +491,7 @@ def test_delier_retire_la_duree_du_lien_quand_la_fiche_garde_son_id(data_manager
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="Album")
     data_manager.fill_track_identities(track.id, deezer_id=10)
-    data_manager.record_duration_observation(track.id, 200, "songbpm")
+    data_manager.record_duration_observation(track.id, 200, "youtube")
     best_of = _album(83, "Best-of", [_piste(77, track.title, duration=240)], artist)
     track.duration, track.deezer_id = None, 10
     ecarts, _ = ed.classer([best_of], [track], [], artist.deezer_id)
@@ -528,7 +532,7 @@ def test_delier_laisse_l_album_repere(data_manager):
     ecarts, _ = ed.classer([album], [track], [], artist.deezer_id)
     ed.rattacher_liens_confirmes(data_manager, artist, ed.BilanEcarts(ecarts=ecarts))
     relue = next(t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id)
-    relue.duration, relue.duration_source = 200, "songbpm"
+    relue.duration, relue.duration_source = 200, "youtube"
     ecarts, _ = ed.classer(
         [album],
         [relue],

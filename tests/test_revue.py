@@ -634,10 +634,20 @@ class TestSignalementsDesRuns:
         s = self._deezer(
             "deezer_link_review", 1, {"ecart": {"piste": {"id": 81385490, "duration": 186}}}
         )
-        contredit = [_t("Pardonne moi", 1, durations_observees={"songbpm": 268})]
+        contredit = [_t("Pardonne moi", 1, durations_observees={"youtube": 268})]
         assert len(revue._cas_des_signalements([s], {1}, contredit)) == 1
         apres = [_t("Pardonne moi", 1, durations_observees={"youtube": 187})]
         assert revue._cas_des_signalements([s], {1}, apres) == []
+
+    def test_lien_a_revoir_contredit_par_des_sources_fragiles_seules(self):
+        """Kanye « FOREVER » (décision utilisateur 2026-10-21) : Deezer 136 s,
+        Discogs 87 s seul contre — une source fragile ne prouve rien, le lien
+        tient et le cas ne se lève plus."""
+        s = self._deezer(
+            "deezer_link_review", 1, {"ecart": {"piste": {"id": 2941248401, "duration": 136}}}
+        )
+        fragiles = [_t("FOREVER", 1, durations_observees={"discogs": 87, "songbpm": 90})]
+        assert revue._cas_des_signalements([s], {1}, fragiles) == []
 
     def test_lien_a_revoir_delie_depuis(self):
         """A2H « Blues » : la piste du single a été remplacée par celle de

@@ -39,6 +39,10 @@ data/diagnostics/*
 exports/
 lib/*
 *.db
+# Fichiers compagnons de SQLite (base en WAL depuis 9c27c01).
+*.db-wal
+*.db-shm
+*.db-journal
 *.sqlite
 *.log
 .cache

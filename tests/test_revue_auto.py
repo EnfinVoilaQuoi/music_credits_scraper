@@ -347,3 +347,35 @@ def test_deezer_fiche_absente_creee_puis_retablie(data_manager, artiste, monkeyp
     assert "Inédit" not in _charger(data_manager, artiste)
     # Défaite : la règle ne la recrée pas.
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
+# ── Famille « liens Deezer » (délier ; NON validée : interrupteur baissé) ────
+
+
+def test_liens_deezer_interrupteur_baisse_par_defaut():
+    assert revue_auto.REGLES_LIENS_DEEZER_BRANCHEES is False
+
+
+def test_lien_deezer_dementi_delie_puis_retabli(data_manager, artiste, monkeypatch):
+    from src.utils.corrections_fiches import deezer_refuses, origine_du_refus
+
+    monkeypatch.setattr(revue_auto, "REGLES_LIENS_DEEZER_BRANCHEES", True)
+    durees = {"deezer": 262, "apple_music": 198, "youtube": 198, "spotify_web": 197}
+    _fiche_durees(data_manager, artiste, "Rap théorie", 30, durees, deezer_id=4242)
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert any("4242" in a for a in bilan.appliquees), bilan
+    fiche = _charger(data_manager, artiste)["Rap théorie"]
+    assert fiche.deezer_id is None and 4242 in deezer_refuses(fiche)
+    assert origine_du_refus(fiche, "id_deezer", 4242) == "regle:duree_deezer"
+
+    (correction,) = [
+        c
+        for c in data_manager.corrections_revue(artiste.id)
+        if c["action"] == "regle:delier_deezer"
+    ]
+    revue_auto.retablir(data_manager, artiste, correction)
+    fiche = _charger(data_manager, artiste)["Rap théorie"]
+    assert fiche.deezer_id == 4242 and 4242 not in deezer_refuses(fiche)
+    assert fiche.durations_observees.get("deezer") == 262

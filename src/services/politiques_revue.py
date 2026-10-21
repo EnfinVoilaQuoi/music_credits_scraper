@@ -732,6 +732,67 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     return None
 
 
+# ── Famille « liens Deezer » (délier) — PAS ENCORE validée ─────────────────
+
+#: Délier un lien Deezer que la durée dément, au seuil des RETRAITS validés
+#: (3 catalogues indépendants d'accord, plus de 10 s) ; garder (✓ Normal) un
+#: lien à revoir que plusieurs catalogues confirment. Originaux sans
+#: ambiguïté seulement. Interrupteur : `revue_auto.REGLES_LIENS_DEEZER_BRANCHEES`.
+REGLES_LIENS_DEEZER = frozenset(
+    {
+        ("duree_deezer", "delier_deezer"),
+        ("deezer_link_review", "delier_deezer"),
+        ("deezer_link_review", "normal"),
+    }
+)
+
+
+def arbitrage_liens_deezer(cas, track, ctx) -> Arbitrage | None:
+    """Le démenti ne vient que des OBSERVATIONS d'autres catalogues que Deezer,
+    jamais de la colonne de la fiche (souvent la durée Deezer elle-même : le
+    piège de « Comfy », où le gate comparait à la colonne)."""
+    if cas.detecteur not in ("duree_deezer", "deezer_link_review") or track is None:
+        return None
+    if not titre_d_original(track.title):
+        return None
+    if cas.detecteur == "duree_deezer":
+        arbitrage = politique_durees(3)(cas, track, ctx)
+        if arbitrage is None or arbitrage.action != "delier_deezer":
+            return None
+        return Arbitrage("délier Deezer (autre version)", "delier_deezer", arbitrage.raison)
+    piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
+    if not titre_d_original(piste.get("title")):
+        return None
+    duree = piste.get("duration")
+    if not duree:
+        return None
+    durees = {s: d for s, d in _durees(track).items() if s != "deezer"}
+    editions = tuple(track.durees_editions or ())
+    ref = _dementie({**durees, "deezer": duree}, "deezer", editions, 3)
+    if ref is not None and abs(int(duree) - ref) > ECART_VERSION_S:
+        vote = voter({**durees, "deezer": duree}, duree, editions=editions)
+        return Arbitrage(
+            "délier (autre version)",
+            "delier_deezer",
+            f"Deezer {duree} s contre {ref} s ({vote.dementie_par()})",
+        )
+    arbitrage = politique_liens_deezer(cas, track, ctx)
+    if arbitrage is not None and arbitrage.action == "normal":
+        return arbitrage
+    # Démenti par des sources FRAGILES seules (Discogs, SongBPM — souvent la
+    # colonne : le piège de « Comfy ») et par aucun catalogue solide : le lien
+    # tient (Kanye « I CAN'T WAIT » : Deezer 137 s, colonne SongBPM 127 s).
+    vote = voter({**durees, "deezer": duree}, duree, editions=editions)
+    if vote is not None and not vote.contre and vote.fragiles_contre:
+        fragiles = ", ".join(f"{s} {d} s" for s, d in sorted(vote.fragiles_contre.items()))
+        return Arbitrage(
+            "garder le lien : seules des sources fragiles le contredisent",
+            "normal",
+            f"Deezer {duree} s ; contre : {fragiles} ; aucun catalogue solide contre",
+        )
+    return None
+
+
 POLITIQUES: tuple[Politique, ...] = (
     Politique(
         "durees_vote_3",

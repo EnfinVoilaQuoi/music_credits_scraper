@@ -319,3 +319,15 @@ def test_id_propose_un_refus_de_duree_dementi_par_les_catalogues_va_a_l_humain()
     t.durations_observees = {"songbpm": 94}  # rien ne confirme : le refus tient
     arb = pol.arbitrage_id_propose(cas, t, None, lire=lire, gate=lambda *_: False)
     assert arb.action == "refuser_id"
+
+
+def test_lien_deezer_dementi_par_des_sources_fragiles_seules_est_garde():
+    """Kanye « I CAN'T WAIT » : Deezer 137 s, seule la colonne SongBPM (127 s)
+    le contredit — le piège de « Comfy » : on garde le lien."""
+    t = _t("I CAN’T WAIT", durations_observees={"songbpm": 127})
+    ecart = {"piste": {"title": "I CAN'T WAIT", "duration": 137}}
+    cas = _cas("deezer_link_review", t, {"ecart": ecart, "piste_deezer": 5})
+    assert pol.arbitrage_liens_deezer(cas, t, None).action == "normal"
+    # Trois catalogues solides d'accord contre, plus de 10 s : on délie.
+    t.durations_observees = {"spotify_web": 110, "youtube": 110, "apple_music": 111}
+    assert pol.arbitrage_liens_deezer(cas, t, None).action == "delier_deezer"

@@ -57,7 +57,7 @@ def main(argv=None) -> int:
     p.add_argument("--apply", action="store_true", help="appliquer sur la VRAIE base")
     p.add_argument(
         "--famille",
-        choices=("durees", "id_spotify_propose", "deezer"),
+        choices=("durees", "id_spotify_propose", "deezer", "liens_deezer"),
         default="durees",
         help="la famille à passer : durées (validée) ou ID Spotify proposé (en essai)",
     )
@@ -85,6 +85,7 @@ def main(argv=None) -> int:
         revue_auto.REGLES_BRANCHEES = a.famille == "durees"
         revue_auto.REGLES_ID_PROPOSE_BRANCHEES = a.famille == "id_spotify_propose"
         revue_auto.REGLES_DEEZER_BRANCHEES = a.famille == "deezer"
+        revue_auto.REGLES_LIENS_DEEZER_BRANCHEES = a.famille == "liens_deezer"
         lignes = simuler(dm, a.artiste, famille=a.famille)
         dm.engine.dispose()
     finally:
@@ -113,6 +114,7 @@ def appliquer(a) -> int:
     revue_auto.REGLES_BRANCHEES = a.famille == "durees"
     revue_auto.REGLES_ID_PROPOSE_BRANCHEES = a.famille == "id_spotify_propose"
     revue_auto.REGLES_DEEZER_BRANCHEES = a.famille == "deezer"
+    revue_auto.REGLES_LIENS_DEEZER_BRANCHEES = a.famille == "liens_deezer"
     dm = DataManager()  # (une famille à la fois, même en --apply)
     lignes = simuler(dm, a.artiste, famille=a.famille)
     lignes[0] = lignes[0].replace("Passage à blanc", "APPLICATION")
@@ -129,7 +131,10 @@ def simuler(dm, noms=None, famille: str = "durees") -> list[str]:
     from src.services import revue, revue_auto
     from src.services.politiques_revue import REGLES_DEEZER, titre_d_original
 
-    codes = {d for d, _ in REGLES_DEEZER} if famille == "deezer" else {famille}
+    codes = {
+        "deezer": {d for d, _ in REGLES_DEEZER},
+        "liens_deezer": {"duree_deezer", "deezer_link_review"},
+    }.get(famille, {famille})
 
     par_action = collections.defaultdict(list)
     echecs = []

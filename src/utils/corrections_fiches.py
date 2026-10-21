@@ -481,10 +481,15 @@ def oublier_id_refuse(track, spotify_id: str) -> bool:
     return _oublier(track, "id_spotify", spotify_id)
 
 
-def memoriser_deezer_refuse(track, deezer_id: int) -> None:
+def oublier_deezer_refuse(track, deezer_id: int) -> bool:
+    """Pendant : un lien Deezer délié par une règle, qu'on RÉTABLIT."""
+    return _oublier(track, "id_deezer", int(deezer_id))
+
+
+def memoriser_deezer_refuse(track, deezer_id: int, origine: str | None = None) -> None:
     """Consigne une piste Deezer DÉLIÉE : relue par les écarts Deezer et le
     provider par morceau (`deezer_refuses`)."""
-    _memoriser(track, "id_deezer", int(deezer_id))
+    _memoriser(track, "id_deezer", int(deezer_id), origine=origine)
 
 
 def memoriser_credit_refuse(track, nom: str, role: str) -> None:

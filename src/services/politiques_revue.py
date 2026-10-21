@@ -687,12 +687,12 @@ def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | N
     return None
 
 
-# ── Famille « écarts Deezer » — PAS ENCORE validée ─────────────────────────
+# ── Famille « écarts Deezer » — VALIDÉE le 2026-10-21 ──────────────────────
 
 #: Restreinte aux originaux sans ambiguïté (piste ET fiche) : toute version
 #: Deezer (live, remix, radio edit…) reste à l'humain, donc aussi les éditions
 #: d'un socle ; un lien à revoir (délier) aussi. Interrupteur :
-#: `revue_auto.REGLES_DEEZER_BRANCHEES`, baissé tant que non validée.
+#: `revue_auto.REGLES_DEEZER_BRANCHEES` (validée : 45 corrections au passage à blanc).
 REGLES_DEEZER = frozenset(
     {
         ("deezer_absent", "deezer_appliquer"),

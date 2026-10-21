@@ -315,12 +315,12 @@ def _ecarts_deezer(dm, artiste, *pistes):
     ed.enregistrer_signalements(dm, artiste, bilan)
 
 
-def test_deezer_interrupteur_baisse_par_defaut(data_manager, artiste):
+def test_deezer_interrupteur_baisse_rien(data_manager, artiste, monkeypatch):
     from src.services import ecarts_deezer as ed
 
     _ecarts_deezer(data_manager, artiste, ed.PisteDeezer(id=9, title="Inédit", duration=200))
     _charger(data_manager, artiste)
-    assert revue_auto.REGLES_DEEZER_BRANCHEES is False
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", False)
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
 
 

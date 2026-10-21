@@ -34,7 +34,7 @@ from src.config import DATA_DIR
 BASE = Path(DATA_DIR) / "music_credits.db"
 
 #: Familles validées par l'utilisateur (leur interrupteur est levé dans `revue_auto`).
-FAMILLES_VALIDEES = ("durees", "id_spotify_propose")
+FAMILLES_VALIDEES = ("durees", "id_spotify_propose", "deezer")
 
 
 def copier_la_base(copie: Path) -> None:
@@ -113,7 +113,7 @@ def appliquer(a) -> int:
     revue_auto.REGLES_BRANCHEES = a.famille == "durees"
     revue_auto.REGLES_ID_PROPOSE_BRANCHEES = a.famille == "id_spotify_propose"
     revue_auto.REGLES_DEEZER_BRANCHEES = a.famille == "deezer"
-    dm = DataManager()
+    dm = DataManager()  # (une famille à la fois, même en --apply)
     lignes = simuler(dm, a.artiste, famille=a.famille)
     lignes[0] = lignes[0].replace("Passage à blanc", "APPLICATION")
     lignes[2] = f"Appliquées sur la VRAIE base (sauvegarde : {backup.name})."

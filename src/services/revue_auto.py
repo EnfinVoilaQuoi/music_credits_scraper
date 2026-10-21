@@ -74,9 +74,9 @@ REGLES_BRANCHEES = True
 #: à blanc restreint (« Je valide les 46 »).
 REGLES_ID_PROPOSE_BRANCHEES = True
 
-#: Famille « écarts Deezer » (`politiques_revue.REGLES_DEEZER`) : BAISSÉ tant
-#: que l'utilisateur n'a pas validé son passage à blanc.
-REGLES_DEEZER_BRANCHEES = False
+#: Famille « écarts Deezer » (`politiques_revue.REGLES_DEEZER`) : levé le
+#: 2026-10-21, l'utilisateur ayant validé les 45 corrections du passage à blanc.
+REGLES_DEEZER_BRANCHEES = True
 
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.

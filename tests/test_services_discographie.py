@@ -118,6 +118,25 @@ class TestFusionner:
         disco.fusionner([page_b], [a, b])
         assert page_b.id == 2
 
+    @pytest.mark.parametrize(
+        ("en_base", "genius"),
+        [("Intro (Adamant-ium)", "Intro"), ("Intro", "Intro (Adamant-ium)")],
+    )
+    def test_niveau_4_generique_nomme_par_son_disque(self, en_base, genius):
+        """Shurik'n, 2026-10-22 : « Intro (Adamant-ium) » (sans page) et la page
+        « Intro » du même disque — la disco créait un doublon (même ISRC, mêmes
+        ID Deezer et Spotify) faute de retirer le disque du titre."""
+        sans_page = _t(en_base, album="Adamant-ium", tid=12087)
+        page = _t(genius, gid=2905127, album="Adamant-ium")
+        f = disco.fusionner([page], [sans_page])
+        assert page.id == 12087 and (f.nouveaux, f.mis_a_jour) == (0, 1)
+
+    def test_niveau_4_le_disque_d_un_autre_titre_ne_compte_pas(self):
+        """Le groupe final n'est retiré que s'il nomme le disque de la fiche."""
+        sans_page = _t("Intro (Adamant-ium)", album="Autre disque", tid=1)
+        page = _t("Intro", gid=2, album="Autre disque")
+        assert disco.fusionner([page], [sans_page]).nouveaux == 1 and page.id is None
+
     def test_niveau_4_generique_dans_son_album_seulement(self):
         deezer = _t("Intro’", album="Autre", tid=1)
         page = _t("Intro'", gid=2, album="Projet")

@@ -17,7 +17,11 @@ from src.utils.credits_genius_api import SOURCE_API
 from src.utils.credits_genius_api import unir as unir_credits
 from src.utils.logger import etape_de_flux, get_logger
 from src.utils.title_matching import cle_album
-from src.utils.version_descriptors import titre_generique, titres_confondus
+from src.utils.version_descriptors import (
+    titre_generique,
+    titre_sans_son_disque,
+    titres_confondus,
+)
 
 logger = get_logger(__name__)
 
@@ -229,18 +233,24 @@ def _fiche_sans_page_equivalente(track: Track, existants: list[Track], adoptable
     tracklists a ainsi DOUBLÉ 22 fiches (CORRECTIFS 1.1, 2026-10-09 — Diam's
     ×11 *Au tour de ma bulle*, A2H « J'observe et je retiens »).
 
-    Un titre générique ne s'adopte que dans son album (un par projet). Plusieurs
-    candidats : celui du même album, sinon RIEN — on ne choisit pas au hasard.
+    Un titre générique ne s'adopte que dans son album (un par projet), et se
+    compare SANS le nom de son disque que Genius lui ajoute (« Intro
+    (Adamant-ium) » = « Intro » sur *Adamant-ium* : Shurik'n, 2026-10-22, un
+    doublon aux mêmes ISRC et ID). Plusieurs candidats : celui du même album,
+    sinon RIEN — on ne choisit pas au hasard.
     """
+    titre = titre_sans_son_disque(track.title, track.album)
     candidats = [
         t
         for t in existants
-        if adoptable(t) and not t.genius_id and titres_confondus(t.title, track.title)
+        if adoptable(t)
+        and not t.genius_id
+        and titres_confondus(titre_sans_son_disque(t.title, t.album), titre)
     ]
     meme_album = [
         t for t in candidats if track.album and cle_album(t.album or "") == cle_album(track.album)
     ]
-    if titre_generique(track.title):
+    if titre_generique(titre):
         candidats = meme_album
     if len(candidats) == 1:
         return candidats[0]

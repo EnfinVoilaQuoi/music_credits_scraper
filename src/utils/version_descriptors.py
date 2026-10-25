@@ -133,6 +133,10 @@ _MOTS_COMPOSES = (
     # « Intro (Mix-Tape Evolution) » est l'intro d'une MIXTAPE, pas un remix
     # (2026-10-11 : lue « remix nu », son original devenait l'Intro d'un autre projet).
     (re.compile(r"\bmix\s+tapes?\b"), "mixtape"),
+    # 2026-10-25 — « Speed Up », « Speedup », « Spedup » : les autres graphies
+    # de « Sped Up » (SDM « Catalina (Speed up) », Kanye « Jesus (Speed Up) »
+    # passaient pour l'original). « Speed » seul n'est pas un descripteur.
+    (re.compile(r"\bspeed\s*up\b|\bspedup\b"), "sped"),
 )
 
 #: Un groupe qui porte l'un de ces mots n'est PAS une version : « Return of the

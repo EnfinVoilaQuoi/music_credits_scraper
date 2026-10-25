@@ -43,6 +43,14 @@ CAS = [
     # … sans toucher aux vrais titres.
     ("BULLY (First Pressing Edition)", Kind.RENDITION, "BULLY", None),
     ("FE!N (First Edition Version)", Kind.RENDITION, "FE!N", None),
+    # « Sped Up » sous toutes ses graphies (2026-10-25) — « Speed » seul est un titre.
+    ("SAY MY GRACE (Sped Up)", Kind.RENDITION, "SAY MY GRACE", None),
+    ("Catalina (Speed up)", Kind.RENDITION, "Catalina", None),
+    ("Jesus (Speed Up)", Kind.RENDITION, "Jesus", None),
+    ("Catalina (Speedup)", Kind.RENDITION, "Catalina", None),
+    ("Catalina (Spedup)", Kind.RENDITION, "Catalina", None),
+    ("Catalina - Speed Up Version", Kind.RENDITION, "Catalina", None),
+    ("Pick Up Your Speed", Kind.NONE, "Pick Up Your Speed", None),
     (
         "Return of the Moon Man (Original Score)",
         Kind.NONE,

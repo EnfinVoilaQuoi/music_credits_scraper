@@ -5,7 +5,10 @@ dépôt privé `therapie_studio`, ignoré quand il n'est pas à côté — en CI
 - chaque chemin de code cité entre backticks (`src/…`, `scripts/…`, `tests/…`,
   `alembic/…`) existe ;
 - chaque test cité par son nom (`test_xxx`, `TestXxx`) existe, en fichier ou en définition ;
-- la liste des sous-commandes `python -m src.cli {a|b|…}` est exactement celle du parseur.
+- la liste des sous-commandes `python -m src.cli {a|b|…}` est exactement celle du parseur ;
+- `WIP.md` et `CORRECTIFS.md` (même dossier que `PROJET.md`) n'ont pas de section
+  « Résolus » : un point fait QUITTE le fichier, sa trace va au JOURNAL (décision
+  utilisateur 2026-10-25).
 
 Ce test n'attrape pas une phrase fausse, seulement une référence morte : la
 relecture du sens reste l'étape « cohérence de la doc » de `/bilan`.
@@ -24,11 +27,13 @@ from src.cli import build_parser
 RACINE = Path(__file__).resolve().parents[1]
 README = RACINE / "README.md"
 PROJET = RACINE.parent / "therapie_studio" / "notes" / "scraper" / "PROJET.md"
+FICHIERS_DE_TRAVAIL = [PROJET.parent / "WIP.md", PROJET.parent / "CORRECTIFS.md"]
 
 _BACKTICKS = re.compile(r"`([^`\n]+)`")
 _CHEMIN = re.compile(r"(?<![\w/.])((?:src|scripts|tests|alembic)/[\w./-]*[\w/])")
 _NOM_DE_TEST = re.compile(r"^(test_\w+|Test[A-Z]\w+)$")
 _SOUS_COMMANDES = re.compile(r"src\.cli \{([^}]+)\}")
+_TITRE_RESOLUS = re.compile(r"^#{1,6}\s.*\bRésolus\b", flags=re.MULTILINE)
 
 
 def _docs() -> list[Path]:
@@ -88,3 +93,14 @@ def test_sous_commandes_cli_a_jour(doc: Path) -> None:
             f"{doc.name} : sous-commandes en trop {sorted(citees - attendues)}, "
             f"manquantes {sorted(attendues - citees)}"
         )
+
+
+@pytest.mark.parametrize(
+    "fichier", [f for f in FICHIERS_DE_TRAVAIL if f.exists()], ids=lambda p: p.name
+)
+def test_pas_de_section_resolus(fichier: Path) -> None:
+    titres = _TITRE_RESOLUS.findall(fichier.read_text(encoding="utf-8"))
+    assert not titres, (
+        f"{fichier.name} a une section « Résolus » {titres} : un point fait quitte le "
+        "fichier, sa trace va au JOURNAL (une ligne, date et commit)"
+    )

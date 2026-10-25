@@ -32,6 +32,7 @@ from src.utils.logger import get_logger
 
 # Extraction du video id : helper partagé (factorisé, cf. youtube_utils). Alias
 # privé conservé pour ne pas toucher les appelants internes.
+from src.utils.spotify_identity import artistes_connus
 from src.utils.youtube_utils import artiste_de_recherche
 from src.utils.youtube_utils import extract_video_id as _extract_video_id
 
@@ -870,7 +871,11 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                 # Règle PARTAGÉE (`youtube_utils`) : c'est elle qui détermine la
                 # clé du cache de recherche, qu'un rejet doit pouvoir purger.
                 results = searcher.search_track(
-                    artiste_de_recherche(t, artist.name), t.title, max_results=5, album=t.album
+                    artiste_de_recherche(t, artist.name),
+                    t.title,
+                    max_results=5,
+                    album=t.album,
+                    artistes_connus=tuple(artistes_connus(t)),
                 )
                 best = results[0] if results else None
                 if (

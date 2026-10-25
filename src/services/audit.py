@@ -524,6 +524,7 @@ def streams(c, par) -> list[Cas]:
                 genius_id=t["genius_id"],
                 album=t["album"],
                 primary_artist_name=t["primary_artist_name"],
+                featured_artists=t["featured_artists"],
                 artist=SimpleNamespace(name=t["artiste"]),
             )
             recherche = recherche_de_ligne(r["recherche"])

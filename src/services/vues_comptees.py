@@ -44,7 +44,8 @@ def recherche_valide(fiche, recherche: dict | None) -> bool:
     """Ce que la recherche a vu passe-t-il le score COURANT pour cette fiche ?
     Sous le nom de l'artiste de la fiche OU de son principal (la recherche
     d'un featuring se fait sous le principal, `artiste_de_recherche`).
-    `fiche` : `title`, `album`, `artist.name`, `primary_artist_name`."""
+    `fiche` : `title`, `album`, `artist.name`, `primary_artist_name`,
+    `featured_artists` (les invités jugent un remixeur nommé, 2026-10-26)."""
     from src.config import YOUTUBE_CONFIDENCE_THRESHOLD
     from src.youtube.youtube_searcher import relevance_score
 
@@ -61,6 +62,10 @@ def recherche_valide(fiche, recherche: dict | None) -> bool:
             fiche.title,
             album=fiche.album,
             result_album=recherche.get("album"),
+            artistes_connus=[
+                *noms,
+                *(n.strip() for n in (fiche.featured_artists or "").split(",")),
+            ],
         )
         >= YOUTUBE_CONFIDENCE_THRESHOLD
         for nom in noms

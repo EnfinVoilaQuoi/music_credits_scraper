@@ -28,6 +28,7 @@ from src.utils.version_descriptors import (
     titre_sans_sous_titre,
     titre_sans_support,
 )
+from src.utils.version_heritage import remixeur_etranger
 
 logger = get_logger(__name__)
 
@@ -46,6 +47,7 @@ def relevance_score(
     *,
     album: str | None = None,
     result_album: str | None = None,
+    artistes_connus=(),
 ) -> float:
     """Pertinence d'un résultat de recherche, entre 0 et 1 (titre 60 %, artiste 40 %).
 
@@ -75,6 +77,12 @@ def relevance_score(
     Un artiste NOMMÉ en invité dans le titre du résultat compte comme un
     artiste du résultat : YouTube Music ne liste souvent que le principal
     (« Moscou (feat. Sadek & Rabah) » de Bruler, 2026-10-20).
+
+    `artistes_connus` (ceux de la fiche, en plus de `target_artist`) jugent le
+    remixeur que nomme un résultat face à une fiche « (Remix) » nue : un
+    remixeur qui n'est aucun d'eux est un AUTRE remix (`remixeur_etranger`,
+    2026-10-26 : « Day 'N' Nite (Crookers Remix) », 16,9 M de vues, comptait
+    pour le remix avec Jim Jones).
     """
     # Le nom du disque que Genius ajoute à un titre générique n'en fait pas
     # partie : « Intro (Table d'écoute) » est l'« Intro » de *Table d'écoute*.
@@ -82,6 +90,11 @@ def relevance_score(
     if titre_generique(target_title) and not meme_album(album, result_album):
         return 0.0
     artistes = [*result_artists, *invites_nommes(result_title)]
+    connus = [target_artist, *artistes_connus]
+    if result_title and any(
+        remixeur_etranger(target_title, forme, connus) for forme in formes_publiees(result_title)
+    ):
+        return 0.0
     return max(
         _pertinence(forme, artistes, target_artist, target_title)
         for forme in formes_publiees(result_title)
@@ -344,10 +357,16 @@ class YouTubeSearcher:
         conn.close()
 
     def search_track(
-        self, artist: str, title: str, max_results: int = 25, album: str | None = None
+        self,
+        artist: str,
+        title: str,
+        max_results: int = 25,
+        album: str | None = None,
+        artistes_connus=(),
     ) -> list[dict]:
         """Recherche principale avec cache et fallbacks. `album` : le disque de
-        la fiche, qui juge un titre générique (`relevance_score`)."""
+        la fiche, qui juge un titre générique ; `artistes_connus` : ceux de la
+        fiche, qui jugent un remixeur nommé (`relevance_score`)."""
 
         # Vérifier le cache d'abord
         cle = cache_key(artist, title)
@@ -361,7 +380,9 @@ class YouTubeSearcher:
         # Méthode 1: ytmusicapi (recommandée)
         if self.ytmusic_available:
             try:
-                results = self._search_with_ytmusic(artist, title, max_results, album)
+                results = self._search_with_ytmusic(
+                    artist, title, max_results, album, artistes_connus
+                )
                 logger.info(f"ytmusicapi: {len(results)} résultats pour {artist} - {title}")
             except (YTMusicError, requests.RequestException, KeyError, TypeError, IndexError) as e:
                 logger.warning(f"Erreur ytmusicapi: {e}")
@@ -405,7 +426,12 @@ class YouTubeSearcher:
             return False
 
     def _search_with_ytmusic(
-        self, artist: str, title: str, max_results: int, album: str | None = None
+        self,
+        artist: str,
+        title: str,
+        max_results: int,
+        album: str | None = None,
+        artistes_connus=(),
     ) -> list[dict]:
         """Recherche avec ytmusicapi"""
 
@@ -428,7 +454,9 @@ class YouTubeSearcher:
                         seen_video_ids.add(video_id)
 
                         # Calculer score de pertinence
-                        score = self._calculate_relevance_score(result, artist, title, album)
+                        score = self._calculate_relevance_score(
+                            result, artist, title, album, artistes_connus
+                        )
 
                         # Extraire les artistes
                         artists = []
@@ -505,7 +533,12 @@ class YouTubeSearcher:
         return results
 
     def _calculate_relevance_score(
-        self, result: dict, target_artist: str, target_title: str, album: str | None = None
+        self,
+        result: dict,
+        target_artist: str,
+        target_title: str,
+        album: str | None = None,
+        artistes_connus=(),
     ) -> float:
         """Score de pertinence d'un résultat ytmusicapi (délègue au calcul pur)."""
         result_artists = [
@@ -519,6 +552,7 @@ class YouTubeSearcher:
             target_title,
             album=album,
             result_album=_nom_d_album(result.get("album")),
+            artistes_connus=artistes_connus,
         )
 
     def _get_best_thumbnail(self, thumbnails: list[dict]) -> str | None:

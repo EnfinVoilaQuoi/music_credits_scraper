@@ -153,6 +153,18 @@ def names_match_as_words(a: str, b: str) -> bool:
     return na == nb or either_contains_as_words(na, nb)
 
 
+def noms_de_meme_graphie(a: str, b: str) -> bool:
+    """`names_match_as_words`, ou les mêmes lettres une fois espaces et signes
+    retirés, « $ » lu « s » : « 20 Syl » / « 20syl », « Ma$e » / « Mase »
+    (mesuré le 2026-10-26 : les deux seules fausses alertes de la simulation
+    « artistes crédités par Spotify » sur les remix nus)."""
+
+    def lettres(n: str) -> str:
+        return normalize_name(n.replace("$", "s")).replace(" ", "")
+
+    return names_match_as_words(a, b) or bool(lettres(a)) and lettres(a) == lettres(b)
+
+
 #: Caractères SANS LARGEUR : espace de largeur nulle, liants, joint insécable,
 #: BOM. Ils ne se voient pas — et c'est précisément le danger : ils DISTINGUENT
 #: deux chaînes que l'œil lit comme identiques. Genius en sème dans ses titres

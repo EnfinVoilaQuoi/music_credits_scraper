@@ -46,6 +46,8 @@ def _track(
         streams=SimpleNamespace(spotify_streams=spotify_streams, ytm_streams=None),
         is_featuring=False,
         primary_artist_name=None,
+        featured_artists=None,
+        get_music_credits=list,
         youtube_url=youtube_url,
         youtube_url_source="genius_media" if youtube_url else None,
         videos=videos or [],
@@ -677,7 +679,7 @@ class TestVideoDeLaRecherche:
         import src.youtube.youtube_searcher as ys
 
         class _Chercheur:
-            def search_track(self, artist, title, max_results=5, album=None):
+            def search_track(self, artist, title, max_results=5, album=None, artistes_connus=()):
                 return [
                     {
                         "video_id": "trouveetrou",

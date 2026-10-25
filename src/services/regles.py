@@ -44,6 +44,7 @@ PORTIERS: dict[str, tuple[str, ...]] = {
         "src.youtube.youtube_searcher",
         "src.services.vues_comptees",
         "src.utils.version_descriptors",
+        "src.utils.version_heritage",
         "src.utils.title_matching",
     ),
 }

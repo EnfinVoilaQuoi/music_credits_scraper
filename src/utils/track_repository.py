@@ -1720,8 +1720,8 @@ class TrackRepository:
             conn.execute(
                 text(
                     "SELECT t.id, t.title, t.genius_id, t.album, t.primary_artist_name, "
-                    "a.name AS artiste FROM tracks t LEFT JOIN artists a ON a.id = t.artist_id "
-                    "WHERE t.id = :t"
+                    "t.featured_artists, a.name AS artiste FROM tracks t "
+                    "LEFT JOIN artists a ON a.id = t.artist_id WHERE t.id = :t"
                 ),
                 {"t": track_id},
             )
@@ -1736,6 +1736,7 @@ class TrackRepository:
             genius_id=ligne["genius_id"],
             album=ligne["album"],
             primary_artist_name=ligne["primary_artist_name"],
+            featured_artists=ligne["featured_artists"],
             artist=SimpleNamespace(name=ligne["artiste"]),
         )
         videos = [

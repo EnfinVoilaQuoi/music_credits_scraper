@@ -48,7 +48,11 @@ from src.utils.concordance_paroles import (
 )
 from src.utils.credits_genius_api import SOURCE_API, SOURCE_SCRAPE
 from src.utils.duree_youtube import SOURCE_AUDIO
-from src.utils.spotify_identity import CHAMP_ID_PROPOSE, variante_etrangere
+from src.utils.spotify_identity import (
+    CHAMP_ID_PROPOSE,
+    remix_d_autres_artistes,
+    variante_etrangere,
+)
 from src.utils.title_matching import cle_album, developper_ligatures, names_match_as_words
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import Kind, parse_variant, socle_normalise, titre_generique
@@ -360,7 +364,17 @@ def id_spotify_autre_version(track, _ctx=None):
         return None
     titre, _, credits = page.partition(" • ")
     if not variante_etrangere(track, {"name": titre}):
-        return None
+        # Un remix nu dont la page crédite d'autres artistes que les siens (et
+        # pas ses invités) : un autre remix, que le titre seul ne trahit pas.
+        autre = remix_d_autres_artistes(track, titre, credits.split(", "))
+        if autre is None:
+            return None
+        inconnus, absents = autre
+        return (
+            f"l'ID Spotify sert « {titre} », crédité à {', '.join(inconnus)} sans "
+            f"{', '.join(absents)} — un autre remix ?",
+            {"spotify_id": track.spotify_id, "spotify_sert": titre, "credites": credits},
+        )
     remixeur = parse_variant(track.title).remixer
     if remixeur and names_match_as_words(remixeur, credits):
         return None

@@ -8,12 +8,18 @@ ce sont les artistes : un remixeur nommé qui n'est aucun d'eux désigne un autr
 remix. Simulée sur toute la base avant d'être codée (8 liens, tous à tort).
 """
 
+from types import SimpleNamespace
+
 from src.models import Artist, Credit, CreditRole, Track
+from src.services.revue import id_spotify_autre_version
+from src.services.vues_comptees import recherche_valide
 from src.utils.apple_identity import fiche_concorde
 from src.utils.deezer_identity import hit_concorde
 from src.utils.deezer_identity import variante_etrangere as variante_deezer
 from src.utils.spotify_identity import artistes_connus, variante_etrangere
+from src.utils.title_matching import noms_de_meme_graphie
 from src.utils.version_heritage import remixeur_etranger, remixeurs_du_titre
+from src.youtube.youtube_searcher import relevance_score
 
 FICHE = "In Common (Remix)"
 ARTISTES = ["Travis Scott", "Alicia Keys", "Kanye West"]
@@ -117,3 +123,66 @@ class TestApple:
         ok, motif = fiche_concorde(fiche, itunes)
         assert not ok
         assert "Fatboy Slim" in motif
+
+
+DAY_N_NITE = "Day ‘n’ Nite (Remix)"
+
+
+class TestYouTube:
+    def test_la_video_d_un_autre_remix_vaut_zero(self):
+        # 16,9 M de vues du remix de Crookers comptaient pour le remix avec Jim Jones.
+        assert (
+            relevance_score("Day 'N' Nite (Crookers Remix)", ["Kid Cudi"], "Kid Cudi", DAY_N_NITE)
+            == 0
+        )
+        assert relevance_score("Day 'N' Nite (Remix)", ["Kid Cudi"], "Kid Cudi", DAY_N_NITE) == 1.0
+
+    def test_un_remixeur_de_la_fiche_garde_son_score(self):
+        score = relevance_score(
+            "Day 'N' Nite (Crookers Remix)",
+            ["Kid Cudi"],
+            "Kid Cudi",
+            DAY_N_NITE,
+            artistes_connus=["Crookers"],
+        )
+        assert score > 0.8
+
+    def test_les_vues_deja_comptees_se_rejugent(self):
+        # La vidéo du remix de Kaskade, posée jadis par la recherche sur
+        # « In Common (Remix) », ne compte plus ses vues.
+        recherche = {"titre": "In Common (Kaskade Remix)", "artistes": ["Alicia Keys"]}
+        fiche = SimpleNamespace(
+            title=FICHE,
+            album=None,
+            artist=SimpleNamespace(name="Travis Scott"),
+            primary_artist_name="Alicia Keys",
+            featured_artists="Kanye West",
+        )
+        assert not recherche_valide(fiche, recherche)
+        fiche.featured_artists = "Kanye West, Kaskade"
+        assert recherche_valide(fiche, {**recherche, "titre": "In Common (Remix)"})
+
+
+def _day_n_nite(page):
+    t = Track(title=DAY_N_NITE, artist=Artist(name="Kid Cudi"))
+    t.spotify_id = "7bMNtFJ5fSkKcFiwBdhQpV"
+    t.spotify_page_title = page
+    t.credits = [Credit(name="Jim Jones", role=CreditRole.FEATURED, source="genius")]
+    return t
+
+
+class TestPanneauArtistesCredites:
+    def test_la_page_d_un_autre_remix_se_signale(self):
+        cas = id_spotify_autre_version(_day_n_nite("Day 'n' Nite (Remix) • Kid Cudi, Crookers"))
+        assert cas is not None
+        assert "Crookers" in cas[0] and "Jim Jones" in cas[0]
+
+    def test_l_invite_credite_ne_se_signale_pas(self):
+        page = "Day 'n' Nite (Remix) • Kid Cudi, Crookers, Jim Jones"
+        assert id_spotify_autre_version(_day_n_nite(page)) is None
+
+    def test_une_autre_graphie_n_est_pas_un_autre_artiste(self):
+        # « Jesus Walks (Remix) » : Genius « Ma$e », Spotify « Mase ».
+        assert noms_de_meme_graphie("Ma$e", "Mase")
+        assert noms_de_meme_graphie("20 Syl", "20syl")
+        assert not noms_de_meme_graphie("Crookers", "Jim Jones")

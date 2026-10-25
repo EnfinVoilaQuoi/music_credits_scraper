@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import re
 
+from src.models.track import CreditRole
 from src.utils.logger import get_logger
 from src.utils.title_matching import (
     either_contains_as_words,
     names_match_as_words,
+    noms_de_meme_graphie,
     normalize_name,
     normalize_title,
     strip_featuring,
@@ -40,7 +42,7 @@ from src.utils.version_descriptors import (
     titre_sans_son_disque,
     titres_equivalents,
 )
-from src.utils.version_heritage import remixeur_etranger
+from src.utils.version_heritage import remixeur_etranger, remixeurs_du_titre
 
 logger = get_logger(__name__)
 
@@ -365,6 +367,36 @@ def artistes_connus(track) -> list[str]:
     noms += [n.strip() for n in (track.featured_artists or "").split(",")]
     noms += [c.name for c in track.get_music_credits()]
     return [n for n in noms if n]
+
+
+def remix_d_autres_artistes(track, titre_spotify: str, credites) -> tuple[list, list] | None:
+    """PUR. `(inconnus, absents)` quand la page Spotify d'une fiche « (Remix) »
+    nue, dont le titre ne nomme pas de remixeur, crédite des artistes INCONNUS
+    de la fiche et pas ses INVITÉS Genius — un autre remix, que le titre seul ne
+    trahit pas. None sinon.
+
+    2026-10-26, Kid Cudi « Day ‘n’ Nite (Remix) » (avec Jim Jones) : Spotify
+    sert « Day 'n' Nite (Remix) » crédité à Kid Cudi et Crookers. Simulé sur
+    les 94 liens de remix nus : un artiste inconnu SEUL alerte à tort sur un
+    producteur crédité en artiste (« Junior à la Prod », DJ Khaled) ; avec
+    l'invité absent et la graphie tolérante (« Ma$e », « 20syl »), 3 cas, tous
+    d'autres remix (Crookers, The Regime, SubLife). Détecteur du panneau, pas
+    une règle de gate : trois cas ne prouvent pas une règle qui refuse."""
+    if parse_variant(track.title).kind != Kind.REMIX_BARE or remixeurs_du_titre(titre_spotify):
+        return None
+    credites = [c for c in credites if c]
+    connus = artistes_connus(track)
+    inconnus = [a for a in credites if not any(noms_de_meme_graphie(a, n) for n in connus)]
+    invites = [n.strip() for n in (track.featured_artists or "").split(",")]
+    invites += [c.name for c in track.get_credits_by_role(CreditRole.FEATURED)]
+    if track.is_featuring:
+        invites += noms_attendus(track)[:1]  # la ligne d'un invité
+    absents = [
+        i
+        for i in dict.fromkeys(n for n in invites if n)
+        if not any(noms_de_meme_graphie(i, a) for a in credites)
+    ]
+    return (inconnus, absents) if inconnus and absents else None
 
 
 def identite_concorde(

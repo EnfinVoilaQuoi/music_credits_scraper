@@ -22,6 +22,28 @@ from src.utils.version_descriptors import (
 )
 from src.utils.version_heritage import famille_de
 
+
+@pytest.mark.parametrize(
+    "titre, attendu",
+    [
+        ("Make Her Say (I Poke Her Face)", "Make Her Say"),
+        ("Man on the Moon (The Anthem)", "Man on the Moon"),
+        ("La Tess (Sambterlude)", "La Tess"),
+        ("Pursuit of Happiness (Nightmare)", "Pursuit of Happiness"),
+        # Un descripteur reste ; un titre générique garde sa parenthèse.
+        ("Blues (Live at AK Studios)", None),
+        ("Black Skinhead (Remix) [V1]", None),
+        ("Intro (A2)", None),
+        ("Interlude (NIRVANA)", None),
+        ("Sky City", None),
+    ],
+)
+def test_titre_sans_sous_titre(titre, attendu):
+    from src.utils.version_descriptors import titre_sans_sous_titre
+
+    assert titre_sans_sous_titre(titre) == attendu
+
+
 CAS = [
     # titre, kind, socle, remixeur
     ("Le cœur des filles - Unplugged", Kind.RENDITION, "Le cœur des filles", None),

@@ -344,6 +344,39 @@ class TestRefusATortDuScore:
     """2026-10-20 : en rejouant les 2 260 vidéos posées par la recherche, des
     liens JUSTES tombaient sous le seuil — défauts du score, pas de la vidéo."""
 
+    @pytest.mark.parametrize(
+        "video, artistes, artiste, fiche",
+        [
+            # 2026-10-25 : 0,76 / 0,84 / 0,72 sous le seuil — le SOUS-TITRE de
+            # la fiche manque à la vidéo (rejeu : 4 liens, 1,22 M de vues).
+            (
+                "Make Her Say (feat. Kanye West & Common)",
+                ["Kid Cudi"],
+                "Kid Cudi",
+                "Make Her Say (I Poke Her Face)",
+            ),
+            ("Man On The Moon", ["Kid Cudi"], "Kid Cudi", "Man on the Moon (The Anthem)"),
+            ("La tess", ["Medine, samb"], "Médine", "La Tess (Sambterlude)"),
+        ],
+    )
+    def test_un_sous_titre_absent_de_la_video_ne_la_refuse_pas(
+        self, video, artistes, artiste, fiche
+    ):
+        from src.config import YOUTUBE_CONFIDENCE_THRESHOLD
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert relevance_score(video, artistes, artiste, fiche) >= YOUTUBE_CONFIDENCE_THRESHOLD
+
+    def test_un_descripteur_n_est_pas_un_sous_titre(self):
+        """La version reste jugée sur le titre COMPLET : l'original n'est
+        jamais la vidéo d'un live, d'un remix ; un titre générique garde la
+        parenthèse qui seule le distingue."""
+        from src.youtube.youtube_searcher import relevance_score
+
+        assert relevance_score("Blues", ["Kid Cudi"], "Kid Cudi", "Blues (Live at AK Studios)") == 0
+        assert relevance_score("Heartless", ["Kanye West"], "Kanye West", "Heartless (Remix)") == 0
+        assert relevance_score("Intro", ["Booba"], "Booba", "Intro (A2)") == 0
+
     def test_le_rappel_final_de_youtube_music_ne_compte_pas(self):
         """« (Pt. 1; Live 2006) » répète les groupes précédents : la Boulette
         de Diam's tombait à 0 (version jugée autre)."""

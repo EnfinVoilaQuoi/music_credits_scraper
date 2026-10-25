@@ -259,6 +259,27 @@ def titre_sans_son_disque(titre: str | None, album: str | None) -> str:
     return m["titre"]
 
 
+_GROUPE = re.compile(r"\s*[\(\[]([^\(\)\[\]]*)[\)\]]")
+
+
+def titre_sans_sous_titre(titre: str | None) -> str | None:
+    """PUR. Le titre sans ses SOUS-TITRES : les groupes entre parenthèses ou
+    crochets qui ne portent aucun mot de version (« Make Her Say (I Poke Her
+    Face) » → « Make Her Say », « Man on the Moon (The Anthem) », « La Tess
+    (Sambterlude) »). Les plateformes et les vidéos les omettent souvent ; un
+    descripteur (« (Live) », « (Remix) ») reste, lui. None s'il n'y a rien à
+    retirer, ou si ce qui reste est vide ou GÉNÉRIQUE (« Intro (A2) » : la
+    parenthèse seule le distingue). Sert la RESSEMBLANCE du score de recherche
+    YouTube (2026-10-25) ; le juge des vidéos Genius (`revue.video_nomme`),
+    qui ne juge pas la version, retire, lui, TOUS les groupes."""
+    if not titre:
+        return None
+    sans = _GROUPE.sub(lambda m: m[0] if _porte_vocabulaire(m[1]) else "", titre).strip()
+    if not sans or sans == titre.strip() or titre_generique(sans):
+        return None
+    return sans
+
+
 def _tokens(texte: str) -> list[str]:
     """Mots normalisés d'un descripteur (ascii, minuscules, ponctuation écrasée).
 

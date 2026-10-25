@@ -25,6 +25,7 @@ from src.utils.version_descriptors import (
     meme_version_publiee,
     titre_generique,
     titre_sans_son_disque,
+    titre_sans_sous_titre,
     titre_sans_support,
 )
 
@@ -109,7 +110,17 @@ def _pertinence(
     # Deux DATES différentes ne se ressemblent pas : « 18-Oct » n'est pas « 17 Octobre ».
     if {d for d in _DATE.findall(cible_compare)} ^ {d for d in _DATE.findall(resultat_compare)}:
         return 0.0
-    title_similarity = difflib.SequenceMatcher(None, cible_compare, resultat_compare).ratio()
+    # Un SOUS-TITRE de la fiche (« Make Her Say (I Poke Her Face) », « Man on
+    # the Moon (The Anthem) ») manque souvent à la vidéo : la ressemblance se
+    # mesure aussi sans lui (2026-10-25 : 0,76 et 0,84 sous le seuil, 1,0 sans).
+    # Version, partie et date restent jugées sur le titre COMPLET, ci-dessus.
+    formes = [cible_compare]
+    sans = titre_sans_sous_titre(target_title)
+    if sans:
+        formes.append(_titre_compare(sans))
+    title_similarity = max(
+        difflib.SequenceMatcher(None, forme, resultat_compare).ratio() for forme in formes
+    )
 
     return (title_similarity * 0.6) + (_similarite_artiste(target_artist, result_artists) * 0.4)
 

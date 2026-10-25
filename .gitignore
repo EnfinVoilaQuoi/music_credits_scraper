@@ -115,6 +115,8 @@ scripts/*
 !scripts/simuler_priorites.py
 !scripts/simuler_politiques_revue.py
 !scripts/simuler_regles_validees.py
+# Lots de runs surveillés (règle « Lots de runs en fond », 2026-10-25)
+!scripts/lot_runs.py
 # Tests / santé des sources
 !scripts/warm_cf_profile.py
 !scripts/capture_fixtures.py

@@ -33,12 +33,14 @@ from src.utils.title_matching import (
 )
 from src.utils.track_mapper import _clean_duration
 from src.utils.version_descriptors import (
+    Kind,
     meme_famille,
     parse_variant,
     titre_generique,
     titre_sans_son_disque,
     titres_equivalents,
 )
+from src.utils.version_heritage import remixeur_etranger
 
 logger = get_logger(__name__)
 
@@ -355,6 +357,16 @@ def noms_attendus(track) -> list[str]:
     return [n for n in noms if n]
 
 
+def artistes_connus(track) -> list[str]:
+    """Les artistes connus de l'enregistrement : ceux de `noms_attendus`, les
+    invités Genius et les crédits musicaux (producteurs, remixeur…). Sert à
+    juger le remixeur qu'une plateforme nomme (`remixeur_etranger`)."""
+    noms = noms_attendus(track)
+    noms += [n.strip() for n in (track.featured_artists or "").split(",")]
+    noms += [c.name for c in track.get_music_credits()]
+    return [n for n in noms if n]
+
+
 def identite_concorde(
     track,
     identite: dict | None,
@@ -546,6 +558,8 @@ def variante_etrangere(track, identite: dict | None) -> bool:
 
     Prédicat pur, sur le SEUL descripteur : deux titres qui diffèrent par autre
     chose (« 1 pour la plume » / « Un pour la plume ») ne sont pas son affaire.
+    Seule exception, le remixeur que nomme Spotify face à un remix nu : il se
+    juge sur les artistes de la fiche (`remixeur_etranger`).
     """
     if not identite:
         return False
@@ -554,7 +568,14 @@ def variante_etrangere(track, identite: dict | None) -> bool:
         return False
     va, vb = parse_variant(track.title), parse_variant(titre_spotify)
     if meme_famille(va, vb):
-        return False
+        # Un remix nu face à un remix nommé : le même, sauf si le remixeur
+        # n'est aucun des artistes de la fiche (« In Common (Remix) » contre
+        # « In Common - Black Coffee Remix », 2026-10-25).
+        # Les artistes ne se lisent que pour un remix nu.
+        return (
+            va.kind == Kind.REMIX_BARE
+            and remixeur_etranger(track.title, titre_spotify, artistes_connus(track)) is not None
+        )
     # Un qualificatif DE PLUS d'un seul côté, même famille de prise (Diam's
     # « Dans ma bulle (Live 2006; Version EP) » / « Dans Ma Bulle - Live
     # 2006 ») : le titre ne départage pas — l'EP live de 2006 et l'album live

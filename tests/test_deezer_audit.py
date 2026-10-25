@@ -78,6 +78,7 @@ def test_un_featuring_se_juge_sur_l_artiste_principal(data_manager):
         "previous_duration": None,
         "artist_deezer_id": None,
         "noms_acceptes": (),
+        "artistes_connus": ("Kanye West", "Drake"),
     }
 
 

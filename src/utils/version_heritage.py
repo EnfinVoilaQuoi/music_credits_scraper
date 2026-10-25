@@ -40,6 +40,7 @@ import re
 from dataclasses import dataclass
 
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES, Credit, CreditRole
+from src.utils.title_matching import names_match_as_words
 from src.utils.version_descriptors import Kind, parse_variant, titre_generique
 
 SOURCE = "heritage"
@@ -129,7 +130,9 @@ _REMIXEURS_DESCRIPTIFS = frozenset(
         "chill",
         "clean",
         "club",
+        "dirty",
         "drill",
+        "explicit",
         "extended",
         "freestyle",
         "french",
@@ -161,6 +164,9 @@ def _remixeur_nomme(nom: str) -> bool:
     # par exemple « Kanye West - POWER (Rap Blvd Remix) ».
     if any(signe in nom for signe in "()[]"):
         return False
+    # Une décennie (« 90's Remix ») est un style, pas une personne.
+    if re.fullmatch(r"(?:19|20)?\d0['’]?s", normalise):
+        return False
     return not bool(re.fullmatch(r"(?:\d+(?:st|nd|rd|th)?|[a-z])", normalise))
 
 
@@ -175,6 +181,31 @@ def remixeurs_du_titre(titre: str | None) -> list[str]:
     return [
         n.strip() for n in _SEPARATEURS_DE_REMIXEURS.split(v.remixer) if _remixeur_nomme(n.strip())
     ]
+
+
+def remixeur_etranger(titre_fiche: str | None, titre_servi: str | None, artistes) -> str | None:
+    """PUR. Le remixeur que NOMME le titre servi par une plateforme quand la
+    fiche est un remix NU (« (Remix) ») et qu'aucun des remixeurs nommés n'est
+    un artiste connu de l'enregistrement (`artistes`) : c'est un AUTRE remix.
+    None sinon — fiche qui n'est pas un remix nu, titre servi sans remixeur
+    nommé (« Official Remix », « French Remix »), ou remixeur connu.
+
+    `meme_famille` tient un remix nu pour le même qu'un remix nommé « jusqu'à
+    preuve du contraire » ; la preuve, ce sont les artistes. 2026-10-25 :
+    « In Common (Remix) » d'Alicia Keys, avec Kanye et Travis Scott, portait
+    l'ID Spotify du « Black Coffee Remix » et l'ID Deezer du « Kaskade Remix ».
+    Simulé le jour même sur toute la base (98 liens Spotify et 77 Deezer de
+    310 remix nus) : 8 liens tombent, tous d'autres remix (Cahill, Fatboy
+    Slim, Dada Life, Crookers, Mike Skinner, Chase B) ; aucun remixeur nommé
+    n'était un artiste connu. Un STYLE (« 90's Remix ») n'est pas un remixeur
+    (`_remixeur_nomme`) : la règle ne le juge pas."""
+    if parse_variant(titre_fiche or "").kind != Kind.REMIX_BARE:
+        return None
+    nommes = remixeurs_du_titre(titre_servi)
+    connus = [a for a in artistes or () if a]
+    if not nommes or any(names_match_as_words(n, a) for n in nommes for a in connus):
+        return None
+    return nommes[0]
 
 
 def famille_de(titre: str) -> str | None:

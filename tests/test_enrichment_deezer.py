@@ -49,9 +49,11 @@ class _FakeDeezerClient:
         deezer_id=None,
         album=None,
         autres_albums=frozenset(),
+        artistes_connus=(),
     ):
         """Jumeau async : même signature au `http` près (session partagée)."""
         self.calls.append((artist, title, previous_duration, scraped_release_date))
+        self.artistes_connus = artistes_connus
         self.ids = getattr(self, "ids", []) + [artist_deezer_id]
         self.piste_ids = getattr(self, "piste_ids", []) + [deezer_id]
         self.autres_albums = autres_albums
@@ -431,3 +433,15 @@ def test_les_disques_des_homonymes_sont_transmis_au_gate():
     autre.id = 2
     _enrich(DeezerProvider(client), track, EnrichmentContext(artist_tracks=[track, autre]))
     assert client.autres_albums == {"late registration"}
+
+
+def test_les_artistes_de_la_fiche_sont_transmis_au_gate():
+    """« In Common (Remix) » : le gate juge le remixeur nommé par Deezer sur les
+    artistes de la fiche — la ligne, le principal Genius, les invités, les
+    crédits (`remixeur_etranger`, 2026-10-25)."""
+    client = _FakeDeezerClient({"success": False, "error": "not found"})
+    track = Track(title="In Common (Remix)", artist=Artist(name="Travis Scott"))
+    track.primary_artist_name = "Alicia Keys"
+    track.featured_artists = "Kanye West"
+    _enrich(DeezerProvider(client), track, EnrichmentContext(artist_tracks=[track]))
+    assert set(client.artistes_connus) == {"Travis Scott", "Alicia Keys", "Kanye West"}

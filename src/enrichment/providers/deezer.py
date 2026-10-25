@@ -18,6 +18,7 @@ from src.utils.bpm_vote import sanitize_bpm
 from src.utils.corrections_fiches import deezer_refuses
 from src.utils.deezer_identity import albums_des_homonymes
 from src.utils.logger import get_logger
+from src.utils.spotify_identity import artistes_connus
 
 logger = get_logger(__name__)
 
@@ -88,6 +89,9 @@ class DeezerProvider:
                 deezer_id=track.deezer_id,
                 album=track.album,
                 autres_albums=albums_des_homonymes(track, ctx.artist_tracks),
+                # Un remixeur nommé par Deezer face à un remix nu doit être l'un
+                # d'eux (`remixeur_etranger`, 2026-10-25).
+                artistes_connus=tuple(artistes_connus(track)),
             )
             # Deezer a RÉPONDU (trouvé ou non) : le constat est daté (e41).
             track.deezer_checked_at = datetime.now().isoformat(timespec="seconds")

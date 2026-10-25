@@ -27,6 +27,7 @@ from src.utils.logger import get_logger
 from src.utils.title_matching import cle_album, names_match_as_words
 from src.utils.track_mapper import _clean_duration
 from src.utils.version_descriptors import titre_generique, titres_equivalents
+from src.utils.version_heritage import remixeur_etranger
 
 logger = get_logger(__name__)
 
@@ -103,16 +104,22 @@ def artiste_etranger(
     )
 
 
-def variante_etrangere(hit: dict | None, *, title: str) -> bool:
+def variante_etrangere(hit: dict | None, *, title: str, artistes=()) -> bool:
     """Le titre du hit et le titre attendu ne désignent pas le même morceau ou
-    pas la même VERSION (« MW2 » face à « MW2 (Chopped & $crewed) »). Second
-    motif de réparation : il se MONTRE (le titre servi est dans le rapport)."""
+    pas la même VERSION (« MW2 » face à « MW2 (Chopped & $crewed) »), ou le hit
+    est le remix d'un remixeur qui n'est aucun des `artistes` de la fiche quand
+    elle est un remix nu (« In Common (Kaskade Remix) » face à « In Common
+    (Remix) », `remixeur_etranger` — jugé seulement si `artistes` est donné :
+    sans artistes, tout remixeur serait étranger). Second motif de
+    réparation : il se MONTRE (le titre servi est dans le rapport)."""
     if not hit or not title:
         return False
     servi = titre_deezer(hit)
     if not servi:
         return False
-    return not titres_equivalents(title, servi)
+    if not titres_equivalents(title, servi):
+        return True
+    return bool(artistes) and remixeur_etranger(title, servi, artistes) is not None
 
 
 def hit_concorde(
@@ -126,13 +133,17 @@ def hit_concorde(
     tolerance: int = TOLERANCE_DUREE,
     album: str | None = None,
     autres_albums: frozenset = frozenset(),
+    artistes_connus=(),
 ) -> tuple[bool, str]:
     """Le hit est-il le morceau cherché ? → `(verdict, motif)`.
 
     1. **Artiste** — par id si connu, sinon par mots entiers, plus les
        FORMATIONS et alias confirmés (`noms_acceptes`) — cf. `artiste_etranger`.
     2. **Titre** — OBLIGATOIRE : `titres_equivalents` (mêmes titres normalisés,
-       ou même socle avec descripteurs de version de la même famille).
+       ou même socle avec descripteurs de version de la même famille) ; face à
+       un remix nu, le remixeur nommé par Deezer doit être un artiste de la
+       fiche (`artist_name`, `noms_acceptes`, `artistes_connus` : invités,
+       crédits) — sinon c'est un autre remix.
     3. **Disque** — un hit du disque d'une AUTRE fiche au titre équivalent
        (`autres_albums`, clés `cle_album`) est la piste de cette fiche-là.
     4. **Durée** — seulement quand la fiche en a une (`previous_duration`) :
@@ -153,6 +164,14 @@ def hit_concorde(
         return False, f"artiste : Deezer crédite {credites}, attendu {artist_name}"
     if variante_etrangere(hit, title=title):
         return False, f"titre : Deezer sert « {titre_deezer(hit)} », attendu « {title} »"
+    remixeur = remixeur_etranger(
+        title, titre_deezer(hit), (artist_name, *noms_acceptes, *artistes_connus)
+    )
+    if remixeur:
+        return False, (
+            f"remix : Deezer sert « {titre_deezer(hit)} », remixé par {remixeur}, "
+            f"qui n'est aucun des artistes de la fiche"
+        )
     # Un titre GÉNÉRIQUE (« Intro ») ne désigne une fiche que dans SON disque :
     # l'« Intro » de *0.9* allait sur celle d'*Autopsie Vol. 3* (Booba,
     # 2026-10-10 — même titre, même durée de 18 s).

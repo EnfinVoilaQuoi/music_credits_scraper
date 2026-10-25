@@ -20,8 +20,10 @@ from __future__ import annotations
 
 import re
 
+from src.utils.spotify_identity import artistes_connus
 from src.utils.title_matching import contains_as_words, names_match_as_words, normalize_name
-from src.utils.version_descriptors import titres_equivalents
+from src.utils.version_descriptors import Kind, parse_variant, titres_equivalents
+from src.utils.version_heritage import remixeur_etranger
 
 #: Champ d'observation de l'identifiant PROPOSÉ par Genius (déclaré, jamais arbitré).
 CHAMP_APPLE_PROPOSE = "apple_music_id_propose"
@@ -57,6 +59,14 @@ def fiche_concorde(track, fiche: dict | None) -> tuple[bool, str]:
         return False, f"artiste : iTunes crédite « {artiste} »"
     if not titres_equivalents(track.title, titre_sans_invites(titre)):
         return False, f"titre : iTunes sert « {titre} »"
+    # Le remix d'un remixeur qui n'est aucun des artistes de la fiche (2026-10-25 :
+    # le lien Apple de la page Genius « Stand Up (Remix) », le remix de mixtape
+    # avec Kanye, servait « Stand Up (feat. Shawnna) [Fatboy Slim Remix] »).
+    remixeur = parse_variant(track.title).kind == Kind.REMIX_BARE and remixeur_etranger(
+        track.title, titre_sans_invites(titre), artistes_connus(track)
+    )
+    if remixeur:
+        return False, f"remix : iTunes sert « {titre} », remixé par {remixeur}"
     duree = duree_de(fiche)
     if track.duration and duree and abs(int(track.duration) - duree) > TOLERANCE_DUREE:
         return False, f"durée : {track.duration} s attendus, {duree} s chez iTunes"

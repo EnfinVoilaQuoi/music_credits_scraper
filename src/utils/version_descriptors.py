@@ -764,9 +764,13 @@ def meme_famille(a: Variant, b: Variant, *, compter_qualificatifs: bool = True) 
     if qualificatifs_incompatibles(a, b, compter=compter_qualificatifs):
         return False
     if a.est_remix and b.est_remix:
-        # Genius écrit « (Remix) », Spotify nomme le remixeur (« In Common - Black
-        # Coffee Remix ») : un remix NU face à un remix NOMMÉ est le même remix
-        # jusqu'à preuve du contraire. Deux remixeurs nommés différents, non.
+        # Genius écrit « (Remix) », une plateforme nomme le remixeur : un remix
+        # NU face à un remix NOMMÉ est le même remix jusqu'à preuve du
+        # contraire. Deux remixeurs nommés différents, non. La preuve se lit
+        # dans les ARTISTES, que ce prédicat de titres n'a pas : les juges
+        # d'identité la demandent à `version_heritage.remixeur_etranger`
+        # (2026-10-25 : « In Common (Remix) », avec Kanye et Travis Scott, n'est
+        # pas « In Common - Black Coffee Remix », pris ici en exemple le 24/09).
         if a.remixer and b.remixer:
             return normalize_title(a.remixer) == normalize_title(b.remixer)
         return True

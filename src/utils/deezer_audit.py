@@ -145,7 +145,15 @@ def criteres_de_la_ligne(ligne: dict, noms_acceptes=()) -> dict:
         "previous_duration": ligne["duree_independante"],
         "artist_deezer_id": None if featuring else ligne["artist_deezer_id"],
         "noms_acceptes": tuple(sorted(noms_acceptes)),
+        # Les artistes de la ligne : un remixeur nommé par Deezer face à un
+        # remix nu doit en être un (`remixeur_etranger`).
+        "artistes_connus": tuple(n for n in (ligne["artiste"], ligne["primary_artist_name"]) if n),
     }
+
+
+def _artistes(criteres: dict) -> tuple:
+    """Les artistes de la fiche que `hit_concorde` connaît pour ces critères."""
+    return (criteres["artist_name"], *criteres["noms_acceptes"], *criteres["artistes_connus"])
 
 
 def verifier_lignes(
@@ -199,7 +207,9 @@ def verifier_lignes(
                             artist_deezer_id=criteres["artist_deezer_id"],
                             noms_acceptes=criteres["noms_acceptes"],
                         ),
-                        "variante_etrangere": variante_etrangere(fiche, title=ligne["title"]),
+                        "variante_etrangere": variante_etrangere(
+                            fiche, title=ligne["title"], artistes=_artistes(criteres)
+                        ),
                         "deezer": {
                             "title": fiche.get("title"),
                             "artist": (fiche.get("artist") or {}).get("name"),
@@ -264,7 +274,9 @@ def verifier_lignes_isrc(
                             artist_deezer_id=criteres["artist_deezer_id"],
                             noms_acceptes=criteres["noms_acceptes"],
                         ),
-                        "variante_etrangere": variante_etrangere(fiche, title=ligne["title"]),
+                        "variante_etrangere": variante_etrangere(
+                            fiche, title=ligne["title"], artistes=_artistes(criteres)
+                        ),
                         "deezer": {
                             "title": fiche.get("title"),
                             "artist": (fiche.get("artist") or {}).get("name"),

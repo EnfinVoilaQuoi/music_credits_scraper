@@ -25,7 +25,7 @@ from src.persistence import brut
 from src.scrapers.playwright_manager import get_playwright
 from src.utils.logger import get_logger, log_api
 from src.utils.title_matching import either_contains_as_words
-from src.utils.version_descriptors import meme_version
+from src.utils.version_descriptors import meme_version_mesuree
 
 logger = get_logger(__name__)
 
@@ -186,9 +186,10 @@ class SongBPMScraper:
         Spotify et Deezer : des descripteurs de familles DIFFÉRENTES désignent
         un autre enregistrement (live, acoustique, remix, instrumental…) ; un
         titre GÉNÉRIQUE n'est reconnu que titre complet égal. Le verdict est
-        partagé avec GetSongBPM (`version_descriptors.meme_version`).
+        partagé avec GetSongBPM (`version_descriptors.meme_version_mesuree`,
+        qui exige aussi la même PARTIE).
         """
-        return meme_version(
+        return meme_version_mesuree(
             self._normalize_title_for_matching(search_title),
             self._normalize_title_for_matching(result_title),
         )

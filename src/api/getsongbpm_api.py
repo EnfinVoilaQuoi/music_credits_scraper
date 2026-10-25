@@ -29,7 +29,7 @@ from src.utils.fichiers_json import ecrire_atomique, lire_cache
 # Import logger
 from src.utils.logger import get_logger
 from src.utils.title_matching import either_contains_as_words, normalize_name
-from src.utils.version_descriptors import meme_version, titre_generique
+from src.utils.version_descriptors import meme_version_mesuree, titre_generique
 
 logger = get_logger(__name__)
 
@@ -204,7 +204,7 @@ class GetSongBPMFetcher:
             # Même VERSION (règle partagée avec SongBPM) : sans elle, le repli
             # par inclusion ci-dessous donnait à « Intro » de Josman le BPM de
             # « Doigt D'Honneur (Intro) », et à « Blues » celui de son live.
-            if not meme_version(title, h.get("title", "")):
+            if not meme_version_mesuree(title, h.get("title", "")):
                 continue
             if generique:
                 disque = h.get("album")

@@ -1047,6 +1047,17 @@ def meme_version(a: str | None, b: str | None) -> bool:
     return meme_version_cherchee(cle_titre(a), cle_titre(b))
 
 
+def meme_version_mesuree(a: str | None, b: str | None) -> bool:
+    """`meme_version`, et la même PARTIE (`memes_parties`) — garde des sources
+    de MESURES (SongBPM, GetSongBPM), dont le repli par inclusion donnait à
+    « Solo Dolo, Pt. IV » le BPM, la tonalité et la durée de « Solo Dolo
+    (Nightmare) » (rejeu du brut SongBPM du 2026-10-25 : seul choix changé sur
+    431). Pas dans `meme_version` : YouTube le partage et juge des titres de
+    vidéo, où « Freeze Corleone 667 - Recette » ou « part1 » se liraient comme
+    des parties (83 verdicts vidéo du corpus faussés) ; sa garde est la sienne."""
+    return memes_parties(a, b) and meme_version(a, b)
+
+
 #: Un groupe de titre de VIDÉO qui ne dit rien de la version : la nature de la
 #: vidéo, sa qualité, son album, son producteur (« (Clip Officiel) », « [4K
 #: Remastered] », « (Réédition album "L'AMOUR") », « (prod. klm) »).

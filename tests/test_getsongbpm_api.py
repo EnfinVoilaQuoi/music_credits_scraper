@@ -103,12 +103,14 @@ class TestSelectionDuHit:
             # premier pour « Intro » de Josman.
             ("Intro", "Doigt D'Honneur (Intro)"),
             ("Intro (A2)", "Intro"),
+            # Une autre PARTIE (rejeu du brut SongBPM, 2026-10-25).
+            ("Solo Dolo, Pt. IV", "Solo Dolo"),
         ],
     )
     def test_une_autre_version_n_est_jamais_retenue(self, client, cherche, propose):
         """Le repli par inclusion prenait le BPM d'une AUTRE version (remix,
-        live) ou d'un autre morceau au titre générique — règle partagée avec
-        SongBPM (`version_descriptors.meme_version`)."""
+        live), d'une autre partie ou d'un autre morceau au titre générique —
+        règle partagée avec SongBPM (`version_descriptors.meme_version_mesuree`)."""
         hits = [_song(titre=propose)]
         assert client._select_hit(hits, "ISHA", cherche) is None
 

@@ -207,6 +207,30 @@ class TestRapprochement:
     def test_featuring_ignore_dans_la_comparaison(self, scraper):
         assert self._match(scraper, result_title="Bande organisée (feat. SCH)") is True
 
+    def test_une_autre_partie_refusee(self, scraper):
+        """Par inclusion, « Solo Dolo, Pt. IV » prenait le BPM, la tonalité et
+        la durée de « Solo Dolo (Nightmare) » — le rejeu du brut (2026-10-25)."""
+        assert (
+            self._match(
+                scraper,
+                result_title="Solo Dolo (Nightmare)",
+                result_artist="Kid Cudi",
+                search_title="Solo Dolo, Pt. IV",
+                search_artist="Kid Cudi",
+            )
+            is False
+        )
+
+    def test_la_meme_partie_autrement_ecrite_retenue(self, scraper):
+        assert (
+            self._match(
+                scraper,
+                result_title="Solo Dolo Part III",
+                search_title="Solo Dolo, Pt. III",
+            )
+            is True
+        )
+
 
 # ────────────────────────────────────────────────── page de détail (texte)
 

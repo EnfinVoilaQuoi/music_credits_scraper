@@ -320,33 +320,29 @@ class SongBPMScraperAsync(SongBPMScraper):
             if not results:
                 return None
 
-            for i, result in enumerate(results[:max_results_to_check], 1):
-                # `titre_juge` : le titre COMPLET quand la requête a été
-                # nettoyée — sinon « Blues (Live at AK Studios) » cherché comme
-                # « Blues » acceptait la page de l'original (2026-09-27).
-                if self._match_track(
-                    result["title"],
-                    result["artist"],
-                    titre_juge or track_title,
-                    artist_name,
-                    result_spotify_id=result.get("spotify_id"),
-                    search_spotify_id=spotify_id,
-                ):
-                    logger.info(f"✅ Correspondance trouvée (résultat #{i})")
-                    if fetch_details and result.get("detail_url"):
-                        try:
-                            details = await self._extract_track_details_async(result["detail_url"])
-                            result.update(details)
-                        except (
-                            PlaywrightError,
-                            AttributeError,
-                            KeyError,
-                            TypeError,
-                            ValueError,
-                        ) as e:
-                            logger.warning(f"⚠️ Détails inaccessibles: {e}")
-                    log_api("SongBPM", f"search/{track_title}", True)
-                    return result
+            # `titre_juge` : le titre COMPLET quand la requête a été
+            # nettoyée — sinon « Blues (Live at AK Studios) » cherché comme
+            # « Blues » acceptait la page de l'original (2026-09-27).
+            choix = self.choisir_resultat(
+                results, titre_juge or track_title, artist_name, spotify_id, max_results_to_check
+            )
+            if choix is not None:
+                i, result = choix
+                logger.info(f"✅ Correspondance trouvée (résultat #{i})")
+                if fetch_details and result.get("detail_url"):
+                    try:
+                        details = await self._extract_track_details_async(result["detail_url"])
+                        result.update(details)
+                    except (
+                        PlaywrightError,
+                        AttributeError,
+                        KeyError,
+                        TypeError,
+                        ValueError,
+                    ) as e:
+                        logger.warning(f"⚠️ Détails inaccessibles: {e}")
+                log_api("SongBPM", f"search/{track_title}", True)
+                return result
 
             logger.info(
                 f"∅ Aucune correspondance parmi {min(len(results), max_results_to_check)} résultat(s)"

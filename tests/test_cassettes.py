@@ -5,6 +5,8 @@ classement des écarts Deezer d'un artiste (disques et pistes lus, fiches
 réduites à leur identité — aucune parole) et le résultat de l'enregistrement.
 Une règle qui change ce classement sur des données réelles est VUE ici ; un
 changement voulu se réenregistre (`python scripts/cassette_deezer.py <artiste>`).
+Kworb (`scripts/cassette_kworb.py`) et SongBPM (`scripts/cassette_songbpm.py`,
+toutes les pages de résultats du brut) suivent le même principe.
 """
 
 import json
@@ -67,3 +69,45 @@ def test_une_cassette_kworb_ne_porte_que_l_identite_des_fiches():
         cassette = json.loads(fichier.read_text(encoding="utf-8"))
         for fiche in cassette["base"]:
             assert set(fiche) <= {*cassettes.CHAMPS_KWORB, "spotify_id_entries"}
+
+
+SONGBPM = DOSSIER / "songbpm.json"
+
+
+def _cassette_songbpm():
+    return json.loads(SONGBPM.read_text(encoding="utf-8"))
+
+
+def _ecart(attendu, obtenu):
+    cle = lambda x: json.dumps(x, ensure_ascii=False, sort_keys=True)  # noqa: E731
+    return sorted({cle(x) for x in attendu} - {cle(x) for x in obtenu}), sorted(
+        {cle(x) for x in obtenu} - {cle(x) for x in attendu}
+    )
+
+
+def test_le_choix_songbpm_rejoue_donne_le_meme_resultat():
+    """SongBPM (2026-10-25) : sur chaque page de résultats gardée au brut, la
+    même fiche retient le même résultat, à la même place, que dans le run
+    enregistré (`scripts/cassette_songbpm.py`)."""
+    cassette = _cassette_songbpm()
+    en_moins, en_plus = _ecart(cassette["attendu"], cassettes.rejouer_songbpm(cassette))
+    assert not en_moins and not en_plus, "\n".join(
+        [f"- {x}" for x in en_moins[:10]] + [f"+ {x}" for x in en_plus[:10]]
+    )
+
+
+def test_la_cassette_songbpm_a_des_dents(monkeypatch):
+    """Un juge qui oublie la VERSION (et la partie) change des choix réels :
+    « Solo Dolo, Pt. IV » prendrait « Solo Dolo (Nightmare) »."""
+    from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
+
+    monkeypatch.setattr(SongBPMScraper, "meme_version", lambda self, a, b: True)
+    cassette = _cassette_songbpm()
+    _, en_plus = _ecart(cassette["attendu"], cassettes.rejouer_songbpm(cassette))
+    assert any("Solo Dolo, Pt. IV" in x and "nightmare" in x.lower() for x in en_plus)
+
+
+def test_une_cassette_songbpm_ne_porte_que_l_identite_des_fiches():
+    for page in _cassette_songbpm()["pages"]:
+        for fiche in page["fiches"]:
+            assert set(fiche) == set(cassettes.CHAMPS_SONGBPM)

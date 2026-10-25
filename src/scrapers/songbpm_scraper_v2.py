@@ -250,6 +250,30 @@ class SongBPMScraper:
         logger.info(f"❌ REJET: titre trop différent (sim {ratio:.2f}: '{st}' vs '{rt}')")
         return False
 
+    def choisir_resultat(
+        self,
+        results: list[dict[str, Any]],
+        titre_juge: str,
+        artist_name: str,
+        spotify_id: str | None = None,
+        max_results_to_check: int = 5,
+    ) -> tuple[int, dict[str, Any]] | None:
+        """Le premier des `max_results_to_check` résultats que `_match_track`
+        accepte, avec sa place (1 = premier), sinon None. PUR (aucun accès à la
+        page) : commun aux deux jumeaux, et rejoué tel quel par la cassette
+        SongBPM (`tests/test_cassettes.py`)."""
+        for i, result in enumerate(results[:max_results_to_check], 1):
+            if self._match_track(
+                result["title"],
+                result["artist"],
+                titre_juge,
+                artist_name,
+                result_spotify_id=result.get("spotify_id"),
+                search_spotify_id=spotify_id,
+            ):
+                return i, result
+        return None
+
     # ──────────────────────────────────────────────────────────────────────────
     # Gestion cookies (Playwright)
     # ──────────────────────────────────────────────────────────────────────────
@@ -491,33 +515,29 @@ class SongBPMScraper:
             if not results:
                 return None
 
-            for i, result in enumerate(results[:max_results_to_check], 1):
-                # `titre_juge` : le titre COMPLET quand la requête a été
-                # nettoyée — sinon « Blues (Live at AK Studios) » cherché comme
-                # « Blues » acceptait la page de l'original (2026-09-27).
-                if self._match_track(
-                    result["title"],
-                    result["artist"],
-                    titre_juge or track_title,
-                    artist_name,
-                    result_spotify_id=result.get("spotify_id"),
-                    search_spotify_id=spotify_id,
-                ):
-                    logger.info(f"✅ Correspondance trouvée (résultat #{i})")
-                    if fetch_details and result.get("detail_url"):
-                        try:
-                            details = self._extract_track_details(result["detail_url"])
-                            result.update(details)
-                        except (
-                            PlaywrightError,
-                            AttributeError,
-                            KeyError,
-                            TypeError,
-                            ValueError,
-                        ) as e:
-                            logger.warning(f"⚠️ Détails inaccessibles: {e}")
-                    log_api("SongBPM", f"search/{track_title}", True)
-                    return result
+            # `titre_juge` : le titre COMPLET quand la requête a été
+            # nettoyée — sinon « Blues (Live at AK Studios) » cherché comme
+            # « Blues » acceptait la page de l'original (2026-09-27).
+            choix = self.choisir_resultat(
+                results, titre_juge or track_title, artist_name, spotify_id, max_results_to_check
+            )
+            if choix is not None:
+                i, result = choix
+                logger.info(f"✅ Correspondance trouvée (résultat #{i})")
+                if fetch_details and result.get("detail_url"):
+                    try:
+                        details = self._extract_track_details(result["detail_url"])
+                        result.update(details)
+                    except (
+                        PlaywrightError,
+                        AttributeError,
+                        KeyError,
+                        TypeError,
+                        ValueError,
+                    ) as e:
+                        logger.warning(f"⚠️ Détails inaccessibles: {e}")
+                log_api("SongBPM", f"search/{track_title}", True)
+                return result
 
             logger.info(
                 f"∅ Aucune correspondance parmi {min(len(results), max_results_to_check)} résultat(s)"

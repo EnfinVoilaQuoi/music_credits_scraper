@@ -111,6 +111,7 @@ scripts/*
 !scripts/corpus_paires_titres.py
 !scripts/cassette_deezer.py
 !scripts/cassette_kworb.py
+!scripts/cassette_songbpm.py
 !scripts/invariants_apres_rejeu.py
 !scripts/simuler_priorites.py
 !scripts/simuler_politiques_revue.py

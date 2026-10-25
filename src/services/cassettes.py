@@ -8,6 +8,8 @@ le résultat attendu. Rejouée à chaque suite de tests
 (`tests/test_cassettes.py`), elle voit toute règle qui change le classement de
 données réelles ; un changement VOULU se réenregistre
 (`scripts/cassette_deezer.py`) et le diff du fixture nomme les écarts touchés.
+Même principe pour le rapprochement Kworb (`scripts/cassette_kworb.py`) et le
+choix d'un résultat SongBPM (`scripts/cassette_songbpm.py`).
 """
 
 from __future__ import annotations
@@ -163,4 +165,36 @@ def rejouer_kworb(cassette: dict) -> list[dict]:
             entry, index, Artist(name=artiste), cassette["decisions"], identites.get
         )
         sortie.append(update_kworb.verdict_vers_dict(entry, r))
+    return sorted(sortie, key=lambda x: json.dumps(x, ensure_ascii=False, sort_keys=True))
+
+
+# ── SongBPM (2026-10-25) : le choix d'un résultat de recherche ──────────────
+
+#: Ce que le choix SongBPM lit d'une fiche : son titre (le titre JUGÉ, même
+#: quand la requête a été nettoyée), l'artiste cherché (le principal Genius
+#: d'une ligne d'invité) et l'ID Spotify passé au juge (`spotify_id_utilisable`).
+CHAMPS_SONGBPM = ("id", "title", "artiste", "spotify_id")
+
+
+def rejouer_songbpm(cassette: dict) -> list[dict]:
+    """Pour chaque page de résultats et chaque fiche qui l'a demandée, le
+    résultat retenu par `SongBPMScraper.choisir_resultat` (sa place et sa page
+    de détail), trié."""
+    from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
+
+    juge = SongBPMScraper()
+    sortie = []
+    for page in cassette["pages"]:
+        for fiche in page["fiches"]:
+            choix = juge.choisir_resultat(
+                page["resultats"], fiche["title"], fiche["artiste"], fiche["spotify_id"]
+            )
+            sortie.append(
+                {
+                    "requete": page["requete"],
+                    "fiche": fiche["id"],
+                    "place": choix[0] if choix else None,
+                    "retenu": choix[1]["detail_url"] if choix else None,
+                }
+            )
     return sorted(sortie, key=lambda x: json.dumps(x, ensure_ascii=False, sort_keys=True))

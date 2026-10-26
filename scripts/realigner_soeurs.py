@@ -28,8 +28,8 @@ def main() -> int:
     dm = DataManager()
     changes = dm.realigner_soeurs()
     print(
-        f"{len(changes)} famille(s) changent, {sum(changes.values())} ligne(s) de données "
-        "de page réécrite(s)"
+        f"{len(changes)} famille(s) changent, {sum(changes.values())} ligne(s) réécrite(s) "
+        "(données de page, lien YouTube)"
     )
     if not args.apply:
         print("(à blanc — relancer avec --apply pour écrire)")

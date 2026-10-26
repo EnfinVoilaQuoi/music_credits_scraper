@@ -40,11 +40,13 @@ from src.utils.title_matching import cle_album, clean_stored_title, normalize_na
 from src.utils.track_mapper import _clean_duration, recherche_de_ligne, track_from_row
 from src.utils.track_soeurs import (
     CLES_LOCALES_DES_RELATIONS,
+    aligner_lien_youtube_des_soeurs,
     avec_relations_manuelles,
     effacer_chez_les_soeurs,
     fusionner_constat_instrumental,
     ids_soeurs,
     relations_a_stocker,
+    serialiser_relations,
     synchroniser_soeurs,
 )
 from src.utils.version_descriptors import titre_generique
@@ -2675,7 +2677,7 @@ class TrackRepository:
         relations posées À LA MAIN chez une sœur sont gardées
         (`avec_relations_manuelles`, comme l'alignement des sœurs).
         """
-        brut = json.dumps(relations_a_stocker(relationships))
+        brut = serialiser_relations(relations_a_stocker(relationships))
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
@@ -2684,9 +2686,9 @@ class TrackRepository:
                 ).scalar()
                 jumelles, _ = ids_soeurs(conn, track_id, gid)
                 if jumelles:
-                    # Re-sérialisé à l'identique de `brut` (échappé) : deux
-                    # sœurs se comparent comme des chaînes.
-                    brut = json.dumps(
+                    # Re-sérialisé sous LA forme stockée : deux sœurs se
+                    # comparent comme des chaînes.
+                    brut = serialiser_relations(
                         json.loads(
                             avec_relations_manuelles(
                                 brut,
@@ -2730,9 +2732,8 @@ class TrackRepository:
                     continue
                 propres = relations_a_stocker(relations)
                 if propres != relations:
-                    # Même graphie que l'écriture d'origine (échappée ou non) :
-                    # deux sœurs se comparent comme des chaînes.
-                    a_reecrire[tid] = json.dumps(propres, ensure_ascii=brut.isascii())
+                    # LA forme stockée : deux sœurs se comparent comme des chaînes.
+                    a_reecrire[tid] = serialiser_relations(propres)
         if appliquer and a_reecrire:
             # Aucun verdict ne dépend des relations : rien à recalculer.
             with self._ecrire() as conn:
@@ -3245,8 +3246,9 @@ class TrackRepository:
         """Rejoue `synchroniser_soeurs` sur chaque famille de lignes sœurs (même
         `genius_id` chez plusieurs artistes), puis rematérialise ses membres —
         rattrapage des familles divergées avant la règle « la lecture la plus
-        récente de la page l'emporte » (2026-10-12). Rend `{genius_id: lignes
-        de page réécrites}` pour les familles qui changent ; sans `appliquer`,
+        récente de la page l'emporte » (2026-10-12) et du lien YouTube arbitré
+        (2026-10-26). Rend `{genius_id: lignes réécrites (données de page et
+        lien YouTube)}` pour les familles qui changent ; sans `appliquer`,
         la transaction est annulée (passage à blanc). Aucune règle n'est
         réimplémentée ici : c'est la synchronisation de `save_track`."""
         changes: dict[int, int] = {}
@@ -3267,8 +3269,11 @@ class TrackRepository:
                     for gid, tid in familles:
                         rapport = synchroniser_soeurs(conn, tid, gid)
                         self._toucher(conn, tid, *rapport["jumelles"])
-                        if rapport.get("donnees_de_page"):
-                            changes[gid] = rapport["donnees_de_page"]
+                        reecrites = rapport.get("donnees_de_page", 0) + rapport.get(
+                            "lien_youtube", 0
+                        )
+                        if reecrites:
+                            changes[gid] = reecrites
                     self._recalculer_touchees(conn)
                 finally:
                     conn.info.pop(self._A_RECALCULER, None)
@@ -5440,6 +5445,9 @@ class TrackRepository:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
                 conn.execute(stmt)
+                # Un ✔️ vaut pour l'ENREGISTREMENT : la sœur qui a déjà un lien
+                # ne le recevrait jamais par le comblement (2026-10-26).
+                aligner_lien_youtube_des_soeurs(conn, track_id)
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur update_track_youtube_url (track_id={track_id}): {e}")

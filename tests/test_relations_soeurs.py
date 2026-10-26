@@ -66,6 +66,29 @@ def test_la_relation_posee_a_la_main_chez_une_soeur_est_gardee(data_manager, soe
     assert _divergences(data_manager) == []
 
 
+def test_une_seule_graphie_quel_que_soit_l_ecrivain(data_manager, soeurs):
+    """« Pressure (Original) » (2026-10-26) : l'alignement des sœurs écrivait
+    « ¥$ » brut (relation manuelle ajoutée), puis `record_relationships` relu
+    chez une seule sœur écrivait « \\u00a5$ » — même contenu, deux chaînes."""
+    kanye, cudi = soeurs
+    with data_manager.engine.begin() as conn:
+        for tid, rels, lu in (
+            (kanye.id, [_SAMPLE, _MANUELLE], "2026-10-16T17:23:32"),
+            (cudi.id, [_SAMPLE], "2026-10-22T06:00:04"),  # la lecture la plus récente
+        ):
+            conn.execute(
+                text(
+                    "UPDATE tracks SET relationships = :r, genius_detail_checked_at = :lu, "
+                    "last_scraped = NULL WHERE id = :t"
+                ),
+                {"r": json.dumps(rels), "lu": lu, "t": tid},
+            )
+    data_manager.save_track(cudi)  # l'alignement : la page de Kid Cudi + la manuelle
+    data_manager.record_relationships(cudi.id, [dict(_SAMPLE)])
+    assert _relations(data_manager, kanye.id) == _relations(data_manager, cudi.id)
+    assert _divergences(data_manager) == []
+
+
 def test_reparation_retire_les_cles_locales(data_manager, soeurs):
     kanye, cudi = soeurs
     with data_manager.engine.begin() as conn:  # l'état laissé par l'ancien code

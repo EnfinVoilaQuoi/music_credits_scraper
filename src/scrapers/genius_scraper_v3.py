@@ -417,6 +417,14 @@ class GeniusScraperV3(CrawlAIScraperBase):
             track.lyrics.scraped_at = datetime.now()
             track.lyrics.source = "genius"
             logger.info(f"🎹 Instrumental constaté sur Genius pour '{track.title}'")
+        elif self._non_transcrites_bs4(soup) and (track.lyrics.text or "").strip():
+            # Des paroles d'une AUTRE source (YTM, Musixmatch, héritage) : la page
+            # ne dit rien d'elles. Le constat, qui ne vidait pas le texte (le
+            # save ne vide jamais), lui volait sa provenance — 11 fiches
+            # « non transcrites » à paroles, dont une sœur divergente (2026-10-26).
+            logger.info(
+                f"📭 Page Genius non transcrite, paroles d'ailleurs gardées : '{track.title}'"
+            )
         elif self._non_transcrites_bs4(soup):
             # La page a répondu, sans paroles POUR L'INSTANT : un constat daté,
             # relu après `RELIRE_NON_TRANSCRITES` (Lyrics.page_genius_a_relire).

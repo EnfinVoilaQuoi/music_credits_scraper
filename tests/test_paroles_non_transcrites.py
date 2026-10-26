@@ -67,6 +67,19 @@ class TestDetectionPage:
         assert t.lyrics.text is None and t.lyrics.instrumental is None
         assert t.lyrics.non_transcrites()
 
+    def test_des_paroles_d_une_autre_source_gardent_leur_provenance(
+        self, scraper, page_non_transcrite
+    ):
+        # « Erase Me (Remix) » (2026-10-26) : texte YTM « Source: LyricFind »,
+        # relu sur une page non transcrite — le constat volait la provenance.
+        t = Track(title="Erase Me (Remix)", artist=None)
+        t.lyrics.text = "She said..."
+        t.lyrics.source = "Source: LyricFind"
+        scraper._apply_lyrics_from_html(page_non_transcrite, t)
+        assert t.lyrics.text == "She said..."
+        assert t.lyrics.source == "Source: LyricFind"
+        assert not t.lyrics.non_transcrites()
+
     def test_des_paroles_arrivees_levent_le_constat(self, scraper):
         t = _constatee()
         scraper._apply_lyrics_from_html(load_fixture("genius/song_page.html"), t)

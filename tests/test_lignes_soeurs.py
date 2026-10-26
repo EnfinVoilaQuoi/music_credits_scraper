@@ -691,3 +691,91 @@ def test_une_identite_divergente_entre_soeurs_va_au_panneau(data_manager, famill
         c for c in revue.analyser(data_manager, artiste).actifs if c.detecteur == "soeurs_identite"
     ]
     assert len(cas) == 1 and "spotify_id différent" in cas[0].motif
+
+
+class TestLienYoutube:
+    """Le lien principal s'aligne là où un arbitre existe (2026-10-26 : 4
+    familles Kanye / Kid Cudi, un ✔️ posé sur une seule ligne)."""
+
+    @staticmethod
+    def _poser(data_manager, track_id, url, source, nature):
+        with data_manager.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "UPDATE tracks SET youtube_url = :u, youtube_url_source = :s, "
+                    "youtube_video_kind = :k WHERE id = :t"
+                ),
+                {"u": url, "s": source, "k": nature, "t": track_id},
+            )
+
+    @staticmethod
+    def _lien(data_manager, track_id):
+        return tuple(
+            _colonne(data_manager, track_id, c)
+            for c in ("youtube_url", "youtube_url_source", "youtube_video_kind")
+        )
+
+    def test_meme_video_la_provenance_la_plus_forte_et_la_nature_connue(
+        self, data_manager, famille
+    ):
+        """« Champions » : `manual` / « unknown » chez Kanye, `genius_media` /
+        « audio » chez Travis, même vidéo."""
+        swing, isha = famille
+        self._poser(
+            data_manager,
+            swing.id,
+            "https://www.youtube.com/watch?v=YIoAZ0Sh8-U",
+            "manual",
+            "unknown",
+        )
+        self._poser(data_manager, isha.id, "https://youtu.be/YIoAZ0Sh8-U", "genius_media", "audio")
+        data_manager.save_track(isha)
+        attendu = ("manual", "audio")
+        assert self._lien(data_manager, swing.id)[1:] == attendu
+        assert self._lien(data_manager, isha.id)[1:] == attendu
+
+    def test_le_choix_manuel_vaut_chez_la_soeur(self, data_manager, famille):
+        """« Sky City » : le ✔️ chez Kanye, le lien Genius gardé chez Kid Cudi."""
+        swing, isha = famille
+        self._poser(
+            data_manager,
+            isha.id,
+            "https://www.youtube.com/watch?v=BzcuDb8WYUU",
+            "genius_media",
+            "audio",
+        )
+        url = "https://www.youtube.com/watch?v=g44Y0L-TNpk"
+        assert data_manager.update_track_youtube_url(swing.id, url, "manual")
+        assert self._lien(data_manager, isha.id)[:2] == (url, "manual")
+
+    def test_deux_liens_sans_choix_manuel_restent_au_panneau(self, data_manager, famille):
+        swing, isha = famille
+        self._poser(
+            data_manager,
+            swing.id,
+            "https://www.youtube.com/watch?v=AAAAAAAAAAA",
+            "genius_media",
+            "audio",
+        )
+        self._poser(
+            data_manager,
+            isha.id,
+            "https://www.youtube.com/watch?v=BBBBBBBBBBB",
+            "search_auto",
+            "audio",
+        )
+        data_manager.save_track(isha)
+        assert self._lien(data_manager, swing.id)[1] == "genius_media"
+        assert self._lien(data_manager, isha.id)[1] == "search_auto"
+
+    def test_deux_choix_manuels_differents_restent_au_panneau(self, data_manager, famille):
+        swing, isha = famille
+        self._poser(
+            data_manager, swing.id, "https://www.youtube.com/watch?v=AAAAAAAAAAA", "manual", "audio"
+        )
+        self._poser(
+            data_manager, isha.id, "https://www.youtube.com/watch?v=BBBBBBBBBBB", "manual", "clip"
+        )
+        data_manager.save_track(isha)
+        assert self._lien(data_manager, swing.id)[0].endswith("AAAAAAAAAAA")
+        assert self._lien(data_manager, isha.id)[0].endswith("BBBBBBBBBBB")

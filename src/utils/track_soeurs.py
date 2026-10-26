@@ -23,7 +23,7 @@ C'est ce qui rend l'ordre d'écriture inoffensif. Deux sœurs sont remplies par 
 déclenchements différents (import, enrichissement, run de streams) ; sans cette
 règle, la PREMIÈRE qui écrit fixerait la valeur commune et un save pauvre
 effacerait ce que les autres savaient. Là où un arbitre existe, c'est lui qui
-tranche et non l'ordre : `source_lien_retenue` pour le lien YouTube,
+tranche et non l'ordre : `_aligner_lien_youtube` pour le lien YouTube,
 `reconcile_spotify_streams` pour les streams, les observations pour l'audio, les
 paroles et — depuis le lot B — la durée, la date et l'ISRC.
 """
@@ -31,6 +31,7 @@ paroles et — depuis le lot B — la durée, la date et l'ISRC.
 import json
 
 from src.utils.logger import get_logger
+from src.utils.youtube_utils import extract_video_id
 
 logger = get_logger(__name__)
 
@@ -220,7 +221,15 @@ def avec_relations_manuelles(relations_json: str | None, toutes: list) -> str | 
                 ajout = True
     if not ajout:
         return relations_json
-    return json.dumps(relations, ensure_ascii=False)
+    return serialiser_relations(relations)
+
+
+def serialiser_relations(relations) -> str:
+    """PUR. LA forme stockée des relations : JSON échappé (`ensure_ascii`, celle
+    de 1 084 lignes sur 1 087 à caractères non ASCII). Deux sœurs se comparent
+    comme des chaînes : « ¥$ » d'un côté et « \\u00a5$ » de l'autre suffisaient
+    à les faire diverger (« Pressure (Original) », 2026-10-26)."""
+    return json.dumps(relations)
 
 
 #: Clés d'une relation propres à la MACHINE (un chemin d'image sur disque) :
@@ -295,6 +304,110 @@ def _aligner_sur_la_lecture_la_plus_recente(conn, famille: list[int]) -> int:
             )
             reecrites += 1
     return reecrites
+
+
+#: Le lien YouTube PRINCIPAL et ce qui le décrit : ils voyagent ensemble.
+COLONNES_LIEN_YOUTUBE = (
+    "youtube_url",
+    "youtube_url_source",
+    "youtube_video_kind",
+    "youtube_video_views",
+    "youtube_video_views_updated",
+)
+
+#: Rang d'une provenance de lien — l'ordre de `update_track_youtube_url` :
+#: le choix de l'utilisateur, puis le lien de la page Genius, puis le reste.
+_RANG_LIEN = {"manual": 2, "genius_media": 1}
+
+
+def _rang_lien(source) -> int:
+    return _RANG_LIEN.get(source or "", 0)
+
+
+def _nature_connue(nature) -> bool:
+    return not _est_vide(nature) and nature != "unknown"
+
+
+def _aligner_lien_youtube(conn, famille: list[int]) -> int:
+    """Le lien YouTube principal, aligné entre sœurs là où un arbitre existe.
+
+    · MÊME vidéo partout : seule l'étiquette diffère — la provenance au plus
+      haut rang (`manual` > `genius_media` > le reste) et la nature connue
+      (« audio » plutôt que « unknown ») gagnent.
+    · Vidéos DIFFÉRENTES : seul un choix `manual` UNIQUE se transmet — c'est
+      déjà la décision de l'utilisateur, pour tout l'enregistrement. Sinon rien :
+      l'une des deux est fausse, le panneau 🧬 le montre (décision 2026-10-12).
+
+    Le comblement ne remplissait que les trous : un ✔️ posé sur une ligne ne
+    gagnait jamais chez sa sœur, qui gardait son lien Genius (Kanye / Kid Cudi
+    « Sky City », « Champions », « Reborn », « Ghost Town », 2026-10-26).
+    Un remplacement, jamais un vidage. Idempotent. Rend le nombre de lignes
+    réécrites."""
+    from sqlalchemy import text
+
+    marques = ", ".join(f":f{n}" for n in range(len(famille)))
+    lignes = (
+        conn.execute(
+            text(
+                f"SELECT id, {', '.join(COLONNES_LIEN_YOUTUBE)} "  # noqa: S608
+                f"FROM tracks WHERE id IN ({marques})"
+            ),
+            {f"f{n}": tid for n, tid in enumerate(famille)},
+        )
+        .mappings()
+        .all()
+    )
+    avec = [r for r in lignes if not _est_vide(r["youtube_url"])]
+
+    def video(r):
+        return extract_video_id(r["youtube_url"]) or r["youtube_url"]
+
+    if len({video(r) for r in avec}) > 1:
+        manuelles = [r for r in avec if r["youtube_url_source"] == "manual"]
+        if len({video(r) for r in manuelles}) != 1:
+            return 0
+        valeurs = {c: manuelles[0][c] for c in COLONNES_LIEN_YOUTUBE}
+        a_reecrire = [r for r in avec if video(r) != video(manuelles[0])]
+    elif avec:
+        gagnante = max(avec, key=lambda r: (_rang_lien(r["youtube_url_source"]), -r["id"]))
+        natures = [r["youtube_video_kind"] for r in avec if _nature_connue(r["youtube_video_kind"])]
+        valeurs = {
+            "youtube_url_source": gagnante["youtube_url_source"],
+            "youtube_video_kind": (
+                gagnante["youtube_video_kind"]
+                if _nature_connue(gagnante["youtube_video_kind"]) or not natures
+                else natures[0]
+            ),
+        }
+        a_reecrire = avec
+    else:
+        return 0
+    reecrites = 0
+    for r in a_reecrire:
+        if all(r[c] == v for c, v in valeurs.items()):
+            continue
+        conn.execute(
+            text(
+                f"UPDATE tracks SET {', '.join(f'{c} = :{c}' for c in valeurs)} "  # noqa: S608
+                "WHERE id = :tid"
+            ),
+            {**valeurs, "tid": r["id"]},
+        )
+        reecrites += 1
+    return reecrites
+
+
+def aligner_lien_youtube_des_soeurs(conn, track_id: int) -> int:
+    """`_aligner_lien_youtube` sur la famille de `track_id` — pour l'écrivain
+    qui pose le lien sur UNE ligne (`update_track_youtube_url`) sans passer par
+    `synchroniser_soeurs`."""
+    from sqlalchemy import text
+
+    gid = conn.execute(
+        text("SELECT genius_id FROM tracks WHERE id = :tid"), {"tid": track_id}
+    ).scalar()
+    jumelles, _ = ids_soeurs(conn, track_id, gid)
+    return _aligner_lien_youtube(conn, [track_id, *jumelles]) if jumelles else 0
 
 
 def _colonnes_a_combler(conn, ids: list[int]) -> dict[int, dict]:
@@ -525,6 +638,7 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
     # Données de PAGE : la lecture la plus récente l'emporte (remplacement,
     # jamais vidage) — décision utilisateur 2026-10-12.
     rapport["donnees_de_page"] = _aligner_sur_la_lecture_la_plus_recente(conn, famille)
+    rapport["lien_youtube"] = _aligner_lien_youtube(conn, famille)
     # `has_lyrics` n'est que le reflet de `lyrics` : `0` étant une VALEUR pour
     # le comblement, une ligne qui recevait les paroles gardait son `0`
     # (2026-10-11 : 72 fiches à paroles marquées « sans paroles »).

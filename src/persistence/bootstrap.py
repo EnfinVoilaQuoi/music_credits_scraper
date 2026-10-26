@@ -25,6 +25,7 @@ Imports Alembic/SQLAlchemy **paresseux** (dans `_stamp_legacy`) : le démarrage
 normal (base déjà stampée) ne paie jamais le coût d'import.
 """
 
+import functools
 import sqlite3
 from contextlib import closing
 from pathlib import Path
@@ -147,8 +148,14 @@ def _current_revision(db_path: str) -> str | None:
         engine.dispose()
 
 
+@functools.cache
 def _head_revision() -> str:
-    """Révision head du dossier `alembic/versions` (sans toucher la base)."""
+    """Révision head du dossier `alembic/versions` (sans toucher la base).
+
+    Lue UNE fois par processus : Alembic recharge chaque fichier de révision
+    pour la trouver — 126 des 150 ms d'un `DataManager()` sur une base déjà à
+    jour (56 révisions, mesuré 2026-10-26), un coût qui grandit avec chaque
+    migration. Les révisions ne changent pas pendant que l'app tourne."""
     from alembic.script import ScriptDirectory
 
     return ScriptDirectory.from_config(make_alembic_config()).get_current_head()

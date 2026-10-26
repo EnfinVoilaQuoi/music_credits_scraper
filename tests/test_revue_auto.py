@@ -402,3 +402,23 @@ def test_alias_confirme_par_deux_sources_puis_retabli(data_manager, artiste, mon
     ]
     revue_auto.retablir(data_manager, artiste, correction)
     assert data_manager.get_artist_relations(artiste.id) == []
+
+
+def test_remix_tiers_cree_par_regle_puis_retabli(data_manager, artiste):
+    """Rétablir une fiche « remix par un tiers » créée par règle la supprime et
+    rend la ligne Kworb à la proposition (2026-10-26)."""
+    from src.services import revue_actions
+
+    titre = "One Man Can Change The World - Rudimental Remix"
+    t = Track(title="One Man Can Change the World (Rudimental Remix)", artist=artiste)
+    data_manager.save_track(t)
+    revue_actions._kworb_links().decide(artiste.name, titre, "tiers", t.id)
+    cas = revue.Cas("kworb_proposition", None, titre, "", 0, {"kworb_title": titre}, "k")
+    annulation = {"type": "fiche_kworb", "kworb_title": titre, "creee": t.id}
+    data_manager.journaliser_correction(artiste.id, cas, "regle:kworb_tiers", "créée", annulation)
+    _charger(data_manager, artiste)
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert t.title not in _charger(data_manager, artiste)
+    assert revue_actions._kworb_links().load(artiste.name)["decisions"] == {}

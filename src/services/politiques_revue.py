@@ -926,8 +926,35 @@ REGLES_ETENDUES = frozenset(
         ("liens_proposes", "confirmer_lien"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
+        ("kworb_proposition", "kworb_tiers"),
     }
 )
+
+
+def politique_kworb_tiers(cas, _track, ctx):
+    """Une ligne Kworb « remix par un tiers » (★ du rapprochement) que l'en-tête
+    Spotify confirme : remix NOMMÉ (le remixeur est dans le titre) ET l'artiste
+    crédité par Spotify. La fiche créée tient l'artiste en rôle SECONDAIRE
+    (`participation` : ni Timeline ni totaux). Un remix sans remixeur nommé
+    (« 2021 Remix Extended », souvent une édition d'un remix déjà en base) ou
+    une collaboration restent à l'humain."""
+    from src.utils.title_matching import names_match_as_words
+
+    preuves = cas.preuves or {}
+    if cas.detecteur != "kworb_proposition" or preuves.get("proposition") != "tiers":
+        return None
+    if preuves.get("kind") != "remix_named" or not preuves.get("remixer"):
+        return None
+    artiste = next((t.artist.name for t in ctx.disco if t.artist is not None), None)
+    credites = preuves.get("credited") or []
+    if not artiste or not any(names_match_as_words(artiste, nom) for nom in credites):
+        return None
+    return Arbitrage(
+        "remix par un tiers : fiche en rôle secondaire",
+        "kworb_tiers",
+        f"remixeur « {preuves['remixer']} » ; Spotify crédite {', '.join(credites)}",
+    )
+
 
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "bpm": politique_bpm,
@@ -937,6 +964,7 @@ _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "doublon_lrc": politique_lrc,
     "liens_proposes": politique_alias,
     "deezer_link_candidate": politique_liens_deezer,
+    "kworb_proposition": politique_kworb_tiers,
 }
 
 

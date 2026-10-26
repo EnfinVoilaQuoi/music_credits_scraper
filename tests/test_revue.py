@@ -471,6 +471,12 @@ class TestNatures:
         (cas,) = revue._cas_des_signalements([{**s, "detecteur": "kworb_proposition"}], set())
         assert cas.nature == revue.DECISION
 
+    def test_une_page_sans_info_n_est_pas_une_decision(self):
+        """2026-10-26 : une page qui ne porte rien ne pèse sur aucune donnée —
+        trancher « poubelle ou inédit » n'y change rien. Pour information."""
+        (sans_info,) = [d for d in revue.DETECTEURS if d.code == "sans_info"]
+        assert sans_info.nature == revue.INFORMATION
+
     def test_par_nature_et_cle_inchangee(self):
         t = _t("TOTAL 90", videos=[self._v("genius_media")])
         (cas,) = revue.detecter(

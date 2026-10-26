@@ -243,6 +243,38 @@ def test_id_partage_le_gate_designe_la_fiche():
     assert juger(cas_autre, autre, ctx) is None
 
 
+def test_kworb_remix_par_un_tiers_que_spotify_confirme():
+    """« One Man Can Change The World - Rudimental Remix » : remixeur nommé,
+    Kanye crédité par l'en-tête Spotify — fiche en rôle secondaire. Un remix
+    sans remixeur (« 2021 Remix Extended ») ou un artiste absent des crédits
+    Spotify : l'humain."""
+    t = _t("One Man Can Change the World", 1)
+    t.artist = Artist(name="Kanye West")
+    ctx = SimpleNamespace(disco=[t])
+    preuves = {
+        "proposition": "tiers",
+        "kind": "remix_named",
+        "remixer": "Rudimental",
+        "credited": ["Big Sean", "Kanye West", "John Legend", "Rudimental"],
+    }
+    cas = _cas("kworb_proposition", None, preuves)
+    assert pol.arbitrage_etendu(cas, None, ctx).action == "kworb_tiers"
+    assert (
+        pol.arbitrage_etendu(
+            _cas("kworb_proposition", None, {**preuves, "kind": "remix_bare", "remixer": None}),
+            None,
+            ctx,
+        )
+        is None
+    )
+    assert (
+        pol.arbitrage_etendu(
+            _cas("kworb_proposition", None, {**preuves, "credited": ["Rudimental"]}), None, ctx
+        )
+        is None
+    )
+
+
 def test_kworb_ligne_rattachee_par_le_rejeu_d_aujourd_hui():
     cas = _cas("kworb_ecartee", None, {"titre_kworb": "Slow Jamz"})
     rejoue = {"Slow Jamz": {"fiche": {"id": 1, "titre": "Slow Jamz"}, "suggestion": False}}

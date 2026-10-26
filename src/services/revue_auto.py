@@ -94,7 +94,9 @@ REGLES_ETENDUES_BRANCHEES = True
 
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.
-_SANS_FICHE = frozenset({"deezer_appliquer", "deezer_rattacher_isrc", "confirmer_lien"})
+_SANS_FICHE = frozenset(
+    {"deezer_appliquer", "deezer_rattacher_isrc", "confirmer_lien", "kworb_tiers"}
+)
 
 #: Correcteurs qui reçoivent l'artiste (ils rejouent l'action du panneau).
 _AVEC_ARTISTE = _SANS_FICHE | {"delier_deezer"}
@@ -320,6 +322,26 @@ def _confirmer_lien(_dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
     }
 
 
+def _kworb_tiers(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Crée la fiche d'un remix par un tiers — la décision du panneau, telle
+    quelle (`kworb_decisions.appliquer`, page Spotify lue). Rétablir supprime
+    la fiche créée et rend la ligne à la proposition."""
+    from src.services import revue_actions
+    from src.utils.title_matching import normalize_title
+
+    ctx = _contexte_action(dm, artiste)
+    compte_rendu = revue_actions._kworb_decision("tiers")(ctx, cas)
+    titre = cas.preuves["kworb_title"]
+    decision = (
+        revue_actions._kworb_links().load(artiste.name)["decisions"].get(normalize_title(titre), {})
+    )
+    return compte_rendu, {
+        "type": "fiche_kworb",
+        "kworb_title": titre,
+        "creee": decision.get("track_id"),
+    }
+
+
 def _contexte_action(dm, artiste):
     from src.services import revue_actions
 
@@ -403,6 +425,7 @@ def _delier_deezer(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
 _CORRECTEURS_DE_REGLE = {
     "retirer_lrc": _corriger_lrc,
     "confirmer_lien": _confirmer_lien,
+    "kworb_tiers": _kworb_tiers,
     "delier_deezer": _delier_deezer,
     "deezer_appliquer": _deezer_appliquer,
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,
@@ -534,7 +557,12 @@ def retablir(dm, artiste, correction: dict) -> str:
     annulation = correction["annulation"]
     track = next((t for t in artiste.tracks or [] if t.id == correction["track_id"]), None)
     # Une piste Deezer « absente » n'avait pas de fiche : l'annulation la retrouve.
-    if track is None and annulation.get("type") not in ("fiche_deezer", "lien_deezer", "lien"):
+    if track is None and annulation.get("type") not in (
+        "fiche_deezer",
+        "lien_deezer",
+        "lien",
+        "fiche_kworb",
+    ):
         raise LookupError("la fiche n'est plus dans la discographie chargée")
     if annulation.get("type") == "lrc":
         lrc = annulation["lrc"]
@@ -609,6 +637,13 @@ def retablir(dm, artiste, correction: dict) -> str:
             dm.fill_track_identities(track.id, deezer_id=did)
         dm.restaurer_observations(annulation.get("observations") or [])
         compte_rendu = f"lien Deezer {did} rétabli sur « {track.title} »"
+    elif annulation.get("type") == "fiche_kworb":
+        from src.services import revue_actions
+
+        if annulation.get("creee"):
+            dm.delete_track(annulation["creee"])
+        revue_actions._kworb_links().oublier_decision(artiste.name, annulation["kworb_title"])
+        compte_rendu = f"« {annulation['kworb_title']} » : fiche retirée, proposition rendue"
     elif annulation.get("type") == "lien":
         if not dm.set_relation_status(
             artiste.id, annulation["nom"], annulation["kind"], "proposed"

@@ -85,6 +85,16 @@ class TestDecisions:
             return KworbLinksManager()
         return KworbLinksManager(str(tmp_path / "kworb_links"))
 
+    def test_oublier_une_decision(self, manager):
+        """« ↩ Rétablir » d'une décision prise par règle (2026-10-26) : la ligne
+        redevient une proposition, sans toucher aux autres."""
+        manager.decide("Kanye West", "One Man Can Change The World - Rudimental Remix", "tiers", 7)
+        manager.decide("Kanye West", "Birthday Song - Chopped Not Slopped", "rendition", 3)
+        manager.oublier_decision("Kanye West", "One Man Can Change The World - Rudimental Remix")
+        assert list(manager.load("Kanye West")["decisions"]) == [
+            normalize_title("Birthday Song - Chopped Not Slopped")
+        ]
+
     def test_confirmation_memorisee(self, manager):
         manager.confirm("Jul", "Bande organisée", 42)
         assert manager.load("Jul")["confirmed"] == {normalize_title("Bande organisée"): 42}

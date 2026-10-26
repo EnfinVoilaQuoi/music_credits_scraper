@@ -1392,7 +1392,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         nature_du_cas=nature_credits_api,
     ),
     Detecteur("annotee", "Page « Non-Music » sans trace", "🏷️", page_annotee_sans_trace),
-    Detecteur("sans_info", "Page Genius sans info", "🕳️", page_sans_info),
+    # Pour INFORMATION (décision utilisateur 2026-10-26, « la vérif manuelle,
+    # c'est pour les cas que le code ne peut pas trancher ») : une page qui ne
+    # porte rien (ni paroles, ni plateforme, ni album, ni vidéo, ni tiers
+    # crédité) ne pèse sur aucune donnée ni aucun visuel — trancher « poubelle
+    # ou inédit » n'y changerait rien. 75 fiches au 2026-10-26.
+    Detecteur("sans_info", "Page Genius sans info", "🕳️", page_sans_info, nature=INFORMATION),
 )
 
 DETECTEURS_ARTISTE: tuple[DetecteurArtiste, ...] = (

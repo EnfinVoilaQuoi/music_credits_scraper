@@ -104,6 +104,26 @@ class KworbLinksManager:
             self._save(artist_name, data)
         logger.info(f"🔗 Kworb décision mémorisée : '{kworb_title}' → {kind} (#{track_id})")
 
+    def oublier_decision(self, artist_name: str, kworb_title: str) -> None:
+        """Retire la décision mémorisée pour ce titre : la ligne Kworb redevient
+        une proposition (« ↩ Rétablir » d'une décision prise par règle)."""
+        norm = normalize_title(kworb_title)
+        if self.moteur is not None:
+            from sqlalchemy import text
+
+            with self.moteur.begin() as c:
+                c.execute(
+                    text(
+                        "DELETE FROM kworb_decisions WHERE artiste = :a AND titre = :t "
+                        "AND nature = 'decision'"
+                    ),
+                    {"a": artist_name, "t": norm},
+                )
+        else:
+            data = self._load_fichier(artist_name)
+            data["decisions"].pop(norm, None)
+            self._save(artist_name, data)
+
     # ── En base ────────────────────────────────────────────────────────────────
 
     def _load_base(self, artist_name: str) -> dict:

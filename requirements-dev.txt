@@ -5,6 +5,8 @@ ruff==0.15.21
 pytest==9.1.1
 pytest-cov==7.1.0
 pytest-timeout==2.4.0
+# Suite en parallèle (`pytest -q -n auto`, 2026-10-26) : 6 min 38 → 1 min 58 sur 16 cœurs.
+pytest-xdist==3.6.1
 # Tests property-based (chantier A, 2026-10-12) : suites aléatoires d'écritures,
 # les invariants de l'audit doivent tenir après chacune.
 hypothesis==6.140.2

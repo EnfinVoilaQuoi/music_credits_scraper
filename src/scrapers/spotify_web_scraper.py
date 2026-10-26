@@ -158,9 +158,14 @@ class SpotifyWebScraper(CrawlAIScraperBase):
         """
         url = self.track_url(track_id)
         with source_usage.observe(_SOURCE, label=url) as obs:
+            # On attend l'EN-TÊTE, pas le compteur : Spotify n'en affiche aucun
+            # sur certaines pages (*VULTURES* de ¥$, un titre de Safaree —
+            # vérifié au navigateur le 2026-10-26), et attendre `playcount`
+            # coûtait le délai entier (~19 s par page). Le compteur, quand il
+            # existe, est dans le même en-tête ; `_EXPAND_JS` tourne après.
             html = await sess.fetch(
                 url,
-                wait_for='css:[data-testid="playcount"]',
+                wait_for='css:[data-testid="entityTitle"]',
                 js_before_wait=_EXPAND_JS,
             )
             if not html:
@@ -171,13 +176,18 @@ class SpotifyWebScraper(CrawlAIScraperBase):
             if not playcounts:
                 obs.parse_error("aucun compteur sur la page (structure changée ?)")
                 return None
+            identite = parse.parse_track_identity(html)
             if track_id not in playcounts:
                 # La récolte a marché mais pas la lecture directe : on rend ce
-                # qu'on a plutôt que rien, en le disant.
-                logger.warning(f"Spotify {track_id} : compteur principal illisible")
+                # qu'on a plutôt que rien, en le disant. En-tête lu sans
+                # compteur = Spotify n'en affiche pas (rien à corriger chez
+                # nous) ; sans en-tête, la structure a peut-être changé.
+                if identite:
+                    logger.info(f"Spotify {track_id} : la page n'affiche pas de compteur")
+                else:
+                    logger.warning(f"Spotify {track_id} : compteur principal illisible")
             obs.ok()
             durations = parse.parse_row_durations(html)
-            identite = parse.parse_track_identity(html)
             if identite and identite.get("duration"):
                 durations[track_id] = identite["duration"]
             return {"playcounts": playcounts, "durations": durations}

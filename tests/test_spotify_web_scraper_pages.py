@@ -93,6 +93,29 @@ class TestTitre:
     def test_page_sans_compteur(self, scraper):
         assert _lancer(scraper.afetch_track(_Session("<html></html>"), "T")) is None
 
+    def test_la_page_titre_attend_l_en_tete_pas_le_compteur(self, scraper):
+        """Spotify n'affiche aucun compteur sur certaines pages (*VULTURES* de
+        ¥$, 2026-10-26) : attendre `playcount` coûtait le délai entier."""
+        sess = _Session(_page("track.html"))
+        _lancer(scraper.afetch_track(sess, "3EDDunSmj8RbiVGU0Qr0M8"))
+        assert sess.options[0]["wait_for"] == 'css:[data-testid="entityTitle"]'
+
+    def test_en_tete_sans_compteur_affiche_la_duree_reste_lue(self, scraper, caplog):
+        """« FIELD TRIP » : en-tête sans compteur. La durée se lit, le message
+        est une INFO — rien à corriger chez nous."""
+        from bs4 import BeautifulSoup
+
+        soup = BeautifulSoup(_page("track.html"), "html.parser")
+        for noeud in soup.select('[data-testid="playcount"]'):
+            noeud.decompose()
+        track_id = "3EDDunSmj8RbiVGU0Qr0M8"
+        with caplog.at_level(logging.INFO):
+            data = _lancer(scraper.afetch_track(_Session(str(soup)), track_id))
+        assert track_id not in data["playcounts"]
+        assert data["durations"].get(track_id)
+        assert "n'affiche pas de compteur" in caplog.text
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
     def test_identite_d_une_page_titre(self, scraper):
         identite = _lancer(
             scraper.afetch_track_identity(

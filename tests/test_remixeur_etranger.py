@@ -11,6 +11,8 @@ remix. Simulée sur toute la base avant d'être codée (8 liens, tous à tort).
 from types import SimpleNamespace
 
 from src.models import Artist, Credit, CreditRole, Track
+from src.services.apple_parutions import propositions_par_place
+from src.services.ecarts_deezer import Ecart, PisteDeezer, _deja_en_base
 from src.services.revue import id_spotify_autre_version
 from src.services.vues_comptees import recherche_valide
 from src.utils.apple_identity import fiche_concorde
@@ -186,3 +188,29 @@ class TestPanneauArtistesCredites:
         assert noms_de_meme_graphie("Ma$e", "Mase")
         assert noms_de_meme_graphie("20 Syl", "20syl")
         assert not noms_de_meme_graphie("Crookers", "Jim Jones")
+
+
+class TestLiaisonsParTitre:
+    """Le catalogue Deezer et les parutions Apple rattachaient sur le titre seul."""
+
+    def test_le_catalogue_deezer_ne_rattache_pas_un_autre_remix(self):
+        fiche = _fiche()
+        fiche.id = 1
+        kaskade = Ecart("x", None, PisteDeezer(id=9, title="In Common (Kaskade Remix)"))
+        assert _deja_en_base(kaskade, [fiche]) == (None, None)
+        remix = Ecart("x", None, PisteDeezer(id=9, title="In Common (Remix)"))
+        assert _deja_en_base(remix, [fiche]) == (fiche, "title")
+
+    def test_la_parution_apple_ne_propose_pas_un_autre_remix(self):
+        fiche = Track(title="Stand Up (Remix)", artist=Artist(name="Kanye West"))
+        fiche.primary_artist_name = "Ludacris"
+        fiche.duration = 303
+        piste = {
+            "trackId": 9,
+            "discNumber": 1,
+            "trackNumber": 1,
+            "trackName": "Stand Up (feat. Shawnna) [Fatboy Slim Remix]",
+            "trackTimeMillis": 303280,
+        }
+        # Même place, même durée : c'est pourtant le remix de Fatboy Slim.
+        assert propositions_par_place({1: (1, 1)}, [piste], {1: fiche}) == {}

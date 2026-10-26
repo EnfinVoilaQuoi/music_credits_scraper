@@ -47,6 +47,7 @@ from src.services.runtime import Bilan
 from src.utils import version_heritage
 from src.utils.corrections_fiches import deezer_refuses, memoriser_deezer_refuse
 from src.utils.logger import etape_de_flux, get_logger
+from src.utils.spotify_identity import meme_enregistrement_pour
 from src.utils.title_matching import (
     base_album_key,
     clean_stored_title,
@@ -62,7 +63,6 @@ from src.utils.version_descriptors import (
     parse_variant,
     titre_generique,
     titre_sans_son_disque,
-    titres_confondus,
 )
 
 logger = get_logger(__name__)
@@ -888,12 +888,14 @@ def _deja_en_base(e: Ecart, base: list[Track]) -> tuple[Track | None, str | None
     if p.isrc:
         memes = [t for t in base if t.isrc and str(t.isrc).upper() == p.isrc.upper()]
         for t in memes:
-            if titres_confondus(t.title, p.title):
+            if meme_enregistrement_pour(t, p.title, graphie=True):
                 return t, "isrc"
         if memes:
             return memes[0], "isrc_autre_titre"
+    # Le remix d'un autre remixeur n'est pas la fiche « (Remix) » nue de
+    # l'artiste (`meme_enregistrement_pour`, 2026-10-26).
     for t in base:
-        if titres_confondus(t.title, p.title):
+        if meme_enregistrement_pour(t, p.title, graphie=True):
             return t, "title"
     return None, None
 

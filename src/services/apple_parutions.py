@@ -26,7 +26,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from src.enrichment.observation import Observation
+from src.utils.apple_identity import titre_sans_invites
 from src.utils.logger import get_logger
+from src.utils.spotify_identity import remixeur_etranger_a_la_fiche
 from src.utils.track_mapper import _clean_duration
 from src.utils.version_descriptors import titres_equivalents
 
@@ -71,6 +73,9 @@ def propositions_par_place(places: dict, pistes_apple: list[dict], fiches: dict)
         duree_apple = (
             round(piste["trackTimeMillis"] / 1000) if piste.get("trackTimeMillis") else None
         )
+        # Le remix d'un autre remixeur n'est pas proposé, même à la bonne durée.
+        if remixeur_etranger_a_la_fiche(fiche, titre_sans_invites(piste.get("trackName") or "")):
+            continue
         meme_titre = titres_equivalents(fiche.title, piste.get("trackName"))
         meme_duree = bool(
             duree_fiche and duree_apple and abs(duree_fiche - duree_apple) <= TOLERANCE_DUREE_S

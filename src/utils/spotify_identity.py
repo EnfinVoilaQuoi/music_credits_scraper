@@ -40,6 +40,7 @@ from src.utils.version_descriptors import (
     parse_variant,
     titre_generique,
     titre_sans_son_disque,
+    titres_confondus,
     titres_equivalents,
 )
 from src.utils.version_heritage import remixeur_etranger, remixeurs_du_titre
@@ -369,6 +370,26 @@ def artistes_connus(track) -> list[str]:
     return [n for n in noms if n]
 
 
+def remixeur_etranger_a_la_fiche(track, titre_servi: str | None) -> str | None:
+    """Le remixeur que nomme `titre_servi` quand `track` est un remix nu et
+    qu'il n'est aucun de ses artistes (`remixeur_etranger`), None sinon. Les
+    artistes ne se lisent que pour un remix nu. Juge PARTAGÉ par toutes les
+    plateformes (Spotify, Deezer, Apple, catalogue Deezer) — il vit ici parce
+    que `artistes_connus` y vit."""
+    if parse_variant(track.title).kind != Kind.REMIX_BARE:
+        return None
+    return remixeur_etranger(track.title, titre_servi, artistes_connus(track))
+
+
+def meme_enregistrement_pour(track, titre_servi: str | None, *, graphie: bool = False) -> bool:
+    """Le titre servi par une plateforme désigne-t-il l'enregistrement de la
+    fiche ? Titres équivalents (`titres_confondus` avec `graphie`, pour
+    reconnaître une fiche sous une autre graphie), et pas le remix d'un autre
+    remixeur (`remixeur_etranger_a_la_fiche`, 2026-10-26)."""
+    egaux = (titres_confondus if graphie else titres_equivalents)(track.title, titre_servi)
+    return egaux and remixeur_etranger_a_la_fiche(track, titre_servi) is None
+
+
 def remix_d_autres_artistes(track, titre_spotify: str, credites) -> tuple[list, list] | None:
     """PUR. `(inconnus, absents)` quand la page Spotify d'une fiche « (Remix) »
     nue, dont le titre ne nomme pas de remixeur, crédite des artistes INCONNUS
@@ -603,11 +624,7 @@ def variante_etrangere(track, identite: dict | None) -> bool:
         # Un remix nu face à un remix nommé : le même, sauf si le remixeur
         # n'est aucun des artistes de la fiche (« In Common (Remix) » contre
         # « In Common - Black Coffee Remix », 2026-10-25).
-        # Les artistes ne se lisent que pour un remix nu.
-        return (
-            va.kind == Kind.REMIX_BARE
-            and remixeur_etranger(track.title, titre_spotify, artistes_connus(track)) is not None
-        )
+        return remixeur_etranger_a_la_fiche(track, titre_spotify) is not None
     # Un qualificatif DE PLUS d'un seul côté, même famille de prise (Diam's
     # « Dans ma bulle (Live 2006; Version EP) » / « Dans Ma Bulle - Live
     # 2006 ») : le titre ne départage pas — l'EP live de 2006 et l'album live

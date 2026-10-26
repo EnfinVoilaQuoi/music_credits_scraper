@@ -8,6 +8,7 @@ proposé en premier — donc quel lien finit associé au morceau.
 n'est jamais touché, et `ytmusicapi` est remplacé par un faux client.
 """
 
+import json
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -214,6 +215,15 @@ class TestRechercheYtMusic:
         res = s.search_track("Jul", "Bande organisée")
         assert res
         assert all(r["source"] != "ytmusicapi" for r in res)
+
+    def test_reponse_vide_ne_fait_pas_tomber_le_run(self, searcher):
+        """2026-10-26 : une réponse VIDE (bridage YTM, `JSONDecodeError`)
+        remontait jusqu'au flux et emportait tout le run YTM de Kanye. Elle
+        rend une liste vide, sans repli ni cache : la passe suivante recherche."""
+        s = self._searcher(searcher, leve=json.JSONDecodeError("Expecting value", "", 0))
+        assert s.search_track("Kanye West", "LOUIE BAGS") == []
+        s.ytmusic = _FauxYT(resultats=[_resultat_ytm(titre="LOUIE BAGS", artiste="Kanye West")])
+        assert s.search_track("Kanye West", "LOUIE BAGS")[0]["video_id"] == "V1"
 
 
 class TestCacheDansLaRecherche:

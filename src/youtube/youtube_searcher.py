@@ -1,6 +1,7 @@
 """Recherche YouTube avec fallbacks et cache"""
 
 import difflib
+import json
 import pickle
 import re
 import sqlite3
@@ -31,6 +32,10 @@ from src.utils.version_descriptors import (
 from src.utils.version_heritage import remixeur_etranger
 
 logger = get_logger(__name__)
+
+
+class RechercheBridee(Exception):
+    """YTM a rendu une réponse VIDE à une recherche : son bridage."""
 
 
 def cache_key(artist: str, title: str) -> str:
@@ -384,6 +389,12 @@ class YouTubeSearcher:
                     artist, title, max_results, album, artistes_connus
                 )
                 logger.info(f"ytmusicapi: {len(results)} résultats pour {artist} - {title}")
+            except RechercheBridee as e:
+                # Une non-réponse ne prouve rien : ni repli (ses liens de
+                # recherche seraient mis en cache), ni cache — la prochaine
+                # passe recherchera.
+                logger.warning(f"YTM bridé : réponse vide pour {artist} - {title} ({e})")
+                return []
             except (YTMusicError, requests.RequestException, KeyError, TypeError, IndexError) as e:
                 logger.warning(f"Erreur ytmusicapi: {e}")
 
@@ -487,6 +498,11 @@ class YouTubeSearcher:
                         if len(all_results) >= max_results:
                             break
 
+            except json.JSONDecodeError as e:
+                # Réponse VIDE : le bridage de YTM (comme `ytmusic_api`). Elle
+                # remontait jusqu'au flux et emportait tout le run YTM de
+                # l'artiste (2026-10-26, streams de Kanye, après 30 min).
+                raise RechercheBridee(str(e)) from e
             except (YTMusicError, requests.RequestException, KeyError, TypeError, IndexError) as e:
                 logger.debug(f"Erreur recherche ytmusicapi pour '{query}': {e}")
                 continue

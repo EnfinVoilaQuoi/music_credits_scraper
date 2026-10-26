@@ -346,6 +346,29 @@ def politique_bpm(cas, track, ctx):
             return None  # deux voix indépendantes d'accord contre la retenue
     detail = ", ".join(f"{s} {v:g}" for s, v in sorted(contre.items()))
     if set(contre) == {"songbpm"}:
+        # Le TÉMOIN d'abord : une page SongBPM à la durée des catalogues est le
+        # même enregistrement, seul son tempo diffère — deux estimations
+        # (75 / 100 chez Flynt « Seul(s) », 3:4). La retirer effacerait une
+        # durée et une tonalité justes : 6 des 7 retraits simulés le
+        # 2026-10-26 l'auraient fait.
+        durees = _durees(track)
+        page = durees.get("songbpm")
+        temoins = sorted(
+            s
+            for s, d in durees.items()
+            if s not in FRAGILES
+            and s not in ("heritage", "manual", "youtube_video")
+            and d
+            and page
+            and abs(d - page) <= ECART_FICHIER_S
+        )
+        if temoins:
+            return Arbitrage(
+                "même enregistrement, deux mesures du tempo : ✓ Normal",
+                "normal",
+                f"ReccoBeats {rb:g} (par l'ID) contre {detail} ; durée SongBPM {page} s "
+                f"= {', '.join(temoins)}",
+            )
         return Arbitrage(
             "garder ReccoBeats ; la page SongBPM est un autre morceau : retirer SongBPM",
             "retirer_songbpm",
@@ -385,6 +408,9 @@ def politique_tonalite(cas, track, ctx):
 
 #: Un LRC qui colle à ≥ 90 % des paires de mots d'une AUTRE fiche est le sien.
 LRC_AUTRE_MIN = 0.9
+#: Un LRC qui s'arrête au moins tant de secondes avant la fin de la fiche est
+#: celui d'une prise plus courte (témoin exigé pour le retirer, 2026-10-26).
+LRC_COURT_S = 30
 
 
 def politique_lrc(cas, track, ctx):
@@ -393,32 +419,49 @@ def politique_lrc(cas, track, ctx):
     la durée de la fiche (+ 5 s) aussi. 👯 LRC d'une version sœur : deux PRISES
     différentes selon la taxonomie (« R.O.C. Remix » / « Jeezy Remix ») ne
     sont pas le même morceau — le LRC est celui de l'autre, il se retire ; même
-    prise : une fusion, l'humain."""
-    from src.utils.lrc_garde import ECART_DUREE_S, fin_du_lrc
+    prise : une fusion, l'humain.
+
+    TÉMOIN exigé (2026-10-26) : des paroles proches ne prouvent pas que le LRC
+    est celui de l'autre (« Love Galore (Version 1) » : 96 % des mots de
+    l'original, mais son LRC finit à 250 s, celui de l'original à 271 s). Le
+    LRC se retire s'il s'arrête au moins `LRC_COURT_S` avant la fin de la
+    fiche (celui d'une prise plus courte : « Can't Tell Me Nothing (Remix) »,
+    316 s, LRC jusqu'à 247 s, la durée du « Jeezy Remix ») ; sans durée,
+    rien ne dit lequel des deux LRC est à sa place."""
+    from src.utils.lrc_garde import ECART_DUREE_S, duree_confirmee, fin_du_lrc
     from src.utils.version_descriptors import meme_prise, parse_variant
 
     if track is None or not track.lyrics.synced:
         return None
     preuves = cas.preuves or {}
     autre = preuves.get("bigrammes_autre")
+    fin = fin_du_lrc(track.lyrics.synced)
+    trop_court = bool(fin and track.duration and int(track.duration) - fin >= LRC_COURT_S)
+    temoin = f"LRC jusqu'à {fin} s, fiche {track.duration} s"
     if cas.detecteur == "doublon_lrc":
         titre_autre = next((t.title for t in ctx.disco if t.id == preuves.get("autre")), None)
-        if titre_autre and not meme_prise(parse_variant(track.title), parse_variant(titre_autre)):
+        if (
+            titre_autre
+            and not meme_prise(parse_variant(track.title), parse_variant(titre_autre))
+            and trop_court
+        ):
             return Arbitrage(
                 "deux prises différentes : le LRC est celui de l'autre, le retirer",
                 "retirer_lrc",
                 f"« {track.title} » ≠ « {titre_autre} » (taxonomie), LRC à "
-                f"{(autre or 0):.0%} de l'autre",
+                f"{(autre or 0):.0%} de l'autre ; {temoin}",
             )
         return None
-    if autre is not None and autre >= LRC_AUTRE_MIN:
+    if autre is not None and autre >= LRC_AUTRE_MIN and trop_court:
         return Arbitrage(
             "LRC d'une autre fiche : le retirer",
             "retirer_lrc",
-            f"{autre:.0%} des paires de mots de l'autre fiche",
+            f"{autre:.0%} des paires de mots de l'autre fiche ; {temoin}",
         )
-    fin = fin_du_lrc(track.lyrics.synced)
-    if fin and track.duration and fin > int(track.duration) + ECART_DUREE_S:
+    # Au-delà de la durée : seulement une durée CONFIRMÉE par deux catalogues
+    # (la garde LRC du projet) — une durée isolée peut être la fausse.
+    confirmee = duree_confirmee(track)
+    if fin and confirmee and fin > confirmee + ECART_DUREE_S:
         return Arbitrage(
             "LRC minuté au-delà de la durée : le retirer",
             "retirer_lrc",
@@ -859,6 +902,52 @@ def arbitrage_id_partage(cas, track, ctx, gate=None) -> Arbitrage | None:
 
     arbitrage = politique_id_partage(gate)(cas, track, ctx)
     if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_ID_PARTAGE:
+        return arbitrage
+    return None
+
+
+# ── Familles « audio, LRC, alias, liens Deezer à confirmer » — 2026-10-26 ───
+
+#: Décision utilisateur 2026-10-26 : « trancher tout ce qu'on peut, la vérif
+#: manuelle c'est pour les cas que le code ne peut pas trancher ». Chaque
+#: politique a été simulée sur toute la base PUIS confrontée à un témoin
+#: indépendant de ce qu'elle change ; deux ont été affinées pour cela (BPM :
+#: une page SongBPM à la durée des catalogues est le même morceau ; LRC : un
+#: retrait exige un LRC qui s'arrête bien avant la fin de la fiche).
+#: Interrupteur : `revue_auto.REGLES_ETENDUES_BRANCHEES`.
+REGLES_ETENDUES = frozenset(
+    {
+        ("bpm", "normal"),
+        ("bpm", "retirer_songbpm"),
+        ("tonalite", "normal"),
+        ("lrc_douteux", "retirer_lrc"),
+        ("lrc_live", "retirer_lrc"),
+        ("doublon_lrc", "retirer_lrc"),
+        ("liens_proposes", "confirmer_lien"),
+        ("deezer_link_candidate", "deezer_appliquer"),
+        ("deezer_link_candidate", "normal"),
+    }
+)
+
+_POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "bpm": politique_bpm,
+    "tonalite": politique_tonalite,
+    "lrc_douteux": politique_lrc,
+    "lrc_live": politique_lrc,
+    "doublon_lrc": politique_lrc,
+    "liens_proposes": politique_alias,
+    "deezer_link_candidate": politique_liens_deezer,
+}
+
+
+def arbitrage_etendu(cas, track, ctx) -> Arbitrage | None:
+    """L'arbitrage des familles étendues du 2026-10-26, si sa (détecteur,
+    action) est validée."""
+    juger = _POLITIQUE_PAR_DETECTEUR.get(cas.detecteur)
+    if juger is None:
+        return None
+    arbitrage = juger(cas, track, ctx)
+    if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_ETENDUES:
         return arbitrage
     return None
 

@@ -133,6 +133,17 @@ class TestAudio:
         ctx = _ctx_mesures(t, "bpm", {"reccobeats": 135, "songbpm": 102})
         assert pol.politique_bpm(_cas("bpm", t), t, ctx).action == "retirer_songbpm"
 
+    def test_page_songbpm_a_la_duree_des_catalogues_est_le_meme_morceau(self):
+        """Booba « Kayna (Remix) » : SongBPM 102 contre ReccoBeats 135, mais sa
+        page dure 179 s comme Deezer et Apple — même enregistrement, deux
+        mesures du tempo. Rien ne se retire (2026-10-26)."""
+        t = _t(durations_observees={"deezer": 178, "apple_music": 179, "songbpm": 179})
+        t.audio.bpm = 135
+        ctx = _ctx_mesures(t, "bpm", {"reccobeats": 135, "songbpm": 102})
+        assert pol.politique_bpm(_cas("bpm", t), t, ctx).action == "normal"
+        t.durations_observees = {"deezer": 178, "songbpm": 240}  # une autre page
+        assert pol.politique_bpm(_cas("bpm", t), t, ctx).action == "retirer_songbpm"
+
     def test_deux_voix_independantes_d_accord_restent_a_l_humain(self):
         """Booba « Futur » : Deezer ET GetSongBPM à 133 contre ReccoBeats 89."""
         t = _t()
@@ -150,11 +161,24 @@ class TestAudio:
 
 
 def test_lrc_d_une_autre_prise():
-    t = _t("Can't Tell Me Nothing (R.O.C. Remix)", 1)
-    t.lyrics.synced = "[00:01.00] x"
+    """« R.O.C. Remix » (336 s) au LRC du « Jeezy Remix », qui s'arrête à 240 s :
+    celui d'une prise plus courte. Sans durée, rien ne dit à qui il est."""
+    t = _t("Can't Tell Me Nothing (R.O.C. Remix)", 1, duration=336)
+    t.lyrics.synced = "[00:01.00] x\n[04:00.00] y"
     autre = _t("Can't Tell Me Nothing (Jeezy Remix)", 2)
     cas = _cas("doublon_lrc", t, {"autre": 2, "bigrammes_autre": 0.91})
     assert pol.politique_lrc(cas, t, revue.contexte([t, autre])).action == "retirer_lrc"
+    t.duration = None
+    assert pol.politique_lrc(cas, t, revue.contexte([t, autre])) is None
+
+
+def test_lrc_aux_paroles_proches_mais_a_sa_place_reste():
+    """« Love Galore (Version 1) » : 96 % des mots de l'original, mais un LRC
+    qui va jusqu'à 250 s sur 264 s — à sa place (2026-10-26)."""
+    t = _t("Love Galore (Version 2)", 1, duration=264)
+    t.lyrics.synced = "[00:01.00] x\n[04:10.00] y"
+    cas = _cas("lrc_douteux", t, {"bigrammes_autre": 0.96})
+    assert pol.politique_lrc(cas, t, revue.contexte([t])) is None
 
 
 class TestEcartsDeezer:

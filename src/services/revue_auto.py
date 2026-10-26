@@ -87,9 +87,14 @@ REGLES_LIENS_DEEZER_BRANCHEES = False
 #: l'utilisateur), qui ne veut plus vérifier « des trucs qu'on sait déjà ».
 REGLES_ID_PARTAGE_BRANCHEES = True
 
+#: Familles BPM, tonalité, LRC, alias et liens Deezer à confirmer
+#: (`politiques_revue.REGLES_ETENDUES`) : levé le 2026-10-26, chaque politique
+#: simulée sur toute la base et confrontée à un témoin indépendant.
+REGLES_ETENDUES_BRANCHEES = True
+
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.
-_SANS_FICHE = frozenset({"deezer_appliquer", "deezer_rattacher_isrc"})
+_SANS_FICHE = frozenset({"deezer_appliquer", "deezer_rattacher_isrc", "confirmer_lien"})
 
 #: Correcteurs qui reçoivent l'artiste (ils rejouent l'action du panneau).
 _AVEC_ARTISTE = _SANS_FICHE | {"delier_deezer"}
@@ -131,11 +136,13 @@ def cas_par_regle(
     deezer: tuple | None = None,
     liens_deezer: bool = False,
     id_partage: bool = False,
+    etendues: bool = False,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
     from src.services.politiques_revue import (
         arbitrage_deezer,
+        arbitrage_etendu,
         arbitrage_id_partage,
         arbitrage_id_propose,
         arbitrage_liens_deezer,
@@ -158,6 +165,8 @@ def cas_par_regle(
             arbitrage = arbitrage_liens_deezer(c, track, ctx)
         if arbitrage is None and id_partage:
             arbitrage = arbitrage_id_partage(c, track, ctx)
+        if arbitrage is None and etendues:
+            arbitrage = arbitrage_etendu(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -297,6 +306,20 @@ def _refuser_id(dm, track, cas: Cas) -> tuple[str, dict]:
     )
 
 
+def _confirmer_lien(_dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Confirme un alias proposé — l'action du panneau ; rétablir le remet
+    « proposé »."""
+    from src.services import revue_actions
+
+    ctx = _contexte_action(_dm, artiste)
+    compte_rendu = revue_actions._statut_lien("confirmed")(ctx, cas)
+    return compte_rendu, {
+        "type": "lien",
+        "nom": cas.preuves["nom"],
+        "kind": cas.preuves["kind"],
+    }
+
+
 def _contexte_action(dm, artiste):
     from src.services import revue_actions
 
@@ -378,6 +401,8 @@ def _delier_deezer(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
 
 #: Correcteurs des RÈGLES, par action de la politique.
 _CORRECTEURS_DE_REGLE = {
+    "retirer_lrc": _corriger_lrc,
+    "confirmer_lien": _confirmer_lien,
     "delier_deezer": _delier_deezer,
     "deezer_appliquer": _deezer_appliquer,
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,
@@ -415,6 +440,7 @@ def corriger(dm, artiste) -> BilanCorrections:
             or REGLES_DEEZER_BRANCHEES
             or REGLES_LIENS_DEEZER_BRANCHEES
             or REGLES_ID_PARTAGE_BRANCHEES
+            or REGLES_ETENDUES_BRANCHEES
         ):
             rendus = _rendus_a_l_humain(dm, artiste.id)
             a_faire += [
@@ -428,6 +454,7 @@ def corriger(dm, artiste) -> BilanCorrections:
                     deezer=contexte_deezer(dm, artiste) if REGLES_DEEZER_BRANCHEES else None,
                     liens_deezer=REGLES_LIENS_DEEZER_BRANCHEES,
                     id_partage=REGLES_ID_PARTAGE_BRANCHEES,
+                    etendues=REGLES_ETENDUES_BRANCHEES,
                 )
                 if (c.detecteur, c.cle) not in rendus
             ]
@@ -507,7 +534,7 @@ def retablir(dm, artiste, correction: dict) -> str:
     annulation = correction["annulation"]
     track = next((t for t in artiste.tracks or [] if t.id == correction["track_id"]), None)
     # Une piste Deezer « absente » n'avait pas de fiche : l'annulation la retrouve.
-    if track is None and annulation.get("type") not in ("fiche_deezer", "lien_deezer"):
+    if track is None and annulation.get("type") not in ("fiche_deezer", "lien_deezer", "lien"):
         raise LookupError("la fiche n'est plus dans la discographie chargée")
     if annulation.get("type") == "lrc":
         lrc = annulation["lrc"]
@@ -582,6 +609,12 @@ def retablir(dm, artiste, correction: dict) -> str:
             dm.fill_track_identities(track.id, deezer_id=did)
         dm.restaurer_observations(annulation.get("observations") or [])
         compte_rendu = f"lien Deezer {did} rétabli sur « {track.title} »"
+    elif annulation.get("type") == "lien":
+        if not dm.set_relation_status(
+            artiste.id, annulation["nom"], annulation["kind"], "proposed"
+        ):
+            raise LookupError(f"lien « {annulation['nom']} » introuvable")
+        compte_rendu = f"« {annulation['nom']} » rendu « proposé »"
     elif annulation.get("type") == "verdict":
         # Défaire le « ✓ Normal » d'une règle, c'est RENDRE le cas à l'humain :
         # le verdict part, rien ne le remplace, et la règle ne le reprend plus

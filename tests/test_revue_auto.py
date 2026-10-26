@@ -379,3 +379,26 @@ def test_lien_deezer_dementi_delie_puis_retabli(data_manager, artiste, monkeypat
     fiche = _charger(data_manager, artiste)["Rap théorie"]
     assert fiche.deezer_id == 4242 and 4242 not in deezer_refuses(fiche)
     assert fiche.durations_observees.get("deezer") == 262
+
+
+def test_alias_confirme_par_deux_sources_puis_retabli(data_manager, artiste, monkeypatch):
+    """Familles étendues (2026-10-26) : « Yeezy », alias que MusicBrainz ET
+    Discogs donnent, est confirmé par règle ; rétablir le rend « proposé »."""
+    from src.models import ArtistRelation
+
+    monkeypatch.setattr(revue_auto, "REGLES_ETENDUES_BRANCHEES", True)
+    data_manager.propose_artist_relations(
+        artiste.id,
+        [ArtistRelation(related_name="Yeezy", kind="alias", source="musicbrainz+discogs")],
+    )
+    _charger(data_manager, artiste)
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert any("Yeezy" in a for a in bilan.appliquees)
+    confirmes = [r.related_name for r in data_manager.get_artist_relations(artiste.id)]
+    assert confirmes == ["Yeezy"]
+
+    (correction,) = [
+        c for c in data_manager.corrections_revue(artiste.id) if c["detecteur"] == "liens_proposes"
+    ]
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert data_manager.get_artist_relations(artiste.id) == []

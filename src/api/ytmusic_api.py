@@ -271,6 +271,12 @@ class YTMusicAPI:
                 + ", ".join(f"{n} ({b})" for b, n in candidates[:3])
             )
             return candidates
+        except json.JSONDecodeError as e:
+            # Réponse VIDE : le bridage de YTM (cf. `get_album_tracks_raw`).
+            logger.warning(
+                f"YTM bridé : réponse vide (recherche de l'artiste '{artist_name}') ({e})"
+            )
+            return []
         except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
             logger.error(f"Erreur get_artist_channel_candidates pour '{artist_name}': {e}")
             return []
@@ -311,6 +317,10 @@ class YTMusicAPI:
                 f"auditeurs/mois={monthly_listeners}"
             )
             return {"albums": albums, "monthly_listeners": monthly_listeners}
+        except json.JSONDecodeError as e:
+            # Réponse VIDE : le bridage de YTM (cf. `get_album_tracks_raw`).
+            logger.warning(f"YTM bridé : réponse vide (get_artist_info {channel_id}) ({e})")
+            return {"albums": [], "monthly_listeners": None}
         except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
             logger.error(f"Erreur get_artist_info ({channel_id}): {e}")
             return {"albums": [], "monthly_listeners": None}
@@ -331,6 +341,10 @@ class YTMusicAPI:
             ]
             logger.info(f"YTMusic: {len(result)} album(s)/single(s) trouvés pour {channel_id}")
             return result
+        except json.JSONDecodeError as e:
+            # Réponse VIDE : le bridage de YTM (cf. `get_album_tracks_raw`).
+            logger.warning(f"YTM bridé : réponse vide (get_artist_albums {channel_id}) ({e})")
+            return []
         except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
             logger.error(f"Erreur get_artist_albums ({channel_id}): {e}")
             return []

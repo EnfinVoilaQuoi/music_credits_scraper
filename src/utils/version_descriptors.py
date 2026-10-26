@@ -329,7 +329,14 @@ def _detacher_descripteur(titre: str) -> tuple[str, list[str]]:
             break
         if not _porte_vocabulaire(contenu):
             break
-        titre = titre[: m.start()].strip() or titre
+        # Un titre fait du SEUL groupe (« (Fivio Foreign Reference Track) »,
+        # segment d'un titre de vidéo) reste le titre : le peler ne laissait
+        # rien, l'ancien `or titre` le gardait et la boucle tournait sans fin
+        # (simulation figée 7 h sur « 530 (Reference) », 2026-10-27).
+        avant = titre[: m.start()].strip()
+        if not avant:
+            break
+        titre = avant
         groupes.insert(0, contenu)
     # Dernier mot nu : « 5G Remix », « Décadent instrumental ». Pas « live »
     # (« Long Live » est un titre) ni les mots d'édition.

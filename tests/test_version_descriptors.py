@@ -14,6 +14,7 @@ from src.utils.version_descriptors import (
     meme_famille,
     meme_prise,
     meme_socle,
+    meme_version_publiee,
     parse_variant,
     parties_du_morceau,
     reeditions_evidentes,
@@ -149,6 +150,17 @@ def test_parse_variant(titre, kind, socle, remixeur):
     assert v.kind == kind
     assert v.socle == socle
     assert v.remixer == remixeur
+
+
+@pytest.mark.timeout(5)
+def test_un_titre_fait_du_seul_groupe_ne_boucle_pas():
+    # Boucle sans fin jusqu'au 2026-10-27 (segment d'un titre de vidéo Kanye).
+    assert parse_variant("(Live)").socle == "(Live)"
+    assert meme_version_publiee(
+        "530 (Reference)",
+        "Kanye West - Dear Summer / 530 [V3] - Featuring Shenseea - "
+        "(Fivio Foreign Reference Track)",
+    ) in (True, False)
 
 
 def test_socle_normalise_rapproche_les_formes():

@@ -345,6 +345,42 @@ class TestVideos:
         t.streams.spotify_streams, t.streams.ytm_streams = 316_410, 5_552_707
         assert "×17" in revue.vues_youtube_anormales(t)[0]
 
+    def _forte(self, titre, *videos, **kw):
+        t = _t(titre, videos=list(videos), **kw)
+        t.streams.spotify_streams, t.streams.ytm_streams = 18_999, 3_308_958
+        return t
+
+    def test_des_vues_que_les_videos_expliquent_ne_sont_pas_anormales(self):
+        clip = TrackVideo(
+            video_id="a", title="Shay feat. Booba - Cruella (Clip Officiel)", views=5_000_000
+        )
+        t = self._forte("Cruella", clip)
+        assert revue.vues_youtube_anormales(t, _ctx(t)) is None
+
+    def test_la_reprise_que_la_page_decrit(self):
+        v = TrackVideo(
+            video_id="a",
+            title="Four Five Seconds - Rihanna Kanye McCartney (Nicole Cross Official Cover Video)",
+            views=3_289_007,
+        )
+        t = self._forte("FourfiveSeconds", v, primary_artist_name="Nicole Cross")
+        assert revue.vues_youtube_anormales(t, _ctx(t)) is None
+        # La reprise d'un AUTRE interprète que celui de la page reste à voir.
+        t = self._forte("FourfiveSeconds", v, primary_artist_name="Twenty One Two")
+        assert revue.vues_youtube_anormales(t, _ctx(t)) is not None
+
+    def test_une_autre_version_reste_a_voir(self):
+        v = TrackVideo(
+            video_id="a", title="IAM - Je danse le Mia (Clip officiel)", views=56_000_000
+        )
+        t = self._forte("Je danse le MIA (Le Terrible Funk Remix Radio Edit)", v)
+        assert revue.vues_youtube_anormales(t, _ctx(t)) is not None
+
+    def test_une_video_partagee_n_explique_rien(self):
+        v = TrackVideo(video_id="a", title="Cruella", views=5_000_000)
+        t, u = self._forte("Cruella", v), _t("Cruella", tid=2, videos=[v])
+        assert revue.vues_youtube_anormales(t, _ctx(t, u)) is not None
+
 
 class TestPagesEtCredits:
     def test_certif_avant_la_sortie(self):

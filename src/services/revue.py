@@ -53,9 +53,20 @@ from src.utils.spotify_identity import (
     remix_d_autres_artistes,
     variante_etrangere,
 )
-from src.utils.title_matching import cle_album, developper_ligatures, names_match_as_words
+from src.utils.title_matching import (
+    cle_album,
+    contains_as_words,
+    developper_ligatures,
+    names_match_as_words,
+)
 from src.utils.track_validation import sans_info
-from src.utils.version_descriptors import Kind, parse_variant, socle_normalise, titre_generique
+from src.utils.version_descriptors import (
+    Kind,
+    meme_version_publiee,
+    parse_variant,
+    socle_normalise,
+    titre_generique,
+)
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
 from src.utils.vote_durees import ISOLEE, MAJORITAIRE, SOUTENUE, voter
 
@@ -1230,11 +1241,43 @@ def soeurs_identite_divergente(ctx):
     return cas
 
 
-def vues_youtube_anormales(track, _ctx=None):
+def _vues_expliquees(track, ctx) -> bool:
+    """Chaque vidéo qui compte des vues est-elle LA publication du morceau ?
+    Elle le nomme, aucune autre fiche ne la porte, et elle est dans sa version
+    — ou c'est la reprise que la page décrit (« FourfiveSeconds » de Nicole
+    Cross : Kanye y est l'auteur, la vidéo « … (Nicole Cross Official Cover
+    Video) » est bien la sienne). Le rapport YouTube / Spotify seul ne prouve
+    rien : un clip d'un autre où l'artiste est invité, un titre d'avant le
+    streaming font ×10 à juste titre (22 des 24 cas du 2026-10-27, contrôlés
+    vidéo par vidéo). Sans vidéo, les vues viennent des compteurs du run : rien
+    ne les explique."""
+    proprietaires = _proprietaires_des_videos(ctx) if ctx is not None else {}
+    avec_vues = [v for v in track.videos or [] if v.views]
+    if not avec_vues:
+        return False
+    for v in avec_vues:
+        if not v.title or len(proprietaires.get(v.video_id, ())) > 1:
+            return False
+        if not video_nomme(track, v):
+            return False
+        if meme_version_publiee(track.title, v.title):
+            continue
+        interprete = track.primary_artist_name
+        reprise = re.search(r"(?i)\bcover\b", v.title) and not re.search(
+            r"(?i)\bcover\b", track.title or ""
+        )
+        if not (reprise and interprete and contains_as_words(interprete, v.title)):
+            return False
+    return True
+
+
+def vues_youtube_anormales(track, ctx=None):
     """Vues YouTube dix fois au-dessus des streams Spotify : une vidéo d'un
     autre morceau, ou d'un autre artiste, gonfle peut-être le total."""
     sp, yt = track.streams.spotify_streams or 0, track.streams.ytm_streams or 0
     if sp and yt > VUES_YTM_MIN and yt > RAPPORT_YTM_SPOTIFY * sp:
+        if _vues_expliquees(track, ctx):
+            return None
         return (
             f"{yt:,} vues YouTube pour {sp:,} streams Spotify (×{yt // sp})".replace(",", " "),
             {"ytm": yt, "spotify": sp, "empreinte": ""},

@@ -1,6 +1,9 @@
 """`rematerialiser` : UN point de calcul des colonnes dérivées (amorce du
 chantier A, audit du 2026-10-11) — à blanc par défaut, idempotent."""
 
+import sqlite3
+from contextlib import closing
+
 from sqlalchemy import text
 
 from src.enrichment.observation import Observation
@@ -34,6 +37,32 @@ def _fiche_decalee(dm):
 def test_a_blanc_rien_n_est_ecrit(data_manager):
     t = _fiche_decalee(data_manager)
     changements = data_manager.rematerialiser([t.id])
+    assert changements[t.id]["spotify_streams"] == (None, 1000)
+    assert _col(data_manager, t.id, "spotify_streams") is None
+
+
+def test_a_blanc_ne_garde_pas_le_verrou_entre_deux_fiches(data_manager, monkeypatch):
+    """2026-10-26 : l'audit (`colonne_verdict`, à blanc) tenait la base sur toutes
+    les fiches ; l'écrivain du run de Kanye lancé à côté a échoué (« database is
+    locked »). Entre deux fiches, un autre écrivain doit passer sans attendre."""
+    t = _fiche_decalee(data_manager)
+    autre = Track(title="Ciel ouvert", artist=t.artist)
+    data_manager.save_track(autre)
+    chemin = data_manager.engine.url.database
+    ecritures = []
+    vraie = data_manager._rematerialiser_fiche
+
+    def espion(conn, tid):
+        if tid == autre.id:
+            with closing(sqlite3.connect(chemin, timeout=0)) as ecrivain:
+                ecrivain.execute("UPDATE tracks SET album = 'X' WHERE id = ?", (t.id,))
+                ecrivain.commit()
+                ecritures.append(tid)
+        vraie(conn, tid)
+
+    monkeypatch.setattr(data_manager, "_rematerialiser_fiche", espion)
+    changements = data_manager.rematerialiser([t.id, autre.id])
+    assert ecritures == [autre.id]
     assert changements[t.id]["spotify_streams"] == (None, 1000)
     assert _col(data_manager, t.id, "spotify_streams") is None
 

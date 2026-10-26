@@ -3292,46 +3292,60 @@ class TrackRepository:
     ) -> dict[int, dict[str, tuple]]:
         """Recalcule les colonnes dérivées (`_rematerialiser_fiche`) de
         `track_ids` (toutes les fiches si None). Rend `{track_id: {colonne:
-        (avant, après)}}` pour ce qui CHANGE ; sans `appliquer`, la transaction
-        est annulée (passage à blanc)."""
-        colonnes = ", ".join(self.COLONNES_REMATERIALISEES)
+        (avant, après)}}` pour ce qui CHANGE ; sans `appliquer`, rien n'est écrit
+        (passage à blanc).
+
+        À blanc, UNE transaction par fiche, annulée aussitôt : le verrou
+        d'écriture ne dure que le temps d'une fiche. En une seule transaction,
+        l'audit (`colonne_verdict`) tenait la base plus de 30 s et faisait
+        échouer l'écrivain d'un run lancé à côté (2026-10-26, streams de Kanye)."""
         changements: dict[int, dict[str, tuple]] = {}
         with self.engine.connect() as conn:
-            transaction = conn.begin()
             try:
-                ids = (
-                    list(track_ids)
-                    if track_ids is not None
-                    else [r[0] for r in conn.execute(text("SELECT id FROM tracks"))]
-                )
-                for tid in ids:
-                    avant = conn.execute(
-                        text(f"SELECT {colonnes} FROM tracks WHERE id = :t"), {"t": tid}
-                    ).first()
-                    if avant is None:
-                        continue
-                    self._rematerialiser_fiche(conn, tid)
-                    apres = conn.execute(
-                        text(f"SELECT {colonnes} FROM tracks WHERE id = :t"), {"t": tid}
-                    ).first()
-                    diff = {
-                        col: (a, b)
-                        for col, a, b in zip(
-                            self.COLONNES_REMATERIALISEES, avant, apres, strict=True
-                        )
-                        if str(a) != str(b)
-                    }
-                    if diff:
-                        changements[tid] = diff
-                if appliquer:
-                    transaction.commit()
+                if track_ids is not None:
+                    ids = list(track_ids)
                 else:
-                    transaction.rollback()
+                    ids = [r[0] for r in conn.execute(text("SELECT id FROM tracks"))]
+                    conn.rollback()
+                if appliquer:
+                    with conn.begin():
+                        for tid in ids:
+                            self._comparer_rematerialisation(conn, tid, changements)
+                else:
+                    for tid in ids:
+                        conn.begin()
+                        try:
+                            self._comparer_rematerialisation(conn, tid, changements)
+                        finally:
+                            conn.rollback()
             except SQLAlchemyError as e:
-                transaction.rollback()
+                conn.rollback()
                 logger.error(f"Erreur rematerialiser : {e}")
                 return {}
         return changements
+
+    def _comparer_rematerialisation(
+        self, conn, tid: int, changements: dict[int, dict[str, tuple]]
+    ) -> None:
+        """Rematérialise la fiche `tid` dans la transaction de l'appelant et
+        consigne dans `changements` les colonnes qui changent."""
+        colonnes = ", ".join(self.COLONNES_REMATERIALISEES)
+        avant = conn.execute(
+            text(f"SELECT {colonnes} FROM tracks WHERE id = :t"), {"t": tid}
+        ).first()
+        if avant is None:
+            return
+        self._rematerialiser_fiche(conn, tid)
+        apres = conn.execute(
+            text(f"SELECT {colonnes} FROM tracks WHERE id = :t"), {"t": tid}
+        ).first()
+        diff = {
+            col: (a, b)
+            for col, a, b in zip(self.COLONNES_REMATERIALISEES, avant, apres, strict=True)
+            if str(a) != str(b)
+        }
+        if diff:
+            changements[tid] = diff
 
     def combler_isrc_vides(self, *, appliquer: bool = False) -> list[tuple[int, str, str]]:
         """Fiches à ISRC VIDE alors qu'une observation en donne un : rend

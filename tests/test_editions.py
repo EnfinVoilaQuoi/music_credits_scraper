@@ -83,3 +83,37 @@ class TestVersionsLiees:
         autre = _t("Marine", 5)
         liees = editions.versions_liees(suzy, [suzy, live, cover, remix, autre])
         assert {(f.id, n) for f, n in liees} == {(2, "version"), (3, "cover"), (4, "remix")}
+
+    def test_par_la_page_genius_de_la_relation(self):
+        """Une relation lue chez Genius n'a pas de `track_id` : elle vise la
+        fiche par sa page — le socle ne lie pas « Day N Night » à « Day ‘N’
+        Nite » (2026-10-26)."""
+        original = _t("Day ‘N’ Nite", 1)
+        original.genius_url = "https://genius.com/Kid-cudi-day-n-nite-lyrics"
+        reprise = _t(
+            "Day N Night",
+            2,
+            relationships=[
+                {"type": "cover_of", "url": "https://genius.com/kid-cudi-day-n-nite-lyrics/"}
+            ],
+        )
+        sample = _t(
+            "Autre",
+            3,
+            relationships=[{"type": "samples", "url": original.genius_url}],
+        )
+        liees = editions.versions_liees(original, [original, reprise, sample])
+        assert [(f.id, n) for f, n in liees] == [(2, "cover")]
+
+    def test_l_original_qui_reprend_son_instrumental_ne_s_affiche_pas_chez_lui(self):
+        """Genius : « Boulbi » cover_of « Boulbi (Instrumental) ». L'original ne
+        s'affiche pas en « reprise » de son instrumental."""
+        instru = _t("Boulbi (Instrumental)", 1)
+        instru.genius_url = "https://genius.com/Booba-boulbi-instrumental-lyrics"
+        original = _t("Boulbi", 2, relationships=[{"type": "cover_of", "url": instru.genius_url}])
+        assert editions.versions_liees(instru, [instru, original]) == []
+
+    def test_sans_page_genius_la_relation_sans_track_id_ne_vise_rien(self):
+        original = _t("Day ‘N’ Nite", 1)
+        reprise = _t("Day N Night", 2, relationships=[{"type": "cover_of", "url": None}])
+        assert editions.versions_liees(original, [original, reprise]) == []

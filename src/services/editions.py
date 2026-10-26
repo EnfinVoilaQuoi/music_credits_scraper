@@ -82,26 +82,55 @@ def rattacher(dm, socle, titre: str, source: str, label: str | None = None, **id
 _NATURES = {"version_of": "version", "remix_of": "remix", "cover_of": "cover"}
 
 
+def _cle_page(url) -> str | None:
+    """PUR. Clé de comparaison d'une page Genius : sans espaces, sans barre
+    finale, en minuscules (None si vide)."""
+    cle = (url or "").strip().rstrip("/").lower()
+    return cle or None
+
+
 def versions_liees(track, fiches) -> list[tuple[object, str]]:
     """PUR. Les autres fiches qui sont des VERSIONS de `track` — (fiche, nature).
 
     Par la relation (`version_of` / `remix_of` / `cover_of` pointant sur la
     fiche, posée par Genius, Deezer, Kworb ou les corrections à la main), sinon
     par le même morceau souche (« Suzy (Live 2006) » pour « Suzy »). Sert
-    l'onglet « Versions » de la fiche."""
+    l'onglet « Versions » de la fiche.
+
+    Une relation lue chez Genius ne porte pas de `track_id` : elle vise la fiche
+    par sa PAGE (`url` = `genius_url`), ce que le socle ne voit pas quand les
+    titres diffèrent (« Day N Night » → « Day ‘N’ Nite », 493 liens de plus en
+    base, 2026-10-26). AFFICHAGE seulement : chez Genius, `remix_of` couvre
+    aussi un freestyle sur la prod d'un autre (« Grünt #33 » → « Petit
+    frère ») — jamais une source d'héritage (BPM, durée, tonalité). Genius dit
+    aussi l'original « reprise » de son propre instrumental (« Boulbi » →
+    « Boulbi (Instrumental) », 21 cas) : ce sens-là ne s'affiche pas, le socle
+    lie déjà l'instrumental depuis l'original."""
     from src.utils.version_descriptors import Kind
 
-    souche = normalize_title(parse_variant(track.title).socle)
+    variante = parse_variant(track.title)
+    souche = normalize_title(variante.socle)
+    page = _cle_page(track.genius_url)
+
+    def vise(r, f) -> bool:
+        if r.get("track_id") is not None and r.get("track_id") == track.id:
+            return True
+        if page is None or _cle_page(r.get("url")) != page:
+            return False
+        vf = parse_variant(f.title)
+        inverse = (
+            variante.kind != Kind.NONE
+            and vf.kind == Kind.NONE
+            and normalize_title(vf.socle) == souche
+        )
+        return not inverse
+
     vues, liees = {track.id}, []
     for f in fiches:
         if f.id in vues:
             continue
         rel = next(
-            (
-                r
-                for r in f.relationships or []
-                if r.get("type") in _NATURES and r.get("track_id") == track.id
-            ),
+            (r for r in f.relationships or [] if r.get("type") in _NATURES and vise(r, f)),
             None,
         )
         if rel is not None:

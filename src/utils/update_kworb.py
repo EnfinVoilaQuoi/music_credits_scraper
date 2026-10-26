@@ -45,6 +45,7 @@ from src.utils.version_descriptors import (
     meme_famille,
     meme_prise,
     parse_variant,
+    reeditions_evidentes,
     titre_generique,
     titres_equivalents,
 )
@@ -53,7 +54,12 @@ logger = get_logger(__name__)
 
 
 # Normaliseur PARTAGÉ (même matching que update_ytmusic — cf. title_matching.py)
-from src.utils.title_matching import base_album_key, contains_as_words, names_match_as_words
+from src.utils.title_matching import (
+    base_album_key,
+    cle_album,
+    contains_as_words,
+    names_match_as_words,
+)
 from src.utils.title_matching import normalize_title as _normalize_title
 
 
@@ -291,6 +297,10 @@ class Index:
     #: à la première fiche (id le plus bas) — écrire sur chacune gonflerait le
     #: total d'album d'un morceau ; les autres restent à fusionner.
     doublons: dict[str, list] = field(default_factory=dict)
+    #: Parmi `doublons`, les RÉÉDITIONS (`reeditions_evidentes` : album et sa
+    #: Deluxe, même durée) : attribuées à la fiche de l'album d'origine, et
+    #: rien à trancher (décision utilisateur 2026-10-26).
+    reeditions: set[str] = field(default_factory=set)
     by_title: dict[str, list] = field(default_factory=dict)
     by_socle: dict[str, list] = field(default_factory=dict)
     #: Titre sans sous-titre final → [(fiche, sous-titre)] (6D, `sous_titre`).
@@ -406,6 +416,13 @@ def construire_index(tracks) -> Index:
             premiere, *autres = sorted(ts, key=lambda t: t.id)
             index.by_edition_id[sid] = premiere
             index.doublons[sid] = autres
+        elif len(ts) > 1 and reeditions_evidentes([(t.title, t.album, t.duration) for t in ts]):
+            # L'album d'origine d'abord : sa clé est la plus courte (« TYCOON »
+            # devant « TYCOON (Deluxe) »).
+            origine, *autres = sorted(ts, key=lambda t: (len(cle_album(t.album)), t.id))
+            index.by_edition_id[sid] = origine
+            index.doublons[sid] = autres
+            index.reeditions.add(sid)
         elif len(ts) > 1:
             index.ids_partages[sid] = ts
         else:
@@ -1216,6 +1233,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
     result["doublons_evidents"] = [
         (sid, sorted([index.by_edition_id[sid].title] + [t.title for t in ts]))
         for sid, ts in sorted(index.doublons.items())
+        if sid not in index.reeditions
     ]
     for sid, ts in sorted(index.ids_partages.items()):
         for t in ts:
@@ -1228,6 +1246,8 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 {"spotify_id": sid},
             )
     for sid, ts in sorted(index.doublons.items()):
+        if sid in index.reeditions:
+            continue
         fiches = [index.by_edition_id[sid], *ts]
         for t in fiches:
             autres = sorted(x.title for x in fiches if x is not t)

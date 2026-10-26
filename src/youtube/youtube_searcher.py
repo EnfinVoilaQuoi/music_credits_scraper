@@ -16,8 +16,7 @@ from src.utils.logger import get_logger
 from src.utils.title_matching import (
     _GROUPE_D_INVITES,
     _retirer_si_invites,
-    base_album_key,
-    cle_album,
+    meme_album,
     names_match_as_words,
     normalize_name,
     normalize_title,
@@ -180,16 +179,6 @@ def invites_nommes(titre: str | None) -> list[str]:
         for m in _GROUPE_D_INVITES.finditer(titre or "")
         if _retirer_si_invites(m) == "" and m.group(2).strip()
     ]
-
-
-def meme_album(album: str | None, autre: str | None) -> bool:
-    """Deux noms de disque désignent-ils le même disque (ou une édition de
-    lui : « Temps mort » / « Temps mort (Réédition) », « 444 Nuits » /
-    « 444Nuits (Version rouge) ») ? Faux si l'un manque."""
-    if not album or not autre:
-        return False
-    a, b = (re.sub(r"(?<=\d) (?=[a-z])", "", cle_album(x)) for x in (album, autre))
-    return base_album_key(a, {b}) is not None or base_album_key(b, {a}) is not None
 
 
 def memes_parties_publiees(cible: str, resultat: str, artistes=()) -> bool:

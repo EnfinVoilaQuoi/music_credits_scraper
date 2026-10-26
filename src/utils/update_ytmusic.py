@@ -416,13 +416,20 @@ def videos_partagees(vid_counts: dict, tracks_par_id: dict | None = None) -> set
 
 
 def partage_evident(video_id: str, track_ids, tracks_par_id: dict) -> str | None:
-    """« medley » (clip double), « doublon » (mêmes fiches) ou None."""
-    from src.utils.version_descriptors import doublons_evidents, medley_evident
+    """« medley » (clip double), « doublon » (mêmes fiches), « reedition »
+    (album et sa réédition, même durée) ou None."""
+    from src.utils.version_descriptors import (
+        doublons_evidents,
+        medley_evident,
+        reeditions_evidentes,
+    )
 
     fiches = [tracks_par_id[t] for t in track_ids if t in tracks_par_id]
     titres = [f.title for f in fiches]
     if doublons_evidents([(f.title, f.album) for f in fiches]):
         return "doublon"
+    if reeditions_evidentes([(f.title, f.album, f.duration) for f in fiches]):
+        return "reedition"
     titre_video = next(
         (
             v.title

@@ -43,6 +43,7 @@ def _track(
         deezer_id=deezer_id,
         title=title,
         album=album,
+        duration=None,
         streams=SimpleNamespace(spotify_streams=spotify_streams, ytm_streams=None),
         is_featuring=False,
         primary_artist_name=None,

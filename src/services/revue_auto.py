@@ -82,6 +82,11 @@ REGLES_DEEZER_BRANCHEES = True
 #: BAISSÉ tant que l'utilisateur n'a pas validé son passage à blanc.
 REGLES_LIENS_DEEZER_BRANCHEES = False
 
+#: Famille « ID Spotify porté par deux fiches » (`politiques_revue.REGLES_ID_PARTAGE`) :
+#: levé le 2026-10-26 — simulée sur toute la base (2 cas, tranchés comme
+#: l'utilisateur), qui ne veut plus vérifier « des trucs qu'on sait déjà ».
+REGLES_ID_PARTAGE_BRANCHEES = True
+
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.
 _SANS_FICHE = frozenset({"deezer_appliquer", "deezer_rattacher_isrc"})
@@ -125,11 +130,13 @@ def cas_par_regle(
     id_propose: bool = False,
     deezer: tuple | None = None,
     liens_deezer: bool = False,
+    id_partage: bool = False,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
     from src.services.politiques_revue import (
         arbitrage_deezer,
+        arbitrage_id_partage,
         arbitrage_id_propose,
         arbitrage_liens_deezer,
         arbitrage_valide,
@@ -149,6 +156,8 @@ def cas_par_regle(
             arbitrage = arbitrage_deezer(c, track, ctx, *deezer)
         if arbitrage is None and liens_deezer:
             arbitrage = arbitrage_liens_deezer(c, track, ctx)
+        if arbitrage is None and id_partage:
+            arbitrage = arbitrage_id_partage(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -405,6 +414,7 @@ def corriger(dm, artiste) -> BilanCorrections:
             or REGLES_ID_PROPOSE_BRANCHEES
             or REGLES_DEEZER_BRANCHEES
             or REGLES_LIENS_DEEZER_BRANCHEES
+            or REGLES_ID_PARTAGE_BRANCHEES
         ):
             rendus = _rendus_a_l_humain(dm, artiste.id)
             a_faire += [
@@ -417,6 +427,7 @@ def corriger(dm, artiste) -> BilanCorrections:
                     id_propose=REGLES_ID_PROPOSE_BRANCHEES,
                     deezer=contexte_deezer(dm, artiste) if REGLES_DEEZER_BRANCHEES else None,
                     liens_deezer=REGLES_LIENS_DEEZER_BRANCHEES,
+                    id_partage=REGLES_ID_PARTAGE_BRANCHEES,
                 )
                 if (c.detecteur, c.cle) not in rendus
             ]

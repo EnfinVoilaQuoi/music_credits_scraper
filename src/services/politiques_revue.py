@@ -793,6 +793,76 @@ def arbitrage_liens_deezer(cas, track, ctx) -> Arbitrage | None:
     return None
 
 
+# ── Famille « ID Spotify porté par deux fiches » — VALIDÉE le 2026-10-26 ────
+
+#: Simulée sur toute la base le 2026-10-26 : 2 ID partagés en tout (Kanye),
+#: l'un réédition (`reeditions_evidentes`, plus signalé), l'autre tranché par
+#: le gate — « I CAN'T WAIT » / « Wait », morceaux différents (décision
+#: utilisateur : « on a déjà les infos pour le savoir »). Interrupteur :
+#: `revue_auto.REGLES_ID_PARTAGE_BRANCHEES`.
+REGLES_ID_PARTAGE = frozenset(
+    {("kworb_id_partage", "retirer_spotify"), ("kworb_id_partage", "normal")}
+)
+
+
+def _ids_d_edition(track) -> set[str]:
+    ids = {track.spotify_id} if track.spotify_id else set()
+    return ids | {e.spotify_id for e in (track.spotify_id_entries or []) if not e.est_rendition}
+
+
+def politique_id_partage(gate: Callable) -> Callable:
+    """Un ID Spotify porté par plusieurs fiches de l'artiste : le gate
+    d'identité STRICT est rejoué sur chacune. Une SEULE le passe : l'ID est le
+    sien (« ✓ Normal » pour elle) et se retire des autres — le gate qui le
+    refuse est la preuve montrable. Aucune, ou plusieurs : l'humain. Originaux
+    sans ambiguïté seulement (`titre_d_original`), sur TOUTES les porteuses."""
+
+    def juger(cas, track, ctx):
+        if cas.detecteur != "kworb_id_partage" or track is None:
+            return None
+        sid = (cas.preuves or {}).get("spotify_id")
+        porteuses = [t for t in ctx.disco if sid and sid in _ids_d_edition(t)]
+        if len(porteuses) < 2 or track.id not in {t.id for t in porteuses}:
+            return None
+        if not all(titre_d_original(t.title) for t in porteuses):
+            return None
+        passent = [t for t in porteuses if gate(t, sid)]
+        if len(passent) != 1:
+            return None
+        gardee = passent[0]
+        if gardee.id == track.id:
+            autres = ", ".join(f"« {t.title} »" for t in porteuses if t.id != track.id)
+            return Arbitrage(
+                "l'ID est celui de cette fiche",
+                "normal",
+                f"seule à passer le contrôle d'identité ; retiré de {autres}",
+            )
+        return Arbitrage(
+            "l'ID est celui d'une autre fiche : retirer",
+            "retirer_spotify",
+            f"« {gardee.title} » seule passe le contrôle d'identité de {sid}",
+        )
+
+    return juger
+
+
+def arbitrage_id_partage(cas, track, ctx, gate=None) -> Arbitrage | None:
+    """L'arbitrage de la famille « ID partagé ». `gate` injectable ; par
+    défaut, le gate des runs sur la page embed (réseau, gardée au brut)."""
+    if cas.detecteur != "kworb_id_partage":
+        return None
+    if gate is None:
+        from src.utils.spotify_identity import lire_identite_http, valider_identite
+
+        def gate(t, sid):
+            return bool(valider_identite(t, sid, lire_identite_http, lire_album=lambda _s: None))
+
+    arbitrage = politique_id_partage(gate)(cas, track, ctx)
+    if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_ID_PARTAGE:
+        return arbitrage
+    return None
+
+
 POLITIQUES: tuple[Politique, ...] = (
     Politique(
         "durees_vote_3",

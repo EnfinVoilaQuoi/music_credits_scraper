@@ -1256,6 +1256,38 @@ def doublons_evidents(fiches) -> bool:
     return True
 
 
+#: Écart de durée entre deux fiches d'une RÉÉDITION : deux catalogues d'un même
+#: fichier (`vote_durees.TOLERANCE_S`).
+ECART_REEDITION_S = 2
+
+
+def reeditions_evidentes(fiches) -> bool:
+    """Ces fiches sont-elles le MÊME enregistrement paru sur un album et sa
+    réédition ? `fiches` = `[(titre, album, durée)]`.
+
+    Même titre normalisé, chaque album une édition de l'autre (`meme_album` :
+    « TYCOON » / « TYCOON (Deluxe) ») ET la même durée à 2 s : le titre et
+    l'album ne suffisent pas, une Deluxe porte parfois une AUTRE prise sous le
+    même titre (Kanye « I CAN'T WAIT » : 127 s sur *BULLY*, 137 s avec Lauryn
+    Hill sur *BULLY - DELUXE*). Décision utilisateur 2026-10-26 : « Tycoon et
+    Tycoon Deluxe, c'est une réédition d'album, ya rien de bizarre » — ni ID
+    « partagé », ni doublon à fusionner."""
+    from src.utils.title_matching import meme_album
+
+    fiches = list(fiches or [])
+    if len(fiches) < 2:
+        return False
+    for i, (titre_a, album_a, duree_a) in enumerate(fiches):
+        for titre_b, album_b, duree_b in fiches[i + 1 :]:
+            if not titre_a or cle_titre(titre_a).norme != cle_titre(titre_b or "").norme:
+                return False
+            if not meme_album(album_a, album_b):
+                return False
+            if not duree_a or not duree_b or abs(duree_a - duree_b) > ECART_REEDITION_S:
+                return False
+    return True
+
+
 def medley_evident(titre_video: str | None, titres) -> bool:
     """Un clip DOUBLE : chaque morceau rattaché est nommé dans le titre de la
     vidéo (« Avec une rose / Masterclass (Clip Officiel) », « Prélude avant

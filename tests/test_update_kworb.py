@@ -1084,6 +1084,23 @@ class TestIdsPartages:
         assert res["ids_partages"] == []
         assert [sid for sid, _ in res["doublons_evidents"]] == ["SPX", "SPY"]
 
+    def test_une_reedition_n_est_ni_partagee_ni_a_fusionner(self):
+        """Kanye « DON'T KILL THE PARTY » sur TYCOON et TYCOON (Deluxe), même
+        durée : décision utilisateur 2026-10-26, « ya rien de bizarre ». La
+        ligne va à la fiche de l'album d'origine, rien n'est signalé."""
+        deluxe = _track(1, "DON’T KILL THE PARTY", spotify_id="SPX", album="TYCOON (Deluxe)")
+        origine = _track(2, "DON’T KILL THE PARTY", spotify_id="SPX", album="TYCOON")
+        deluxe.duration, origine.duration = 133, 132
+        res, dm = _run([deluxe, origine], [_entry("DON'T KILL THE PARTY", 1000, 9, "SPX")])
+        assert [(tid, st) for tid, st, *_ in dm.streams_writes] == [(2, 1000)]
+        assert res["ids_partages"] == []
+        assert res["doublons_evidents"] == []
+        assert not [
+            c
+            for c in res.get("a_trancher", [])
+            if c.get("detecteur") in ("kworb_id_partage", "kworb_doublon")
+        ]
+
     def test_id_partage_retire_l_observation_kworb_perimee(self):
         """Kanye « Runaway » : l'ID est aussi sur « Runaway (Film) », le run
         n'écrit plus rien — mais la vieille observation (35 M) restait MAÎTRE

@@ -345,3 +345,13 @@ def base_album_key(titre_normalise: str, cles_connues) -> str | None:
         if titre_normalise.startswith(cle) and _MARQUEURS_EDITION.match(reste):
             return cle
     return None
+
+
+def meme_album(album: str | None, autre: str | None) -> bool:
+    """Deux noms de disque désignent-ils le même disque (ou une édition de
+    lui : « Temps mort » / « Temps mort (Réédition) », « 444 Nuits » /
+    « 444Nuits (Version rouge) ») ? Faux si l'un manque."""
+    if not album or not autre:
+        return False
+    a, b = (re.sub(r"(?<=\d) (?=[a-z])", "", cle_album(x)) for x in (album, autre))
+    return base_album_key(a, {b}) is not None or base_album_key(b, {a}) is not None

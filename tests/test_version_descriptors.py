@@ -16,6 +16,7 @@ from src.utils.version_descriptors import (
     meme_socle,
     parse_variant,
     parties_du_morceau,
+    reeditions_evidentes,
     socle_normalise,
     titre_sans_edition,
     titres_equivalents,
@@ -536,3 +537,28 @@ class TestGraphiesEtFeat:
         assert not titres_equivalents(
             "Today Is a Good Day (Remix)", "Today Is a Good Day (feat. Darina)"
         )
+
+
+class TestReeditions:
+    """Décision utilisateur 2026-10-26 : un album et sa réédition portent le
+    même enregistrement — ni ID « partagé », ni doublon à fusionner."""
+
+    def test_album_et_sa_deluxe_meme_duree(self):
+        assert reeditions_evidentes(
+            [
+                ("DON'T KILL THE PARTY", "TYCOON (Deluxe)", 133),
+                ("DON’T KILL THE PARTY", "TYCOON", 132),
+            ]
+        )
+
+    def test_une_autre_prise_sur_la_deluxe(self):
+        """« I CAN'T WAIT » : 127 s sur BULLY, 137 s avec Lauryn Hill sur la Deluxe."""
+        assert not reeditions_evidentes(
+            [("I CAN'T WAIT", "BULLY", 127), ("I CAN'T WAIT", "BULLY - DELUXE", 137)]
+        )
+
+    def test_titre_album_ou_duree_manquants(self):
+        assert not reeditions_evidentes([("Wait", None, 137), ("I CAN'T WAIT", "BULLY", 137)])
+        assert not reeditions_evidentes([("KING", "BULLY", 126), ("KING", "VULTURES 1", 126)])
+        assert not reeditions_evidentes([("KING", "BULLY", None), ("KING", "BULLY (Deluxe)", 126)])
+        assert not reeditions_evidentes([("KING", "BULLY", 126)])

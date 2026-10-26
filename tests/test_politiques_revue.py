@@ -200,6 +200,25 @@ def test_id_propose_gate_et_duree_independante():
     assert pol.politique_id_propose(lire, lambda *_: True)(cas, t, None) is None
 
 
+def test_id_partage_le_gate_designe_la_fiche():
+    """Kanye : l'ID de « I CAN'T WAIT » (Deluxe) posé aussi sur « Wait », un
+    autre morceau. Seule la fiche que le gate accepte garde l'ID."""
+    juste = _t("I CAN'T WAIT", 1, spotify_id="SID", spotify_id_entries=[])
+    autre = _t("Wait", 2, spotify_id="SID", spotify_id_entries=[])
+    ctx = SimpleNamespace(disco=[juste, autre])
+    juger = pol.politique_id_partage(lambda t, _sid: t is juste)
+    cas_autre = _cas("kworb_id_partage", autre, {"spotify_id": "SID"})
+    cas_juste = _cas("kworb_id_partage", juste, {"spotify_id": "SID"})
+    assert juger(cas_autre, autre, ctx).action == "retirer_spotify"
+    assert juger(cas_juste, juste, ctx).action == "normal"
+    # Les deux passent, ou aucune : l'humain.
+    assert pol.politique_id_partage(lambda *_: True)(cas_autre, autre, ctx) is None
+    assert pol.politique_id_partage(lambda *_: False)(cas_autre, autre, ctx) is None
+    # Une version parmi les porteuses : l'humain (décision 2026-10-20).
+    autre.title = "Wait (Remix)"
+    assert juger(cas_autre, autre, ctx) is None
+
+
 def test_kworb_ligne_rattachee_par_le_rejeu_d_aujourd_hui():
     cas = _cas("kworb_ecartee", None, {"titre_kworb": "Slow Jamz"})
     rejoue = {"Slow Jamz": {"fiche": {"id": 1, "titre": "Slow Jamz"}, "suggestion": False}}

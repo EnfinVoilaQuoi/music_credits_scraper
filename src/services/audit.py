@@ -46,7 +46,15 @@ from src.utils.concordance_paroles import (
     paroles_de_reference,
     recouvrement_bigrammes,
 )
-from src.utils.duree_youtube import NON_MORCEAU, est_un_clip
+from src.utils.duree_youtube import (
+    DUREE_MAX_MORCEAU,
+    DUREE_MIN_MORCEAU,
+    FICHE_EMISSION,
+    NON_MORCEAU,
+    court_par_nature,
+    dementie_par_les_paroles,
+    est_un_clip,
+)
 from src.utils.title_matching import cle_album, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
@@ -392,13 +400,31 @@ def durees(c, pistes) -> list[Cas]:
                     f"{_lib(t)} {t['duration']}s ← «{(vids[0].title if vids else '?')[:70]}»",
                 )
             )
+    suspectes = {}
     for t in pistes:
         try:
             d = int(t["duration"]) if t["duration"] is not None else None
         except (TypeError, ValueError):
             d = None
-        if d is not None and (d < 25 and not court_par_nature(t["title"]) or d > 900):
-            cas.append(Cas("duree_aberrante", t["artiste"], [t["id"]], f"{_lib(t)} {d}s"))
+        if d is not None and (
+            d < DUREE_MIN_MORCEAU and not court_par_nature(t["title"]) or d > DUREE_MAX_MORCEAU
+        ):
+            suspectes[t["id"]] = (t, d)
+    observees = collections.defaultdict(dict)
+    if suspectes:
+        from src.utils.track_mapper import _clean_duration
+
+        for r in c.execute(
+            "SELECT track_id, source, value FROM observations WHERE field='duration'"
+        ):
+            if r["track_id"] in suspectes:
+                observees[r["track_id"]][r["source"]] = _clean_duration(r["value"])
+    for tid, (t, d) in suspectes.items():
+        if not duree_aberrante(
+            t["title"], d, observees[tid], paroles_de_reference(t["lyrics"], t["lyrics_source"])
+        ):
+            continue
+        cas.append(Cas("duree_aberrante", t["artiste"], [t["id"]], f"{_lib(t)} {d}s"))
     cas += lrc_trop_longs(c, pistes)
     return cas
 
@@ -438,18 +464,23 @@ def lrc_trop_longs(c, pistes) -> list[Cas]:
     return cas
 
 
-_COURT = re.compile(r"\b(?:intro|interlude|skit|outro|prelude|prélude)\b", re.IGNORECASE)
+def duree_aberrante(titre, duree: int, observees: dict, paroles: str | None) -> bool:
+    """PUR. Une durée hors de 25 s - 15 min qui reste INEXPLIQUÉE.
 
+    Expliquée : deux catalogues indépendants la donnent (« ISABELLA » 9 s,
+    « 13 Organisé » 24 min, les interludes d'IAM) — `lrc_garde.duree_confirmee`
+    — ou, au-delà de 15 min, la fiche est une émission (Grünt, Rentre dans le
+    Cercle, freestyle, live) : la MÊME règle que la pose de la durée
+    (`duree_youtube.FICHE_EMISSION`), sauf si ses paroles la démentent
+    (`dementie_par_les_paroles`, le juge du verdict)."""
+    from src.utils.lrc_garde import duree_confirmee
 
-def court_par_nature(titre: str | None) -> bool:
-    """PUR. Un titre qui ANNONCE un morceau court (intro, interlude, skit,
-    outro) : moins de 25 s n'y est pas aberrant. Mesuré le 2026-10-13 : 20 des
-    26 durées sous 25 s de la base (les « Interlude : … » des Cool Sessions de
-    MC Solaar, 15-24 s, arrivés avec le lot de streams) ; restent les vrais
-    suspects (« ISABELLA » 9 s, « RXN » 7 s, « SICKO MODE (ref. CyHi) » 12 s)."""
-    t = titre or ""
-    principal = re.split(r"[:(\[]", t, maxsplit=1)[0]
-    return titre_generique(principal) or bool(_COURT.search(t))
+    fiche = SimpleNamespace(duration=duree, durations_observees=observees)
+    if duree_confirmee(fiche):
+        return False
+    if duree > DUREE_MAX_MORCEAU and FICHE_EMISSION.search(titre or ""):
+        return dementie_par_les_paroles(duree, paroles)
+    return True
 
 
 def certifs(pistes) -> list[Cas]:

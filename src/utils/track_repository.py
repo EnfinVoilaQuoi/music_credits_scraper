@@ -2884,10 +2884,19 @@ class TrackRepository:
             DISCOGRAPHY_PRIORITIES,
             resolve_by_priority,
             resoudre_date_de_sortie,
+            resoudre_duree,
         )
         from src.utils.dates import completer as _completer
 
         observations = self._get_observations(conn, track_id)
+        from src.utils.concordance_paroles import paroles_de_reference
+
+        fiche = conn.execute(
+            text("SELECT title, lyrics, lyrics_source FROM tracks WHERE id = :id"),
+            {"id": track_id},
+        ).first()
+        titre = fiche.title if fiche is not None else None
+        paroles = paroles_de_reference(fiche.lyrics, fiche.lyrics_source) if fiche else None
         valeurs: dict = {}
         for field in fields:
             colonne = self.COLONNES_DISCOGRAPHIE.get(field)
@@ -2900,6 +2909,8 @@ class TrackRepository:
             # une seule des deux ferait dépendre le verdict du flux qui écrit.
             if field == "release_date":
                 verdict = resoudre_date_de_sortie(obs_du_champ, ordre)
+            elif field == "duration":
+                verdict = resoudre_duree(obs_du_champ, ordre, titre, paroles)
             else:
                 verdict = resolve_by_priority(obs_du_champ, field, ordre)
             if verdict is None:

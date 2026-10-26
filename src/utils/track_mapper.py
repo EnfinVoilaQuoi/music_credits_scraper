@@ -287,6 +287,7 @@ def track_from_row(row, artist: Artist, observations=None) -> Track | None:
                 track_duration=track.duration,
                 paroles=paroles_de_reference(track.lyrics.text, track.lyrics.source),
                 instrumental=bool(track.lyrics.instrumental),
+                titre=track.title,
             ),
         )
         track.durations_observees = {

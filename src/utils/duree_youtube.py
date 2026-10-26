@@ -78,6 +78,46 @@ FICHE_EMISSION = re.compile(
 )
 
 
+#: En deçà, une durée n'est pas celle d'un morceau — sauf si le titre en annonce
+#: un court (`court_par_nature`). Seuil de l'audit (`duree_aberrante`) et du
+#: verdict (`reconcile.resoudre_duree`, extraits vidéo, 2026-10-27).
+DUREE_MIN_MORCEAU = 25
+_COURT = re.compile(r"\b(?:intro|interlude|skit|outro|prelude|prélude)\b", re.IGNORECASE)
+
+
+def court_par_nature(titre: str | None) -> bool:
+    """PUR. Un titre qui ANNONCE un morceau court (intro, interlude, skit,
+    outro) : moins de 25 s n'y est pas aberrant. Mesuré le 2026-10-13 : 20 des
+    26 durées sous 25 s de la base (les « Interlude : … » des Cool Sessions de
+    MC Solaar, 15-24 s, arrivés avec le lot de streams) ; restent les vrais
+    suspects (« ISABELLA » 9 s, « RXN » 7 s, « SICKO MODE (ref. CyHi) » 12 s)."""
+    from src.utils.version_descriptors import titre_generique
+
+    t = titre or ""
+    principal = re.split(r"[:(\[]", t, maxsplit=1)[0]
+    return titre_generique(principal) or bool(_COURT.search(t))
+
+
+#: Mots de paroles Genius par seconde sous lesquels une vidéo longue dure bien
+#: plus que ce que la page transcrit. Mesuré le 2026-10-27 sur les 70
+#: freestyles et sessions de plus de 5 min : 0,28 à 3,7 (transcriptions
+#: partielles comprises) ; « Kanye West Sway Freestyle » 0,04 (73 mots pour
+#: les 34 min de l'entretien entier).
+MOTS_PAR_SECONDE_MIN = 0.1
+
+
+def dementie_par_les_paroles(duree, paroles: str | None) -> bool:
+    """PUR. Une durée de plus de 15 min que les paroles Genius DÉMENTENT : la
+    vidéo est un entretien, une émission entière, pas la page. Sans paroles,
+    rien ne dément."""
+    try:
+        duree = int(duree)
+    except (TypeError, ValueError):
+        return False
+    mots = len((paroles or "").split())
+    return duree > DUREE_MAX_MORCEAU and bool(mots) and mots / duree < MOTS_PAR_SECONDE_MIN
+
+
 #: Un CLIP a son propre montage (« On contrôle la zone » : clip 4:04, CD 4:48 ;
 #: décision utilisateur 2026-10-13 : « la mention Clip officiel doit bloquer
 #: la durée »).

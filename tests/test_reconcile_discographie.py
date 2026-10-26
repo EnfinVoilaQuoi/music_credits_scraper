@@ -76,6 +76,42 @@ class TestResolveByPriority:
         assert resolve_by_priority([], "duration", ("deezer",)) is None
 
 
+class TestExtraitsVideo:
+    """2026-10-27 : une vidéo ordinaire de moins de 25 s est un extrait —
+    « SICKO MODE (ref. CyHi) » 12 s, « I Could Tell » 24 s."""
+
+    def test_l_extrait_ne_fait_pas_la_duree(self):
+        res = reconcile([_obs("duration", 12, "youtube_video")], titre="SICKO MODE (ref. CyHi)")
+        # Verdict EXPLICITE « pas de durée » : la colonne ne garde pas l'extrait.
+        assert res["duration"].value is None
+
+    def test_un_catalogue_reste_maitre(self):
+        res = reconcile(
+            [_obs("duration", 12, "youtube_video"), _obs("duration", 9, "deezer")],
+            titre="ISABELLA",
+        )
+        assert (res["duration"].value, res["duration"].source) == (9, "deezer")
+
+    def test_un_titre_court_par_nature_garde_sa_video(self):
+        res = reconcile([_obs("duration", 18, "youtube_video")], titre="Chicken Wings Skit")
+        assert res["duration"].value == 18
+
+    def test_au_dela_de_25_s_rien_ne_change(self):
+        res = reconcile([_obs("duration", 25, "youtube_video")], titre="I Could Tell")
+        assert res["duration"].value == 25
+
+    def test_l_entretien_entier_que_les_paroles_dementent(self):
+        obs = [_obs("duration", 2055, "youtube_video")]
+        titre = "Kanye West Sway Freestyle"
+        assert reconcile(obs, titre=titre, paroles="mot " * 73)["duration"].value is None
+        # Une session à la mesure de ses paroles, ou sans paroles : gardée.
+        assert reconcile(obs, titre=titre, paroles="mot " * 3000)["duration"].value == 2055
+        assert reconcile(obs, titre=titre)["duration"].value == 2055
+
+    def test_sans_titre_pas_de_filtre(self):
+        assert reconcile([_obs("duration", 12, "youtube_video")])["duration"].value == 12
+
+
 class TestLesStreamsNOntPasChange:
     """`reconcile_spotify_streams` devient un APPEL du résolveur généralisé :
     son comportement doit être identique au byte près."""

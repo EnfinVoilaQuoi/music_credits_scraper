@@ -435,6 +435,7 @@ class DataEnricher:
                 track_duration=track.duration,
                 paroles=paroles_de_reference(track.lyrics.text, track.lyrics.source),
                 instrumental=bool(track.lyrics.instrumental),
+                titre=track.title,
             ),
         )
         logger.info(

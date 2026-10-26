@@ -220,6 +220,33 @@ def test_un_titre_qui_annonce_un_morceau_court(titre, court):
     assert court_par_nature(titre) is court
 
 
+@pytest.mark.parametrize(
+    "titre, duree, observees, paroles, aberrante",
+    [
+        # Deux catalogues la donnent : le morceau EST court (ou long).
+        ("ISABELLA", 9, {"deezer": 9, "spotify_web": 8, "discogs": 8}, "", False),
+        ("13 Organisé", 1471, {"deezer": 1471, "spotify_web": 1471}, "", False),
+        # Une émission longue, ses paroles à la mesure de la vidéo.
+        ("Grünt #55", 1933, {"youtube_video": 1933}, "mot " * 5386, False),
+        ("Runaway (Live at Sydney 2014)", 907, {"youtube_video": 907}, "mot " * 1634, False),
+        # … ou sans paroles : rien ne la dément.
+        ("A TRAUMA Freestyle", 1697, {"youtube_video": 1697}, None, False),
+        # L'entretien entier sous la page d'un freestyle de 73 mots.
+        ("Kanye West Sway Freestyle", 2055, {"youtube_video": 2055}, "mot " * 73, True),
+        # Un extrait de 12 s, seule source : inexpliqué.
+        ("SICKO MODE (ref. CyHi)", 12, {"youtube_video": 12}, None, True),
+        # Long et pas une émission.
+        ("Morts pour rien", 3840, {"youtube_video": 3840}, None, True),
+    ],
+)
+def test_une_duree_hors_norme_expliquee_n_est_pas_aberrante(
+    titre, duree, observees, paroles, aberrante
+):
+    from src.services.audit import duree_aberrante
+
+    assert duree_aberrante(titre, duree, observees, paroles) is aberrante
+
+
 def test_paroles_identiques_sur_deux_titres_non_equivalents():
     """Chantier D, 2026-10-13 : le pendant de `lrc_emprunte` pour les paroles."""
     texte = "\n".join(

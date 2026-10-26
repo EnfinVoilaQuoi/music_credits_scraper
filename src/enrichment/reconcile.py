@@ -177,6 +177,42 @@ SPOTIFY_STREAMS_FIELD = "spotify_streams"
 STREAMS_SOURCES = ("kworb", "spotify_web")
 
 
+#: Vidéos ORDINAIRES (ni l'audio Topic, ni un catalogue) : sous
+#: `duree_youtube.DUREE_MIN_MORCEAU`, leur durée est celle d'un EXTRAIT.
+_VIDEOS_ORDINAIRES = frozenset({"youtube_video", "youtube_officiel"})
+
+
+def resoudre_duree(
+    observations: list, ordre, titre: str | None, paroles: str | None = None
+) -> Resolution | None:
+    """Verdict `duration` : `resolve_by_priority`, deux vidéos ordinaires
+    écartées (2026-10-27) :
+      · moins de 25 s quand le titre n'annonce pas un morceau court (intro,
+        skit…) — un extrait (« SICKO MODE (ref. CyHi) » 12 s, « I Could Tell »
+        24 s) ; sans titre connu, pas de filtre ;
+      · plus de 15 min que les paroles Genius démentent — l'entretien entier
+        (« Kanye West Sway Freestyle » : 73 mots pour 34 min).
+    Règle de VERDICT : l'observation reste, la colonne cesse de la porter, y
+    compris pour ce qui a été posé avant elle. La même fonction pour
+    `reconcile` et le repository."""
+    from src.utils.duree_youtube import (
+        DUREE_MIN_MORCEAU,
+        court_par_nature,
+        dementie_par_les_paroles,
+    )
+    from src.utils.track_mapper import _clean_duration
+
+    court = titre is None or court_par_nature(titre)
+
+    def recevable(o) -> bool:
+        if o.source not in _VIDEOS_ORDINAIRES:
+            return True
+        d = _clean_duration(o.value) or 0
+        return (court or d >= DUREE_MIN_MORCEAU) and not dementie_par_les_paroles(d, paroles)
+
+    return resolve_by_priority([o for o in observations if recevable(o)], "duration", ordre)
+
+
 def resolve_by_priority(observations: list, field: str, ordre) -> Resolution | None:
     """Verdict d'un champ dont les sources mesurent la MÊME grandeur.
 
@@ -548,6 +584,7 @@ def reconcile(
     streams_master: str = "kworb",
     paroles: str | None = None,
     instrumental: bool = False,
+    titre: str | None = None,
 ) -> dict[str, Resolution]:
     """Arbitre les observations d'UN morceau → verdict par champ.
 
@@ -559,7 +596,8 @@ def reconcile(
     par la durée réelle dans `compare_synced`) ; il entre par PARAMÈTRE pour que
     le moteur reste pur (aucune lecture de `Track`). Les deux appelants passent
     `track.duration`. `paroles` (le texte Genius) écarte les LRC qu'il dément ;
-    `instrumental` (constat) n'en retient aucun.
+    `instrumental` (constat) n'en retient aucun. `titre` juge les durées
+    d'extraits (`resoudre_duree`).
     """
     by_field: dict[str, list] = {}
     for obs in observations:
@@ -603,6 +641,12 @@ def reconcile(
         # dépendrait du flux qui a écrit.
         if field == "release_date":
             res = resoudre_date_de_sortie(obs_list, ordre)
+        elif field == "duration":
+            res = resoudre_duree(obs_list, ordre, titre, paroles)
+            if res is None and resolve_by_priority(obs_list, field, ordre) is not None:
+                # Toutes écartées (extraits) : le verdict est « pas de durée »
+                # — sans lui la colonne garderait l'extrait.
+                res = Resolution(field, None, None, None)
         else:
             res = resolve_by_priority(obs_list, field, ordre)
         if res is not None:

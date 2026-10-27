@@ -29,7 +29,7 @@ from playwright.sync_api import Error as PlaywrightError
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.scrapers.kworb_scraper import KworbScraper
-from src.utils import spotify_identity
+from src.utils import corrections_fiches, spotify_identity
 from src.utils.discogs_identity import nom_sans_suffixe
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import (
@@ -671,7 +671,49 @@ def _recevable(fiche, sid, lire_identite) -> bool:
     return any(names_match_as_words(fiche.primary_artist_name, a) for a in credites)
 
 
-def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> Rapprochement:
+def lien_tranche(entry, track, decisions: dict) -> bool:
+    """Le lien ligne Kworb → `track` a-t-il déjà été TRANCHÉ à la main : titre
+    confirmé (ou décidé) vers cette fiche dans `kworb_decisions`, ou ID
+    accepté sur elle (`acceptations`) ? Alors un titre Spotify d'une autre
+    « version » n'est qu'un libellé, rien à signaler : Diam's « Marine -
+    Version 2006 » EST la fiche « Marine » (décision du 2026-10-13), et les
+    lives de l'EP sont les fiches « Version EP » (2026-10-14) — 5 des 6
+    `kworb_variante` justes du 2026-10-27."""
+    if est_accepte(track, entry.get("spotify_id")):
+        return True
+    norm = _normalize_title(_SUFFIXE_UPLOAD.sub("", entry["title"]))
+    if (decisions.get("confirmed") or {}).get(norm) == track.id:
+        return True
+    decision = (decisions.get("decisions") or {}).get(norm) or {}
+    return decision.get("kind") not in (None, "ignore", "rendition") and (
+        decision.get("track_id") == track.id
+    )
+
+
+def _revient_au_titre(entry, fiche, page) -> bool:
+    """La ligne dont l'ID est posé sur une AUTRE fiche revient-elle à `fiche`,
+    celle qui porte son titre (Kanye « Only » / « Only One », 2026-09-24) ?
+
+    Pas quand l'ID y est REFUSÉ à la main, ni quand la page Kworb a une AUTRE
+    ligne au même titre : deux lignes au même titre sont deux enregistrements,
+    et l'ID les départage — la fiche a déjà la sienne. Diam's « La Gamberge -
+    Live 2006 » : la ligne de l'édition Collector de l'EP (170 s, sur la fiche
+    « Version EP ») s'ajoutait à celle de l'album 2007 (166 s), +132 394
+    streams comptés deux fois ; « Jeune demoiselle » de même, malgré le refus
+    de l'ID posé le 2026-10-14 (2026-10-27)."""
+    sid = entry.get("spotify_id")
+    if sid in corrections_fiches.ids_refuses(fiche):
+        return False
+    norm = _normalize_title(_SUFFIXE_UPLOAD.sub("", entry["title"]))
+    return not any(
+        e.get("spotify_id") != sid and _normalize_title(_SUFFIXE_UPLOAD.sub("", e["title"])) == norm
+        for e in page
+    )
+
+
+def rapprocher(
+    entry, index: Index, artist, decisions: dict, lire_identite, page=()
+) -> Rapprochement:
     """À quel morceau de la base appartient cette ligne Kworb ?
 
     Niveaux, du plus sûr au moins sûr :
@@ -701,9 +743,10 @@ def rapprocher(entry, index: Index, artist, decisions: dict, lire_identite) -> R
             # Jamais sur un titre GÉNÉRIQUE : chaque projet a son intro, parfois
             # plusieurs interludes — « Interlude * » ne désigne pas une fiche,
             # l'ID (« Interlude ****** (Pt. 3) ») est la seule identité fiable.
+            # `page` : toutes les lignes de la page (`_revient_au_titre`).
             generique = titre_generique(entry["title"])
             bonnes = [t for t in index.by_title.get(norm, []) if t.id != porteur.id]
-            if len(bonnes) == 1 and not generique:
+            if len(bonnes) == 1 and not generique and _revient_au_titre(entry, bonnes[0], page):
                 return Rapprochement(track=bonnes[0], via="id_mal_place", motif=porteur.title)
         return Rapprochement(track=porteur, via="id")
     # Édition de DIFFUSION (« Impossible - Radio Edit », « Put On - Album
@@ -1032,7 +1075,7 @@ def relier_ids_kworb(artist, data_manager, scraper=None, lire_identite=None) -> 
         sid = entry.get("spotify_id")
         if not sid:
             continue
-        r = rapprocher(entry, index, artist, decisions, lire_identite)
+        r = rapprocher(entry, index, artist, decisions, lire_identite, page_songs["entries"])
         # Variantes, propositions, lignes sans fiche : l'affaire du comptage.
         if r.track is None or r.suggestion is not None or r.rendition_de is not None:
             continue
@@ -1092,7 +1135,9 @@ def rapprochements(artist, data_manager, scraper=None, lire_identite=None) -> li
         decisions = {"confirmed": {}, "rejected": [], "decisions": {}}
 
     return [
-        verdict_vers_dict(entry, rapprocher(entry, index, artist, decisions, lire_identite))
+        verdict_vers_dict(
+            entry, rapprocher(entry, index, artist, decisions, lire_identite, page["entries"])
+        )
         for entry in page["entries"]
     ]
 
@@ -1277,7 +1322,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
     refusees_titre: set[int] = set()
 
     for entry in page_songs["entries"]:
-        r = rapprocher(entry, index, artist, _decisions, lire_identite)
+        r = rapprocher(entry, index, artist, _decisions, lire_identite, page_songs["entries"])
 
         if r.track is not None and r.via == "rendition_id":
             # L'ID est connu comme RENDITION du morceau : son compteur va sur la
@@ -1379,8 +1424,10 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 f"🔀 ID {entry.get('spotify_id')} posé sur « {r.motif} » : la ligne Kworb "
                 f"« {entry['title']} » va à la fiche « {track.title} »"
             )
-        if via == "id" and not meme_famille(
-            parse_variant(entry["title"]), parse_variant(track.title)
+        if (
+            via == "id"
+            and not meme_famille(parse_variant(entry["title"]), parse_variant(track.title))
+            and not lien_tranche(entry, track, _decisions)
         ):
             # L'ID en base dit « ce morceau », son titre Spotify dit une AUTRE
             # version : c'est la signature d'un ID mal attribué (« Heartless

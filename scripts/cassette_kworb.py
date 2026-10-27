@@ -62,7 +62,7 @@ def main() -> int:
             enregistre = sorted(
                 (
                     update_kworb.verdict_vers_dict(
-                        e, update_kworb.rapprocher(e, index, art, decisions, lire)
+                        e, update_kworb.rapprocher(e, index, art, decisions, lire, page["entries"])
                     )
                     for e in page["entries"]
                 ),

@@ -506,3 +506,18 @@ class TestChampsDeclares:
         with caplog.at_level("WARNING"):
             assert "spotify_id_propose" not in reconcile(obs)
         assert not [r for r in caplog.records if "GÉNÉRIQUE" in r.getMessage()]
+
+    def test_la_duree_audio_du_lrc_en_fait_partie(self, caplog):
+        """2026-10-27 : la durée de l'audio d'un LRC se lit par source, dans la
+        stratégie LRC ; LRCLIB et YTM ensemble ne la font pas trancher."""
+        from src.enrichment.observation import Observation
+        from src.enrichment.reconcile import reconcile
+        from src.utils.lrc_garde import CHAMP_DUREE_AUDIO
+
+        obs = [
+            Observation(CHAMP_DUREE_AUDIO, 212, "lrclib"),
+            Observation(CHAMP_DUREE_AUDIO, 204, "ytmusic"),
+        ]
+        with caplog.at_level("WARNING"):
+            assert CHAMP_DUREE_AUDIO not in reconcile(obs)
+        assert not [r for r in caplog.records if "GÉNÉRIQUE" in r.getMessage()]

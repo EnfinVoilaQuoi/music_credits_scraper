@@ -123,7 +123,11 @@ CHAMPS_DECLARES: frozenset[str] = frozenset(
     # `discogs_position` (2026-10-10, CORRECTIFS 2.6) : la place de la piste sur
     # le disque Discogs (« B3 », « 12 »), qui dit à quelles pistes un crédit
     # de disque se rapporte — stockée pour que l'audit se rejoue sans réseau.
-    {"spotify_id_propose", "apple_music_id_propose", "discogs_position"}
+    # `lrc_duree_audio` (2026-10-27) : la durée de l'audio sur lequel le LRC
+    # d'UNE source est calé (`lrc_garde.CHAMP_DUREE_AUDIO`) — lue par la
+    # stratégie `lyrics_synced`, source par source ; jamais un verdict (LRCLIB
+    # et YTM ensemble tombaient dans le repli, un avertissement par fiche).
+    {"spotify_id_propose", "apple_music_id_propose", "discogs_position", "lrc_duree_audio"}
 )
 
 DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {

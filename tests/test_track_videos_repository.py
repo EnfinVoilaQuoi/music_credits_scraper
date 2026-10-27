@@ -7,6 +7,7 @@ ce qu'une autre a trouvé, et une fusion de doublons les RÉUNIT.
 """
 
 import pytest
+from sqlalchemy import text
 
 from src.models import Artist, Track, TrackVideo
 from src.utils.track_repository import source_lien_retenue
@@ -142,6 +143,33 @@ class TestRecordTrackVideos:
         (relue,) = [t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id]
         assert "youtube_video" not in (relue.durations_observees or {})
         assert relue.duration == 200
+
+    def test_le_rejet_de_la_seule_source_vide_la_colonne(self, data_manager):
+        """2026-10-27, Kanye « DJ Aktive Mix » : la vidéo (un skit de 18 s)
+        était la seule source de la durée ; rejetée, la colonne gardait 18 s,
+        qu'aucune observation n'expliquait plus (7 fiches de la règle
+        `video_partagee` aussi). Le retrait ôte la provenance : la colonne suit."""
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="aaaaaaaaaaa")])
+        data_manager.record_duration_observation(track.id, 18, "youtube")
+        (relue,) = [t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id]
+        assert relue.duration == 18
+        data_manager.forget_track_video(track.id, "aaaaaaaaaaa")
+        (relue,) = [t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id]
+        assert relue.duration is None
+
+    def test_le_rejet_ne_vide_pas_une_duree_sans_provenance_video(self, data_manager):
+        """Une colonne d'avant les observations (aucune) n'est pas l'affaire
+        du rejet : il ne vide que ce que SES observations portaient."""
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="aaaaaaaaaaa")])
+        with data_manager.engine.begin() as conn:
+            conn.execute(text("UPDATE tracks SET duration = 240 WHERE id = :t"), {"t": track.id})
+        data_manager.forget_track_video(track.id, "aaaaaaaaaaa")
+        (relue,) = [t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id]
+        assert relue.duration == 240
 
     def test_oublier_une_video_absente_ne_touche_pas_la_duree(self, data_manager):
         artist = _artiste(data_manager)

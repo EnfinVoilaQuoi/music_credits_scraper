@@ -76,7 +76,7 @@ def main() -> int:
         decisions = KworbLinksManager().load(artiste.name)
         lignes = []
         for entree in page["entries"]:
-            r = uk.rapprocher(entree, index, artiste, decisions, lambda s: None)
+            r = uk.rapprocher(entree, index, artiste, decisions, lambda s: None, page["entries"])
             if r.via != "id_mal_place":
                 continue
             sid = entree["spotify_id"]

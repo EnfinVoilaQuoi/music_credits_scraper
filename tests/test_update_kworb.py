@@ -1479,6 +1479,106 @@ def test_un_titre_generique_ne_deplace_pas_l_id():
     assert res["ids_mal_places"] == []
 
 
+class TestIdMalPlaceGardes:
+    """R1 (2026-10-27) : Diam's « La Gamberge - Live 2006 » et « Jeune demoiselle
+    - Live 2006 ». La ligne de l'édition Collector de l'EP, dont l'ID est sur la
+    fiche « Version EP », allait à la fiche de l'album 2007 au même titre —
+    qui avait déjà SA ligne : +132 394 et +104 185 streams comptés deux fois."""
+
+    @staticmethod
+    def _fiches(album_id="ALB", ep_id="EP", collector_id="COL"):
+        album = _track(8199, "La Gamberge - Live 2006", spotify_id=album_id)
+        ep = _track(12092, "La Gamberge (Live 2006; Version EP)", spotify_id=ep_id)
+        ep.spotify_id_entries = [TrackSpotifyId(spotify_id=collector_id, source="kworb")]
+        return [album, ep]
+
+    def test_la_fiche_du_titre_a_deja_sa_ligne(self):
+        res, dm = _run(
+            self._fiches(),
+            [
+                _entry("La Gamberge - Live 2006", 612_265, 10, "ALB"),
+                _entry("La Gamberge - Live 2006", 132_394, 5, "COL"),
+            ],
+        )
+        ecrits = {tid: streams for tid, streams, *_ in dm.streams_writes}
+        assert ecrits == {8199: 612_265, 12092: 132_394}
+        assert res["ids_mal_places"] == []
+
+    def test_id_refuse_sur_la_fiche_du_titre(self, monkeypatch):
+        """#12067 : l'ID de l'édition Collector y est REFUSÉ à la main depuis le
+        2026-10-14 — la ligne reste à la fiche qui porte l'ID, même seule."""
+        monkeypatch.setattr(
+            uk.corrections_fiches,
+            "ids_refuses",
+            lambda t: {"COL"} if t.id == 8199 else set(),
+        )
+        res, dm = _run(self._fiches(), [_entry("La Gamberge - Live 2006", 132_394, 5, "COL")])
+        assert [tid for tid, *_ in dm.streams_writes] == [12092]
+        assert res["ids_mal_places"] == []
+
+    def test_seule_ligne_sans_refus_va_toujours_au_titre(self):
+        """Le cas d'origine (« Only » / « Only One ») n'est pas touché."""
+        res, dm = _run(self._fiches(), [_entry("La Gamberge - Live 2006", 132_394, 5, "COL")])
+        assert [tid for tid, *_ in dm.streams_writes] == [8199]
+        assert res["ids_mal_places"] == [
+            ("COL", "La Gamberge (Live 2006; Version EP)", "La Gamberge - Live 2006")
+        ]
+
+    def test_meme_verdict_au_rejeu(self):
+        """`rapprochements` (rejeu hors ligne) juge avec la page : même verdict."""
+        lignes = [
+            _entry("La Gamberge - Live 2006", 612_265, 10, "ALB"),
+            _entry("La Gamberge - Live 2006", 132_394, 5, "COL"),
+        ]
+        verdicts = uk.rapprochements(
+            _Artist(), _DataManager(self._fiches()), scraper=_Scraper(songs=_page(lignes))
+        )
+        assert [(v["fiche"]["id"], v["via"]) for v in verdicts] == [(8199, "id"), (12092, "id")]
+
+
+class TestVarianteDejaTranchee:
+    """R2 (2026-10-27) : `kworb_variante` ne signale plus un lien tranché à la
+    main — Diam's « Marine - Version 2006 » sur la fiche « Marine » (décision
+    Kworb confirmée le 2026-10-13, ID accepté le 2026-10-19)."""
+
+    def _cas(self, res):
+        return [c["detecteur"] for c in res["a_trancher"] if c["detecteur"] == "kworb_variante"]
+
+    def _lancer(self):
+        return _run(
+            [_track(8155, "Marine", spotify_id="SPM")],
+            [_entry("Marine - Version 2006", 3_844_534, 9, "SPM")],
+        )
+
+    def test_sans_trace_ecrite_signale(self):
+        res, dm = self._lancer()
+        assert self._cas(res) == ["kworb_variante"]
+
+    def test_lien_confirme_non_signale(self, monkeypatch):
+        _memoire(monkeypatch, confirmed={"marine version2006": 8155})
+        res, dm = self._lancer()
+        assert self._cas(res) == [] and res["variantes_suspectes"] == []
+        assert dm.streams_writes[0][:2] == (8155, 3_844_534)
+
+    def test_lien_confirme_vers_une_autre_fiche_signale(self, monkeypatch):
+        _memoire(monkeypatch, confirmed={"marine version2006": 9999})
+        res, _ = self._lancer()
+        assert self._cas(res) == ["kworb_variante"]
+
+    def test_decision_existant_non_signalee(self, monkeypatch):
+        _memoire(
+            monkeypatch,
+            decisions={"marine version2006": {"kind": "existant", "track_id": 8155}},
+        )
+        res, _ = self._lancer()
+        assert self._cas(res) == []
+
+    def test_id_accepte_non_signale(self, monkeypatch):
+        monkeypatch.setattr(uk, "est_accepte", lambda t, sid: (t.id, sid) == (8155, "SPM"))
+        res, _ = self._lancer()
+        assert self._cas(res) == []
+
+
 class TestAutreUploadAuMemeTitre:
     """6F — Kid Cudi « Day 'N' Nite » : Kworb rapproche par titre un autre
     upload (9 M) d'une fiche dont l'ID propre, absent de Kworb, lit 66 M chez

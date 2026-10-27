@@ -162,7 +162,12 @@ def rejouer_kworb(cassette: dict) -> list[dict]:
     sortie = []
     for entry in cassette["lignes"]:
         r = update_kworb.rapprocher(
-            entry, index, Artist(name=artiste), cassette["decisions"], identites.get
+            entry,
+            index,
+            Artist(name=artiste),
+            cassette["decisions"],
+            identites.get,
+            cassette["lignes"],
         )
         sortie.append(update_kworb.verdict_vers_dict(entry, r))
     return sorted(sortie, key=lambda x: json.dumps(x, ensure_ascii=False, sort_keys=True))

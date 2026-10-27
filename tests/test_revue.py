@@ -705,12 +705,23 @@ class TestSignalementsDesRuns:
         avec = [_t("Yacht Music", 1, deezer_id=128748177)]
         assert revue._cas_des_signalements([s], {1}, avec) == []
 
-    def test_candidat_resolu_seulement_sur_sa_fiche(self):
+    def test_candidat_sans_objet_quand_la_page_est_a_une_fiche(self):
+        """R3 (2026-10-27) : la page proposée à #8199 était l'ID principal de
+        #12092 — un rattachement à une AUTRE fiche n'est plus proposé."""
         s = self._deezer("deezer_link_candidate", 1, {"piste_deezer": 70})
+        libre = [_t("A", 1), _t("B", 2)]
+        assert len(revue._cas_des_signalements([s], {1, 2}, libre)) == 1
         ailleurs = [_t("A", 1), _t("B", 2, deezer_id=70)]
-        assert len(revue._cas_des_signalements([s], {1, 2}, ailleurs)) == 1
+        assert revue._cas_des_signalements([s], {1, 2}, ailleurs) == []
         chez_elle = [_t("A", 1, deezer_id=70), _t("B", 2)]
         assert revue._cas_des_signalements([s], {1, 2}, chez_elle) == []
+
+    def test_candidat_sans_objet_quand_la_page_est_une_edition(self):
+        """3113153, édition Collector de #12092, proposée à #8199."""
+        s = self._deezer("deezer_link_candidate", 1, {"piste_deezer": 70})
+        fiches = [_t("A", 1), _t("B", 2)]
+        assert len(revue._cas_des_signalements([s], {1, 2}, fiches)) == 1
+        assert revue._cas_des_signalements([s], {1, 2}, fiches, frozenset({70})) == []
 
     def test_lien_a_revoir_sans_duree_qui_le_contredise(self):
         """A2H « Pardonne moi » : la durée SongBPM (268 s, celle d'un autre
@@ -767,6 +778,7 @@ def test_fenetre_se_construit(racine_tk):
     dm = SimpleNamespace(
         get_artist_observations=lambda _id: {},
         get_artist_edition_durations=lambda _id: {},
+        get_artist_edition_deezer_ids=lambda _id: frozenset(),
         get_artist_relations=lambda _id, status: [],
         divergences_identite_soeurs=lambda _id: [],
         get_artist_positions=lambda _id: {},

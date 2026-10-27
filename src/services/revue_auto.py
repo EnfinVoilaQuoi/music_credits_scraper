@@ -768,6 +768,12 @@ def retablir(dm, artiste, correction: dict) -> str:
         e = ecarts_deezer.ecart_depuis(annulation["ecart"], {fiche.id: fiche})
         e.nature, e.existing_track = "link_review", fiche
         compte_rendu = ecarts_deezer.delier(dm, artiste, e)
+        # Le rattachement a pu noter la page en « autre édition Deezer »
+        # (`_renseigner_fiche`) : elle n'est pas plus une édition de la fiche
+        # que sa parution — #8199, 2026-10-27, l'édition restait.
+        retirees = ecarts_deezer.retirer_editions_de_la_page(dm, fiche.id, e.piste.id)
+        if retirees:
+            compte_rendu += f" — édition(s) retirée(s) : {', '.join(retirees)}"
     elif annulation.get("type") == "delie_deezer":
         from src.utils.corrections_fiches import oublier_deezer_refuse
 

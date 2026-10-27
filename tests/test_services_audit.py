@@ -94,6 +94,39 @@ class TestInvariants:
         (cas,) = [c for c in audit.cas if c.famille == "refus_vivant"]
         assert cas.pistes == [soeur.id] and "video" in cas.libelle
 
+    def test_isrc_d_une_edition_porte_par_une_autre_fiche(self, data_manager, isha):
+        """« La Gamberge - Live 2006 » (#8199) portait en édition les pages
+        Deezer de l'EP (#12092, FRZ110600957) ; la même édition sur une SŒUR
+        de la même page Genius n'est pas un défaut."""
+        a, t = isha
+        ep = Track(title="Durag (Version EP)", artist=a)
+        ep.isrc = "FRZ110600957"
+        ep.id = data_manager.save_track(ep)
+        data_manager.record_track_edition(
+            ep.id, "Collector", source="deezer", deezer_id=3113153, isrc="FRZ110600957"
+        )
+        assert not _familles(au.auditer(data_manager, revue=False)).get("isrc_edition_autre_fiche")
+        data_manager.record_track_edition(
+            t.id,
+            "Au Tour De Ma Bulle Live",
+            source="deezer",
+            deezer_id=3437202,
+            isrc="frz110600957",
+        )
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        (cas,) = [c for c in audit.cas if c.famille == "isrc_edition_autre_fiche"]
+        assert cas.pistes == [t.id, ep.id] and "3437202" in cas.libelle
+
+        swing = Artist(name="Swing")
+        swing.id = data_manager.save_artist(swing)
+        soeur = Track(title="Durag", artist=swing)
+        soeur.genius_id = 4242
+        soeur.isrc = "FRZ120000001"
+        data_manager.save_track(soeur)
+        data_manager.record_track_edition(t.id, "Radio Edit", source="deezer", isrc="FRZ120000001")
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        assert len([c for c in audit.cas if c.famille == "isrc_edition_autre_fiche"]) == 1
+
     def test_orphelin_et_schema_sur_la_base_entiere(self, data_manager, isha):
         _sql(
             data_manager,

@@ -373,6 +373,39 @@ def test_deezer_isrc_connu_rattache_malgre_le_descripteur(data_manager, artiste,
     assert fiches["Love64"].deezer_id == 9 and fiches["Joe Le Taxi"].deezer_id is None
 
 
+def test_retablir_un_rattachement_retire_l_autre_edition_deezer(data_manager, artiste):
+    """#8199, corrections 679/680 du 2026-10-26 : le rattachement « autre
+    édition Deezer » avait noté la page en édition de la fiche. Rétablir délie
+    la parution ET retire l'édition — elle restait."""
+    from src.services import ecarts_deezer as ed
+
+    artiste.deezer_id = 77
+    data_manager.save_artist(artiste)
+    fiche = Track(title="La Gamberge", artist=artiste, genius_id=2240910, deezer_id=3359811)
+    fiche.id = data_manager.save_track(fiche)
+    data_manager.record_duration_observation(fiche.id, 166, "deezer")
+    fiche = _charger(data_manager, artiste)["La Gamberge"]
+    piste = ed.PisteDeezer(id=3113153, title="La Gamberge", duration=170, position=4)
+    alb = ed.AlbumDeezer(
+        id=301, title="Dans Ma Bulle Edition Collector", artist_id=77, artist_name=artiste.name
+    )
+    e = ed.Ecart("link", alb, piste, existing_track=fiche, matched_by="title")
+    ed.creer_lignes(data_manager, artiste, [e])
+    assert [x["deezer_id"] for x in data_manager.get_track_editions(fiche.id)] == [3113153]
+
+    cas = revue.Cas("deezer_link_candidate", fiche.id, "La Gamberge", "", 0, {}, "k")
+    annulation = {"type": "lien_deezer", "track_id": fiche.id, "ecart": ed.ecart_vers_dict(e)}
+    data_manager.journaliser_correction(
+        artiste.id, cas, "regle:deezer_appliquer", "rattaché", annulation
+    )
+    _charger(data_manager, artiste)
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    compte = revue_auto.retablir(data_manager, artiste, correction)
+    assert "édition(s) retirée(s) : Dans Ma Bulle Edition Collector" in compte
+    assert data_manager.get_track_editions(fiche.id) == []
+    assert data_manager.get_track_releases(fiche.id) == []
+
+
 # ── Famille « liens Deezer » (délier ; NON validée : interrupteur baissé) ────
 
 

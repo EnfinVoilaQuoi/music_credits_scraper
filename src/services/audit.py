@@ -157,13 +157,21 @@ FAMILLES = {
     "orphelin": "INVARIANT — ligne liée à une fiche qui n'existe plus",
     "schema": "INVARIANT — colonne de la base ≠ schema.py",
     "refus_vivant": "INVARIANT — valeur refusée à la main encore portée par la fiche ou une sœur",
+    "isrc_edition_autre_fiche": "INVARIANT — ISRC d'une édition = celui d'une AUTRE fiche",
 }
 
 #: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
 FAMILLES_DECISION = ("recherche_perimee",)
 
 #: Les familles dont la cible est zéro (une seule ligne = un défaut de code).
-INVARIANTS = ("colonne_verdict", "soeurs_divergentes", "orphelin", "schema", "refus_vivant")
+INVARIANTS = (
+    "colonne_verdict",
+    "soeurs_divergentes",
+    "orphelin",
+    "schema",
+    "refus_vivant",
+    "isrc_edition_autre_fiche",
+)
 
 _FEAT = re.compile(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", re.IGNORECASE)
 
@@ -839,6 +847,48 @@ def refus_vivants(c, pistes) -> list[Cas]:
     return cas
 
 
+def isrc_d_une_autre_fiche(c, pistes) -> list[Cas]:
+    """Une ÉDITION (`track_editions`) dont l'ISRC est celui d'une AUTRE fiche
+    (ni elle, ni une sœur de la même page Genius) : l'édition est la page d'un
+    autre enregistrement, posée sur la mauvaise fiche — les deux pages Deezer
+    de « La Gamberge (Live 2006; Version EP) » (#12092) notées sur « La
+    Gamberge - Live 2006 » (#8199), 2026-10-27."""
+    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    if "track_editions" not in tables:
+        return []
+    par_isrc = collections.defaultdict(list)
+    for r in c.execute(
+        "SELECT id, title, genius_id, isrc FROM tracks WHERE isrc IS NOT NULL AND isrc != ''"
+    ):
+        par_isrc[r["isrc"].strip().upper()].append(r)
+    fiches = {t["id"]: t for t in pistes}
+    cas = []
+    for e in c.execute(
+        "SELECT track_id, label, isrc, deezer_id FROM track_editions "
+        "WHERE isrc IS NOT NULL AND isrc != '' ORDER BY track_id, label"
+    ):
+        f = fiches.get(e["track_id"])
+        if f is None:
+            continue
+        autres = [
+            t
+            for t in par_isrc.get(e["isrc"].strip().upper(), [])
+            if t["id"] != f["id"]
+            and not (f["genius_id"] and t["genius_id"] and f["genius_id"] == t["genius_id"])
+        ]
+        if autres:
+            cas.append(
+                Cas(
+                    "isrc_edition_autre_fiche",
+                    f["artiste"],
+                    [f["id"], *(t["id"] for t in autres)],
+                    f"{_lib(f)} édition « {e['label']} » (Deezer {e['deezer_id'] or '—'}) : "
+                    f"ISRC {e['isrc']} de " + " | ".join(_lib(t) for t in autres),
+                )
+            )
+    return cas
+
+
 def ecarts_de_schema(db_path) -> list[Cas]:
     from src.persistence.bootstrap import ecarts_au_schema
 
@@ -925,6 +975,7 @@ def auditer(
         if persistance:
             audit.cas += soeurs_divergentes(c, pistes)
             audit.cas += refus_vivants(c, pistes)
+            audit.cas += isrc_d_une_autre_fiche(c, pistes)
             if not noms:
                 audit.cas += orphelins(c)
     if persistance:

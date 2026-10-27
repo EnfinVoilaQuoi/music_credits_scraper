@@ -6415,6 +6415,48 @@ class TrackRepository:
             logger.error(f"Erreur deplacer_edition({de_track_id}, {label}, {vers_track_id}): {e}")
             return False
 
+    def retirer_edition(self, track_id: int, label: str) -> bool:
+        """Retire une édition notée à tort sur la fiche — deux pages Deezer de
+        #12092 posées en « autre édition » sur « La Gamberge - Live 2006 »
+        (#8199) par une règle du panneau, 2026-10-26. Sa durée entrait dans le
+        verdict de la durée : la fiche est recalculée. Rend True si une ligne
+        est partie."""
+        try:
+            with self._ecrire() as conn:
+                retirees = conn.execute(
+                    text("DELETE FROM track_editions WHERE track_id = :t AND label = :l"),
+                    {"t": track_id, "l": label},
+                ).rowcount
+                if retirees:
+                    self._toucher(conn, track_id)
+                return bool(retirees)
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_edition({track_id}, {label}): {e}")
+            return False
+
+    def fiches_portant_page_deezer(self, artist_id: int, deezer_id: int) -> set[int]:
+        """Les fiches de l'artiste qui portent cette page Deezer, en ID
+        principal ou en ÉDITION (`track_editions`) — la règle R3 des liens
+        Deezer (2026-10-27) : une page déjà à une fiche n'est pas rattachée à
+        une autre."""
+        try:
+            with self.engine.connect() as conn:
+                return {
+                    int(tid)
+                    for (tid,) in conn.execute(
+                        text(
+                            "SELECT id FROM tracks WHERE artist_id = :a AND deezer_id = :d "
+                            "UNION SELECT e.track_id FROM track_editions e "
+                            "JOIN tracks t ON t.id = e.track_id "
+                            "WHERE t.artist_id = :a AND e.deezer_id = :d"
+                        ),
+                        {"a": artist_id, "d": int(deezer_id)},
+                    )
+                }
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur fiches_portant_page_deezer({artist_id}, {deezer_id}): {e}")
+            return set()
+
     def get_artist_edition_durations(self, artist_id: int) -> dict[int, tuple[int, ...]]:
         """`{track_id: (durées des éditions connues)}` des fiches de l'artiste."""
         try:

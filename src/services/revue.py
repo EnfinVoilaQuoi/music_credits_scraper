@@ -1851,20 +1851,29 @@ _CODES_DEEZER_PISTE_ORPHELINE = (
 )
 
 
-def _signalement_deezer_resolu(s, par_id: dict, ids_deezer: set) -> bool:
+def _signalement_deezer_resolu(
+    s, par_id: dict, ids_deezer: set, editions_deezer: frozenset = frozenset()
+) -> bool:
     """Un écart Deezer que l'état PRÉSENT dément (2026-10-12, A2H) : la piste
     « absente » est aujourd'hui l'ID Deezer d'une fiche (« Yatch Music » —
     l'ID de « Yacht Music », perdu par une fusion puis rétabli) ; le « lien à
     revoir » n'a plus de durée indépendante qui le contredise (« Pardonne
-    moi » : la durée SongBPM, d'un autre morceau, a été retirée)."""
+    moi » : la durée SongBPM, d'un autre morceau, a été retirée).
+
+    Une page notée en ÉDITION d'une fiche (`editions_deezer`) n'est plus
+    orpheline non plus ; et un rattachement PROPOSÉ à une fiche tombe quand
+    la page est déjà à une AUTRE (R3, 2026-10-27 : les pages de #12092,
+    rattachées à #8199 par la règle du panneau le 2026-10-26)."""
     preuves = s["preuves"] or {}
     if s["detecteur"] in _CODES_DEEZER_PISTE_ORPHELINE:
         piste = preuves.get("piste_deezer")
+        if piste is not None and piste in editions_deezer:
+            return True
         if s["track_id"] is not None:
-            # Un rattachement PROPOSÉ à une fiche : résolu seulement si c'est
-            # elle qui porte la piste, pas une autre.
+            # Un rattachement PROPOSÉ à une fiche : résolu si c'est elle qui
+            # porte la piste — et sans objet si c'est une autre.
             track = par_id.get(s["track_id"])
-            return track is not None and piste is not None and track.deezer_id == piste
+            return track is not None and piste is not None and piste in ids_deezer
         return piste in ids_deezer
     if s["detecteur"] == "deezer_link_review":
         from types import SimpleNamespace
@@ -1882,10 +1891,13 @@ def _signalement_deezer_resolu(s, par_id: dict, ids_deezer: set) -> bool:
     return False
 
 
-def _cas_des_signalements(signalements, ids_disco: set, tracks=None) -> list[Cas]:
+def _cas_des_signalements(
+    signalements, ids_disco: set, tracks=None, editions_deezer: frozenset = frozenset()
+) -> list[Cas]:
     """Un signalement dont la fiche a disparu depuis le run (fusion,
     suppression) n'a plus d'objet ; avec `tracks`, ceux que l'état présent
-    dément non plus (`_signalement_resolu`)."""
+    dément non plus (`_signalement_resolu`). `editions_deezer` = pages Deezer
+    notées en édition d'une fiche (`track_editions`)."""
     partages = None
     if tracks is not None and any(s["detecteur"] in _CODES_ID_PARTAGE for s in signalements):
         partages = ids_spotify_encore_partages(tracks)
@@ -1898,7 +1910,7 @@ def _cas_des_signalements(signalements, ids_disco: set, tracks=None) -> list[Cas
         if partages is not None and s["detecteur"] in _CODES_ID_PARTAGE:
             return (s["preuves"] or {}).get("spotify_id") in partages
         if tracks is not None:
-            return not _signalement_deezer_resolu(s, par_id, ids_deezer)
+            return not _signalement_deezer_resolu(s, par_id, ids_deezer, editions_deezer)
         return True
 
     return [
@@ -1962,7 +1974,10 @@ def analyser(data_manager, artiste, ctx: Contexte | None = None) -> Revue:
     ctx = ctx or charger_contexte(data_manager, artiste)
     cas = detecter(ctx)
     cas += _cas_des_signalements(
-        data_manager.signalements_revue(artiste.id), {t.id for t in tracks}, tracks
+        data_manager.signalements_revue(artiste.id),
+        {t.id for t in tracks},
+        tracks,
+        data_manager.get_artist_edition_deezer_ids(artiste.id),
     )
     cas.sort(key=lambda c: (-c.impact, c.detecteur, c.morceau))
     tranches = data_manager.verdicts_revue(artiste.id)

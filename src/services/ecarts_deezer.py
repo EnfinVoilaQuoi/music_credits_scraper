@@ -1102,7 +1102,25 @@ def _lier_parution(dm, artist, e: Ecart, track: Track) -> bool:
     La création d'une fiche neuve pose encore son album de référence dans
     `_ligne`; rattacher une fiche existante ne le fait jamais. C'est le garde
     qui empêche une compilation de voler l'album original au prochain run.
+
+    R3 (2026-10-27) : une page Deezer déjà portée par une AUTRE fiche de
+    l'artiste (ID principal ou édition) n'est jamais rattachée — la règle du
+    panneau (2026-10-26) avait donné à « La Gamberge - Live 2006 » (#8199) les
+    deux pages de « La Gamberge (Live 2006; Version EP) » (#12092). Rend False.
+    Une fiche qui porte DÉJÀ la page se relie toujours : une page posée à tort
+    sur une seconde fiche ne bloque pas sa vraie propriétaire (l'audit
+    `isrc_edition_autre_fiche` montre la seconde).
     """
+    porteuses = dm.fiches_portant_page_deezer(artist.id, e.piste.id)
+    autres = porteuses - {track.id}
+    if autres and track.id not in porteuses:
+        logger.info(
+            "« %s » : page Deezer %s déjà portée par la fiche #%s — pas rattachée",
+            track.title,
+            e.piste.id,
+            ", #".join(str(t) for t in sorted(autres)),
+        )
+        return False
     scope = (
         "own"
         if artist.deezer_id is not None and e.album.artist_id == artist.deezer_id
@@ -1214,6 +1232,19 @@ def delier(dm, artist, e: Ecart) -> str:
         # la revue contestait. Elle part avec le lien.
         compte += f" — durée Deezer {e.piste.duration} s retirée"
     return compte
+
+
+def retirer_editions_de_la_page(dm, track_id: int, deezer_id: int) -> list[str]:
+    """Retire les éditions de la fiche notées pour cette page Deezer — quand
+    son rattachement est défait, la page n'est pas plus une édition de la
+    fiche que sa parution. Rend les libellés retirés."""
+    return [
+        e["label"]
+        for e in dm.get_track_editions(track_id)
+        if e.get("deezer_id") is not None
+        and int(e["deezer_id"]) == int(deezer_id)
+        and dm.retirer_edition(track_id, e["label"])
+    ]
 
 
 @etape_de_flux("Création des écarts Deezer")

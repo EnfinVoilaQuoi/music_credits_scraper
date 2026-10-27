@@ -623,6 +623,39 @@ def test_une_autre_page_deezer_devient_une_edition(data_manager):
     assert (edition["label"], edition["deezer_id"], edition["duration"]) == ("Single", 2, 232)
 
 
+def test_une_page_deezer_d_une_autre_fiche_n_est_jamais_rattachee(data_manager):
+    """R3 (2026-10-27) : « La Gamberge - Live 2006 » (#8199) a reçu en édition
+    3437202 (ID principal de l'EP, #12092) et 3113153 (son édition Collector),
+    par un signalement rejoué. Ni l'un ni l'autre ne se rattache plus."""
+    artist = _artist(data_manager)
+    album = _track(data_manager, artist, title="La Gamberge", deezer_id=3359811)
+    data_manager.record_duration_observation(album.id, 166, "deezer")
+    ep = _track(data_manager, artist, title="La Gamberge (Version EP)", deezer_id=3437202)
+    data_manager.record_track_edition(ep.id, "Collector", source="deezer", deezer_id=3113153)
+    relue = next(t for t in data_manager.get_artist_tracks(artist.id) if t.id == album.id)
+    ecarts = [
+        ed.Ecart(
+            "link",
+            _album(alb, titre, [_piste(pid, "La Gamberge", duration=170)], artist),
+            _piste(pid, "La Gamberge", duration=170),
+            existing_track=relue,
+            matched_by="title",
+        )
+        for alb, titre, pid in ((1, "Au Tour De Ma Bulle Live", 3437202), (2, "Collector", 3113153))
+    ]
+    comptes = ed.creer_lignes(data_manager, artist, ecarts)
+    assert comptes == ["« La Gamberge » : rattachement impossible"] * 2
+    assert data_manager.get_track_editions(album.id) == []
+    assert data_manager.get_track_releases(album.id) == []
+    assert _colonnes(data_manager, album.id)["deezer_id"] == 3359811
+    # Sa vraie fiche se relie toujours, même si une autre la porte à tort.
+    data_manager.record_track_edition(album.id, "Collector", source="deezer", deezer_id=3113153)
+    relue_ep = next(t for t in data_manager.get_artist_tracks(artist.id) if t.id == ep.id)
+    ecarts[1].existing_track = relue_ep
+    (compte,) = ed.creer_lignes(data_manager, artist, [ecarts[1]])
+    assert "rattaché à « Collector »" in compte
+
+
 def test_deux_id_deezer_d_un_meme_upc_sont_une_seule_parution(data_manager):
     """e54 : « A V L D » / « AVLD », la même édition sous deux ID Deezer
     (mesuré le 2026-10-14) — le code-barres désigne l'ÉDITION, la seconde

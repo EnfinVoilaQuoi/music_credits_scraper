@@ -95,6 +95,38 @@ def test_deplacer_une_edition_vers_sa_fiche(data_manager):
     assert not data_manager.deplacer_edition(demo, "Version radio", suzy)  # plus rien à déplacer
 
 
+def test_retirer_une_edition_posee_a_tort(data_manager):
+    """Les pages Deezer de l'EP (#12092) notées en édition de « La Gamberge -
+    Live 2006 » (#8199) partent ; l'autre édition et l'autre fiche restent."""
+    a = Artist(name="Diam’s")
+    a.id = data_manager.save_artist(a)
+    album = data_manager.save_track(Track(title="La Gamberge - Live 2006", artist=a))
+    ep = data_manager.save_track(Track(title="La Gamberge (Live 2006; Version EP)", artist=a))
+    for fiche in (album, ep):
+        data_manager.record_track_edition(
+            fiche, "Dans Ma Bulle Edition Collector", source="deezer", deezer_id=3113153
+        )
+    data_manager.record_track_edition(album, "Radio Edit", source="deezer", duration=150)
+
+    assert data_manager.retirer_edition(album, "Dans Ma Bulle Edition Collector")
+    assert [e["label"] for e in data_manager.get_track_editions(album)] == ["Radio Edit"]
+    assert len(data_manager.get_track_editions(ep)) == 1
+    assert data_manager.fiches_portant_page_deezer(a.id, 3113153) == {ep}
+    assert not data_manager.retirer_edition(album, "Dans Ma Bulle Edition Collector")
+
+
+def test_fiches_portant_page_deezer_id_principal_et_edition(data_manager):
+    a = Artist(name="Diam’s")
+    a.id = data_manager.save_artist(a)
+    ep = Track(title="La Gamberge (Live 2006; Version EP)", artist=a)
+    ep.deezer_id = 3437202
+    ep.id = data_manager.save_track(ep)
+    autre = data_manager.save_track(Track(title="Marine", artist=a))
+    data_manager.record_track_edition(autre, "Live", source="deezer", deezer_id=3437202)
+    assert data_manager.fiches_portant_page_deezer(a.id, 3437202) == {ep.id, autre}
+    assert data_manager.fiches_portant_page_deezer(a.id, 1) == set()
+
+
 class TestVersionsLiees:
     def test_par_relation_et_par_souche(self):
         suzy = _t("Suzy", 1)

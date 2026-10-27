@@ -23,6 +23,7 @@ from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.codes_barres import cle_upc
 from src.utils.corrections_fiches import (
+    compteurs_refuses,
     credits_refuses,
     refus_videos_a_la_fusion,
     videos_refusees,
@@ -2856,6 +2857,14 @@ class TrackRepository:
         # ce module. C'est l'idiome anti-cycle déjà en place chez les providers.
         from src.enrichment.reconcile import SPOTIFY_STREAMS_FIELD, reconcile_spotify_streams
 
+        if self._compteur_partage(conn, track_id):
+            # Règle 2a (2026-10-27) : Spotify partage ce compteur avec une autre
+            # fiche, qui le porte ; ici il ne compte pas. Les observations restent.
+            return {
+                "spotify_streams": None,
+                "spotify_streams_updated": None,
+                "spotify_daily_streams": None,
+            }
         observations = [
             o for o in self._get_observations(conn, track_id) if o.field == SPOTIFY_STREAMS_FIELD
         ]
@@ -5712,6 +5721,37 @@ class TrackRepository:
     # ──────────────────────────────────────────────────────────────────────────
     # Vidéos YouTube d'un morceau (table `track_videos`, e20)
     # ──────────────────────────────────────────────────────────────────────────
+
+    def recalculer_streams(self, track_id: int) -> bool:
+        """Recalcule la fiche et ses sœurs (`_ecrire` + `_toucher`) après un
+        refus de compteur posé ou levé (règle 2a) : rien d'autre ne bouge, seul
+        le verdict des streams change."""
+        try:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur recalculer_streams({track_id}): {e}")
+            return False
+
+    def _compteur_partage(self, conn, track_id: int) -> bool:
+        """L'ID Spotify PRINCIPAL de la fiche a son compteur refusé ici
+        (`corrections_fiches.compteurs_refuses`) : il compte sur une autre fiche."""
+        from types import SimpleNamespace
+
+        r = conn.execute(
+            text(
+                "SELECT t.title, t.album, t.genius_id, a.name, t.spotify_id FROM tracks t "
+                "LEFT JOIN artists a ON a.id = t.artist_id WHERE t.id = :id"
+            ),
+            {"id": track_id},
+        ).first()
+        if r is None or not r[3] or not r[4]:
+            return False
+        fiche = SimpleNamespace(
+            title=r[0], album=r[1], genius_id=r[2], artist=SimpleNamespace(name=r[3])
+        )
+        return r[4] in compteurs_refuses(fiche)
 
     def _videos_refusees(self, track_id: int) -> set[str]:
         """Les vidéos que l'utilisateur a rejetées pour cette fiche (`fiches.json`)."""

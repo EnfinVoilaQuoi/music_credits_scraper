@@ -94,6 +94,16 @@ def _rejeter_video_partagee(ctx: ContexteAction, cas: Cas) -> str:
     return f"vidéo {vid} retirée de {len(faites)} fiche(s)"
 
 
+def _partager_compteur(ctx: ContexteAction, cas: Cas) -> str:
+    """Règle 2a à la main : le compteur de la fiche compte sur l'autre."""
+    from src.utils.corrections_fiches import memoriser_compteur_refuse
+
+    track = _fiche(ctx, cas)
+    memoriser_compteur_refuse(track, cas.preuves["spotify_id"])
+    ctx.data_manager.recalculer_streams(track.id)
+    return f"compteur Spotify de « {track.title} » compté sur l'autre fiche"
+
+
 def _retirer_spotify(ctx: ContexteAction, cas: Cas) -> str:
     from src.utils.corrections_fiches import memoriser_id_refuse
     from src.utils.spotify_audit import rejeter_spotify_id
@@ -416,6 +426,23 @@ def actions_pour(cas: Cas) -> list[Action]:
                 reseau=True,
             ),
             refuser,
+        ]
+    if d == "compteur_partage":
+        return [
+            Action(
+                "partager_compteur",
+                "🧮 Compter sur l'autre fiche",
+                _partager_compteur,
+                "Ne plus compter ce compteur Spotify sur cette fiche ? L'ID reste ; le "
+                "compteur ne compte que sur l'autre.",
+            ),
+            Action(
+                "retirer_spotify",
+                "✖️ Retirer l'ID Spotify",
+                _retirer_spotify,
+                f"Retirer l'ID {cas.preuves['spotify_id']} ? Les streams et mesures qui en "
+                "découlent partent avec lui, et il ne sera plus reposé.",
+            ),
         ]
     if d in _CODES_ID_SPOTIFY and cas.preuves.get("spotify_id"):
         return [

@@ -131,7 +131,9 @@ NATURES = {
 #: (même page Genius, tout artiste) — un refus décidé sur la ligne de Kanye
 #: protège celle de Kid Cudi (chantier C lot 1). Les certifications, recalculées
 #: PAR ARTISTE, gardent leur refus à la ligne.
-PAR_ENREGISTREMENT = frozenset(set(NATURES.values()) - {"certif"})
+#: Le compteur partagé (règle 2a) vit dans le verdict des streams, que les sœurs
+#: ré-arbitrent chacune : son refus vaut pour toutes, sinon elles divergeraient.
+PAR_ENREGISTREMENT = frozenset(set(NATURES.values()) - {"certif"} | {"compteur_spotify"})
 
 
 def _cle_fiche(designation: dict) -> str:
@@ -541,6 +543,21 @@ def memoriser_video_refusee(track, video_id: str, origine: str | None = None) ->
 def oublier_video_refusee(track, video_id: str) -> bool:
     """Pendant : une vidéo retirée par une règle, qu'on RÉTABLIT."""
     return _oublier(track, "video", video_id)
+
+
+def compteurs_refuses(track) -> set[str]:
+    """ID Spotify dont le COMPTEUR ne compte pas sur cette fiche : Spotify le
+    partage avec une autre fiche, qui le porte (règle 2a, 2026-10-27). L'ID
+    reste ; seul le compteur sort de la colonne `spotify_streams`."""
+    return {r["valeur"] for r in _lignes(track, "compteur_spotify")}
+
+
+def memoriser_compteur_refuse(track, spotify_id: str, origine: str | None = None) -> None:
+    _memoriser(track, "compteur_spotify", spotify_id, origine=origine)
+
+
+def oublier_compteur_refuse(track, spotify_id: str) -> bool:
+    return _oublier(track, "compteur_spotify", spotify_id)
 
 
 def empreinte_lrc(lrc: str | None) -> str:

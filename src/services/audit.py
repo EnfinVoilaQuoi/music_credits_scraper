@@ -41,6 +41,7 @@ from types import SimpleNamespace
 
 from src.services import vues_comptees
 from src.services.revue import DECISION, INFORMATION, RUN, _titre_sans_feat, video_nomme
+from src.utils.compteurs_partages import titres_parents
 from src.utils.concordance_paroles import (
     jugeable,
     paroles_de_reference,
@@ -524,6 +525,9 @@ def streams(c, par) -> list[Cas]:
             if (t["spotify_streams"] or 0) > 1000:
                 groupes[t["spotify_streams"]].append(t)
         for n, g in groupes.items():
+            if all(titres_parents(a["title"], b["title"]) for a in g for b in g if a is not b):
+                # Titres parents : le panneau le juge (`revue:compteur_partage`).
+                continue
             if len(g) > 1 and len({t["genius_id"] for t in g}) > 1:
                 cas.append(
                     Cas(

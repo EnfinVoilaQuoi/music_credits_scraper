@@ -938,6 +938,112 @@ def arbitrage_id_partage(cas, track, ctx, gate=None) -> Arbitrage | None:
     return None
 
 
+# ── Famille « même compteur Spotify, deux fiches » (règle 2a) — 2026-10-27 ──
+
+#: Simulée sur toute la base le 2026-10-27 (lecture seule) : 15 paires sur une
+#: courbe ; 8 versions proches, la page gardée = l'ID que Kworb affiche (6 / 6
+#: quand il en affiche un) ; 4 ID d'un autre morceau, que Spotify nomme (retirés
+#: à la main le même jour) ; « Back Like That » / son remix, deux ID justes.
+#: Interrupteur : `revue_auto.REGLES_COMPTEUR_BRANCHEES`.
+REGLES_COMPTEUR = frozenset(
+    {
+        ("compteur_partage", "normal"),
+        ("compteur_partage", "partager_compteur"),
+        ("compteur_partage", "retirer_spotify"),
+    }
+)
+
+
+def _garde_du_compteur(track, autre, ctx, preuve: str) -> Arbitrage | None:
+    from src.utils.compteurs_partages import page_du_compteur
+
+    kworb = {
+        t.id
+        for t in (track, autre)
+        if any(o.field == "spotify_streams" and o.source == "kworb" for o in ctx.obs.get(t.id, ()))
+    }
+    choix = page_du_compteur([track, autre], kworb)
+    if choix is None:
+        return None
+    critere, gardee = choix
+    if gardee is track:
+        return Arbitrage("le compteur est celui de cette fiche", "normal", f"{preuve} ; {critere}")
+    return Arbitrage(
+        "le compteur compte sur l'autre fiche",
+        "partager_compteur",
+        f"{preuve} ; {critere} : « {gardee.title} » (#{gardee.id}) le porte",
+    )
+
+
+def politique_compteur_partage(lire_spotify: Callable) -> Callable:
+    """Deux fiches au même compteur Spotify. Version PROCHE montrée (ISRC,
+    instrumental, paroles) : le compteur ne compte qu'une fois, sur la fiche
+    que Kworb a rattachée, sinon l'original (`page_du_compteur`). Sinon, ce que
+    Spotify sert pour chaque ID (`catalogue_designe`) : le titre de l'AUTRE
+    fiche, aux paroles différentes, désigne un ID faux (retiré) ; chacun son
+    titre, ce sont deux ID justes au compteur partagé. Le reste : l'humain."""
+    from src.utils.catalogue_designe import page_designee, servi_spotify
+    from src.utils.compteurs_partages import PAROLES_DIFFERENTES
+
+    def juger(cas, track, ctx):
+        if cas.detecteur != "compteur_partage" or track is None:
+            return None
+        preuves = cas.preuves or {}
+        autre = next((t for t in ctx.disco if t.id == preuves.get("autre")), None)
+        if (
+            autre is None
+            or track.spotify_id != preuves.get("spotify_id")
+            or autre.spotify_id != preuves.get("autre_spotify_id")
+        ):
+            return None
+        if preuves.get("version_proche"):
+            return _garde_du_compteur(track, autre, ctx, preuves["version_proche"])
+
+        def designee(fiche):
+            servi = ctx.memo(
+                f"catalogue_servi|spotify_id|{fiche.spotify_id}",
+                lambda: servi_spotify(lire_spotify(fiche.spotify_id)),
+            )
+            verdict = page_designee(servi, [track, autre])
+            return (servi, *verdict) if verdict else (servi, None, None)
+
+        servi_t, critere_t, page_t = designee(track)
+        servi_a, _critere_a, page_a = designee(autre)
+        paroles = preuves.get("paroles")
+        differentes = paroles is not None and paroles < PAROLES_DIFFERENTES
+        if page_t is autre and differentes:
+            return Arbitrage(
+                "l'ID est celui de l'autre morceau : retirer",
+                "retirer_spotify",
+                f"Spotify sert « {servi_t.titre} » : {critere_t} désigne « {autre.title} » "
+                f"(#{autre.id}) ; paroles communes {paroles:.0%}",
+            )
+        if page_a is track and differentes:
+            return Arbitrage(
+                "l'ID est celui de cette fiche",
+                "normal",
+                f"l'ID de « {autre.title} » sert « {servi_a.titre} », ce morceau",
+            )
+        if page_t is track and page_a is autre:
+            return _garde_du_compteur(track, autre, ctx, "Spotify sert le titre de chaque fiche")
+        return None
+
+    return juger
+
+
+def arbitrage_compteur(cas, track, ctx, lire_spotify=None) -> Arbitrage | None:
+    """L'arbitrage de la famille « même compteur ». Lecteur injectable ; par
+    défaut l'embed Spotify (gardé au brut)."""
+    if cas.detecteur != "compteur_partage":
+        return None
+    if lire_spotify is None:
+        from src.utils.spotify_identity import lire_identite_http as lire_spotify
+    arbitrage = politique_compteur_partage(lire_spotify)(cas, track, ctx)
+    if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_COMPTEUR:
+        return arbitrage
+    return None
+
+
 # ── Famille « même ID de catalogue, deux pages » — 2026-10-27 ───────────────
 
 #: Simulée sur la base d'avant les retraits à la main du 2026-10-27 (rejeu du

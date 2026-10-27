@@ -92,6 +92,10 @@ REGLES_ID_PARTAGE_BRANCHEES = True
 #: rejouée par le code sur la base d'avant les retraits : les mêmes 6.
 REGLES_CATALOGUE_BRANCHEES = True
 
+#: Famille « même compteur Spotify, deux fiches » (`politiques_revue.REGLES_COMPTEUR`,
+#: règle 2a) : levé le 2026-10-27 sur accord de l'utilisateur après simulation.
+REGLES_COMPTEUR_BRANCHEES = True
+
 #: Familles BPM, tonalité, LRC, alias et liens Deezer à confirmer
 #: (`politiques_revue.REGLES_ETENDUES`) : levé le 2026-10-26, chaque politique
 #: simulée sur toute la base et confrontée à un témoin indépendant.
@@ -152,11 +156,13 @@ def cas_par_regle(
     id_partage: bool = False,
     etendues: bool = False,
     catalogue: bool = False,
+    compteur: bool = False,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
     from src.services.politiques_revue import (
         arbitrage_catalogue,
+        arbitrage_compteur,
         arbitrage_deezer,
         arbitrage_etendu,
         arbitrage_id_partage,
@@ -185,6 +191,8 @@ def cas_par_regle(
             arbitrage = arbitrage_etendu(c, track, ctx)
         if arbitrage is None and catalogue:
             arbitrage = arbitrage_catalogue(c, track, ctx)
+        if arbitrage is None and compteur:
+            arbitrage = arbitrage_compteur(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -512,6 +520,25 @@ def _delier_deezer(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
     }
 
 
+def _partager_compteur(dm, track, cas: Cas) -> tuple[str, dict]:
+    """Le compteur Spotify de la fiche compte sur une autre (règle 2a) : son
+    refus, lu par le verdict des streams ; l'ID et les observations restent."""
+    from src.utils.corrections_fiches import memoriser_compteur_refuse
+
+    sid = cas.preuves.get("spotify_id")
+    if not sid or track.spotify_id != sid:
+        raise LookupError("la fiche ne porte plus cet ID Spotify")
+    avant = track.streams.spotify_streams
+    memoriser_compteur_refuse(track, sid, origine=f"{PREFIXE_REGLE}{cas.detecteur}")
+    if not dm.recalculer_streams(track.id):
+        raise LookupError("recalcul des streams impossible")
+    track.streams.spotify_streams = None
+    return (
+        f"compteur Spotify de « {track.title} » ({avant or 0:,}) compté sur l'autre fiche",
+        {"type": "compteur_spotify", "spotify_id": sid},
+    )
+
+
 #: Correcteurs des RÈGLES, par action de la politique.
 _CORRECTEURS_DE_REGLE = {
     "retirer_lrc": _corriger_lrc,
@@ -523,6 +550,7 @@ _CORRECTEURS_DE_REGLE = {
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,
     "retirer_songbpm": _corriger_songbpm,
     "retirer_spotify": _corriger_spotify,
+    "partager_compteur": _partager_compteur,
     "poser_id": _poser_id,
     "refuser_id": _refuser_id,
 }
@@ -557,6 +585,7 @@ def corriger(dm, artiste) -> BilanCorrections:
             or REGLES_ID_PARTAGE_BRANCHEES
             or REGLES_ETENDUES_BRANCHEES
             or REGLES_CATALOGUE_BRANCHEES
+            or REGLES_COMPTEUR_BRANCHEES
         ):
             rendus = _rendus_a_l_humain(dm, artiste.id)
             a_faire += [
@@ -572,6 +601,7 @@ def corriger(dm, artiste) -> BilanCorrections:
                     id_partage=REGLES_ID_PARTAGE_BRANCHEES,
                     etendues=REGLES_ETENDUES_BRANCHEES,
                     catalogue=REGLES_CATALOGUE_BRANCHEES,
+                    compteur=REGLES_COMPTEUR_BRANCHEES,
                 )
                 if (c.detecteur, c.cle) not in rendus
             ]
@@ -690,6 +720,12 @@ def retablir(dm, artiste, correction: dict) -> str:
 
         rejeter_spotify_id(dm, track, annulation["spotify_id"])
         compte_rendu = f"ID Spotify {annulation['spotify_id']} retiré de « {track.title} »"
+    elif annulation.get("type") == "compteur_spotify":
+        from src.utils.corrections_fiches import oublier_compteur_refuse
+
+        oublier_compteur_refuse(track, annulation["spotify_id"])
+        dm.recalculer_streams(track.id)
+        compte_rendu = f"compteur Spotify de nouveau compté sur « {track.title} »"
     elif annulation.get("type") == "refus_spotify":
         oublier_id_refuse(track, annulation["spotify_id"])
         compte_rendu = f"refus de l'ID {annulation['spotify_id']} levé pour « {track.title} »"

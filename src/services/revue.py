@@ -35,6 +35,13 @@ from dataclasses import dataclass, field
 from datetime import date
 from difflib import SequenceMatcher
 
+from src.utils.compteurs_partages import (
+    PLANCHER,
+    lectures,
+    meme_compteur,
+    titres_parents,
+    version_proche,
+)
 from src.utils.concordance_paroles import (
     MOTS_MIN,
     SEUIL_FAUX,
@@ -45,6 +52,7 @@ from src.utils.concordance_paroles import (
     mots,
     paroles_de_reference,
     recouvrement,
+    recouvrement_bigrammes,
 )
 from src.utils.credits_genius_api import SOURCE_API, SOURCE_SCRAPE
 from src.utils.duree_youtube import SOURCE_AUDIO
@@ -485,6 +493,64 @@ def id_catalogue_partage(track, ctx):
             + (f" et {len(autres) - 1} autre(s)" if len(autres) > 1 else "")
             + " — à quelle page est-il ?",
             {champ: valeur, "autres": [t.id for t in autres]},
+        )
+    return None
+
+
+#: Fenêtre de recherche des paires : deux compteurs lus à quelques semaines
+#: d'écart restent à 5 % l'un de l'autre ; `meme_compteur` juge ensuite.
+_FENETRE_COMPTEUR = 1.05
+
+
+def _paires_de_compteur(ctx) -> dict:
+    """`{track_id: [(autre fiche, recouvrement des paroles)]}` : deux fiches
+    (pages Genius et ID Spotify différents, titres parents) dont les compteurs
+    Spotify suivent UNE courbe (`compteurs_partages.meme_compteur`)."""
+    fiches = sorted(
+        (t for t in ctx.disco if t.spotify_id and (t.streams.spotify_streams or 0) >= PLANCHER),
+        key=lambda t: t.streams.spotify_streams,
+    )
+    paires: dict = {}
+    for i, a in enumerate(fiches):
+        for b in fiches[i + 1 :]:
+            if b.streams.spotify_streams > a.streams.spotify_streams * _FENETRE_COMPTEUR:
+                break
+            if a.spotify_id == b.spotify_id or (a.genius_id and a.genius_id == b.genius_id):
+                continue
+            if not titres_parents(a.title, b.title):
+                continue
+            rythme = max(a.streams.spotify_daily_streams or 0, b.streams.spotify_daily_streams or 0)
+            if not meme_compteur(
+                lectures(ctx.obs.get(a.id)), lectures(ctx.obs.get(b.id)), rythme or None
+            ):
+                continue
+            ra = paroles_de_reference(a.lyrics.text, a.lyrics.source)
+            rb = paroles_de_reference(b.lyrics.text, b.lyrics.source)
+            rec = recouvrement_bigrammes(ra, rb) if ra and rb else None
+            paires.setdefault(a.id, []).append((b, rec))
+            paires.setdefault(b.id, []).append((a, rec))
+    return paires
+
+
+def compteur_partage(track, ctx):
+    """Deux fiches, deux ID Spotify, UN compteur (règle 2a, 2026-10-27) : il
+    entre deux fois dans les totaux. Version proche (même ISRC, instrumental,
+    paroles communes) : le compteur ne compte que sur une fiche ; sinon un des
+    deux ID est souvent celui de l'autre morceau — ce que sert Spotify le dit
+    (`politiques_revue.politique_compteur_partage`). UN cas par fiche."""
+    paires = ctx.memo("paires_de_compteur", lambda: _paires_de_compteur(ctx))
+    for autre, rec in paires.get(track.id, ()):
+        preuve = version_proche(track, autre, rec)
+        return (
+            f"même compteur Spotify que « {autre.title} » ({autre.streams.spotify_streams:,})"
+            + (f" — {preuve}" if preuve else " — paroles différentes : un des ID est-il faux ?"),
+            {
+                "spotify_id": track.spotify_id,
+                "autre": autre.id,
+                "autre_spotify_id": autre.spotify_id,
+                "version_proche": preuve,
+                "paroles": None if rec is None else round(rec, 2),
+            },
         )
     return None
 
@@ -1547,6 +1613,7 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur(
         "id_catalogue_partage", "Même ID de catalogue, deux pages", "🪪", id_catalogue_partage
     ),
+    Detecteur("compteur_partage", "Même compteur Spotify, deux fiches", "🧮", compteur_partage),
     Detecteur("id_spotify_propose", "ID Spotify proposé (SongBPM)", "🆔", id_spotify_propose),
     Detecteur(
         "songbpm_original",

@@ -30,6 +30,18 @@ def _ytm(dm, track_id):
         ).scalar()
 
 
+def _colonnes(dm, track_id):
+    from sqlalchemy import text
+
+    with dm.engine.connect() as conn:
+        return tuple(
+            conn.execute(
+                text("SELECT spotify_streams, spotify_id FROM tracks WHERE id = :t"),
+                {"t": track_id},
+            ).one()
+        )
+
+
 def _invariants(dm) -> dict[str, list[str]]:
     resultat = audit.auditer(dm)
     return {
@@ -170,6 +182,31 @@ class TestApresChaqueEcrivain:
         data_manager.save_track(base["swing"])
         assert _invariants(data_manager) == {}
         data_manager.clear_track_spotify_id(base["swing"].id)
+        assert _invariants(data_manager) == {}
+
+    def test_compteur_partage_ne_compte_plus_et_se_retablit(self, data_manager, base):
+        """Règle 2a : le compteur refusé sort de la colonne, sœurs comprises, un
+        run suivant ne le remet pas ; l'ID et les observations restent ; levé,
+        il revient."""
+        from src.utils import corrections_fiches as cf
+
+        tid, sid = base["isha"].id, "3VXzVGAWFSrH47dBtTOPws"
+        base["isha"].spotify_id = sid
+        data_manager.save_track(base["isha"])
+        data_manager.record_spotify_streams(tid, 5_000_000, "spotify_web")
+        cf.memoriser_compteur_refuse(base["isha"], sid, origine="regle:compteur_partage")
+        assert data_manager.recalculer_streams(tid)
+        data_manager.record_spotify_streams(tid, 5_010_000, "spotify_web")  # un run de plus
+        for t in (base["isha"], base["swing"]):
+            assert _colonnes(data_manager, t.id) == (None, sid)
+        assert any(
+            o.field == "spotify_streams"
+            for o in data_manager.get_artist_observations(base["isha"].artist.id).get(tid, [])
+        )
+        assert _invariants(data_manager) == {}
+        cf.oublier_compteur_refuse(base["isha"], sid)
+        data_manager.recalculer_streams(tid)
+        assert _colonnes(data_manager, tid) == (5_010_000, sid)
         assert _invariants(data_manager) == {}
 
     def test_retrait_deezer_et_isrc(self, data_manager, base):

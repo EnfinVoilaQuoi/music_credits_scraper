@@ -498,3 +498,38 @@ def test_remix_tiers_cree_par_regle_puis_retabli(data_manager, artiste):
     revue_auto.retablir(data_manager, artiste, correction)
     assert t.title not in _charger(data_manager, artiste)
     assert revue_actions._kworb_links().load(artiste.name)["decisions"] == {}
+
+
+def test_page_songbpm_retiree_par_regle_refusee_puis_levee_au_retablissement(data_manager, artiste):
+    from src.utils.corrections_fiches import (
+        CHAMP_PAGE_SONGBPM,
+        origine_du_refus,
+        pages_songbpm_refusees,
+    )
+
+    o = Track(title="All Day", artist=artiste, genius_id=10)
+    o.observations += [
+        Observation("duration", "310", "deezer"),
+        Observation("bpm", "123", "reccobeats"),
+    ]
+    data_manager.save_track(o)
+    r = Track(title="All Day (Kendrick Lamar Reference)", artist=artiste, genius_id=11)
+    r.observations += [
+        Observation("duration", "311", "songbpm"),
+        Observation("bpm", "123", "songbpm"),
+        Observation("key", "5", "songbpm"),
+        Observation(CHAMP_PAGE_SONGBPM, "/@kanye-west/all-day", "songbpm"),
+    ]
+    data_manager.save_track(r)
+    _charger(data_manager, artiste)
+
+    assert len(revue_auto.corriger(data_manager, artiste).appliquees) == 1
+    ref = _charger(data_manager, artiste)["All Day (Kendrick Lamar Reference)"]
+    assert pages_songbpm_refusees(ref) == {"/@kanye-west/all-day"}
+    assert origine_du_refus(ref, "page_songbpm", "/@kanye-west/all-day").startswith("regle:")
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    revue_auto.retablir(data_manager, artiste, correction)
+    ref = _charger(data_manager, artiste)["All Day (Kendrick Lamar Reference)"]
+    assert pages_songbpm_refusees(ref) == set()
+    assert ref.duration == 311

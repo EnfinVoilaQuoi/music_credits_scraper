@@ -549,3 +549,54 @@ class TestBrutGarde:
         assert details["mode"] == "minor"
         (lecture,) = brut.lectures("songbpm", _Reponse.url)
         assert lecture["statut"] == 200 and lecture["corps"] == html.encode("utf-8")
+
+
+class TestPagesRefusees:
+    RESULTATS = [
+        {"title": "Dangerous", "artist": "Kid Cudi", "detail_url": "/@kid-cudi/dangerous"},
+        {
+            "title": "Dangerous",
+            "artist": "Kid Cudi",
+            "detail_url": "https://songbpm.com/@kid-cudi/dangerous-2?x=1",
+        },
+    ]
+
+    def test_la_page_refusee_n_est_plus_candidate(self, scraper):
+        assert scraper.choisir_resultat(self.RESULTATS, "Dangerous", "Kid Cudi")[0] == 1
+        _, retenu = scraper.choisir_resultat(
+            self.RESULTATS, "Dangerous", "Kid Cudi", pages_refusees={"/@kid-cudi/dangerous"}
+        )
+        assert retenu["detail_url"].endswith("dangerous-2?x=1")
+
+    def test_toutes_refusees_rien_n_est_retenu(self, scraper):
+        refusees = {"/@kid-cudi/dangerous", "/@kid-cudi/dangerous-2"}
+        choix = scraper.choisir_resultat(
+            self.RESULTATS, "Dangerous", "Kid Cudi", pages_refusees=refusees
+        )
+        assert choix is None
+
+    def test_les_deux_voies_transmettent_les_pages(self, scraper, monkeypatch):
+        import asyncio
+
+        from src.scrapers.songbpm_scraper_async import SongBPMScraperAsync
+
+        class _O:
+            def ok(self):
+                pass
+
+            def absent(self, *_):
+                pass
+
+        vus = []
+        monkeypatch.setattr(scraper, "_perform_search", lambda **kw: vus.append(kw))
+        scraper._search_track_body(_O(), "Dangerous", "Kid Cudi", None, 5, True, {"/@a/b"})
+        s = SongBPMScraperAsync(headless=True)
+
+        async def perform(**kw):
+            vus.append(kw)
+
+        monkeypatch.setattr(s, "_perform_search_async", perform)
+        asyncio.run(
+            s._search_track_async_body(_O(), "Dangerous", "Kid Cudi", None, 5, True, {"/@a/b"})
+        )
+        assert [kw["pages_refusees"] for kw in vus] == [{"/@a/b"}, {"/@a/b"}]

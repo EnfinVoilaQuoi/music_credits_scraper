@@ -16,8 +16,11 @@ class _FakeScraper:
         self._data = data
         self.calls = []
 
-    def search_track(self, title, artist, spotify_id=None, fetch_details=False):
+    def search_track(
+        self, title, artist, spotify_id=None, fetch_details=False, pages_refusees=frozenset()
+    ):
         self.calls.append((title, artist, spotify_id, fetch_details))
+        self.pages_refusees = pages_refusees
         return self._data
 
 
@@ -30,8 +33,11 @@ class _FakeScraperAsync(_FakeScraper):
         self._lent = lent
         self.ferme = False
 
-    async def search_track_async(self, title, artist, spotify_id=None, fetch_details=False):
+    async def search_track_async(
+        self, title, artist, spotify_id=None, fetch_details=False, pages_refusees=frozenset()
+    ):
         self.calls.append((title, artist, spotify_id, fetch_details))
+        self.pages_refusees = pages_refusees
         if self._lent:
             await asyncio.sleep(3600)
         if isinstance(self._data, Exception):
@@ -426,3 +432,44 @@ class TestTitreGenerique:
         from src.enrichment.providers.songbpm import page_generique_douteuse
 
         assert page_generique_douteuse(_track(), {"spotify_id": "x"}) is None
+
+
+class TestPageRefusee:
+    """Une page SongBPM dont les mesures ont été retirées n'est pas reposée."""
+
+    DONNEES = {"bpm": 120, "detail_url": "/@kid-cudi/dangerous", "duration": "3:00"}
+
+    def test_la_page_lue_est_declaree(self):
+        from src.utils.corrections_fiches import CHAMP_PAGE_SONGBPM
+
+        ctx = EnrichmentContext(artist_tracks=[_track()])
+        assert SongBpmProvider(_FakeScraper(dict(self.DONNEES))).enrich(_track(), ctx)
+        pages = [(o.value, o.source) for o in ctx.observations if o.field == CHAMP_PAGE_SONGBPM]
+        assert pages == [("/@kid-cudi/dangerous", "songbpm")]
+
+    def test_la_voie_sync_passe_les_pages_refusees_au_scraper(self, monkeypatch):
+        from src.enrichment.providers import songbpm as mod
+
+        monkeypatch.setattr(mod, "pages_songbpm_refusees", lambda t: {"/@kid-cudi/dangerous"})
+        scraper = _FakeScraper({})
+        SongBpmProvider(scraper).enrich(_track(), EnrichmentContext(artist_tracks=[_track()]))
+        assert scraper.pages_refusees == {"/@kid-cudi/dangerous"}
+
+    def test_la_voie_async_passe_les_pages_refusees_au_scraper(self, monkeypatch):
+        from src.enrichment.providers import songbpm as mod
+
+        monkeypatch.setattr(mod, "pages_songbpm_refusees", lambda t: {"/@kid-cudi/dangerous"})
+        scraper = _FakeScraperAsync({})
+        provider = SongBpmProvider(None, async_scraper_factory=lambda: scraper)
+        ctx = EnrichmentContext(artist_tracks=[_track()], sync_runner=_RunnerSync())
+        asyncio.run(provider.enrich_async(_track(), ctx))
+        assert scraper.pages_refusees == {"/@kid-cudi/dangerous"}
+
+    def test_filet_si_le_scraper_rend_quand_meme_une_page_refusee(self, monkeypatch):
+        from src.enrichment.providers import songbpm as mod
+
+        monkeypatch.setattr(mod, "pages_songbpm_refusees", lambda t: {"/@kid-cudi/dangerous"})
+        ctx = EnrichmentContext(artist_tracks=[_track()])
+        track = _track()
+        assert SongBpmProvider(_FakeScraper(dict(self.DONNEES))).enrich(track, ctx) is False
+        assert not ctx.observations and track.duration is None

@@ -133,7 +133,26 @@ NATURES = {
 #: PAR ARTISTE, gardent leur refus à la ligne.
 #: Le compteur partagé (règle 2a) vit dans le verdict des streams, que les sœurs
 #: ré-arbitrent chacune : son refus vaut pour toutes, sinon elles divergeraient.
-PAR_ENREGISTREMENT = frozenset(set(NATURES.values()) - {"certif"} | {"compteur_spotify"})
+#: La page SongBPM (nature `page_songbpm`) en est aussi : ses mesures sont des
+#: observations que les sœurs partagent, et c'est le même enregistrement.
+PAR_ENREGISTREMENT = frozenset(
+    set(NATURES.values()) - {"certif"} | {"compteur_spotify", "page_songbpm"}
+)
+
+#: Champ d'observation (source `songbpm`, DÉCLARÉ, jamais arbitré) qui garde la
+#: page lue : sans lui, un retrait des mesures ne saurait pas QUELLE page refuser.
+CHAMP_PAGE_SONGBPM = "songbpm_page"
+
+
+def cle_page_songbpm(lien: str | None) -> str:
+    """PUR. La désignation d'une page SongBPM : son chemin (« /@artiste/titre »),
+    sans hôte, requête, fragment ni barre finale, en minuscules. Vide si le lien
+    n'en porte pas."""
+    chemin = (lien or "").strip()
+    if "songbpm.com" in chemin:
+        chemin = chemin.split("songbpm.com", 1)[1]
+    chemin = chemin.split("#", 1)[0].split("?", 1)[0].rstrip("/").lower()
+    return chemin if chemin.startswith("/@") else ""
 
 
 def _cle_fiche(designation: dict) -> str:
@@ -624,6 +643,43 @@ def comptes_ailleurs(tracks) -> dict[int, str]:
 
 def oublier_compteur_refuse(track, spotify_id: str) -> bool:
     return _oublier(track, "compteur_spotify", spotify_id)
+
+
+def pages_songbpm_refusees(track) -> set[str]:
+    """Pages SongBPM (chemins, `cle_page_songbpm`) dont les mesures ont été
+    retirées de la fiche : le scraper ne les reprend plus (Kid Cudi
+    « Dangerous », Diam's « Suzy » lue sur « Suzy 2003 », 2026-10-27)."""
+    return {r["valeur"] for r in _lignes(track, "page_songbpm")}
+
+
+def memoriser_page_songbpm_refusee(track, page: str, origine: str | None = None) -> bool:
+    return _memoriser(track, "page_songbpm", cle_page_songbpm(page), origine=origine)
+
+
+def oublier_page_songbpm_refusee(track, page: str) -> bool:
+    return _oublier(track, "page_songbpm", cle_page_songbpm(page))
+
+
+def pages_des_observations(observations) -> list[str]:
+    """PUR. Les pages SongBPM que portent ces observations (dicts retirés ou
+    objets), sans doublon, dans l'ordre."""
+    vues: list[str] = []
+    for o in observations or ():
+        champ, valeur = (
+            (o.get("field"), o.get("value")) if isinstance(o, dict) else (o.field, o.value)
+        )
+        if champ == CHAMP_PAGE_SONGBPM and valeur and valeur not in vues:
+            vues.append(valeur)
+    return vues
+
+
+def refuser_pages_retirees(track, observations, origine: str | None = None) -> int:
+    """Consigne le refus de chaque page SongBPM qu'un retrait de mesures vient
+    d'emporter. Rend le nombre de refus posés."""
+    return sum(
+        bool(memoriser_page_songbpm_refusee(track, p, origine=origine))
+        for p in pages_des_observations(observations)
+    )
 
 
 def empreinte_lrc(lrc: str | None) -> str:

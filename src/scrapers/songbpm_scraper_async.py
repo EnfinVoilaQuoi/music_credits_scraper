@@ -282,6 +282,7 @@ class SongBPMScraperAsync(SongBPMScraper):
         fetch_details: bool = True,
         reload_homepage: bool = True,
         titre_juge: str | None = None,
+        pages_refusees: frozenset[str] | set[str] = frozenset(),
     ) -> dict[str, Any] | None:
         try:
             if reload_homepage:
@@ -324,7 +325,12 @@ class SongBPMScraperAsync(SongBPMScraper):
             # nettoyée — sinon « Blues (Live at AK Studios) » cherché comme
             # « Blues » acceptait la page de l'original (2026-09-27).
             choix = self.choisir_resultat(
-                results, titre_juge or track_title, artist_name, spotify_id, max_results_to_check
+                results,
+                titre_juge or track_title,
+                artist_name,
+                spotify_id,
+                max_results_to_check,
+                pages_refusees,
             )
             if choix is not None:
                 i, result = choix
@@ -367,6 +373,7 @@ class SongBPMScraperAsync(SongBPMScraper):
         spotify_id: str | None = None,
         max_results_to_check: int = 5,
         fetch_details: bool = True,
+        pages_refusees: frozenset[str] | set[str] = frozenset(),
     ) -> dict[str, Any] | None:
         await self._ensure_driver_async()
         if not self.page:
@@ -377,7 +384,13 @@ class SongBPMScraperAsync(SongBPMScraper):
         # UNE observation : recherche + repli « sans parenthèses » = un appel.
         with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_title}") as obs:
             return await self._search_track_async_body(
-                obs, track_title, artist_name, spotify_id, max_results_to_check, fetch_details
+                obs,
+                track_title,
+                artist_name,
+                spotify_id,
+                max_results_to_check,
+                fetch_details,
+                pages_refusees,
             )
 
     async def _search_track_async_body(
@@ -388,6 +401,7 @@ class SongBPMScraperAsync(SongBPMScraper):
         spotify_id: str | None,
         max_results_to_check: int,
         fetch_details: bool,
+        pages_refusees: frozenset[str] | set[str] = frozenset(),
     ):
         """Corps de `search_track_async`, sous l'observation ouverte par elle."""
         result = await self._perform_search_async(
@@ -396,6 +410,7 @@ class SongBPMScraperAsync(SongBPMScraper):
             spotify_id=spotify_id,
             max_results_to_check=max_results_to_check,
             fetch_details=fetch_details,
+            pages_refusees=pages_refusees,
         )
         if result:
             log_api("SongBPM", f"search/{track_title}", True)
@@ -415,6 +430,7 @@ class SongBPMScraperAsync(SongBPMScraper):
                     fetch_details=fetch_details,
                     reload_homepage=False,
                     titre_juge=track_title,
+                    pages_refusees=pages_refusees,
                 )
                 if result:
                     log_api("SongBPM", f"search/{track_title}", True)

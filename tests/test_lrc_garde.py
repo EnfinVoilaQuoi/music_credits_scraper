@@ -335,6 +335,52 @@ class TestTropLongEnColonne:
         assert self._lrc(data_manager, t.id) == self._LONG
 
 
+class TestDebordeSonAudio:
+    """2026-10-27 : chaque source donne l'audio sur lequel elle a calé SON LRC
+    (`lrc_duree_audio`). Un LRC qui court au-delà n'est calé sur aucun audio
+    connu — « The Storm » : LRCLIB dit 199 s, la fiche 200 s, le LRC va à 235 s.
+    Règle de verdict : elle rejuge les LRC déjà en colonne."""
+
+    _LRC = "[00:00.00] ♪\n[03:55.00] fin"
+
+    def test_pur(self):
+        from datetime import datetime
+
+        from src.utils.lrc_garde import audios_des_lrc, deborde_son_audio
+
+        vu, avant = datetime(2026, 10, 27, 1, 37), datetime(2026, 9, 1)
+        obs = [
+            Observation("lyrics_synced", self._LRC, "lrclib", seen_at=vu),
+            Observation("lrc_duree_audio", 199, "lrclib", seen_at=vu),
+            # L'audio d'une lecture ANTÉRIEURE ne vaut pas pour ce LRC.
+            Observation("lyrics_synced", self._LRC, "ytmusic", seen_at=vu),
+            Observation("lrc_duree_audio", 240, "ytmusic", seen_at=avant),
+        ]
+        assert audios_des_lrc(obs) == {"lrclib": 199}
+        assert deborde_son_audio(self._LRC, 199)
+        assert not deborde_son_audio(self._LRC, 231) and not deborde_son_audio(self._LRC, None)
+
+    def test_en_colonne(self, data_manager):
+        a = Artist(name="Kanye West")
+        a.id = data_manager.save_artist(a)
+        t = Track(title="The Storm", artist=a)
+        data_manager.save_track(t)
+        data_manager.upsert_observations(t.id, [Observation("lyrics_synced", self._LRC, "lrclib")])
+        lrc = TestTropLongEnColonne()._lrc
+        assert lrc(data_manager, t.id) == self._LRC
+        # Même lecture que le LRC (même `seen_at`) : l'audio de 199 s le dément.
+        from sqlalchemy import text
+
+        with data_manager.engine.connect() as conn:
+            vu = conn.execute(
+                text("SELECT seen_at FROM observations WHERE track_id = :t"), {"t": t.id}
+            ).scalar()
+        data_manager.upsert_observations(
+            t.id, [Observation("lrc_duree_audio", 199, "lrclib", seen_at=vu)]
+        )
+        assert lrc(data_manager, t.id) is None
+
+
 class TestTropLongPourUneVersion:
     """Décision utilisateur 2026-10-20 : pour une VERSION d'un autre
     enregistrement, sa durée même isolée suffit — un LRC plus long que la

@@ -127,6 +127,34 @@ def limite_du_lrc(titre: str | None, duree, confirmee: int | None) -> int | None
     return d if d > 0 and titre and _autre_enregistrement(titre) else None
 
 
+def audios_des_lrc(observations) -> dict[str, int]:
+    """PUR. `{source: durée de l'audio de SON LRC}` — l'observation
+    `CHAMP_DUREE_AUDIO` d'une source ne vaut que posée à la même lecture que son
+    LRC (même `seen_at`) : celle d'une lecture antérieure dirait l'audio d'un
+    autre LRC."""
+    lrc_vu = {o.source: o.seen_at for o in observations if o.field == "lyrics_synced"}
+    audios = {}
+    for o in observations:
+        if o.field != CHAMP_DUREE_AUDIO or o.source not in lrc_vu:
+            continue
+        if str(o.seen_at) != str(lrc_vu[o.source]):
+            continue
+        try:
+            audios[o.source] = int(float(o.value))
+        except (TypeError, ValueError):
+            continue
+    return audios
+
+
+def deborde_son_audio(lrc: str | None, duree_audio: int | None) -> bool:
+    """PUR. Le LRC court au-delà de l'audio sur lequel SA source l'a calé
+    (2026-10-27) : la dernière ligne ne peut pas venir après la fin de cet
+    audio — le minutage est celui d'un autre (« The Storm » : LRCLIB donne un
+    audio de 199 s, la fiche dure 200 s, le LRC court jusqu'à 235 s)."""
+    fin = fin_du_lrc(lrc) if duree_audio else None
+    return bool(fin and fin > duree_audio + ECART_DUREE_S)
+
+
 def depasse(lrc: str | None, limite: int | None) -> int | None:
     """PUR. La fin du LRC si elle dépasse `limite` de plus de `ECART_DUREE_S`."""
     fin = fin_du_lrc(lrc) if limite else None

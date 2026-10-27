@@ -413,6 +413,7 @@ def _reconcile_lyrics_synced(
     instrumental: bool = False,
     duree_confirmee: int | None = None,
     titre: str | None = None,
+    audios: dict[str, int] | None = None,
 ) -> Resolution | None:
     """Départage les LRC synchronisés par source (réutilise `compare_synced`).
 
@@ -439,14 +440,22 @@ def _reconcile_lyrics_synced(
     dont Médine « Skit - Dream Bank » : 39 s, LRC jusqu'à 3 min 47). Avec le
     `titre` d'une VERSION d'un autre enregistrement, sa durée même isolée
     suffit (`lrc_garde.limite_du_lrc`, décision utilisateur du 2026-10-20).
+
+    `audios` (`lrc_garde.audios_des_lrc`, `{source: durée}`) : l'audio sur
+    lequel chaque source a calé SON LRC. Un LRC qui court au-delà est écarté
+    (`deborde_son_audio`, 2026-10-27) — une règle de verdict, qui rejuge donc
+    aussi les LRC déjà posés.
     """
     from src.utils.concordance_paroles import lrc_dementi
-    from src.utils.lrc_garde import depasse, limite_du_lrc
+    from src.utils.lrc_garde import deborde_son_audio, depasse, limite_du_lrc
 
     limite = limite_du_lrc(titre, track_duration, duree_confirmee)
+    audios = audios or {}
 
-    def trop_long(lrc) -> bool:
-        return depasse(lrc, limite) is not None
+    def trop_long(o) -> bool:
+        return depasse(o.value, limite) is not None or deborde_son_audio(
+            o.value, audios.get(o.source)
+        )
 
     if instrumental:
         # Un instrumental CONSTATÉ n'a aucun LRC (décision utilisateur
@@ -458,7 +467,7 @@ def _reconcile_lyrics_synced(
     by_source = {
         o.source: o
         for o in observations
-        if not lrc_dementi(paroles, o.value) and not trop_long(o.value)
+        if o.field == LYRICS_SYNCED_FIELD and not lrc_dementi(paroles, o.value) and not trop_long(o)
     }
     lrclib = by_source.get("lrclib")
     ytm = by_source.get("ytmusic")
@@ -618,7 +627,15 @@ def reconcile(
 
     lyrics_obs = by_field.get(LYRICS_SYNCED_FIELD, [])
     if lyrics_obs:
-        lyrics_res = _reconcile_lyrics_synced(lyrics_obs, track_duration, paroles, instrumental)
+        from src.utils.lrc_garde import CHAMP_DUREE_AUDIO, audios_des_lrc
+
+        lyrics_res = _reconcile_lyrics_synced(
+            lyrics_obs,
+            track_duration,
+            paroles,
+            instrumental,
+            audios=audios_des_lrc(lyrics_obs + by_field.get(CHAMP_DUREE_AUDIO, [])),
+        )
         if lyrics_res is not None:
             resolutions[LYRICS_SYNCED_FIELD] = lyrics_res
 

@@ -3033,17 +3033,19 @@ class TrackRepository:
         conclut pas, la colonne reste."""
         from src.enrichment.reconcile import _reconcile_lyrics_synced
         from src.utils.concordance_paroles import paroles_de_reference
+        from src.utils.lrc_garde import CHAMP_DUREE_AUDIO, audios_des_lrc
 
-        obs = [
-            Observation("lyrics_synced", r[1], r[0])
+        lues = [
+            Observation(r[0], r[2], r[1], seen_at=r[3])
             for r in conn.execute(
                 text(
-                    "SELECT source, value FROM observations "
-                    "WHERE track_id = :t AND field = 'lyrics_synced'"
+                    "SELECT field, source, value, seen_at FROM observations "
+                    "WHERE track_id = :t AND field IN ('lyrics_synced', :audio)"
                 ),
-                {"t": track_id},
+                {"t": track_id, "audio": CHAMP_DUREE_AUDIO},
             )
         ]
+        obs = [o for o in lues if o.field == "lyrics_synced"]
         if not obs:
             return
         ligne = (
@@ -3066,6 +3068,7 @@ class TrackRepository:
             bool(ligne["instrumental"]),
             duree_confirmee=self._duree_confirmee(conn, track_id, ligne["duration"]),
             titre=ligne["title"],
+            audios=audios_des_lrc(lues),
         )
         if res is None:
             return

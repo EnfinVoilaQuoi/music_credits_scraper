@@ -171,6 +171,31 @@ class TestRecordTrackVideos:
         (relue,) = [t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id]
         assert relue.duration == 240
 
+    def test_retirer_les_durees_video_rend_la_colonne_au_catalogue(self, data_manager):
+        """2026-10-27, « La balade des indépendants (Remix) » : 257 s d'une
+        vidéo de FLYNTMC rangés en `youtube` passaient devant les 399 s de la
+        page Spotify. Retirées, la colonne revient au catalogue ; la source
+        `sauf` (celle que le run vient de déclarer) reste."""
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_duration_observation(track.id, 399, "spotify_web")
+        data_manager.record_duration_observation(track.id, 257, "youtube")
+        data_manager.record_duration_observation(track.id, 250, "youtube_video")
+        (relue,) = [t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id]
+        assert relue.duration == 257
+        assert data_manager.retirer_durees_video(track.id, sauf="youtube_video") == 1
+        (relue,) = [t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id]
+        assert relue.duration == 399
+        assert set(relue.durations_observees) == {"spotify_web", "youtube_video"}
+
+    def test_retirer_la_seule_duree_video_vide_la_colonne(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_duration_observation(track.id, 252, "youtube")
+        assert data_manager.retirer_durees_video(track.id) == 1
+        (relue,) = [t for t in data_manager.get_artist_tracks(artist.id) if t.id == track.id]
+        assert relue.duration is None
+
     def test_oublier_une_video_absente_ne_touche_pas_la_duree(self, data_manager):
         artist = _artiste(data_manager)
         track = _morceau(data_manager, artist)

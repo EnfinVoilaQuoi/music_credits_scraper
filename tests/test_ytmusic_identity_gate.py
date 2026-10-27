@@ -96,6 +96,7 @@ def _track(idx, title, album="Alb", spotify_streams=None, youtube_url=None, vide
         genius_id=None,
         spotify_id=None,
         deezer_id=None,
+        durations_observees={},
         title=title,
         album=album,
         streams=SimpleNamespace(

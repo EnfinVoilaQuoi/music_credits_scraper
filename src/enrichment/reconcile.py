@@ -186,8 +186,44 @@ STREAMS_SOURCES = ("kworb", "spotify_web")
 _VIDEOS_ORDINAIRES = frozenset({"youtube_video", "youtube_officiel"})
 
 
+#: Veto du vote dans le verdict de durée — PROPOSITION, interrupteur BAISSÉ
+#: (2026-10-27). Levé, la source en tête de l'ordre cède quand sa valeur est
+#: ISOLÉE au vote des catalogues (`vote_durees.voter` : au moins deux
+#: catalogues solides la démentent) : la suivante non démentie fait la
+#: colonne. À ne lever qu'après simulation contre un témoin indépendant
+#: (`scripts/simuler_veto_duree.py`) ET une fois les durées des éditions
+#: passées aussi au chemin de lecture (`track_mapper` → `reconcile`), qui ne
+#: les a pas : sans elles les deux verdicts divergeraient.
+VETO_DU_VOTE = False
+
+
+def _veto_du_vote(observations: list, ordre, editions) -> list:
+    """Les observations privées de celles que le vote ISOLE, tant qu'il reste
+    une source de l'ordre non démentie ; sinon telles quelles (le veto choisit
+    entre des valeurs, il ne vide jamais la colonne)."""
+    from src.utils.track_mapper import _clean_duration
+    from src.utils.vote_durees import ISOLEE, voter
+
+    durees = {o.source: _clean_duration(o.value) for o in observations}
+    durees = {s: d for s, d in durees.items() if d}
+    isolees = set()
+    for o in observations:
+        vote = voter(durees, durees.get(o.source), editions=editions)
+        if vote is not None and vote.nature == ISOLEE:
+            isolees.add(o.source)
+    restantes = [o for o in observations if o.source not in isolees]
+    if not any(o.source in ordre and o.value is not None for o in restantes):
+        return observations
+    return restantes
+
+
 def resoudre_duree(
-    observations: list, ordre, titre: str | None, paroles: str | None = None
+    observations: list,
+    ordre,
+    titre: str | None,
+    paroles: str | None = None,
+    editions=(),
+    veto: bool | None = None,
 ) -> Resolution | None:
     """Verdict `duration` : `resolve_by_priority`, deux vidéos ordinaires
     écartées (2026-10-27) :
@@ -198,7 +234,12 @@ def resoudre_duree(
         (« Kanye West Sway Freestyle » : 73 mots pour 34 min).
     Règle de VERDICT : l'observation reste, la colonne cesse de la porter, y
     compris pour ce qui a été posé avant elle. La même fonction pour
-    `reconcile` et le repository."""
+    `reconcile` et le repository.
+
+    `veto` (None = `VETO_DU_VOTE`) : écarte en plus les valeurs que le vote des
+    catalogues isole (`_veto_du_vote`) ; `editions` = durées des autres
+    éditions connues de la fiche, qui expliquent un témoin au lieu de
+    l'accuser."""
     from src.utils.duree_youtube import (
         DUREE_MIN_MORCEAU,
         court_par_nature,
@@ -214,7 +255,10 @@ def resoudre_duree(
         d = _clean_duration(o.value) or 0
         return (court or d >= DUREE_MIN_MORCEAU) and not dementie_par_les_paroles(d, paroles)
 
-    return resolve_by_priority([o for o in observations if recevable(o)], "duration", ordre)
+    retenues = [o for o in observations if recevable(o)]
+    if VETO_DU_VOTE if veto is None else veto:
+        retenues = _veto_du_vote(retenues, ordre, editions)
+    return resolve_by_priority(retenues, "duration", ordre)
 
 
 def resolve_by_priority(observations: list, field: str, ordre) -> Resolution | None:

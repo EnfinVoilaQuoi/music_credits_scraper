@@ -112,6 +112,81 @@ class TestExtraitsVideo:
         assert reconcile([_obs("duration", 12, "youtube_video")])["duration"].value == 12
 
 
+class TestVetoDuVote:
+    """Proposition du 2026-10-27, interrupteur BAISSÉ : une valeur que le vote
+    des catalogues isole cède à la source suivante non démentie."""
+
+    ORDRE = DISCOGRAPHY_PRIORITIES["duration"]
+    # Diam's « Vice Versa » : l'audio YouTube 277 s, Spotify et Apple 240 s.
+    VICE_VERSA = [
+        _obs("duration", 277, "youtube"),
+        _obs("duration", 240, "apple_music"),
+        _obs("duration", 240, "spotify_web"),
+    ]
+
+    def test_baisse_la_priorite_choisit_seule(self):
+        from src.enrichment import reconcile as module
+
+        assert module.VETO_DU_VOTE is False
+        assert module.resoudre_duree(self.VICE_VERSA, self.ORDRE, "Vice Versa").value == 277
+
+    def test_leve_la_valeur_isolee_cede(self):
+        from src.enrichment.reconcile import resoudre_duree
+
+        res = resoudre_duree(self.VICE_VERSA, self.ORDRE, "Vice Versa", veto=True)
+        assert (res.value, res.source) == (240, "apple_music")
+
+    def test_un_seul_catalogue_contre_ne_suffit_pas(self):
+        """« Deuces (Remix) » : l'audio Topic 404 s (le single avec T.I., celui
+        de la page) contre Spotify 339 s et Discogs 338 s — Discogs, fragile,
+        ne compte pas : un seul catalogue solide contre, rien ne change."""
+        from src.enrichment.reconcile import resoudre_duree
+
+        obs = [
+            _obs("duration", 404, "youtube"),
+            _obs("duration", 338, "discogs"),
+            _obs("duration", 339, "spotify_web"),
+        ]
+        assert resoudre_duree(obs, self.ORDRE, "Deuces (Remix)", veto=True).value == 404
+
+    def test_une_edition_connue_explique_le_temoin(self):
+        from src.enrichment.reconcile import resoudre_duree
+
+        res = resoudre_duree(self.VICE_VERSA, self.ORDRE, "Vice Versa", editions=(240,), veto=True)
+        assert res.value == 277
+
+    def test_deux_contre_deux_la_priorite_reste(self):
+        """Deux catalogues pour chaque valeur : le vote est indécis, le veto ne
+        choisit pas."""
+        from src.enrichment.reconcile import resoudre_duree
+
+        obs = [
+            _obs("duration", 200, "deezer"),
+            _obs("duration", 200, "youtube"),
+            _obs("duration", 300, "apple_music"),
+            _obs("duration", 300, "spotify_web"),
+        ]
+        assert resoudre_duree(obs, self.ORDRE, "X", veto=True).value == 200
+
+    def test_seule_source_de_l_ordre_isolee_le_veto_ne_vide_pas(self):
+        """L'audio Topic seul dans l'ordre, démenti par deux sources hors
+        ordre : sans repli dans l'ordre, la colonne garde sa valeur."""
+        from src.enrichment.reconcile import _veto_du_vote
+
+        obs = [
+            _obs("duration", 277, "youtube"),
+            _obs("duration", 240, "hors_ordre_a"),
+            _obs("duration", 240, "hors_ordre_b"),
+        ]
+        assert _veto_du_vote(obs, ("youtube",), ()) == obs
+
+    def test_le_manuel_court_circuite_toujours(self):
+        from src.enrichment.reconcile import resoudre_duree
+
+        obs = [*self.VICE_VERSA, _obs("duration", 277, "manual")]
+        assert resoudre_duree(obs, self.ORDRE, "Vice Versa", veto=True).value == 277
+
+
 class TestLesStreamsNOntPasChange:
     """`reconcile_spotify_streams` devient un APPEL du résolveur généralisé :
     son comportement doit être identique au byte près."""

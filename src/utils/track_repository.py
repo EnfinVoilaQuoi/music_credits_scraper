@@ -3012,7 +3012,13 @@ class TrackRepository:
             if field == "release_date":
                 verdict = resoudre_date_de_sortie(obs_du_champ, ordre)
             elif field == "duration":
-                verdict = resoudre_duree(obs_du_champ, ordre, titre, paroles)
+                verdict = resoudre_duree(
+                    obs_du_champ,
+                    ordre,
+                    titre,
+                    paroles,
+                    editions=self._durees_editions(conn, track_id),
+                )
             else:
                 verdict = resolve_by_priority(obs_du_champ, field, ordre)
             if verdict is None:
@@ -3030,6 +3036,25 @@ class TrackRepository:
             else:
                 valeurs[colonne] = str(verdict.value) if verdict.value is not None else None
         return valeurs
+
+    @staticmethod
+    def _durees_editions(conn, track_id: int) -> tuple[int, ...]:
+        """Durées des éditions connues de la fiche (`track_editions`), pour le
+        veto du vote — lues seulement s'il est levé (`reconcile.VETO_DU_VOTE`)."""
+        from src.enrichment import reconcile as _reconcile
+
+        if not _reconcile.VETO_DU_VOTE:
+            return ()
+        return tuple(
+            int(d)
+            for (d,) in conn.execute(
+                text(
+                    "SELECT duration FROM track_editions WHERE track_id = :t "
+                    "AND duration IS NOT NULL"
+                ),
+                {"t": track_id},
+            )
+        )
 
     def rearbitrer_duree_et_date(self, track_id: int) -> bool:
         """Écrivain PUBLIC de `_rearbitrer_duree_et_date` — réparation des
@@ -6132,6 +6157,54 @@ class TrackRepository:
             logger.error(f"Erreur poser_recherches_videos : {e}")
             return 0
 
+    #: Sources d'une durée tirée des vidéos (`duree_youtube`).
+    _SOURCES_DUREE_VIDEO = ("youtube", "youtube_video", "youtube_officiel")
+
+    def _retirer_durees_video(self, conn, track_id: int, sauf: str | None = None) -> int:
+        """Ôte les durées tirées des vidéos (hors la source `sauf`). Plus aucune
+        durée observée : le ré-arbitrage du commit ne touche pas une colonne
+        sans observation (celles d'avant les observations), qui gardait donc la
+        durée de la vidéo rejetée (« DJ Aktive Mix », 18 s d'un skit,
+        2026-10-27). Le retrait ôte la provenance : la colonne suit."""
+        self._toucher(conn, track_id)
+        retirees = 0
+        for source in self._SOURCES_DUREE_VIDEO:
+            if source == sauf:
+                continue
+            retirees += conn.execute(
+                text(
+                    "DELETE FROM observations WHERE track_id = :tid "
+                    "AND field = 'duration' AND source = :s"
+                ),
+                {"tid": track_id, "s": source},
+            ).rowcount
+        if (
+            retirees
+            and not conn.execute(
+                text("SELECT 1 FROM observations WHERE track_id = :tid AND field = 'duration'"),
+                {"tid": track_id},
+            ).first()
+        ):
+            conn.execute(
+                text("UPDATE tracks SET duration = NULL WHERE id = :tid"), {"tid": track_id}
+            )
+        return retirees
+
+    def retirer_durees_video(self, track_id: int, sauf: str | None = None) -> int:
+        """Le run YTM a relu TOUTES les vidéos de la fiche et n'en tire plus la
+        durée qu'il avait déclarée (vidéo devenue partagée, refusée par le
+        score, chaîne qui n'est pas un « - Topic »…) : l'observation part, sauf
+        celle de la source `sauf` qu'il vient de déclarer. Laissée là, elle
+        gardait la colonne — « La balade des indépendants (Remix) » 257 s d'une
+        vidéo de FLYNTMC contre 399 s Spotify (2026-10-27). Rend le nombre
+        d'observations retirées."""
+        try:
+            with self._ecrire() as conn:
+                return self._retirer_durees_video(conn, track_id, sauf)
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_durees_video({track_id}) : {e}")
+            return 0
+
     def forget_track_video(self, track_id: int, video_id: str) -> bool:
         """Retire UNE vidéo d'un morceau (rejet d'un lien automatique erroné).
 
@@ -6163,34 +6236,7 @@ class TrackRepository:
                         # rejet, la colonne est ré-arbitrée au commit, et le run
                         # YTM suivant la redéclare si les vidéos restantes la
                         # justifient (Kid Cudi « Whatever U Want (Remix) », 2026-10-13).
-                        retirees = conn.execute(
-                            text(
-                                "DELETE FROM observations WHERE track_id = :tid "
-                                "AND field = 'duration' AND source IN "
-                                "('youtube', 'youtube_video', 'youtube_officiel')"
-                            ),
-                            {"tid": tid},
-                        ).rowcount
-                        # Plus aucune durée observée : le ré-arbitrage du commit
-                        # ne touche pas une colonne sans observation (celles
-                        # d'avant les observations), qui gardait donc la durée
-                        # de la vidéo rejetée (« DJ Aktive Mix », 18 s d'un
-                        # skit, 2026-10-27). Le retrait ôte la provenance : la
-                        # colonne suit.
-                        if (
-                            retirees
-                            and not conn.execute(
-                                text(
-                                    "SELECT 1 FROM observations WHERE track_id = :tid "
-                                    "AND field = 'duration'"
-                                ),
-                                {"tid": tid},
-                            ).first()
-                        ):
-                            conn.execute(
-                                text("UPDATE tracks SET duration = NULL WHERE id = :tid"),
-                                {"tid": tid},
-                            )
+                        self._retirer_durees_video(conn, tid)
 
                 oublier(track_id)
                 effacer_chez_les_soeurs(conn, track_id, oublier)

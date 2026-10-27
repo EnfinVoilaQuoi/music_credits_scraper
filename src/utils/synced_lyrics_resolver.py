@@ -92,7 +92,7 @@ def resolve_track_synced_lyrics(
     refuse un LRC qui appartient à une AUTRE fiche de l'artiste — ce que les
     paroles de la fiche seule ne peuvent pas dire quand elle n'en a pas.
     """
-    from src.utils.lrc_garde import sans_lrc
+    from src.utils.lrc_garde import CHAMP_DUREE_AUDIO, sans_lrc
 
     out = SyncedLyricsOutcome()
     now = now or datetime.now()
@@ -153,7 +153,7 @@ def resolve_track_synced_lyrics(
     ytm_lrc = _retenu(ytm_lrc, "YTM")
 
     # SOURCE 1 (LRCLIB) : match sur la durée ±2 s.
-    lrclib_lrc = None
+    lrclib_lrc = lrclib_duree = None
     if need_sync and lrclib is not None:
         try:
             lr = lrclib.get_synced(
@@ -178,6 +178,7 @@ def resolve_track_synced_lyrics(
                 )
             elif lr:
                 lrclib_lrc = _retenu(lr.get("lyrics_synced"), "LRCLIB")
+                lrclib_duree = lr.get("duration")
         except (AttributeError, TypeError, KeyError) as e:
             # LRCLIBAPI gère déjà son réseau → accès inattendu seul ; on continue.
             logger.debug(f"LRCLIB échec '{artist_name} - {track.title}': {e}")
@@ -185,10 +186,20 @@ def resolve_track_synced_lyrics(
     # CROSS-CHECK (sources 1 & 2) + départage durée.
     if need_sync:
         # E7d : persister le LRC BRUT par source (re-vote inter-runs à la lecture).
-        if lrclib_lrc:
-            out.observations.append(Observation("lyrics_synced", lrclib_lrc, "lrclib", seen_at=now))
-        if ytm_lrc:
-            out.observations.append(Observation("lyrics_synced", ytm_lrc, "ytmusic", seen_at=now))
+        # Avec chaque LRC, la durée de l'audio sur lequel il est calé (même
+        # lecture, même `seen_at`) : le témoin d'un LRC qui court au-delà de la
+        # durée de la fiche (`lrc_garde.CHAMP_DUREE_AUDIO`, 2026-10-27).
+        for lrc, source, duree_audio in (
+            (lrclib_lrc, "lrclib", lrclib_duree),
+            (ytm_lrc, "ytmusic", ytm_res.get("duree_audio") if ytm_res else None),
+        ):
+            if not lrc:
+                continue
+            out.observations.append(Observation("lyrics_synced", lrc, source, seen_at=now))
+            if isinstance(duree_audio, int | float) and duree_audio > 0:
+                out.observations.append(
+                    Observation(CHAMP_DUREE_AUDIO, round(duree_audio), source, seen_at=now)
+                )
         verdict = compare_synced(lrclib_lrc, ytm_lrc, duration)
         if verdict:
             out.lyrics_synced = verdict["lrc"]

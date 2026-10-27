@@ -98,6 +98,32 @@ class TestParoles:
         assert res["lyrics"] == "Une ligne"
         assert res["source"] == "LyricFind"
 
+    def test_duree_de_l_audio_des_paroles(self, api):
+        """2026-10-27 : la piste de la file dont viennent les paroles donne la
+        durée de l'audio sur lequel le LRC est calé ; à défaut, le hit retenu."""
+        api.yt = _YTLyrics(
+            search=[_resultat()],
+            watch={
+                "lyrics": "browse1",
+                "tracks": [
+                    {"videoId": "autre", "length": "9:59"},
+                    {"videoId": "v1", "length": "3:45"},
+                ],
+            },
+            lyrics_sync={"lyrics": [{"text": "Une ligne", "start_time": 1000}]},
+        )
+        assert api.get_lyrics("ISHA", "Titre")["duree_audio"] == 225
+        api.yt._watch = {"lyrics": "browse1"}
+        api.yt._search = [{**_resultat(), "duration_seconds": 201}]
+        assert api.get_lyrics("ISHA", "Titre")["duree_audio"] == 201
+        assert (
+            api._duree_dans_la_playlist({"tracks": [{"videoId": "v", "length": "1:02:03"}]}, "v")
+            == 3723
+        )
+        assert (
+            api._duree_dans_la_playlist({"tracks": [{"videoId": "v", "length": "?"}]}, "v") is None
+        )
+
     def test_repli_sur_texte_brut(self, api):
         """Certaines pistes n'ont pas de version synchronisée."""
         api.yt = _YTLyrics(

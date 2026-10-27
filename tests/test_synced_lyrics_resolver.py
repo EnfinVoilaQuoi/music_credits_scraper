@@ -96,6 +96,32 @@ def test_cross_check_concordant_conf2():
     assert sorted(o.source for o in out.observations) == ["lrclib", "ytmusic"]
 
 
+def test_chaque_lrc_porte_la_duree_de_son_audio():
+    """2026-10-27 : la durée de l'audio d'un LRC (LRCLIB `duration`, piste YTM)
+    est gardée avec lui, à la même lecture — le témoin d'un LRC qui court
+    au-delà de la durée de la fiche."""
+    from src.utils.lrc_garde import CHAMP_DUREE_AUDIO
+
+    lrclib = _FakeLRCLIB(_LRC)
+    lrclib.get_synced = lambda *a, **k: {"lyrics_synced": _LRC, "duration": 361.152}
+    ytm = _FakeYTM(lrc=_LRC)
+    ytm._res["duree_audio"] = 359
+    out = resolve_track_synced_lyrics(
+        _track(),
+        "X",
+        lrclib=lrclib,
+        ytm=ytm,
+        mxm=None,
+        need_sync=True,
+        need_text=False,
+        sync_ytm=True,
+    )
+    durees = {o.source: o.value for o in out.observations if o.field == CHAMP_DUREE_AUDIO}
+    assert durees == {"lrclib": 361, "ytmusic": 359}
+    lrc = {o.source: o.seen_at for o in out.observations if o.field == "lyrics_synced"}
+    assert all(o.seen_at == lrc[o.source] for o in out.observations if o.field == CHAMP_DUREE_AUDIO)
+
+
 def test_ytm_seul_source_unique():
     out = resolve_track_synced_lyrics(
         _track(),

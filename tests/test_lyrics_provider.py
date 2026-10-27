@@ -137,7 +137,11 @@ def test_pont_lrclib_async_utilise_quand_non_injecte():
     provider.enrich(track, "X", need_sync=True, need_text=False)
     assert track.lyrics.synced == _LRC
     assert track.lyrics.synced_source == "LRCLIB"
-    assert [o.source for o in track.observations] == ["lrclib"]
+    # Le LRC et la durée de son audio (2026-10-27), tous deux de LRCLIB.
+    assert [(o.field, o.source, o.value) for o in track.observations] == [
+        ("lyrics_synced", "lrclib", _LRC),
+        ("lrc_duree_audio", "lrclib", 200),
+    ]
 
 
 def test_close_ferme_la_session_async():

@@ -447,15 +447,36 @@ class YTMusicAPI:
             return None
         return secondes if titres_equivalents(title, hit.get("title")) else None
 
-    def _lire_paroles(self, video_id: str) -> tuple[str | None, str | None, str | None]:
-        """(texte, LRC, source) des paroles qu'YTM rattache à CETTE vidéo ;
-        (None, None, None) si elle n'en a pas. Aucune recherche : l'identité
-        est celle de la vidéo."""
+    @staticmethod
+    def _duree_dans_la_playlist(watch, video_id: str) -> int | None:
+        """La durée (s) de la piste `video_id` dans la file de lecture, dont
+        YTM tire les paroles : l'audio sur lequel un LRC est calé (« 3:45 »,
+        « 1:02:03 »). None si la file ne la donne pas."""
+        pistes = watch.get("tracks") if isinstance(watch, dict) else None
+        for piste in pistes or []:
+            if not isinstance(piste, dict) or piste.get("videoId") != video_id:
+                continue
+            morceaux = str(piste.get("length") or "").split(":")
+            if not all(m.isdigit() for m in morceaux) or not 2 <= len(morceaux) <= 3:
+                return None
+            secondes = 0
+            for m in morceaux:
+                secondes = secondes * 60 + int(m)
+            return secondes or None
+        return None
+
+    def _lire_paroles(self, video_id: str) -> tuple[str | None, str | None, str | None, int | None]:
+        """(texte, LRC, source, durée de l'audio) des paroles qu'YTM rattache à
+        CETTE vidéo ; (None, None, None, None) si elle n'en a pas. Aucune
+        recherche : l'identité est celle de la vidéo. La durée est celle de la
+        piste dont viennent les paroles (2026-10-27) : un LRC qui court au-delà
+        de la durée d'une fiche se juge contre l'audio sur lequel il est calé."""
         with source_usage.attempt(_SOURCE, detail="watch_playlist"):
             watch = self.yt.get_watch_playlist(videoId=video_id)
         lyrics_id = watch.get("lyrics") if isinstance(watch, dict) else None
         if not lyrics_id:
-            return None, None, None
+            return None, None, None, None
+        duree_audio = self._duree_dans_la_playlist(watch, video_id)
         # Demander la version synchronisée ; fallback texte brut si indispo
         try:
             data = self.yt.get_lyrics(lyrics_id, timestamps=True)
@@ -479,9 +500,9 @@ class YTMusicAPI:
         else:
             text = raw
         if not text or not str(text).strip():
-            return None, None, None
+            return None, None, None, None
         source = (data.get("source") if isinstance(data, dict) else None) or "YouTube Music"
-        return str(text).strip(), synced, source
+        return str(text).strip(), synced, source, duree_audio
 
     def _get_lyrics_body(
         self, obs, artist: str, title: str, exiger_titre: bool = False, video_ids=()
@@ -493,7 +514,7 @@ class YTMusicAPI:
             #    ainsi, 70 justes — la recherche texte en donnait 50 % de fausses.
             for video_id in video_ids:
                 try:
-                    text, synced, source = self._lire_paroles(video_id)
+                    text, synced, source, duree_audio = self._lire_paroles(video_id)
                 except YTMusicError as e:
                     # Vidéo inconnue d'YTM (clip supprimé, privé, hors catalogue :
                     # « No content returned », mesuré 30 fois sur A2H le
@@ -512,6 +533,7 @@ class YTMusicAPI:
                         "lyrics_synced": synced,
                         "source": source,
                         "duration": None,
+                        "duree_audio": duree_audio,
                         "title": None,
                         "video_id": video_id,
                     }
@@ -556,10 +578,13 @@ class YTMusicAPI:
                 else None
             )
 
-            text, synced, source = self._lire_paroles(chosen["videoId"])
+            text, synced, source, duree_audio = self._lire_paroles(chosen["videoId"])
             if not text:
                 obs.absent("pas de paroles pour cette vidéo")
                 return sans_paroles
+            if not duree_audio and isinstance(chosen.get("duration_seconds"), int):
+                # Le hit retenu EST la piste dont viennent les paroles.
+                duree_audio = chosen["duration_seconds"] or None
             logger.info(
                 f"📝 YTM paroles: '{artist} - {title}' (source: {source}"
                 f"{', synchro' if synced else ''})"
@@ -569,6 +594,7 @@ class YTMusicAPI:
                 "lyrics_synced": synced,
                 "source": source,
                 "duration": duree,
+                "duree_audio": duree_audio,
                 "title": chosen.get("title"),
                 "video_id": chosen["videoId"],
             }

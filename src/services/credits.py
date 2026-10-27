@@ -18,7 +18,7 @@ from src.observability import source_usage
 from src.services.runtime import Bilan, Hooks, Manque, Runtime, morceaux_a_traiter
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.logger import etape_de_flux, get_logger
-from src.utils.lrc_garde import GardeLrc, sans_lrc
+from src.utils.lrc_garde import CHAMP_DUREE_AUDIO, GardeLrc, sans_lrc
 
 logger = get_logger(__name__)
 
@@ -378,6 +378,8 @@ def _retablir_sans_reponse(
             if id(t) in synchro_obtenue:
                 if t.id:
                     runtime.data_manager.delete_observations(t.id, "lyrics_synced")
+                    # La durée de l'audio d'un LRC part avec lui.
+                    runtime.data_manager.delete_observations(t.id, CHAMP_DUREE_AUDIO)
             elif not t.lyrics.instrumental:
                 for c in _CHAMPS_SYNC:
                     setattr(t.lyrics, c, etat[f"lyrics.{c}"])

@@ -73,6 +73,13 @@ def _autre_enregistrement(titre: str) -> bool:
 #: 5 s = même enregistrement d'une plateforme à l'autre, cf. écarts Deezer).
 ECART_DUREE_S = 5
 
+#: Observation `(fiche, CHAMP_DUREE_AUDIO, source du LRC)` : la durée (s) de
+#: l'audio sur lequel le LRC de cette source est calé — `duration` de LRCLIB,
+#: la piste YTM dont viennent les paroles (2026-10-27). Un FAIT sur le LRC,
+#: pas une durée de la fiche : il n'entre pas au vote des durées. Posé avec le
+#: LRC, au même `seen_at` : il ne vaut que pour la lecture qui l'a donné.
+CHAMP_DUREE_AUDIO = "lrc_duree_audio"
+
 
 _HORODATAGE = re.compile(r"\[(\d+):(\d{1,2})(?:[.:]\d+)?\]")
 

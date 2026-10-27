@@ -131,7 +131,8 @@ class TestForcer:
             force_sync=True,
         )
         credits.run(_rt(dm), Artist(name="Swing"), [t], opts, Hooks(), cl)
-        assert dm.obs_deleted == [(t.id, "lyrics_synced")]
+        # Le LRC et la durée de son audio partent ensemble (2026-10-27).
+        assert dm.obs_deleted == [(t.id, "lyrics_synced"), (t.id, "lrc_duree_audio")]
         assert lyr.appels and lyr.appels[0][2] is True  # need_sync malgré l'ancien LRC
 
     def test_force_sync_sans_reponse_garde_l_ancien_lrc(self):

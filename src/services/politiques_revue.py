@@ -938,6 +938,88 @@ def arbitrage_id_partage(cas, track, ctx, gate=None) -> Arbitrage | None:
     return None
 
 
+# ── Famille « même ID de catalogue, deux pages » — 2026-10-27 ───────────────
+
+#: Simulée sur la base d'avant les retraits à la main du 2026-10-27 (rejeu du
+#: brut, `catalogue_designe`) : 6 ID partagés, 6 tranchés comme l'utilisateur
+#: et les témoins (Deuces : 274 s servis contre 338-339 s du long remix).
+#: Interrupteur : `revue_auto.REGLES_CATALOGUE_BRANCHEES`.
+REGLES_CATALOGUE = frozenset(
+    {
+        ("id_catalogue_partage", "normal"),
+        ("id_catalogue_partage", "retirer_spotify"),
+        ("id_catalogue_partage", "delier_deezer"),
+    }
+)
+
+
+def politique_catalogue_designe(lire_spotify: Callable, lire_deezer: Callable) -> Callable:
+    """Ce que sert le catalogue pour l'ID partagé désigne UNE page
+    (`catalogue_designe.page_designee`) : elle le garde (« ✓ Normal »), les
+    autres le perdent. Rien de servi, ou aucun critère qui n'en retienne
+    qu'une : l'humain. `lire_*` : `id -> lecture brute | None`."""
+    from src.utils.catalogue_designe import page_designee, servi_deezer, servi_spotify
+
+    def juger(cas, track, ctx):
+        if cas.detecteur != "id_catalogue_partage" or track is None:
+            return None
+        preuves = cas.preuves or {}
+        if preuves.get("spotify_id"):
+            champ, valeur, action = "spotify_id", preuves["spotify_id"], "retirer_spotify"
+            if track.spotify_id != valeur:
+                return None
+
+            def lire():
+                return servi_spotify(lire_spotify(valeur))
+
+        elif preuves.get("deezer_id"):
+            champ, valeur, action = "deezer_id", preuves["deezer_id"], "delier_deezer"
+            if track.deezer_id is None or int(track.deezer_id) != int(valeur):
+                return None
+
+            def lire():
+                return servi_deezer(lire_deezer(int(valeur)))
+
+        else:
+            return None
+        porteuses = [track] + [t for t in ctx.disco if t.id in set(preuves.get("autres") or ())]
+        # Une lecture par ID, pas une par porteuse.
+        servi = ctx.memo(f"catalogue_servi|{champ}|{valeur}", lire)
+        verdict = page_designee(servi, porteuses)
+        if verdict is None:
+            return None
+        critere, gardee = verdict
+        if gardee is track:
+            return Arbitrage(
+                "l'ID est celui de cette page",
+                "normal",
+                f"le catalogue sert « {servi.titre} » : seule page retenue par {critere}",
+            )
+        return Arbitrage(
+            "l'ID est celui d'une autre page : retirer",
+            action,
+            f"le catalogue sert « {servi.titre} » : {critere} désigne « {gardee.title} » "
+            f"(#{gardee.id})",
+        )
+
+    return juger
+
+
+def arbitrage_catalogue(cas, track, ctx, lire_spotify=None, lire_deezer=None) -> Arbitrage | None:
+    """L'arbitrage de la famille « même ID de catalogue ». Lecteurs injectables ;
+    par défaut, l'embed Spotify (gardé au brut) et `GET /track` de Deezer."""
+    if cas.detecteur != "id_catalogue_partage":
+        return None
+    if lire_spotify is None:
+        from src.utils.spotify_identity import lire_identite_http as lire_spotify
+    if lire_deezer is None:
+        from src.utils.deezer_identity import lire_piste_http as lire_deezer
+    arbitrage = politique_catalogue_designe(lire_spotify, lire_deezer)(cas, track, ctx)
+    if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_CATALOGUE:
+        return arbitrage
+    return None
+
+
 # ── Familles « audio, LRC, alias, liens Deezer à confirmer » — 2026-10-26 ───
 
 #: Décision utilisateur 2026-10-26 : « trancher tout ce qu'on peut, la vérif

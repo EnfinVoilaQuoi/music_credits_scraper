@@ -87,6 +87,11 @@ REGLES_LIENS_DEEZER_BRANCHEES = False
 #: l'utilisateur), qui ne veut plus vérifier « des trucs qu'on sait déjà ».
 REGLES_ID_PARTAGE_BRANCHEES = True
 
+#: Famille « même ID de catalogue, deux pages » (`politiques_revue.REGLES_CATALOGUE`) :
+#: levé le 2026-10-27 — règle validée par l'utilisateur (6 / 6 à la main),
+#: rejouée par le code sur la base d'avant les retraits : les mêmes 6.
+REGLES_CATALOGUE_BRANCHEES = True
+
 #: Familles BPM, tonalité, LRC, alias et liens Deezer à confirmer
 #: (`politiques_revue.REGLES_ETENDUES`) : levé le 2026-10-26, chaque politique
 #: simulée sur toute la base et confrontée à un témoin indépendant.
@@ -146,10 +151,12 @@ def cas_par_regle(
     liens_deezer: bool = False,
     id_partage: bool = False,
     etendues: bool = False,
+    catalogue: bool = False,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
     from src.services.politiques_revue import (
+        arbitrage_catalogue,
         arbitrage_deezer,
         arbitrage_etendu,
         arbitrage_id_partage,
@@ -176,6 +183,8 @@ def cas_par_regle(
             arbitrage = arbitrage_id_partage(c, track, ctx)
         if arbitrage is None and etendues:
             arbitrage = arbitrage_etendu(c, track, ctx)
+        if arbitrage is None and catalogue:
+            arbitrage = arbitrage_catalogue(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -484,7 +493,7 @@ def _delier_deezer(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
         if o.source == "deezer"
     ]
     ctx = _contexte_action(dm, artiste)
-    if cas.detecteur == "duree_deezer":
+    if cas.detecteur in ("duree_deezer", "id_catalogue_partage"):
         compte_rendu = revue_actions._delier_deezer(ctx, cas)
     else:
         compte_rendu = revue_actions._deezer_appliquer(ctx, cas)
@@ -547,6 +556,7 @@ def corriger(dm, artiste) -> BilanCorrections:
             or REGLES_LIENS_DEEZER_BRANCHEES
             or REGLES_ID_PARTAGE_BRANCHEES
             or REGLES_ETENDUES_BRANCHEES
+            or REGLES_CATALOGUE_BRANCHEES
         ):
             rendus = _rendus_a_l_humain(dm, artiste.id)
             a_faire += [
@@ -561,6 +571,7 @@ def corriger(dm, artiste) -> BilanCorrections:
                     liens_deezer=REGLES_LIENS_DEEZER_BRANCHEES,
                     id_partage=REGLES_ID_PARTAGE_BRANCHEES,
                     etendues=REGLES_ETENDUES_BRANCHEES,
+                    catalogue=REGLES_CATALOGUE_BRANCHEES,
                 )
                 if (c.detecteur, c.cle) not in rendus
             ]

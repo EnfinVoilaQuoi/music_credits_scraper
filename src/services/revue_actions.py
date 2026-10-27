@@ -26,6 +26,7 @@ _CODES_ID_SPOTIFY = (
     "duree_spotify",
     "kworb_id_partage",
     "id_spotify_version",
+    "id_catalogue_partage",
 )
 _CODES_SONGBPM = ("songbpm_copie", "duree_songbpm", "songbpm_original")
 _CODES_DOUBLON = ("doublon", "doublon_inedit", "doublon_lrc", "id_spotify_partage")
@@ -439,7 +440,7 @@ def actions_pour(cas: Cas) -> list[Action]:
                 _choisir_discogs("disques"),
             ),
         ]
-    if d == "duree_deezer":
+    if d in ("duree_deezer", "id_catalogue_partage") and cas.preuves.get("deezer_id"):
         return [
             Action(
                 "delier_deezer",

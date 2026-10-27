@@ -353,3 +353,26 @@ class TestRecherchePerimee:
         # Affichée dans le bloc des décisions.
         decisions = au.tableau(audit).split("panneau : décisions")[1].split("── panneau")[0]
         assert "recherche_perimee" in decisions
+
+
+def test_id_de_catalogue_entre_pages_laisse_au_panneau():
+    """Spotify / Deezer entre deux PAGES : `revue:id_catalogue_partage` le
+    compte (une fois) ; un ISRC, ou une fiche sans page, reste à l'audit."""
+
+    def _r(tid, genius_id, **ids):
+        return {
+            "id": tid,
+            "title": "Famous",
+            "artiste": "Kanye West",
+            "genius_id": genius_id,
+            "spotify_id": None,
+            "deezer_id": None,
+            "isrc": None,
+            "apple_music_id": None,
+            **ids,
+        }
+
+    par = {1: [_r(1, 10, deezer_id=7, isrc="US1"), _r(2, 11, deezer_id=7, isrc="US1")]}
+    assert [c.libelle.split(" ")[0] for c in au.ids_partages(par)] == ["isrc"]
+    sans_page = {1: [_r(1, 10, spotify_id="SP"), _r(2, None, spotify_id="SP")]}
+    assert [c.libelle.split(" ")[0] for c in au.ids_partages(sans_page)] == ["spotify_id"]

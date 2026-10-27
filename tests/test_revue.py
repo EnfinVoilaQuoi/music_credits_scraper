@@ -231,14 +231,56 @@ class TestContreVerification:
         assert revue.id_spotify_autre_version(t) is not None
 
     def test_meme_id_spotify_sur_deux_pages(self):
-        a = _t("Castro", 1, spotify_id="SP", spotify_ids=["SP"], genius_id=10, album="A")
+        """Une ÉDITION Spotify de l'une, principale de l'autre."""
+        a = _t("Castro", 1, spotify_id="SPA", spotify_ids=["SPA", "SP"], genius_id=10, album="A")
         b = _t("Castro", 2, spotify_id="SP", spotify_ids=["SP"], genius_id=11, album="B")
-        soeur = _t("Castro", 3, spotify_id="SP", spotify_ids=["SP"], genius_id=10, album="A")
+        soeur = _t(
+            "Castro", 3, spotify_id="SPA", spotify_ids=["SPA", "SP"], genius_id=10, album="A"
+        )
         ctx = _ctx(a, b, soeur)
         motif, preuves = revue.id_spotify_partage(a, ctx)
         assert preuves["autres"] == [2] and "deux pages Genius" in motif
         assert revue.id_spotify_partage(b, ctx) is None  # un cas par groupe
         assert revue.id_spotify_partage(soeur, _ctx(a, soeur)) is None
+
+    def test_le_meme_id_principal_est_laisse_au_catalogue(self):
+        """Deux pages au même ID PRINCIPAL : `id_catalogue_partage` les juge,
+        pas de second cas « même enregistrement ? »."""
+        a = _t("Forever", 1, spotify_id="SP", spotify_ids=["SP"], genius_id=10, album="A")
+        b = _t("Forever", 2, spotify_id="SP", spotify_ids=["SP"], genius_id=11, album="B")
+        assert revue.id_spotify_partage(a, _ctx(a, b)) is None
+
+
+class TestIdCataloguePartage:
+    """« Forever » de Lil Wayne et celui de Drake, 2026-10-27 : la même
+    recherche de titre avait posé le même ID sur deux pages."""
+
+    def test_un_cas_par_page_porteuse(self):
+        a = _t("Famous", 1, deezer_id=126772735, genius_id=10, album="The Life of Pablo")
+        b = _t("Famous", 2, deezer_id=126772735, genius_id=11)
+        ctx = _ctx(a, b)
+        motif, preuves = revue.id_catalogue_partage(a, ctx)
+        assert preuves == {"deezer_id": 126772735, "autres": [2]} and "Deezer" in motif
+        assert revue.id_catalogue_partage(b, ctx)[1]["autres"] == [1]
+
+    def test_spotify_aussi(self):
+        a = _t("Intro", 1, spotify_id="SP", genius_id=10, album="The College Dropout")
+        b = _t("Intro", 2, spotify_id="SP", genius_id=11, album="Akademiks")
+        assert revue.id_catalogue_partage(a, _ctx(a, b))[1]["spotify_id"] == "SP"
+
+    def test_ni_soeurs_ni_fiche_sans_page(self):
+        a = _t("Famous", 1, deezer_id=7, genius_id=10)
+        soeur = _t("Famous", 2, deezer_id=7, genius_id=10)
+        sans_page = _t("Famous", 3, deezer_id=7)
+        assert revue.id_catalogue_partage(a, _ctx(a, soeur)) is None
+        # Une fiche sans page : la famille des doublons (`doublon_equivalent`).
+        assert revue.id_catalogue_partage(a, _ctx(a, sans_page)) is None
+
+    def test_une_reedition_n_est_pas_un_partage(self):
+        """Tycoon / Tycoon (Deluxe) : même titre, même album à l'édition près."""
+        a = _t("TYCOON", 1, spotify_id="SP", genius_id=10, album="TYCOON", duration=200)
+        b = _t("TYCOON", 2, spotify_id="SP", genius_id=11, album="TYCOON (Deluxe)", duration=201)
+        assert revue.id_catalogue_partage(a, _ctx(a, b)) is None
 
 
 class TestDoublons:

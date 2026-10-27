@@ -232,6 +232,9 @@ def ids_partages(par) -> list[Cas]:
                     groupes[t[col]].append(t)
             for valeur, g in groupes.items():
                 pages = {t["genius_id"] for t in g}
+                if col in ("spotify_id", "deezer_id") and None not in pages:
+                    # Entre pages Genius : le panneau le juge (`revue:id_catalogue_partage`).
+                    continue
                 if len(g) > 1 and (len(pages) > 1 or None in pages):
                     cas.append(
                         Cas(

@@ -65,6 +65,7 @@ from src.utils.version_descriptors import (
     Kind,
     meme_version_publiee,
     parse_variant,
+    reeditions_evidentes,
     socle_normalise,
     titre_generique,
 )
@@ -420,6 +421,8 @@ def id_spotify_partage(track, ctx):
             t.id is not None and track.id is not None and t.id < track.id for t in autres
         ):
             continue
+        if sid == track.spotify_id and _porteuses_de_l_id(ctx, "spotify_id", sid):
+            continue  # `id_catalogue_partage` le juge
         if all(doublon_de_titre(t, ctx) or doublon_de_titre(track, ctx) for t in autres):
             continue
         return (
@@ -427,6 +430,61 @@ def id_spotify_partage(track, ctx):
             + (f" ({autres[0].artist.name})" if autres[0].artist else "")
             + " — même enregistrement, deux pages Genius ?",
             {"autres": [t.id for t in autres], "spotify_id": sid},
+        )
+    return None
+
+
+#: Colonnes d'identité qu'un catalogue sert (titre, interprète, album, date).
+CHAMPS_DU_CATALOGUE = ("spotify_id", "deezer_id")
+
+
+def _id_du_catalogue(track, champ: str):
+    return track.spotify_id if champ == "spotify_id" else track.deezer_id
+
+
+def _porteuses_de_l_id(ctx, champ: str, valeur) -> list:
+    """Les fiches de l'artiste qui portent `valeur` en `champ` PRINCIPAL, quand
+    elles sont au moins deux PAGES Genius différentes (ni lignes sœurs, ni
+    fiche sans page) et pas une réédition évidente ; [] sinon."""
+
+    def fabrique():
+        groupes: dict = {}
+        for t in ctx.disco:
+            for c in CHAMPS_DU_CATALOGUE:
+                v = _id_du_catalogue(t, c)
+                if v:
+                    groupes.setdefault((c, str(v)), []).append(t)
+        retenus = {}
+        for cle, ts in groupes.items():
+            pages = {t.genius_id for t in ts}
+            if len(pages) < 2 or None in pages:
+                continue
+            if reeditions_evidentes([(t.title, t.album, t.duration) for t in ts]):
+                continue
+            retenus[cle] = ts
+        return retenus
+
+    return ctx.memo("porteuses_par_id_de_catalogue", fabrique).get((champ, str(valeur)), [])
+
+
+def id_catalogue_partage(track, ctx):
+    """Le même ID Spotify ou Deezer PRINCIPAL sur deux pages Genius : la même
+    recherche de titre l'a posé sur les deux (« Forever » de Lil Wayne et celui
+    de Drake, 2026-10-27). Ce que sert le catalogue pour l'ID désigne la page
+    (`politiques_revue.politique_catalogue_designe`) ; UN cas par fiche
+    porteuse, pour que chacune garde ou perde l'ID par sa propre correction."""
+    for champ in CHAMPS_DU_CATALOGUE:
+        valeur = _id_du_catalogue(track, champ)
+        porteuses = _porteuses_de_l_id(ctx, champ, valeur) if valeur else []
+        if track not in porteuses:
+            continue
+        autres = [t for t in porteuses if t is not track]
+        catalogue = "Spotify" if champ == "spotify_id" else "Deezer"
+        return (
+            f"même ID {catalogue} que « {autres[0].title} »"
+            + (f" et {len(autres) - 1} autre(s)" if len(autres) > 1 else "")
+            + " — à quelle page est-il ?",
+            {champ: valeur, "autres": [t.id for t in autres]},
         )
     return None
 
@@ -1486,6 +1544,9 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "id_spotify_version", "ID Spotify d'une autre version", "🔀", id_spotify_autre_version
     ),
     Detecteur("id_spotify_partage", "Même ID Spotify, deux pages", "👯", id_spotify_partage),
+    Detecteur(
+        "id_catalogue_partage", "Même ID de catalogue, deux pages", "🪪", id_catalogue_partage
+    ),
     Detecteur("id_spotify_propose", "ID Spotify proposé (SongBPM)", "🆔", id_spotify_propose),
     Detecteur(
         "songbpm_original",

@@ -243,6 +243,68 @@ def test_id_partage_le_gate_designe_la_fiche():
     assert juger(cas_autre, autre, ctx) is None
 
 
+class TestCatalogueDesigne:
+    """« Même ID de catalogue, deux pages » (2026-10-27) : ce que sert le
+    catalogue pour l'ID désigne la page qui le garde."""
+
+    def _famous(self):
+        album = _t("Famous", 1, deezer_id=126772735, genius_id=10, album="The Life of Pablo")
+        autre = _t("Famous", 2, deezer_id=126772735, genius_id=11)
+        return album, autre, revue.contexte([album, autre])
+
+    _FICHE = {
+        "title": "Famous",
+        "artist": {"name": "Kanye West"},
+        "album": {"title": "The Life Of Pablo"},
+    }
+
+    def test_la_page_designee_garde_l_id_l_autre_le_perd(self):
+        album, autre, ctx = self._famous()
+        lectures = []
+
+        def lire_deezer(did):
+            lectures.append(did)
+            return self._FICHE
+
+        juger = pol.politique_catalogue_designe(lambda _sid: None, lire_deezer)
+        preuves = {"deezer_id": 126772735}
+        a = juger(_cas("id_catalogue_partage", album, {**preuves, "autres": [2]}), album, ctx)
+        b = juger(_cas("id_catalogue_partage", autre, {**preuves, "autres": [1]}), autre, ctx)
+        assert (a.action, b.action) == ("normal", "delier_deezer")
+        assert "par album" in a.raison and "#1" in b.raison
+        assert lectures == [126772735]  # une lecture par ID, pas par porteuse
+
+    def test_spotify_retire_l_id(self):
+        drake = _t("Forever", 1, spotify_id="SP", genius_id=10, primary_artist_name="Drake")
+        wayne = _t("Forever", 2, spotify_id="SP", genius_id=11, primary_artist_name="Lil Wayne")
+        ctx = revue.contexte([drake, wayne])
+        juger = pol.politique_catalogue_designe(
+            lambda _sid: {"name": "Forever", "artists": ["Drake", "Kanye West"]}, lambda _d: None
+        )
+        cas = _cas("id_catalogue_partage", wayne, {"spotify_id": "SP", "autres": [1]})
+        assert juger(cas, wayne, ctx).action == "retirer_spotify"
+        # Par l'arbitrage branché : même sens ; illisible, rien.
+        assert pol.arbitrage_catalogue(cas, wayne, ctx).action == "retirer_spotify"  # mémo du ctx
+        frais = revue.contexte([drake, wayne])
+        assert pol.arbitrage_catalogue(cas, wayne, frais, lambda _s: None, lambda _d: None) is None
+
+    def test_rien_de_servi_ou_indecis_l_humain(self):
+        album, autre, ctx = self._famous()
+        cas = _cas("id_catalogue_partage", autre, {"deezer_id": 126772735, "autres": [1]})
+        assert pol.politique_catalogue_designe(None, lambda _d: None)(cas, autre, ctx) is None
+        autre.album = "The Life of Pablo"
+        juger = pol.politique_catalogue_designe(None, lambda _d: self._FICHE)
+        assert juger(cas, autre, revue.contexte([album, autre])) is None
+
+    def test_une_fiche_qui_n_a_plus_l_id_n_est_pas_jugee(self):
+        album, autre, ctx = self._famous()
+        cas = _cas("id_catalogue_partage", autre, {"deezer_id": 126772735, "autres": [1]})
+        autre.deezer_id = None
+        assert (
+            pol.politique_catalogue_designe(None, lambda _d: self._FICHE)(cas, autre, ctx) is None
+        )
+
+
 def test_kworb_remix_par_un_tiers_que_spotify_confirme():
     """« One Man Can Change The World - Rudimental Remix » : remixeur nommé,
     Kanye crédité par l'en-tête Spotify — fiche en rôle secondaire. Un remix

@@ -349,6 +349,30 @@ def test_deezer_fiche_absente_creee_puis_retablie(data_manager, artiste, monkeyp
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
 
 
+def test_deezer_isrc_connu_rattache_malgre_le_descripteur(data_manager, artiste, monkeypatch):
+    """« Love64 (Interlude) » n'est pas un titre d'original, mais son ISRC est
+    celui de « Love64 » et les autres catalogues de la fiche soutiennent sa
+    durée : rattachée. Une durée qu'ils ne soutiennent pas reste à l'humain."""
+    from src.services import ecarts_deezer as ed
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    durees = {"spotify_web": 100, "youtube": 101}
+    _fiche_durees(data_manager, artiste, "Love64", 40, durees, isrc="FRIDO2417302")
+    _fiche_durees(data_manager, artiste, "Joe Le Taxi", 41, durees, isrc="FR2P70800140")
+    _ecarts_deezer(
+        data_manager,
+        artiste,
+        ed.PisteDeezer(id=9, title="Love64 (Interlude)", duration=100, isrc="FRIDO2417302"),
+        ed.PisteDeezer(id=10, title="Joe Le Taxi (Inedit)", duration=285, isrc="FR2P70800140"),
+    )
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1 and "Love64" in bilan.appliquees[0], bilan
+    fiches = _charger(data_manager, artiste)
+    assert fiches["Love64"].deezer_id == 9 and fiches["Joe Le Taxi"].deezer_id is None
+
+
 # ── Famille « liens Deezer » (délier ; NON validée : interrupteur baissé) ────
 
 

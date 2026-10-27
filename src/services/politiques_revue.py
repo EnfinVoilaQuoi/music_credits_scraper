@@ -750,11 +750,43 @@ REGLES_DEEZER = frozenset(
 )
 
 
+def _rattacher_par_isrc(cas, ctx, isrcs_connus: dict, ids_artiste: set) -> Arbitrage | None:
+    """La piste Deezer « absente » dont l'ISRC est celui d'UNE fiche de
+    l'artiste, sa durée SOUTENUE par les autres catalogues de cette fiche
+    (vote sans Deezer, dont l'observation peut venir de la piste même) : c'est
+    elle, quel que soit le descripteur du titre (« Love64 (Interlude) » /
+    « Love64 », « Joe Le Taxi (Inedit) »). Deux témoins indépendants, le code
+    de l'enregistrement et la durée — la restriction aux originaux protège les
+    rapprochements par TITRE, pas celui-ci (2026-10-27)."""
+    if cas.detecteur == "deezer_link_candidate":
+        return None
+    arbitrage = politique_ecarts_deezer(isrcs_connus, ids_artiste)(cas, None, ctx)
+    if arbitrage is None or arbitrage.action != "deezer_rattacher_isrc":
+        return None
+    piste = cas.preuves["ecart"]["piste"]
+    isrc = str(piste.get("isrc")).upper()
+    fiches = [t for t in ctx.disco if t.isrc and str(t.isrc).upper() == isrc]
+    if len(fiches) != 1 or not piste.get("duration"):
+        return None
+    durees = {s: d for s, d in _durees(fiches[0]).items() if famille(s) != famille("deezer")}
+    vote = voter(durees, int(piste["duration"]), editions=tuple(fiches[0].durees_editions or ()))
+    if vote is None or vote.nature != SOUTENUE:
+        return None
+    return Arbitrage(
+        arbitrage.sens,
+        arbitrage.action,
+        f"{isrc}, durée {piste['duration']} s soutenue par {', '.join(sorted(vote.pour))}",
+    )
+
+
 def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     """L'arbitrage de la famille « écarts Deezer », restreint aux originaux
     sans ambiguïté — le titre de la PISTE Deezer et celui de la fiche."""
     if not any(cas.detecteur == d for d, _ in REGLES_DEEZER):
         return None
+    par_isrc = _rattacher_par_isrc(cas, ctx, isrcs_connus, ids_artiste)
+    if par_isrc is not None:
+        return par_isrc
     piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
     if not titre_d_original(piste.get("title") or cas.morceau):
         return None

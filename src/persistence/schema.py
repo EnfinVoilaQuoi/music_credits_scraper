@@ -756,6 +756,26 @@ acceptations = Table(
 )
 Index("ix_acceptations_genius_nature", acceptations.c.genius_id, acceptations.c.nature)
 
+# HISTORIQUE des lectures de compteurs Spotify (e61, 2026-10-27) : `observations`
+# n'en garde qu'UNE par (fiche, source), la suivante écrase la précédente. Ici,
+# une lecture par JOUR et par source (la dernière du jour gagne), clé = l'ID
+# Spotify lu (jamais la fiche : une fusion ou une suppression n'a rien à purger).
+# `quotidien` : le rythme du jour, que Kworb seul donne. Écrit par
+# `TrackRepository` (`_noter_lecture_compteur`), purgé au-delà de 180 jours.
+lectures_compteurs = Table(
+    "lectures_compteurs",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("spotify_id", Text, nullable=False),
+    Column("source", Text, nullable=False),
+    Column("valeur", Integer, nullable=False),
+    Column("quotidien", Integer),
+    Column("lu_le", TIMESTAMP, nullable=False),
+    Column("jour", Text, nullable=False),
+    UniqueConstraint("spotify_id", "source", "jour"),
+    sqlite_autoincrement=True,
+)
+
 
 # Les CORRECTIONS de fiches décidées à la main (e49, chantier C lot 3) : le
 # reste de `fiches.json` après les refus — fusions, suppressions, départages,

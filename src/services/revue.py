@@ -58,6 +58,7 @@ from src.utils.title_matching import (
     contains_as_words,
     developper_ligatures,
     names_match_as_words,
+    normalize_name,
 )
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import (
@@ -1174,16 +1175,101 @@ def nature_video_etrangere(track, preuves, _ctx) -> str:
     return INFORMATION if v is not None and v.source == "genius_media" else DECISION
 
 
+#: « Artiste - Titre » : la tête d'un titre de vidéo, avant le premier tiret.
+_TETE_DE_VIDEO_RE = re.compile(r"^(.+?)\s+[-–—]\s+")
+#: Les invités de la tête (« Kid Cudi feat Arie Dixon & … ») ne sont pas
+#: l'interprète principal.
+_INVITES_DE_TETE_RE = re.compile(r"\s+(?:feat\.?|ft\.?|featuring|avec|w/)\s.*$", re.IGNORECASE)
+
+
+def interprete_principal_de_la_video(v) -> str | None:
+    """L'interprète PRINCIPAL d'une vidéo : le premier artiste que la recherche
+    a vu (e60) ; sinon la tête « Artiste - Titre » de son titre, invités
+    coupés. None si le titre n'a pas cette forme (« KING », « Moon - Kanye
+    West » donne « Moon », qui ne nomme personne)."""
+    if v.recherche and v.recherche.get("artistes"):
+        return v.recherche["artistes"][0]
+    m = _TETE_DE_VIDEO_RE.match(v.title or "")
+    return _INVITES_DE_TETE_RE.sub("", m.group(1)) if m else None
+
+
+def _page(track):
+    """L'enregistrement d'une fiche : sa page Genius (les lignes sœurs n'en
+    font qu'un), sinon la fiche elle-même."""
+    return track.genius_id or f"fiche:{track.id}"
+
+
+def proprietaire_de_la_video(fiches, v):
+    """La fiche à qui revient une vidéo que plusieurs PAGES portent : celle
+    dont l'interprète principal (sinon l'artiste de la ligne) est l'interprète
+    principal de la vidéo — seule de son cas — et que la vidéo nomme. Le
+    motif dominant des vidéos partagées est l'HOMONYME : « Selfish » de Slum
+    Village (feat. Kanye) posé aussi sur le « Selfish » de *DONDA 2*. None si
+    rien ne départage (deux pages du même interprète, titre sans tête), ou si
+    toutes les fiches sont sur le même disque (clip double, compté au niveau
+    de l'album). Simulé sur toute la base le 2026-10-27 : 41 des 90 vidéos
+    partagées tranchées, aucune démentie par les témoins (album vu par la
+    recherche, durées de catalogue)."""
+    pages = {_page(t) for t in fiches}
+    albums = {cle_album(t.album) for t in fiches if t.album}
+    if len(pages) < 2 or (all(t.album for t in fiches) and len(albums) == 1):
+        return None
+    principal = interprete_principal_de_la_video(v)
+    if not principal:
+        return None
+    cible = normalize_name(principal)
+    elues = {
+        _page(t)
+        for t in fiches
+        if contains_as_words(
+            normalize_name(t.primary_artist_name or (t.artist.name if t.artist else "")), cible
+        )
+    }
+    if len(elues) != 1:
+        return None
+    gagnante = next(t for t in fiches if _page(t) in elues)
+    return gagnante if video_nomme(gagnante, v) else None
+
+
 def video_partagee(ctx):
     """Une vidéo portée par PLUSIEURS fiches qui n'en nomme pas au moins une
     (album entier, EP complet, film, freestyle collectif mal rattaché) : UN
-    cas, avec les fiches concernées — ses vues sont comptées sur chacune."""
+    cas, avec les fiches concernées — ses vues sont comptées sur chacune.
+    Quand l'interprète principal de la vidéo désigne SA fiche
+    (`proprietaire_de_la_video`), le cas porte la fiche à garder (`garder`)
+    et les autres (`track_ids`) : une règle le tranche."""
     cas = []
     for video_id, fiches in _proprietaires_des_videos(ctx).items():
         if len(fiches) < 2:
             continue
         v = next(x for x in fiches[0].videos if x.video_id == video_id)
         if not v.title:
+            continue
+        # Ce que la recherche a vu est sur la ligne qu'elle a posée.
+        vue = next(
+            (x for t in fiches for x in t.videos or [] if x.video_id == video_id and x.recherche),
+            v,
+        )
+        gagnante = proprietaire_de_la_video(fiches, vue)
+        if gagnante is not None:
+            autres = [t for t in fiches if _page(t) != _page(gagnante)]
+            noms = ", ".join(f"« {t.title} » (#{t.id})" for t in autres)
+            principal = interprete_principal_de_la_video(vue)
+            cas.append(
+                (
+                    v.title,
+                    f"vidéo de {principal} : elle revient à « {gagnante.title} » "
+                    f"(#{gagnante.id}), pas à {noms}",
+                    {
+                        "video_id": video_id,
+                        "kind": video_id,
+                        "track_ids": [t.id for t in autres],
+                        "garder": gagnante.id,
+                        "principal": principal,
+                        "impact": v.views or 0,
+                    },
+                )
+            )
             continue
         muettes = [t for t in fiches if not video_nomme(t, v)]
         if not muettes:
@@ -1210,7 +1296,10 @@ def nature_video_partagee(preuves, ctx) -> str:
     """Une vidéo que deux fiches d'un MÊME artiste portent n'est comptée chez
     aucune des deux (`_recalculer_vues_ytm`) : information. Portée par une
     seule fiche d'un artiste (l'autre ligne est d'un groupe, d'un invité), ses
-    vues comptent chez lui : à trancher."""
+    vues comptent chez lui : à trancher. Une vidéo dont le propriétaire est
+    désigné est une DÉCISION, qu'une règle prend (`politiques_revue`)."""
+    if preuves.get("garder"):
+        return DECISION
     fiches = _proprietaires_des_videos(ctx).get(preuves.get("video_id"), [])
     artistes = [t.artist.id if t.artist else None for t in fiches]
     if fiches and all(a is not None and artistes.count(a) > 1 for a in artistes):

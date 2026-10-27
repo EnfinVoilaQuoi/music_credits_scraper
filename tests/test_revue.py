@@ -939,6 +939,52 @@ class TestVideoPartagee:
         assert preuves["track_ids"] == [1, 2] and preuves["impact"] == 5000
         assert "portée par 2 fiches" in motif
 
+    def test_l_homonyme_revient_a_l_interprete_principal_de_la_video(self):
+        """2026-10-27 : le « Selfish » de Slum Village (feat. Kanye) posé aussi
+        sur le « Selfish » de *DONDA 2* — la tête du titre désigne sa fiche."""
+        clip = self._v("S3", "Slum Village Ft. Kanye West & John Legend - Selfish [Clip]", 900)
+        donda = _t("Selfish", 1, videos=[clip], genius_id=11, album="DONDA 2")
+        slum = _t("Selfish", 2, videos=[clip], genius_id=12, album="Detroit Deli")
+        slum.primary_artist_name = "Slum Village"
+        ((_, motif, preuves),) = revue.video_partagee(_ctx(donda, slum))
+        assert preuves["garder"] == 2 and preuves["track_ids"] == [1]
+        assert preuves["principal"] == "Slum Village" and "Slum Village" in motif
+        cas = revue.detecter(
+            _ctx(donda, slum), detecteurs=(), detecteurs_artiste=revue.DETECTEURS_ARTISTE
+        )
+        assert [c.nature for c in cas] == [revue.DECISION]
+
+    def test_la_recherche_dit_l_interprete_principal(self):
+        vue = TrackVideo(
+            video_id="B",
+            title="Baby",
+            recherche={"titre": "Baby", "artistes": ["Dala", "Booba"], "album": "MLJ Hills"},
+        )
+        booba = _t("Baby", 1, videos=[vue], genius_id=11, album="Panthéon")
+        dala = _t("Baby", 2, videos=[vue], genius_id=12, album="MLJ HILLS")
+        dala.primary_artist_name = "Dala"
+        assert revue.proprietaire_de_la_video([booba, dala], vue) is dala
+
+    def test_rien_ne_departage(self):
+        """Un titre sans tête (« KING »), une tête qui n'est pas un artiste
+        (« Moon - Kanye West, Sunday Service »), deux pages du même interprète,
+        ou des invités seuls nommés : la vidéo reste à l'humain."""
+        proprio = revue.proprietaire_de_la_video
+        a = _t("KING", 1, genius_id=11, album="BULLY")
+        b = _t("KING", 2, genius_id=12, album="VULTURES 1")
+        assert proprio([a, b], self._v("K", "KING")) is None
+        assert proprio([a, b], self._v("K", "Kanye West - KING")) is None
+        b.primary_artist_name = "Sunday Service Choir"
+        assert proprio([a, b], self._v("M", "KING - Kanye West, Sunday Service")) is None
+        assert proprio([a, b], self._v("M", "Ty Dolla $ign feat. Kanye West - KING")) is None
+
+    def test_un_clip_d_un_meme_disque_n_est_pas_departage(self):
+        clip = self._v("C", "Kanye West - Champions")
+        a = _t("Champions", 1, genius_id=11, album="Cruel Summer")
+        b = _t("Champions", 2, genius_id=12, album="Cruel Summer")
+        b.primary_artist_name = "Dame Dash"
+        assert revue.proprietaire_de_la_video([a, b], clip) is None
+
     def test_un_clip_double_qui_nomme_ses_deux_titres_n_est_pas_signale(self):
         clip = self._v("DBL", "Booba - Donjon & 2h22")
         ctx = _ctx(_t("Donjon", 1, videos=[clip]), _t("2h22", 2, videos=[clip]))

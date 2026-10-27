@@ -927,8 +927,25 @@ REGLES_ETENDUES = frozenset(
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
         ("kworb_proposition", "kworb_tiers"),
+        # 2026-10-27 : simulée sur toute la base (41 vidéos partagées sur 90),
+        # témoins d'accord (album vu par la recherche, durées de catalogue).
+        ("video_partagee", "retirer_video_partagee"),
     }
 )
+
+
+def politique_video_partagee(cas, _track, _ctx):
+    """Une vidéo que plusieurs pages portent revient à la fiche dont
+    l'interprète principal est celui de la vidéo (`revue.proprietaire_de_la_video`,
+    qui a posé `garder`) : elle quitte les autres, par un refus de règle."""
+    preuves = cas.preuves or {}
+    if cas.detecteur != "video_partagee" or not preuves.get("garder"):
+        return None
+    return Arbitrage(
+        "vidéo d'un autre interprète : la retirer des autres fiches",
+        "retirer_video_partagee",
+        f"interprète principal de la vidéo : {preuves.get('principal')}",
+    )
 
 
 def politique_kworb_tiers(cas, _track, ctx):
@@ -965,6 +982,7 @@ _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "liens_proposes": politique_alias,
     "deezer_link_candidate": politique_liens_deezer,
     "kworb_proposition": politique_kworb_tiers,
+    "video_partagee": politique_video_partagee,
 }
 
 

@@ -538,6 +538,11 @@ def memoriser_video_refusee(track, video_id: str, origine: str | None = None) ->
     _memoriser(track, "video", video_id, origine=origine)
 
 
+def oublier_video_refusee(track, video_id: str) -> bool:
+    """Pendant : une vidéo retirée par une règle, qu'on RÉTABLIT."""
+    return _oublier(track, "video", video_id)
+
+
 def empreinte_lrc(lrc: str | None) -> str:
     """PUR. L'identité d'un LRC : son TEXTE (espaces normalisés), pas sa source —
     la même source peut servir plus tard un autre LRC, qui ne doit pas être

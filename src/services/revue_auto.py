@@ -95,7 +95,14 @@ REGLES_ETENDUES_BRANCHEES = True
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.
 _SANS_FICHE = frozenset(
-    {"deezer_appliquer", "deezer_rattacher_isrc", "confirmer_lien", "kworb_tiers"}
+    {
+        "deezer_appliquer",
+        "deezer_rattacher_isrc",
+        "confirmer_lien",
+        "kworb_tiers",
+        # Cas d'ARTISTE : ses fiches sont dans ses preuves.
+        "retirer_video_partagee",
+    }
 )
 
 #: Correcteurs qui reçoivent l'artiste (ils rejouent l'action du panneau).
@@ -342,6 +349,81 @@ def _kworb_tiers(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
     }
 
 
+#: Les durées tirées des vidéos, qui partent avec elles (`forget_track_video`).
+_SOURCES_DUREE_VIDEO = ("youtube", "youtube_video", "youtube_officiel")
+
+
+def _retirer_video_partagee(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Retire la vidéo des fiches qui ne sont pas la sienne (`garder` est
+    celle de son interprète principal), avec un refus de RÈGLE. Avant, ce
+    que le retrait emporte est lu — liens de la vidéo, durées tirées des
+    vidéos, lignes sœurs comprises, lien principal de la fiche — de quoi
+    rétablir."""
+    from sqlalchemy import text
+
+    from src.utils.corrections_fiches import memoriser_video_refusee
+    from src.utils.youtube_utils import extract_video_id
+
+    vid = cas.preuves["video_id"]
+    fiches = {t.id: t for t in artiste.tracks or []}
+    cibles = [fiches[tid] for tid in cas.preuves.get("track_ids") or [] if tid in fiches]
+    if not cibles:
+        raise LookupError("aucune fiche à qui retirer la vidéo")
+    # Entiers seuls dans les listes IN (ID de base, pages Genius).
+    pages = ",".join(str(int(t.genius_id)) for t in cibles if t.genius_id) or "NULL"
+    fiches_cibles = ",".join(str(int(t.id)) for t in cibles)
+    sources = ",".join(f"'{s}'" for s in _SOURCES_DUREE_VIDEO)
+    with dm.engine.connect() as conn:
+        liens = [
+            dict(r)
+            for r in conn.execute(
+                text(
+                    "SELECT track_id, video_id, url, kind, source, views, title, recherche "
+                    "FROM track_videos WHERE video_id = :v AND track_id IN "
+                    f"(SELECT id FROM tracks WHERE id IN ({fiches_cibles}) "
+                    f"OR genius_id IN ({pages}))"
+                ),
+                {"v": vid},
+            ).mappings()
+        ]
+        porteuses = ",".join(str(int(r["track_id"])) for r in liens) or "NULL"
+        durees = [
+            dict(r)
+            for r in conn.execute(
+                text(
+                    "SELECT track_id, field, value, source, confidence, seen_at FROM observations "
+                    f"WHERE track_id IN ({porteuses}) AND field = 'duration' "
+                    f"AND source IN ({sources})"
+                )
+            ).mappings()
+        ]
+    principaux = []
+    for t in cibles:
+        if extract_video_id(t.youtube_url) == vid:
+            principaux.append(
+                {"track_id": t.id, "url": t.youtube_url, "source": t.youtube_url_source}
+            )
+            dm.clear_track_youtube_link(t.id)
+            t.youtube_url = t.youtube_url_source = None
+        memoriser_video_refusee(t, vid, origine=f"{PREFIXE_REGLE}{cas.detecteur}")
+        dm.forget_track_video(t.id, vid)
+        t.videos = [v for v in t.videos or [] if v.video_id != vid]
+    gardee = fiches.get(cas.preuves.get("garder"))
+    return (
+        f"vidéo {vid} retirée de {', '.join(f'« {t.title} »' for t in cibles)}, "
+        f"gardée par « {gardee.title if gardee else cas.preuves.get('garder')} »"
+    ), {
+        "type": "videos",
+        "video_id": vid,
+        "track_ids": [t.id for t in cibles],
+        "liens": liens,
+        "observations": [
+            {**o, "seen_at": str(o["seen_at"]) if o["seen_at"] else None} for o in durees
+        ],
+        "principaux": principaux,
+    }
+
+
 def _contexte_action(dm, artiste):
     from src.services import revue_actions
 
@@ -426,6 +508,7 @@ _CORRECTEURS_DE_REGLE = {
     "retirer_lrc": _corriger_lrc,
     "confirmer_lien": _confirmer_lien,
     "kworb_tiers": _kworb_tiers,
+    "retirer_video_partagee": _retirer_video_partagee,
     "delier_deezer": _delier_deezer,
     "deezer_appliquer": _deezer_appliquer,
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,
@@ -562,6 +645,7 @@ def retablir(dm, artiste, correction: dict) -> str:
         "lien_deezer",
         "lien",
         "fiche_kworb",
+        "videos",
     ):
         raise LookupError("la fiche n'est plus dans la discographie chargée")
     if annulation.get("type") == "lrc":
@@ -650,6 +734,35 @@ def retablir(dm, artiste, correction: dict) -> str:
         ):
             raise LookupError(f"lien « {annulation['nom']} » introuvable")
         compte_rendu = f"« {annulation['nom']} » rendu « proposé »"
+    elif annulation.get("type") == "videos":
+        from src.models.track import TrackVideo
+        from src.utils.corrections_fiches import oublier_video_refusee
+        from src.utils.track_mapper import recherche_de_ligne
+
+        vid = annulation["video_id"]
+        fiches = {t.id: t for t in artiste.tracks or []}
+        for tid in annulation["track_ids"]:
+            if tid in fiches:
+                oublier_video_refusee(fiches[tid], vid)
+        for lien in annulation.get("liens") or []:
+            dm.record_track_videos(
+                lien["track_id"],
+                [
+                    TrackVideo(
+                        video_id=lien["video_id"],
+                        url=lien["url"],
+                        kind=lien["kind"],
+                        source=lien["source"],
+                        views=lien["views"],
+                        title=lien["title"],
+                        recherche=recherche_de_ligne(lien["recherche"]),
+                    )
+                ],
+            )
+        dm.restaurer_observations(annulation.get("observations") or [])
+        for p in annulation.get("principaux") or []:
+            dm.update_track_youtube_url(p["track_id"], p["url"], p["source"])
+        compte_rendu = f"vidéo {vid} rétablie sur {len(annulation['track_ids'])} fiche(s)"
     elif annulation.get("type") == "verdict":
         # Défaire le « ✓ Normal » d'une règle, c'est RENDRE le cas à l'humain :
         # le verdict part, rien ne le remplace, et la règle ne le reprend plus

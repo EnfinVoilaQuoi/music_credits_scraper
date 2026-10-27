@@ -404,6 +404,58 @@ def test_alias_confirme_par_deux_sources_puis_retabli(data_manager, artiste, mon
     assert data_manager.get_artist_relations(artiste.id) == []
 
 
+def test_video_d_un_homonyme_retiree_par_regle_puis_retablie(data_manager, artiste, monkeypatch):
+    """2026-10-27 : la vidéo de Slum Village portée aussi par le « Selfish » de
+    *DONDA 2* quitte celui-ci, refus de règle ; rétablir la rend, lien
+    principal et durée tirée de la vidéo compris."""
+    from src.models.track import TrackVideo
+    from src.utils.corrections_fiches import origine_du_refus, videos_refusees
+
+    monkeypatch.setattr(revue_auto, "REGLES_ETENDUES_BRANCHEES", True)
+    clip = TrackVideo(
+        video_id="S_3ZQM_vLQo",
+        url="https://www.youtube.com/watch?v=S_3ZQM_vLQo",
+        source="genius_media",
+        views=5_356_748,
+        title="Slum Village Ft. Kanye West & John Legend - Selfish [Official Music Video]",
+    )
+    donda = Track(title="Selfish", artist=artiste, genius_id=11, album="DONDA 2")
+    donda.youtube_url, donda.youtube_url_source = clip.url, "genius_media"
+    donda.observations.append(Observation("duration", 225, "youtube"))
+    slum = Track(
+        title="Selfish",
+        artist=artiste,
+        genius_id=12,
+        album="Detroit Deli",
+        primary_artist_name="Slum Village",
+    )
+    for t in (donda, slum):
+        data_manager.save_track(t)
+        data_manager.record_track_videos(t.id, [clip])
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert any("gardée par" in a for a in bilan.appliquees), bilan
+    fiches = {t.id: t for t in data_manager.get_artist_tracks(artiste.id)}
+    assert [v.video_id for v in fiches[slum.id].videos] == ["S_3ZQM_vLQo"]
+    assert fiches[donda.id].videos == [] and fiches[donda.id].youtube_url is None
+    assert "S_3ZQM_vLQo" in videos_refusees(fiches[donda.id])
+    assert origine_du_refus(fiches[donda.id], "video", "S_3ZQM_vLQo") == "regle:video_partagee"
+    assert "youtube" not in fiches[donda.id].durations_observees
+
+    (correction,) = [
+        c
+        for c in data_manager.corrections_revue(artiste.id)
+        if c["action"] == "regle:retirer_video_partagee"
+    ]
+    _charger(data_manager, artiste)
+    revue_auto.retablir(data_manager, artiste, correction)
+    fiche = {t.id: t for t in data_manager.get_artist_tracks(artiste.id)}[donda.id]
+    assert [v.video_id for v in fiche.videos] == ["S_3ZQM_vLQo"]
+    assert fiche.youtube_url == clip.url and "S_3ZQM_vLQo" not in videos_refusees(fiche)
+    assert fiche.durations_observees.get("youtube") == 225
+
+
 def test_remix_tiers_cree_par_regle_puis_retabli(data_manager, artiste):
     """Rétablir une fiche « remix par un tiers » créée par règle la supprime et
     rend la ligne Kworb à la proposition (2026-10-26)."""

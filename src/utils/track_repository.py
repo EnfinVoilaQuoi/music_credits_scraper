@@ -2935,7 +2935,13 @@ class TrackRepository:
             if field == "release_date":
                 verdict = resoudre_date_de_sortie(obs_du_champ, ordre)
             elif field == "duration":
-                verdict = resoudre_duree(obs_du_champ, ordre, titre, paroles)
+                verdict = resoudre_duree(
+                    obs_du_champ,
+                    ordre,
+                    titre,
+                    paroles,
+                    editions=self._durees_editions(conn, track_id),
+                )
             else:
                 verdict = resolve_by_priority(obs_du_champ, field, ordre)
             if verdict is None:
@@ -2953,6 +2959,25 @@ class TrackRepository:
             else:
                 valeurs[colonne] = str(verdict.value) if verdict.value is not None else None
         return valeurs
+
+    @staticmethod
+    def _durees_editions(conn, track_id: int) -> tuple[int, ...]:
+        """Durées des éditions connues de la fiche (`track_editions`), pour le
+        veto du vote — lues seulement s'il est levé (`reconcile.VETO_DU_VOTE`)."""
+        from src.enrichment import reconcile as _reconcile
+
+        if not _reconcile.VETO_DU_VOTE:
+            return ()
+        return tuple(
+            int(d)
+            for (d,) in conn.execute(
+                text(
+                    "SELECT duration FROM track_editions WHERE track_id = :t "
+                    "AND duration IS NOT NULL"
+                ),
+                {"t": track_id},
+            )
+        )
 
     def rearbitrer_duree_et_date(self, track_id: int) -> bool:
         """Écrivain PUBLIC de `_rearbitrer_duree_et_date` — réparation des

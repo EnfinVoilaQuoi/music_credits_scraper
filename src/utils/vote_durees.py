@@ -44,10 +44,31 @@ TOLERANCE_S = 5
 #: donnaient exactement le même panneau (mesuré le 2026-10-14).
 TOLERANCE_EDITION_S = TOLERANCE_S
 
+#: Une édition à la durée de la page Deezer PRINCIPALE n'explique rien : c'est
+#: la durée de la fiche elle-même (single et album au même fichier). Gardée,
+#: elle rendait Deezer muet dans tous les votes de la fiche — 1 067 des 1 104
+#: éditions sont dans ce cas (mesuré le 2026-10-27 ; Médine « Rappeur 2 Force » :
+#: Deezer 282 s, édition 282 s, la page Spotify 292 s n'était plus démentie par
+#: personne). Appliqué là où les durées d'éditions sont LUES pour un vote
+#: (`editions_distinctes`) — pas dans `voter`, dont certains appelants posent
+#: sous « deezer » une page CANDIDATE. Interrupteur simulé par
+#: `scripts/simuler_durees_panneau.py`.
+EDITIONS_HORS_DUREE_PRINCIPALE = True
+
 SOUTENUE = "soutenue"  # ≥ 2 catalogues pour, aucun catalogue solide contre
 MAJORITAIRE = "majoritaire"  # ≥ 2 pour, UN seul catalogue solide contre
 ISOLEE = "isolee"  # ≥ 2 catalogues solides contre, au plus un pour (elle-même)
 INDECISE = "indecise"
+
+
+def editions_distinctes(editions, principale) -> tuple[int, ...]:
+    """PUR. Les durées d'éditions qui DIFFÈRENT de la page Deezer principale de
+    la fiche (`principale`, secondes) : les seules qui expliquent un témoin
+    (`EDITIONS_HORS_DUREE_PRINCIPALE`)."""
+    connues = tuple(int(e) for e in editions or () if e)
+    if not EDITIONS_HORS_DUREE_PRINCIPALE or not principale:
+        return connues
+    return tuple(e for e in connues if abs(e - int(principale)) > TOLERANCE_EDITION_S)
 
 
 def famille(source: str) -> str:

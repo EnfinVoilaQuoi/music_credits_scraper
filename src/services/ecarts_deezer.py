@@ -794,10 +794,14 @@ def discographie_de_classement(dm, artist) -> list[Track]:
     edit d'une fiche ressortait « à revoir » à chaque run (Booba « Avant De
     Partir (Radio Edit) » 250 s face à l'album 325 s, 2026-10-19) — le vote
     les attendait (`_lien_a_revoir`), personne ne les chargeait."""
+    from src.utils.vote_durees import editions_distinctes
+
     base = dm.discographie_reunie(artist)
     durees = dm.get_artist_edition_durations(artist.id)
     for t in base:
-        t.durees_editions = durees.get(t.id, ())
+        t.durees_editions = editions_distinctes(
+            durees.get(t.id, ()), (t.durations_observees or {}).get("deezer")
+        )
     return base
 
 

@@ -35,6 +35,11 @@ ECART_FICHIER_S = 2
 #: enregistrement ».
 ECART_VERSION_S = 10
 
+#: Un ID Spotify démenti à `ECART_VERSION_S` au plus est une édition : ✓ Normal
+#: s'il ne tient pas la colonne (2026-10-27). Interrupteur simulé par
+#: `scripts/simuler_durees_panneau.py`.
+EDITION_SPOTIFY_NORMALE = True
+
 
 @dataclass(frozen=True)
 class Arbitrage:
@@ -82,7 +87,7 @@ def _dementie(durees: dict, source: str, editions, minimum: int):
 
 
 def _durees(track) -> dict:
-    return dict(track.durations_observees or {})
+    return revue.durees_du_vote(track)
 
 
 def _colonne_impactee(track, source: str) -> bool:
@@ -107,7 +112,21 @@ def politique_durees(minimum: int) -> Callable:
             if len(faux) == len(presents):
                 ref = dementis[faux[0]]
                 if abs(durees[faux[0]] - ref) <= ECART_VERSION_S:
-                    return None  # une autre édition ? l'humain
+                    # Une ÉDITION du même enregistrement (décision utilisateur
+                    # 2026-10-19 : radio edit, fondu retouché = une fiche) : ses
+                    # streams comptent, et hors colonne rien de faux n'est
+                    # affiché (2026-10-27, « Viens danser avec les Lunatic »
+                    # 178 s contre 170 s partout).
+                    if not EDITION_SPOTIFY_NORMALE or any(
+                        _colonne_impactee(track, s) for s in faux
+                    ):
+                        return None
+                    return Arbitrage(
+                        "l'ID Spotify est une édition du même enregistrement : ✓ Normal",
+                        "normal",
+                        f"{', '.join(f'{s} {durees[s]} s' for s in faux)} contre {ref} s, "
+                        f"à {ECART_VERSION_S} s au plus",
+                    )
                 return Arbitrage(
                     "l'ID Spotify désigne un autre enregistrement : retirer l'ID",
                     "retirer_spotify",
@@ -689,6 +708,48 @@ def arbitrage_valide(cas, track, ctx) -> Arbitrage | None:
             continue  # un retrait ne se décide qu'au seuil de 3
         if (cas.detecteur, arbitrage.action) in REGLES_VALIDEES:
             return arbitrage
+    return None
+
+
+# ── Vidéo ordinaire d'un autre montage (2026-10-27) ────────────────────────
+
+#: Interrupteur : `revue_auto.REGLES_VIDEO_BRANCHEES`.
+REGLES_VIDEO = frozenset({("duree_isolee", "normal")})
+
+
+def arbitrage_video_hors_colonne(cas, track, _ctx) -> Arbitrage | None:
+    """Le témoin isolé est une VIDÉO ORDINAIRE (`youtube_video`,
+    `youtube_officiel`) que deux catalogues d'accord démentent, et la colonne
+    a leur durée : ✓ Normal. Aucune donnée ne change — une vidéo ordinaire ne
+    fait jamais la durée d'une fiche qui a une plateforme
+    (`DISCOGRAPHY_PRIORITIES`), un clip a ses intros et ses fins.
+
+    Deux écarts à `arbitrage_valide`, mesurés sur les 9 cas du 2026-10-27 :
+    · la piste YTM et l'audio Topic sont un AUTRE fichier que la vidéo : ils
+      la démentent, même si le vote les range dans la même famille (Kanye
+      « Only One » : vidéo 245 s, Apple et piste YTM 224 s) ;
+    · versions et freestyles ne sont pas rendus à l'humain : rien n'étant
+      modifié, l'ambiguïté du titre (décision du 2026-10-20) ne coûte rien
+      (Booba « Kayna (Remix) », clip 171 s, catalogues 178-179 s)."""
+    from src.enrichment.reconcile import _VIDEOS_ORDINAIRES
+
+    if (cas.detecteur, "normal") not in REGLES_VIDEO or track is None or not track.duration:
+        return None
+    durees, editions = _durees(track), tuple(track.durees_editions or ())
+    autres = {s: d for s, d in durees.items() if s not in _VIDEOS_ORDINAIRES}
+    for source in sorted(_VIDEOS_ORDINAIRES):
+        d = durees.get(source)
+        if not d or _colonne_impactee(track, source):
+            continue
+        ref = _dementie({**autres, "video": d}, "video", editions, 2)
+        if ref is None or abs(int(track.duration) - ref) > TOLERANCE_S:
+            continue
+        return Arbitrage(
+            f"vidéo ordinaire ({source}) d'un autre montage ; la colonne garde "
+            f"{track.duration} s",
+            "normal",
+            f"{source} {d} s contre {ref} s",
+        )
     return None
 
 

@@ -42,11 +42,16 @@ class TestDurees:
         assert self.juger(_cas("duree_spotify", t), t, None).action == "retirer_spotify"
 
     def test_un_petit_ecart_est_peut_etre_une_edition(self):
-        """« Viens danser avec les Lunatic » : 178 s contre 170 s — rien n'est retiré."""
+        """« Viens danser avec les Lunatic » : 178 s contre 170 s — rien n'est
+        retiré ; une édition hors colonne est ✓ Normal (2026-10-27), celle qui
+        tient la colonne reste à l'humain."""
         t = _t(
             spotify_id="SP",
             durations_observees={"spotify_web": 178, "deezer": 170, "youtube": 170, "ytmusic": 170},
         )
+        t.duration_source = "deezer"
+        assert self.juger(_cas("duree_spotify", t), t, None).action == "normal"
+        t.duration_source = "spotify_web"
         assert self.juger(_cas("duree_spotify", t), t, None) is None
 
     def test_relecture_reccobeats_d_accord_ne_prouve_pas_l_id(self):

@@ -435,3 +435,24 @@ def test_version_deezer_notee_en_edition_du_socle():
     assert "édition de « CR600 »" in revue_actions.executer(edition, ctx, cas)
     ((tid, label, kw),) = notes
     assert tid == 3 and kw["duration"] == 180 and kw["deezer_id"] == 5 and kw["source"] == "deezer"
+
+
+def test_retirer_songbpm_a_la_main_refuse_la_page_sans_origine(data_manager, artiste):
+    from src.utils.corrections_fiches import (
+        CHAMP_PAGE_SONGBPM,
+        origine_du_refus,
+        pages_songbpm_refusees,
+    )
+
+    t = Track(title="Dangerous", artist=artiste, genius_id=3566)
+    t.observations += [
+        Observation("bpm", 130, "songbpm"),
+        Observation(CHAMP_PAGE_SONGBPM, "/@kid-cudi/dangerous", "songbpm"),
+    ]
+    tid = data_manager.save_track(t)
+    cas = _cas("songbpm_copie", tid, {})
+    action = next(a for a in revue_actions.actions_pour(cas) if a.code == "retirer_songbpm")
+    revue_actions.executer(action, _ctx(data_manager, artiste), cas)
+    relue = data_manager.get_artist_tracks(artiste.id)[0]
+    assert pages_songbpm_refusees(relue) == {"/@kid-cudi/dangerous"}
+    assert origine_du_refus(relue, "page_songbpm", "/@kid-cudi/dangerous") is None

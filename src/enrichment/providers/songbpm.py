@@ -16,6 +16,11 @@ from src.enrichment.context import EnrichmentContext
 from src.enrichment.observation import Observation
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
+from src.utils.corrections_fiches import (
+    CHAMP_PAGE_SONGBPM,
+    cle_page_songbpm,
+    pages_songbpm_refusees,
+)
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import CHAMP_ID_PROPOSE
 from src.utils.track_mapper import _clean_duration
@@ -181,7 +186,11 @@ class SongBpmProvider:
 
             try:
                 track_data = scraper.search_track(
-                    track.title, artist_name, spotify_id=spotify_id, fetch_details=True
+                    track.title,
+                    artist_name,
+                    spotify_id=spotify_id,
+                    fetch_details=True,
+                    pages_refusees=pages_songbpm_refusees(track),
                 )
             finally:
                 timer.cancel()
@@ -223,10 +232,22 @@ class SongBpmProvider:
             )
             return False
 
+        # Filet : le scraper écarte déjà une page refusée avant de la choisir ;
+        # celle-ci revient d'un autre scraper ou d'un repli qui l'aurait reposée.
+        page = cle_page_songbpm(track_data.get("detail_url"))
+        if page and page in pages_songbpm_refusees(track):
+            logger.info(f"⏭️ SongBPM : page {page} refusée pour '{track.title}' — écartée")
+            return False
+
         motif = page_generique_douteuse(track, track_data)
         if motif:
             logger.warning(f"⚠️ SongBPM : page écartée pour '{track.title}' — {motif}")
             return False
+
+        # La page lue est DÉCLARÉE : un retrait des mesures sait ainsi laquelle
+        # refuser (sinon le run suivant la reposerait).
+        if page:
+            ctx.observations.append(Observation(CHAMP_PAGE_SONGBPM, page, self.name))
 
         # BPM → candidat pour le vote (§8.3). E7 : plus de pose legacy directe —
         # apply_resolutions pose track.audio.bpm en fin de run. Un candidat valide au
@@ -302,7 +323,11 @@ class SongBpmProvider:
             try:
                 async with asyncio.timeout(timeout_seconds):
                     track_data = await scraper.search_track_async(
-                        track.title, artist_name, spotify_id=spotify_id, fetch_details=True
+                        track.title,
+                        artist_name,
+                        spotify_id=spotify_id,
+                        fetch_details=True,
+                        pages_refusees=pages_songbpm_refusees(track),
                     )
             except TimeoutError:
                 # Un délai sur UN morceau n'est pas une erreur du programme : il

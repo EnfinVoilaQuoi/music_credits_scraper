@@ -173,8 +173,13 @@ def _refuser_id_propose(ctx: ContexteAction, cas: Cas) -> str:
 
 
 def _retirer_songbpm(ctx: ContexteAction, cas: Cas) -> str:
+    from src.utils.corrections_fiches import refuser_pages_retirees
+
     track = _fiche(ctx, cas)
-    n = ctx.data_manager.retirer_mesures_songbpm(track.id)
+    retirees: list[dict] = []
+    n = ctx.data_manager.retirer_mesures_songbpm(track.id, retirees=retirees)
+    # À la main : refus sans origine (jamais défait par une règle).
+    refuser_pages_retirees(track, retirees)
     return f"{n} mesure(s) SongBPM retirée(s) de « {track.title} »"
 
 

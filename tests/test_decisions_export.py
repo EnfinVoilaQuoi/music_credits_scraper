@@ -43,6 +43,9 @@ def base(data_manager):
     )
     cf.memoriser_video_refusee(deezer, "lFY4ZN0Xn4U")
     cf.memoriser_id_accepte(genius, "2F9vXoPBLP0QevY1BAL0KA")
+    cf.memoriser_page_songbpm_refusee(
+        genius, "https://songbpm.com/@diams/marine?q=1", origine="regle:songbpm_copie"
+    )
     cf.memoriser_fusion("Diam’s", {"titre": "Marine (Live)", "album": None}, {"genius_id": 54750})
     kworb = KworbLinksManager(moteur_base=dm.engine)
     kworb.confirm("Diam’s", "Marine", genius.id)
@@ -93,7 +96,7 @@ def test_reimporter_ne_fait_rien(base, tmp_path):
     decisions.exporter(dm.engine, tmp_path)
     plans = decisions.a_blanc(dm.engine, decisions.charger(tmp_path))
     assert sum(len(p.a_inserer) for p in plans.values()) == 0
-    assert plans["refus"].deja == 4
+    assert plans["refus"].deja == 5
 
 
 def test_l_export_est_stable_et_une_entree_par_ligne(base, tmp_path):
@@ -107,7 +110,7 @@ def test_l_export_est_stable_et_une_entree_par_ligne(base, tmp_path):
     contenu = json.loads(texte)
     assert contenu["table"] == "refus" and contenu["format"] == decisions.FORMAT
     lignes_entrees = [ligne for ligne in texte.splitlines() if ligne.startswith("    {")]
-    assert len(lignes_entrees) == len(contenu["lignes"]) == 4
+    assert len(lignes_entrees) == len(contenu["lignes"]) == 5
     # Aucune clé locale : la fiche Kworb est désignée, pas numérotée.
     kworb = json.loads((tmp_path / "kworb_decisions.json").read_text(encoding="utf-8"))
     fiches = {e["titre"]: e["fiche"] for e in kworb["lignes"]}
@@ -142,7 +145,7 @@ def test_base_neuve_ce_qui_designe_une_fiche_attend_la_discographie(
     donnees = decisions.charger(tmp_path / "export")
 
     plans = decisions.importer(engine, donnees)
-    assert len(plans["refus"].a_inserer) == 4
+    assert len(plans["refus"].a_inserer) == 5
     assert len(plans["acceptations"].a_inserer) == 1
     assert len(plans["corrections"].a_inserer) == 1
     assert len(plans["kworb_decisions"].a_inserer) == 1  # le rejet, sans fiche

@@ -6193,6 +6193,23 @@ class TrackRepository:
             durees.setdefault(tid, []).append(int(d))
         return {tid: tuple(v) for tid, v in durees.items()}
 
+    def get_artist_edition_deezer_ids(self, artist_id: int) -> frozenset[int]:
+        """Les ID Deezer notés en ÉDITION d'une fiche de l'artiste (`track_editions`)."""
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT e.deezer_id FROM track_editions e "
+                        "JOIN tracks t ON t.id = e.track_id "
+                        "WHERE t.artist_id = :a AND e.deezer_id IS NOT NULL"
+                    ),
+                    {"a": artist_id},
+                ).fetchall()
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_artist_edition_deezer_ids({artist_id}): {e}")
+            return frozenset()
+        return frozenset(int(d) for (d,) in rows)
+
     def get_track_editions(self, track_id: int) -> list[dict]:
         try:
             with self.engine.connect() as conn:

@@ -473,6 +473,7 @@ def classer(
     albums_base: list[dict],
     notre_id: int,
     liens_connus: set[tuple[int, int]] | frozenset = frozenset(),
+    editions_connues: frozenset[int] = frozenset(),
 ) -> tuple[list[Ecart], list[str]]:
     """Les pistes Deezer absentes de la base, classées. Rend `(ecarts, editions_jumelles)`.
 
@@ -481,6 +482,9 @@ def classer(
     pistes dont les contributeurs (lus par l'appelant) comptent l'artiste.
     `liens_connus` = `(id d'album Deezer, track_id)` déjà dans le catalogue des
     parutions : une piste déjà rattachée n'est ni reproposée ni recomptée.
+    `editions_connues` = ID Deezer déjà notés en ÉDITION d'une fiche
+    (`track_editions`) : rangés, jamais reproposés — Kanye « Ni**as In Paris
+    (Album Version Edited) » ressortait « absent » à chaque run (2026-10-27).
     """
     titres: dict[str, Track] = {}
     titres_tous: dict[str, list[Track]] = {}
@@ -533,6 +537,8 @@ def classer(
         )
         inconnues: list[tuple[PisteDeezer, Track | None, bool]] = []
         for p in album.pistes:
+            if p.id in editions_connues and p.id not in deezer_ids:
+                continue
             # « Album Version » est parfois porté hors du titre principal : le
             # socle est alors `title_short`, pas la chaîne décorée Deezer.
             edition_generique = _edition_generique_de(p)
@@ -836,7 +842,12 @@ async def detecter_async(
         logger.exception("Lecture Deezer interrompue")
         bilan.interrompu(f"Deezer : {e}")
     ecarts, jumelles = classer(
-        albums, base, albums_base, deezer_id, liens_connus=dm.get_deezer_release_links(artist.id)
+        albums,
+        base,
+        albums_base,
+        deezer_id,
+        liens_connus=dm.get_deezer_release_links(artist.id),
+        editions_connues=dm.get_artist_edition_deezer_ids(artist.id),
     )
     accrocher_genius(ecarts, artist, genius_api)
     cocher_par_defaut(ecarts, base)

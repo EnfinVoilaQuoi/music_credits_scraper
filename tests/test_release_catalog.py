@@ -139,6 +139,30 @@ def test_deezer_lie_une_identite_forte_et_ne_coche_pas_titre_duree(data_manager)
     assert [(e.nature, e.matched_by, e.coche) for e in links] == [("link", "title_duration", True)]
 
 
+def test_une_page_notee_en_edition_n_est_plus_proposee(data_manager):
+    """Kanye « Ni**as In Paris (Album Version Edited) » : notée en édition de la
+    fiche, la page ressortait « absent » à chaque run (2026-10-27)."""
+    from src.services.editions import rattacher
+
+    artist = _artist(data_manager)
+    known = _track(data_manager, artist, duration=219)
+    album = ed.AlbumDeezer(
+        id=11,
+        title="Album",
+        artist_id=artist.deezer_id,
+        artist_name=artist.name,
+        pistes=[ed.PisteDeezer(id=903, title="Clean (Album Version Edited)", duration=219)],
+    )
+    ecarts, _ = ed.classer([album], [known], [], artist.deezer_id)
+    assert [e.nature for e in ecarts] == ["album_absent"]
+
+    rattacher(data_manager, known, "Clean (Album Version Edited)", "deezer", deezer_id=903)
+    connues = data_manager.get_artist_edition_deezer_ids(artist.id)
+    assert connues == {903}
+    ecarts, _ = ed.classer([album], [known], [], artist.deezer_id, editions_connues=connues)
+    assert ecarts == []
+
+
 def test_deezer_propose_sans_lier_titre_identique_duree_incompatible(data_manager):
     artist = _artist(data_manager)
     known = _track(data_manager, artist, duration=200)

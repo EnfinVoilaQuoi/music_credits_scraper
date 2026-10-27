@@ -445,6 +445,9 @@ class TestDetecterAsync:
         def get_artist_edition_durations(self, aid):
             return {}
 
+        def get_artist_edition_deezer_ids(self, aid):
+            return frozenset()
+
         def get_albums_for_artist(self, aid):
             return []
 

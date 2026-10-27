@@ -74,6 +74,27 @@ def test_une_seconde_source_complete_l_edition(data_manager):
     assert (e["source"], e["spotify_id"], e["duration"]) == ("kworb", "SPR", 198)
 
 
+def test_deplacer_une_edition_vers_sa_fiche(data_manager):
+    """« Suzy (Version radio) » notée sur la démo « Suzy » revient à « Suzy
+    2003 » ; une édition du même libellé déjà là n'est pas écrasée."""
+    a = Artist(name="Diam’s")
+    a.id = data_manager.save_artist(a)
+    demo = data_manager.save_track(Track(title="Suzy", artist=a))
+    suzy = data_manager.save_track(Track(title="Suzy 2003", artist=a))
+    autre = data_manager.save_track(Track(title="Marine", artist=a))
+    data_manager.record_track_edition(demo, "Version radio", source="deezer", duration=223)
+    data_manager.record_track_edition(autre, "Version radio", source="deezer", duration=200)
+
+    assert data_manager.deplacer_edition(demo, "Version radio", suzy)
+    assert data_manager.get_track_editions(demo) == []
+    (e,) = data_manager.get_track_editions(suzy)
+    assert (e["label"], e["duration"]) == ("Version radio", 223)
+
+    assert not data_manager.deplacer_edition(autre, "Version radio", suzy)
+    assert [e["duration"] for e in data_manager.get_track_editions(autre)] == [200]
+    assert not data_manager.deplacer_edition(demo, "Version radio", suzy)  # plus rien à déplacer
+
+
 class TestVersionsLiees:
     def test_par_relation_et_par_souche(self):
         suzy = _t("Suzy", 1)

@@ -6387,6 +6387,34 @@ class TrackRepository:
             logger.error(f"Erreur record_track_edition({track_id}, {label}): {e}")
             return False
 
+    def deplacer_edition(self, de_track_id: int, label: str, vers_track_id: int) -> bool:
+        """Rend une édition notée sur la mauvaise fiche à celle dont elle est
+        l'édition (« Suzy (Version radio) » notée sur la démo « Suzy » au lieu
+        de « Suzy 2003 », 2026-10-27). Refuse si la fiche visée a déjà une
+        édition de ce libellé (rien ne s'écrase). Les durées d'édition entrent
+        dans le verdict de la durée : les deux fiches sont recalculées."""
+        try:
+            with self._ecrire() as conn:
+                if conn.execute(
+                    text("SELECT 1 FROM track_editions WHERE track_id = :t AND label = :l"),
+                    {"t": vers_track_id, "l": label},
+                ).first():
+                    return False
+                deplacees = conn.execute(
+                    text(
+                        "UPDATE track_editions SET track_id = :vers "
+                        "WHERE track_id = :de AND label = :l"
+                    ),
+                    {"vers": vers_track_id, "de": de_track_id, "l": label},
+                ).rowcount
+                if deplacees:
+                    self._toucher(conn, de_track_id)
+                    self._toucher(conn, vers_track_id)
+                return bool(deplacees)
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur deplacer_edition({de_track_id}, {label}, {vers_track_id}): {e}")
+            return False
+
     def get_artist_edition_durations(self, artist_id: int) -> dict[int, tuple[int, ...]]:
         """`{track_id: (durées des éditions connues)}` des fiches de l'artiste."""
         try:

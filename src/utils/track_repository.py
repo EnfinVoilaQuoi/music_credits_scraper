@@ -6055,6 +6055,52 @@ class TrackRepository:
             logger.error(f"Erreur poser_recherches_videos : {e}")
             return 0
 
+    def poser_durees_audio_lrc(self, faits) -> int:
+        """Pose `lrc_duree_audio` (`lrc_garde.CHAMP_DUREE_AUDIO`) des LRC lus
+        AVANT qu'on la garde (2026-10-27). `faits` : `(track_id, source, lrc,
+        seen_at, duree)` — `lrc` et `seen_at` sont ceux de l'observation
+        `lyrics_synced` de cette source, que la durée accompagne. Rien n'est
+        posé si cette observation a changé depuis (la source a relu : la durée
+        dirait l'audio d'un autre LRC) ou si une durée de la même lecture existe
+        déjà. Le verdict LRC des fiches suit en fin de transaction. Rend le
+        nombre posé."""
+        from src.utils.lrc_garde import CHAMP_DUREE_AUDIO
+
+        posees = 0
+        try:
+            with self._ecrire() as conn:
+                for track_id, source, lrc, seen_at, duree in faits or []:
+                    if not duree or duree <= 0:
+                        continue
+                    lue = conn.execute(
+                        text(
+                            "SELECT value, seen_at FROM observations WHERE track_id = :t "
+                            "AND field = 'lyrics_synced' AND source = :s"
+                        ),
+                        {"t": track_id, "s": source},
+                    ).first()
+                    if lue is None or lue[0] != lrc or str(lue[1]) != str(seen_at):
+                        continue
+                    deja = conn.execute(
+                        text(
+                            "SELECT 1 FROM observations WHERE track_id = :t AND field = :f "
+                            "AND source = :s AND seen_at = :vu"
+                        ),
+                        {"t": track_id, "f": CHAMP_DUREE_AUDIO, "s": source, "vu": lue[1]},
+                    ).first()
+                    if deja:
+                        continue
+                    self._upsert_observations(
+                        conn,
+                        track_id,
+                        [Observation(CHAMP_DUREE_AUDIO, int(round(duree)), source, seen_at=lue[1])],
+                    )
+                    posees += 1
+            return posees
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur poser_durees_audio_lrc : {e}")
+            return 0
+
     def forget_track_video(self, track_id: int, video_id: str) -> bool:
         """Retire UNE vidéo d'un morceau (rejet d'un lien automatique erroné).
 

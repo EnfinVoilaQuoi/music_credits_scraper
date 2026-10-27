@@ -24,7 +24,7 @@ import hashlib
 import sqlite3
 import threading
 import zlib
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -189,6 +189,23 @@ def lectures(source: str, url: str, params=None) -> list[dict]:
         }
         for s, c, p, d in lignes
     ]
+
+
+def parcourir(source: str, chemin: Path | None = None):
+    """Toutes les lectures gardées de `source`, EN LECTURE SEULE (une base
+    ouverte `mode=ro`, à part de la connexion d'écriture) : `(requete, corps
+    (bytes), premiere_lecture, derniere_lecture)`. Pour les rattrapages qui
+    cherchent une réponse par son CONTENU, pas par sa requête."""
+    chemin = Path(chemin or CHEMIN)
+    if not chemin.exists():
+        return
+    with closing(sqlite3.connect(f"file:{chemin.as_posix()}?mode=ro", uri=True)) as conn:
+        for requete, corps, premiere, derniere in conn.execute(
+            "SELECT requete, corps, premiere_lecture, derniere_lecture FROM brut "
+            "WHERE source = ? ORDER BY id",
+            (source,),
+        ):
+            yield requete, zlib.decompress(corps), premiere, derniere
 
 
 def bilan() -> dict:

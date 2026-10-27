@@ -9,7 +9,7 @@ constant vs l'ancien `data_manager.py` (refonte 1.5 puis bascule Core phase E2).
 import json
 import time
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import bindparam, func, literal, or_, select, text, update
@@ -2807,10 +2807,87 @@ class TrackRepository:
                     values["spotify_daily_streams"] = daily_streams
                 if values:
                     conn.execute(update(tracks).where(tracks.c.id == track_id).values(**values))
+                # Historique : l'ID PRINCIPAL de la fiche (une source à valeur
+                # unique ne s'alimente que depuis lui), jamais bloquant.
+                principal = conn.execute(
+                    select(tracks.c.spotify_id).where(tracks.c.id == track_id)
+                ).scalar()
+                self._noter_lecture_compteur(
+                    conn, principal, source, streams, daily_streams, updated_at
+                )
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur record_spotify_streams (track_id={track_id}): {e}")
             return False
+
+    #: Au-delà, une lecture d'historique est purgée (au passage d'une nouvelle).
+    LECTURES_COMPTEURS_JOURS = 180
+
+    @staticmethod
+    def _noter_lecture_compteur(
+        conn, spotify_id, source: str, valeur, quotidien, lu_le=None
+    ) -> None:
+        """Historique des compteurs (e61) — écrivain dédié, ADDITIF, jamais bloquant.
+
+        Une lecture par (ID Spotify, source, jour) : la plus récente du jour
+        l'emporte. Écrit dans la transaction de l'appelant (`conn`) ; un échec est
+        journalisé et n'empêche jamais l'écriture du compteur qu'il accompagne.
+        Les lectures de cet ID de plus de `LECTURES_COMPTEURS_JOURS` jours sont
+        purgées au passage. Aucune colonne de fiche n'en dépend : rien à
+        recalculer.
+        """
+        if not spotify_id or valeur is None:
+            return
+        try:
+            if isinstance(lu_le, str):
+                lu_le = datetime.fromisoformat(lu_le)
+            lu_le = (lu_le or datetime.now()).replace(tzinfo=None)
+            conn.execute(
+                text(
+                    "INSERT INTO lectures_compteurs "
+                    "(spotify_id, source, valeur, quotidien, lu_le, jour) "
+                    "VALUES (:sid, :source, :valeur, :quotidien, :lu_le, :jour) "
+                    "ON CONFLICT(spotify_id, source, jour) DO UPDATE SET "
+                    "valeur = excluded.valeur, quotidien = excluded.quotidien, "
+                    "lu_le = excluded.lu_le WHERE excluded.lu_le >= lu_le"
+                ),
+                {
+                    "sid": spotify_id,
+                    "source": source,
+                    "valeur": int(valeur),
+                    "quotidien": None if quotidien is None else int(quotidien),
+                    "lu_le": lu_le.strftime("%Y-%m-%d %H:%M:%S"),
+                    "jour": lu_le.strftime("%Y-%m-%d"),
+                },
+            )
+            limite = datetime.now() - timedelta(days=TrackRepository.LECTURES_COMPTEURS_JOURS)
+            conn.execute(
+                text("DELETE FROM lectures_compteurs WHERE spotify_id = :sid AND lu_le < :limite"),
+                {"sid": spotify_id, "limite": limite.strftime("%Y-%m-%d %H:%M:%S")},
+            )
+        except (SQLAlchemyError, ValueError, TypeError) as e:
+            logger.warning(f"Historique des compteurs non écrit ({spotify_id}, {source}): {e}")
+
+    def historique_compteurs(self, spotify_ids) -> list[tuple[int, datetime]]:
+        """Lectures passées d'un ou plusieurs ID Spotify : `[(valeur, lu_le)]`, triées.
+
+        Même format que `compteurs_partages.lectures`. Toutes sources confondues
+        (Kworb et Spotify web), les ID réunis (deux fiches qui se partagent un
+        compteur se lisent d'un seul tenant en passant les deux).
+        """
+        ids = [spotify_ids] if isinstance(spotify_ids, str) else [i for i in spotify_ids if i]
+        if not ids:
+            return []
+        requete = text(
+            "SELECT valeur, lu_le FROM lectures_compteurs "
+            "WHERE spotify_id IN :ids ORDER BY lu_le, id"
+        ).bindparams(bindparam("ids", expanding=True))
+        with self.engine.connect() as conn:
+            lignes = conn.execute(requete, {"ids": ids}).all()
+        return [
+            (int(v), lu if isinstance(lu, datetime) else datetime.fromisoformat(str(lu)))
+            for v, lu in lignes
+        ]
 
     def forget_spotify_streams_observation(self, track_id: int, source: str) -> bool:
         """Retire l'observation de streams d'UNE source, puis ré-arbitre la colonne.
@@ -6860,6 +6937,10 @@ class TrackRepository:
                         ),
                         params,
                     )
+                # Une rendition est lue par SON ID : c'est une lecture d'historique.
+                self._noter_lecture_compteur(
+                    conn, spotify_id, "kworb", streams, daily_streams, seen_at
+                )
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur record_variant_streams (track_id={track_id}): {e}")

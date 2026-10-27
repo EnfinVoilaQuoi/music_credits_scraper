@@ -480,6 +480,14 @@ def _rapport_partagees(partagees: set, vid_counts: dict, tracks_par_id: dict) ->
     return rapport
 
 
+_SOURCES_DUREE_VIDEO = frozenset({"youtube", "youtube_video", "youtube_officiel"})
+
+
+def _durees_video_declarees(fiche) -> set:
+    """Sources de durée tirées des vidéos que la fiche porte déjà."""
+    return set(fiche.durations_observees or {}) & _SOURCES_DUREE_VIDEO
+
+
 def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> dict:
     """Met à jour les streams YouTube Music des morceaux et albums de l'artiste.
 
@@ -1093,6 +1101,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
     from src.utils.chaines_youtube import nature_de
 
     result["durees_youtube"] = 0
+    result["durees_youtube_retirees"] = 0
     for track_id, vids in vid_counts.items():
         fiche = tracks_par_id.get(track_id)
         if fiche is None:
@@ -1122,6 +1131,37 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         )
         if verdict and data_manager.record_duration_observation(track_id, *verdict):
             result["durees_youtube"] += 1
+        # Toutes ses vidéos relues : le verdict de ce run fait foi, une durée
+        # vidéo d'un run passé qu'il ne justifie plus part (2026-10-27, « La
+        # balade des indépendants (Remix) » gardait 257 s d'une vidéo de FLYNTMC
+        # rangés en audio Topic, contre 399 s Spotify). Une vidéo restée sans
+        # réponse de l'API : rien ne se retire (absent ≠ échec).
+        connues = set(vids) | {v.video_id for v in fiche.videos if v.video_id}
+        clip_vid = _extract_video_id(fiche.youtube_url)
+        if clip_vid:
+            connues.add(clip_vid)
+        if _durees_video_declarees(fiche) - {verdict and verdict[1]} and all(
+            v in details_videos for v in connues
+        ):
+            result["durees_youtube_retirees"] += data_manager.retirer_durees_video(
+                track_id, sauf=verdict[1] if verdict else None
+            )
+    # Une fiche qui n'a plus AUCUNE vidéo n'a plus de provenance pour une durée
+    # vidéo (« Feel A Way » : 252 s sans vidéo, contre 213 s Spotify).
+    for fiche in tracks_par_id.values():
+        if (
+            fiche.id not in vid_counts
+            and retenu(fiche.id)
+            and not any(v.video_id for v in fiche.videos)
+            and not _extract_video_id(fiche.youtube_url)
+            and _durees_video_declarees(fiche)
+        ):
+            result["durees_youtube_retirees"] += data_manager.retirer_durees_video(fiche.id)
+    if result["durees_youtube_retirees"]:
+        logger.info(
+            f"⏱️ Durée YouTube retirée sur {result['durees_youtube_retirees']} observation(s) "
+            "que les vidéos ne justifient plus"
+        )
     if result["durees_youtube"]:
         logger.info(f"⏱️ Durée YouTube déclarée pour {result['durees_youtube']} morceau(x)")
 

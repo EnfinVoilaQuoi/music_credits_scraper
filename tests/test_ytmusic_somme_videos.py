@@ -34,8 +34,10 @@ def _track(
     spotify_streams=None,
     spotify_id=None,
     deezer_id=None,
+    durations_observees=None,
 ):
     return SimpleNamespace(
+        durations_observees=durations_observees or {},
         id=idx,
         genius_id=None,
         artist=SimpleNamespace(name="Isha"),
@@ -145,6 +147,10 @@ class FakeDM:
     def record_duration_observation(self, track_id, secondes, source):
         self.durees.append((track_id, secondes, source))
         return True
+
+    def retirer_durees_video(self, track_id, sauf=None):
+        self.retraits = getattr(self, "retraits", []) + [(track_id, sauf)]
+        return 1
 
     def forget_track_video(self, track_id, video_id):
         self.oublis = getattr(self, "oublis", []) + [(track_id, video_id)]
@@ -526,6 +532,104 @@ def test_duree_de_l_audio_topic_et_repli_hors_plateformes(sans_recherche):
 
     assert sorted(dm.durees) == [(1, 193, "youtube"), (2, 150, "youtube_video")]
     assert result["durees_youtube"] == 2
+
+
+class TestDureeVideoPerimee:
+    """2026-10-27 : une durée vidéo qu'un run passé avait déclarée restait
+    quand le run suivant ne la justifiait plus — « La balade des indépendants
+    (Remix) » 257 s d'une vidéo de FLYNTMC devant les 399 s de Spotify, « Feel
+    A Way » 252 s sans plus aucune vidéo."""
+
+    def test_vues_relues_sans_audio_topic_la_duree_part(self, sans_recherche):
+        api = FakeAPI(
+            raw_tracks=[],
+            vues={"remixflynt": 9},
+            details={
+                "remixflynt": {
+                    "duration": 257,
+                    "channel": "FLYNTMC",
+                    "title": "La balade des indépendants REMIX",
+                }
+            },
+        )
+        tracks = [
+            _track(
+                1,
+                "La balade des indépendants (Remix)",
+                spotify_id="SP",
+                youtube_url="https://youtu.be/remixflynt",
+                durations_observees={"youtube": 257, "spotify_web": 399},
+            )
+        ]
+        dm, result = _lancer(api, tracks)
+        assert dm.durees == []
+        assert dm.retraits == [(1, None)]
+        assert result["durees_youtube_retirees"] == 1
+
+    def test_le_verdict_du_run_garde_sa_source_et_retire_l_autre(self, sans_recherche):
+        api = FakeAPI(
+            raw_tracks=[],
+            vues={"freestylefr": 7},
+            details={
+                "freestylefr": {
+                    "duration": 150,
+                    "channel": "Booska-P",
+                    "title": "Isha - Freestyle | Booska",
+                }
+            },
+        )
+        tracks = [
+            _track(
+                1,
+                "Freestyle",
+                album=None,
+                youtube_url="https://youtu.be/freestylefr",
+                durations_observees={"youtube": 140},
+            )
+        ]
+        dm, _ = _lancer(api, tracks)
+        assert dm.durees == [(1, 150, "youtube_video")]
+        assert dm.retraits == [(1, "youtube_video")]
+
+    def test_meme_source_rien_a_retirer(self, sans_recherche):
+        api = FakeAPI(
+            raw_tracks=[{"title": "Magot", "video_id": "audioaudioa", "views_str": None}],
+            vues={"audioaudioa": 5},
+            details={"audioaudioa": {"duration": 193, "channel": "Isha - Topic"}},
+        )
+        dm, _ = _lancer(api, [_track(1, "Magot", durations_observees={"youtube": 193})])
+        assert dm.durees == [(1, 193, "youtube")]
+        assert not hasattr(dm, "retraits")
+
+    def test_une_video_sans_reponse_ne_retire_rien(self, sans_recherche):
+        """Absent ≠ échec : l'API n'a pas rendu les détails de l'audio Topic
+        connue de la fiche — la durée qu'il avait donnée reste."""
+        api = FakeAPI(
+            raw_tracks=[],
+            vues={"clipclipcli": 9, "audioaudioa": 5},
+            details={"clipclipcli": {"duration": 260, "channel": "ISHA", "title": "Magot"}},
+        )
+        tracks = [
+            _track(
+                1,
+                "Magot",
+                spotify_id="SP",
+                youtube_url="https://youtu.be/clipclipcli",
+                videos=[TrackVideo(video_id="audioaudioa")],
+                durations_observees={"youtube": 193},
+            )
+        ]
+        dm, _ = _lancer(api, tracks)
+        assert not hasattr(dm, "retraits")
+
+    def test_une_fiche_sans_aucune_video_perd_sa_duree_video(self, sans_recherche):
+        api = FakeAPI(raw_tracks=[], vues={})
+        tracks = [
+            _track(1, "Feel A Way", durations_observees={"youtube": 252, "spotify_web": 213}),
+            _track(2, "Sans durée vidéo", durations_observees={"spotify_web": 200}),
+        ]
+        dm, _ = _lancer(api, tracks)
+        assert dm.retraits == [(1, None)]
 
 
 def test_une_video_qui_ne_nomme_pas_le_morceau_ne_donne_pas_sa_duree(sans_recherche):

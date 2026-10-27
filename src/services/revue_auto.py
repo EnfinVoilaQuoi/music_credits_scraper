@@ -101,6 +101,12 @@ REGLES_COMPTEUR_BRANCHEES = True
 #: simulée sur toute la base et confrontée à un témoin indépendant.
 REGLES_ETENDUES_BRANCHEES = True
 
+#: Famille « vidéo ordinaire d'un autre montage » (`politiques_revue.REGLES_VIDEO`,
+#: ✓ Normal seulement) : levé le 2026-10-27 — simulée sur toute la base
+#: (`scripts/simuler_durees_panneau.py`), chaque cas confronté à la vidéo et
+#: aux catalogues.
+REGLES_VIDEO_BRANCHEES = True
+
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.
 _SANS_FICHE = frozenset(
@@ -157,6 +163,7 @@ def cas_par_regle(
     etendues: bool = False,
     catalogue: bool = False,
     compteur: bool = False,
+    video: bool = False,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
@@ -169,6 +176,7 @@ def cas_par_regle(
         arbitrage_id_propose,
         arbitrage_liens_deezer,
         arbitrage_valide,
+        arbitrage_video_hors_colonne,
     )
 
     sortie = []
@@ -193,6 +201,8 @@ def cas_par_regle(
             arbitrage = arbitrage_catalogue(c, track, ctx)
         if arbitrage is None and compteur:
             arbitrage = arbitrage_compteur(c, track, ctx)
+        if arbitrage is None and video:
+            arbitrage = arbitrage_video_hors_colonne(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -595,6 +605,7 @@ def corriger(dm, artiste) -> BilanCorrections:
             or REGLES_ETENDUES_BRANCHEES
             or REGLES_CATALOGUE_BRANCHEES
             or REGLES_COMPTEUR_BRANCHEES
+            or REGLES_VIDEO_BRANCHEES
         ):
             rendus = _rendus_a_l_humain(dm, artiste.id)
             a_faire += [
@@ -611,6 +622,7 @@ def corriger(dm, artiste) -> BilanCorrections:
                     etendues=REGLES_ETENDUES_BRANCHEES,
                     catalogue=REGLES_CATALOGUE_BRANCHEES,
                     compteur=REGLES_COMPTEUR_BRANCHEES,
+                    video=REGLES_VIDEO_BRANCHEES,
                 )
                 if (c.detecteur, c.cle) not in rendus
             ]

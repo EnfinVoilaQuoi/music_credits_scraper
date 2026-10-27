@@ -117,6 +117,7 @@ scripts/*
 !scripts/simuler_politiques_revue.py
 !scripts/simuler_regles_validees.py
 !scripts/simuler_veto_duree.py
+!scripts/simuler_durees_panneau.py
 # Lots de runs surveillés (règle « Lots de runs en fond », 2026-10-25)
 !scripts/lot_runs.py
 # Tests / santé des sources

@@ -78,7 +78,7 @@ from src.utils.version_descriptors import (
     titre_generique,
 )
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
-from src.utils.vote_durees import ISOLEE, MAJORITAIRE, SOUTENUE, voter
+from src.utils.vote_durees import ISOLEE, MAJORITAIRE, SOUTENUE, editions_distinctes, voter
 
 #: Écart de durée au-delà duquel deux sources ne décrivent plus le même fichier
 #: (2 s = même fichier ; 5 s = tolérance inter-plateformes, comme la revue des
@@ -233,6 +233,29 @@ def _editions(track) -> tuple:
     return tuple(getattr(track, "durees_editions", ()) or ())
 
 
+#: ReccoBeats lu par l'ISRC (`reccobeats_resolution`) a lu la piste Spotify de
+#: l'ISRC, pas celle de l'ID : quand la page de l'ID donne sa durée, il n'est
+#: pas la voix de Spotify (2026-10-27, 6 cas du panneau). Kid Cudi « Erase
+#: Me » : page de l'ID 192 s comme YouTube et Discogs, ReccoBeats 199 s par un
+#: ISRC d'une autre parution — c'est l'ID qu'on accusait. Interrupteur simulé
+#: par `scripts/simuler_durees_panneau.py`.
+RECCOBEATS_ISRC_HORS_VOIX = True
+
+
+def durees_du_vote(track) -> dict:
+    """`{source: secondes}` que lisent les détecteurs et les politiques de
+    durée : les durées observées, moins ReccoBeats lu par l'ISRC quand la page
+    de l'ID Spotify donne la sienne (`RECCOBEATS_ISRC_HORS_VOIX`)."""
+    durees = dict(track.durations_observees or {})
+    if (
+        RECCOBEATS_ISRC_HORS_VOIX
+        and durees.get("spotify_web")
+        and track.audio.reccobeats_resolution == "isrc"
+    ):
+        durees.pop("reccobeats", None)
+    return durees
+
+
 def _duree_youtube(track) -> int | None:
     return (track.durations_observees or {}).get(SOURCE_AUDIO)
 
@@ -243,7 +266,7 @@ def duree_songbpm_dementie(track, _ctx=None):
     « Blues (Live at AK Studios) » → page de « Blues »)."""
     yt, sb = _duree_youtube(track), (track.durations_observees or {}).get("songbpm")
     if yt and sb and abs(yt - sb) > ECART_DUREE_S:
-        if voter(track.durations_observees, yt, editions=_editions(track)).nature == ISOLEE:
+        if voter(durees_du_vote(track), yt, editions=_editions(track)).nature == ISOLEE:
             return None  # c'est l'audio YouTube que les catalogues démentent (`duree_isolee`)
         return (
             f"durée SongBPM {sb} s ≠ audio YouTube {yt} s — page d'une autre version ? "
@@ -306,7 +329,7 @@ def duree_spotify_dementie(track, _ctx=None):
     portait l'ID de *New God Flow* (357 s)."""
     if not track.spotify_id:
         return None
-    durees = track.durations_observees or {}
+    durees = durees_du_vote(track)
     for temoin, ecart in _DUREES_TEMOINS:
         ref = durees.get(temoin)
         for src in _SOURCES_PAR_ID_SPOTIFY:
@@ -332,7 +355,7 @@ def duree_spotify_dementie(track, _ctx=None):
 def duree_deezer_dementie(track, _ctx=None):
     """L'audio Topic ou la piste YTM dément la durée de l'identifiant Deezer :
     le hit Deezer est peut-être celui d'une autre version."""
-    durees = track.durations_observees or {}
+    durees = durees_du_vote(track)
     dz = durees.get("deezer")
     if not track.deezer_id or not dz:
         return None
@@ -360,7 +383,7 @@ def duree_isolee(track, _ctx=None):
     piste YTM ou la fiche Apple est celle d'une autre version (2026-10-13).
     Diam's « Vice Versa » : Spotify, Deezer et Apple à 240 s, l'audio YouTube
     à 277 s — avant le vote, c'est l'ID Spotify qu'on accusait."""
-    durees = track.durations_observees or {}
+    durees = durees_du_vote(track)
     for source in _TEMOINS_ISOLABLES:
         d = durees.get(source)
         vote = voter(durees, d, editions=_editions(track))
@@ -1940,9 +1963,7 @@ def _vote_de_parution(s, par_id: dict) -> str:
     duree = ((preuves.get("ecart") or {}).get("piste") or {}).get("duration")
     if track is None or not duree:
         return ""
-    vote = voter(
-        {**(track.durations_observees or {}), "deezer": duree}, duree, editions=_editions(track)
-    )
+    vote = voter({**durees_du_vote(track), "deezer": duree}, duree, editions=_editions(track))
     if vote.nature == SOUTENUE and len(vote.pour) >= 2:
         return f" — durée confirmée par {', '.join(sorted(vote.pour))} : rattachement sûr"
     if vote.nature == ISOLEE:
@@ -1956,7 +1977,9 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     tracks = artiste.tracks or []
     durees_editions = data_manager.get_artist_edition_durations(artiste.id)
     for t in tracks:
-        t.durees_editions = durees_editions.get(t.id, ())
+        t.durees_editions = editions_distinctes(
+            durees_editions.get(t.id, ()), (t.durations_observees or {}).get("deezer")
+        )
     ctx = contexte(
         tracks,
         data_manager.get_artist_observations(artiste.id),

@@ -52,6 +52,22 @@ class TestMemeCompteur:
         a = [_l(49_207, "2026-10-13T00:00:00")]
         assert not meme_compteur(a, [_l(49_207, "2026-10-13T00:00:00")], None)
 
+    def test_compte_ailleurs_la_ligne_est_complete_et_le_dit(self):
+        """Un compteur compté sur une autre fiche ne manque pas (validation,
+        sélection d'un run) ; l'onglet Streams dit où il compte."""
+        from src.models import Artist, Track
+        from src.presentation.fiche import onglet_streams
+        from src.services.runtime import Manque, est_manquant
+        from src.utils.track_validation import streams_valides
+
+        t = Track(title="Keep My Spirit Alive pt 2", artist=Artist(name="Kanye West"))
+        t.spotify_id, t.streams.ytm_streams = "SB", 1000
+        assert not streams_valides(t) and est_manquant(t, Manque.STREAMS)
+        t.streams.compte_sur = "Keep My Spirit Alive"
+        assert streams_valides(t) and not est_manquant(t, Manque.STREAMS)
+        textes = [e.libelle for s in onglet_streams(t).sections for e in s.entrees]
+        assert "Compté sur « Keep My Spirit Alive » (même compteur Spotify)" in textes
+
     def test_lectures_depuis_les_observations(self):
         obs = [
             SimpleNamespace(field="spotify_streams", value="120", seen_at="2026-10-13 16:41:00"),

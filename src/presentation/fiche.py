@@ -345,7 +345,10 @@ def onglet_certifs(track) -> Onglet:
 
 def onglet_streams(track) -> Onglet:
     st = track.streams
-    sp_entrees = [Entree(f"{fmt.nombre(st.spotify_streams) or '—'} streams")]
+    if st.compte_sur and not st.spotify_streams:
+        sp_entrees = [Entree(f"Compté sur « {st.compte_sur} » (même compteur Spotify)")]
+    else:
+        sp_entrees = [Entree(f"{fmt.nombre(st.spotify_streams) or '—'} streams")]
     if st.spotify_daily_streams:
         sp_entrees.append(
             Entree(f"{fmt.nombre(st.spotify_daily_streams)} / jour (Kworb)", discret=True)

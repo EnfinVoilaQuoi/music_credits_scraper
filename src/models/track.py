@@ -386,6 +386,9 @@ class Streams:
     spotify_streams_updated: datetime | None = None
     ytm_streams: int | None = None
     ytm_streams_updated: datetime | None = None
+    #: Règle 2a (2026-10-27) : le compteur Spotify de l'ID principal est compté
+    #: sur une AUTRE fiche, dont c'est le titre (lu à la lecture, jamais écrit).
+    compte_sur: str | None = None
 
 
 #: `lyrics_source` d'une page Genius LUE qui n'avait pas encore de paroles

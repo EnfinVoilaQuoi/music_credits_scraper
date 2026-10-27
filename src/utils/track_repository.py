@@ -23,6 +23,7 @@ from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.codes_barres import cle_upc
 from src.utils.corrections_fiches import (
+    comptes_ailleurs,
     compteurs_refuses,
     credits_refuses,
     refus_videos_a_la_fusion,
@@ -877,6 +878,10 @@ class TrackRepository:
                         # garder la trace (et rester exempt de BLE001).
                         logger.exception("❌ Erreur track %d — ignoré, on continue", i)
                         continue
+
+                # Règle 2a : les compteurs comptés sur une autre fiche (une requête).
+                for tid, porteuse in comptes_ailleurs(result).items():
+                    next(t for t in result if t.id == tid).streams.compte_sur = porteuse
 
                 # Compter les tracks avec musical_key
                 tracks_with_key = sum(1 for t in result if t.audio.musical_key)

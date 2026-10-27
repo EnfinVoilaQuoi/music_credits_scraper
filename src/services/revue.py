@@ -547,6 +547,7 @@ def compteur_partage(track, ctx):
             {
                 "spotify_id": track.spotify_id,
                 "autre": autre.id,
+                "autre_titre": autre.title,
                 "autre_spotify_id": autre.spotify_id,
                 "version_proche": preuve,
                 "paroles": None if rec is None else round(rec, 2),

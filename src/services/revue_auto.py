@@ -529,7 +529,12 @@ def _partager_compteur(dm, track, cas: Cas) -> tuple[str, dict]:
     if not sid or track.spotify_id != sid:
         raise LookupError("la fiche ne porte plus cet ID Spotify")
     avant = track.streams.spotify_streams
-    memoriser_compteur_refuse(track, sid, origine=f"{PREFIXE_REGLE}{cas.detecteur}")
+    memoriser_compteur_refuse(
+        track,
+        sid,
+        origine=f"{PREFIXE_REGLE}{cas.detecteur}",
+        porteuse=cas.preuves.get("autre_titre"),
+    )
     if not dm.recalculer_streams(track.id):
         raise LookupError("recalcul des streams impossible")
     track.streams.spotify_streams = None

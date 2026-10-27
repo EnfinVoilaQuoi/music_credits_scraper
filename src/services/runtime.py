@@ -204,7 +204,8 @@ def est_manquant(track: Track, kind: Manque) -> bool:
     if kind is Manque.AUDIO:
         return track.audio.bpm is None or track.audio.key is None
     if kind is Manque.STREAMS:
-        return track.streams.spotify_streams is None or track.streams.ytm_streams is None
+        spotify = track.streams.spotify_streams is not None or bool(track.streams.compte_sur)
+        return not spotify or track.streams.ytm_streams is None
     if kind is Manque.IDENTITE_DEEZER:
         return not track.deezer_id and constat_perime(track.deezer_checked_at, track.release_date)
     if kind is Manque.IDENTITE_SPOTIFY:

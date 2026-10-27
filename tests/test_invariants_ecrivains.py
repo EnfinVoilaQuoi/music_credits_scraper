@@ -194,9 +194,17 @@ class TestApresChaqueEcrivain:
         base["isha"].spotify_id = sid
         data_manager.save_track(base["isha"])
         data_manager.record_spotify_streams(tid, 5_000_000, "spotify_web")
-        cf.memoriser_compteur_refuse(base["isha"], sid, origine="regle:compteur_partage")
+        cf.memoriser_compteur_refuse(
+            base["isha"], sid, origine="regle:compteur_partage", porteuse="Grünt #33 (Live)"
+        )
         assert data_manager.recalculer_streams(tid)
         data_manager.record_spotify_streams(tid, 5_010_000, "spotify_web")  # un run de plus
+        # Lu avec la discographie, sœur comprise : la fiche dit où il compte.
+        for artiste in (base["isha"].artist, base["swing"].artist):
+            fiche = next(
+                t for t in data_manager.get_artist_tracks(artiste.id) if t.genius_id == _GENIUS
+            )
+            assert fiche.streams.compte_sur == "Grünt #33 (Live)"
         for t in (base["isha"], base["swing"]):
             assert _colonnes(data_manager, t.id) == (None, sid)
         assert any(

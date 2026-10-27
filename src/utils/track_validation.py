@@ -192,7 +192,8 @@ def streams_valides(track) -> bool:
     if not track.streams.ytm_streams:
         return False
     if track.spotify_id:
-        return bool(track.streams.spotify_streams)
+        # Compté sur une autre fiche (règle 2a) : rien ne manque ici.
+        return bool(track.streams.spotify_streams or track.streams.compte_sur)
     if track.isrc:
         return False
     return bool(track.spotify_id_checked_at)

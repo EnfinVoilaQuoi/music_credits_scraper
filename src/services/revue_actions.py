@@ -99,7 +99,9 @@ def _partager_compteur(ctx: ContexteAction, cas: Cas) -> str:
     from src.utils.corrections_fiches import memoriser_compteur_refuse
 
     track = _fiche(ctx, cas)
-    memoriser_compteur_refuse(track, cas.preuves["spotify_id"])
+    memoriser_compteur_refuse(
+        track, cas.preuves["spotify_id"], porteuse=cas.preuves.get("autre_titre")
+    )
     ctx.data_manager.recalculer_streams(track.id)
     return f"compteur Spotify de « {track.title} » compté sur l'autre fiche"
 

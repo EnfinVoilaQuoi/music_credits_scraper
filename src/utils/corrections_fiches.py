@@ -200,10 +200,15 @@ def _lignes(track, nature: str, table: str = "refus") -> list[dict]:
 
 
 def _memoriser(
-    track, nature: str, valeur, table: str = "refus", origine: str | None = None
+    track,
+    nature: str,
+    valeur,
+    table: str = "refus",
+    origine: str | None = None,
+    detail: dict | None = None,
 ) -> bool:
     """Consigne un refus (ou une acceptation) pour la fiche. Rend False s'il y
-    était déjà."""
+    était déjà. `detail` : ce que le refus doit garder en plus de sa valeur."""
     artiste = track.artist.name if track.artist else None
     if moteur is None or not artiste or valeur in (None, ""):
         return False
@@ -220,6 +225,7 @@ def _memoriser(
         datetime.now().isoformat(timespec="seconds"),
         table=table,
         origine=origine,
+        detail=detail,
     )
 
 
@@ -234,9 +240,12 @@ def _inserer(
     conn=None,
     table: str = "refus",
     origine: str | None = None,
+    detail: dict | None = None,
 ) -> bool:
     from sqlalchemy import text
 
+    if isinstance(valeur, dict):
+        detail = valeur
     params = {
         "cle_fiche": _cle_fiche(designation),
         "gid": designation.get("genius_id"),
@@ -245,7 +254,7 @@ def _inserer(
         "album": album,
         "nature": nature,
         "valeur": _cle(nature, valeur),
-        "detail": json.dumps(valeur, ensure_ascii=False) if isinstance(valeur, dict) else None,
+        "detail": json.dumps(detail, ensure_ascii=False) if detail else None,
         "le": le,
     }
     # `origine` n'existe que dans `refus` (e59) : les acceptations sont toujours
@@ -552,8 +561,65 @@ def compteurs_refuses(track) -> set[str]:
     return {r["valeur"] for r in _lignes(track, "compteur_spotify")}
 
 
-def memoriser_compteur_refuse(track, spotify_id: str, origine: str | None = None) -> None:
-    _memoriser(track, "compteur_spotify", spotify_id, origine=origine)
+def memoriser_compteur_refuse(
+    track, spotify_id: str, origine: str | None = None, porteuse: str | None = None
+) -> None:
+    """`porteuse` : le titre de la fiche qui compte le compteur, montré par la
+    fiche (« Compté sur … ») et qui la tient pour complète."""
+    _memoriser(
+        track,
+        "compteur_spotify",
+        spotify_id,
+        origine=origine,
+        detail={"porteuse": porteuse} if porteuse else None,
+    )
+
+
+def comptes_ailleurs(tracks) -> dict[int, str]:
+    """`{track_id: titre de la fiche porteuse}` des fiches dont l'ID Spotify
+    PRINCIPAL a son compteur compté ailleurs (règle 2a) — une requête pour
+    toute la discographie. Sans titre gardé : « une autre fiche »."""
+    if moteur is None:
+        return {}
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        with moteur.connect() as conn:
+            lignes = (
+                conn.execute(
+                    text(
+                        "SELECT genius_id, artiste, titre, album, valeur, detail FROM refus "
+                        "WHERE nature = 'compteur_spotify'"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+    except SQLAlchemyError as e:
+        logger.warning(f"Refus de compteur illisibles : {e} — rien d'appliqué")
+        return {}
+    sortie = {}
+    for t in tracks:
+        if not t.spotify_id:
+            continue
+        for r in lignes:
+            if r["valeur"] != _cle("compteur_spotify", t.spotify_id):
+                continue
+            if r["genius_id"] is not None:
+                vise = t.genius_id is not None and int(r["genius_id"]) == int(t.genius_id)
+            else:
+                vise = r["artiste"] == (t.artist.name if t.artist else None) and designe(
+                    {"titre": r["titre"], "album": r["album"]},
+                    genius_id=t.genius_id,
+                    titre=t.title,
+                    album=t.album,
+                )
+            if vise:
+                detail = json.loads(r["detail"]) if r["detail"] else {}
+                sortie[t.id] = detail.get("porteuse") or "une autre fiche"
+                break
+    return sortie
 
 
 def oublier_compteur_refuse(track, spotify_id: str) -> bool:

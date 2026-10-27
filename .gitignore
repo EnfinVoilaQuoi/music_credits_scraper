@@ -183,6 +183,8 @@ scripts/*
 # Mesures hors ligne (2026-10-14) : places sur les disques, champs du brut.
 !scripts/mesurer_positions.py
 !scripts/sonder_brut.py
+# Durée de l'audio des LRC d'avant `lrc_duree_audio`, depuis le brut (2026-10-27).
+!scripts/poser_durees_audio_lrc.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
 # méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
 # `scripts/*` les exclut déjà : ne PAS ajouter de négation ici.

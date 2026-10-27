@@ -43,6 +43,10 @@ class SyncedLyricsOutcome:
     # Origine du verdict pour les compteurs GUI : "lrclib" | "ytm" | "musixmatch" | None.
     synced_kind: str | None = None
     synced_is_cross: bool = False  # confidence >= 2 (croisé/validé)
+    # Sources qui ont RENDU un LRC à cette lecture, retenu ou écarté (2026-10-27).
+    # Seule leur ancienne observation peut être purgée par une synchro forcée :
+    # une source qui n'a pas répondu ne prouve pas qu'elle n'a plus son LRC.
+    sources_repondues: set = field(default_factory=set)
     # Fallback TEXTE (paroles brutes YTM) — appliqué seulement si Genius n'a rien donné.
     text: str | None = None
     text_source: str | None = None
@@ -150,6 +154,8 @@ def resolve_track_synced_lyrics(
         if not duration:
             duration = ytm_res["duration"]  # secours du match LRCLIB ± 2 s
     ytm_lrc = (ytm_res.get("lyrics_synced") if ytm_res else None) if sync_ytm else None
+    if ytm_lrc and need_sync:
+        out.sources_repondues.add("ytmusic")
     ytm_lrc = _retenu(ytm_lrc, "YTM")
 
     # SOURCE 1 (LRCLIB) : match sur la durée ±2 s.
@@ -162,6 +168,8 @@ def resolve_track_synced_lyrics(
                 album_name=getattr(track, "album", None),
                 duration=duration,
             )
+            if lr and lr.get("lyrics_synced"):
+                out.sources_repondues.add("lrclib")
             titre_lrclib = (lr or {}).get("title")
             if (
                 lr
@@ -220,6 +228,8 @@ def resolve_track_synced_lyrics(
                 # ne couvre plus qu'un retour inattendu ; dernier recours, non bloquant.
                 mres = None
                 logger.debug(f"Musixmatch échec '{artist_name} - {track.title}': {e}")
+            if mres and mres.get("lrc"):
+                out.sources_repondues.add("musixmatch")
             if mres and not _retenu(mres["lrc"], "Musixmatch"):
                 mres = None
             if mres:

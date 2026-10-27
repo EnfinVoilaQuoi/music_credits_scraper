@@ -1104,22 +1104,33 @@ class TrackRepository:
             if valeurs:
                 conn.execute(update(tracks).where(tracks.c.id == track_id).values(**valeurs))
 
-    def delete_observations(self, track_id: int, field: str, *, conn=None) -> None:
-        """Supprime toutes les observations d'un champ pour un morceau (composable).
+    def delete_observations(self, track_id: int, field: str, *, conn=None, sources=None) -> None:
+        """Supprime les observations d'un champ pour un morceau (composable) —
+        toutes, ou celles des seules `sources`.
 
         Sert au « force » d'un scrape (E7d, `force_sync`) : repartir de zéro sur
         `lyrics_synced` — sinon une source disparue laisserait une observation
         stale qui ressusciterait le verdict à la lecture (le mapper réconcilie
         l'union persistée). Symétrique de `upsert_observations`."""
         if conn is not None:
-            self._delete_observations(conn, track_id, field)
+            self._delete_observations(conn, track_id, field, sources)
         else:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
-                self._delete_observations(conn, track_id, field)
+                self._delete_observations(conn, track_id, field, sources)
 
-    def _delete_observations(self, conn, track_id: int, field: str) -> None:
+    def _delete_observations(self, conn, track_id: int, field: str, sources=None) -> None:
         self._toucher(conn, track_id)
+        if sources is not None:
+            for source in sources:
+                conn.execute(
+                    text(
+                        "DELETE FROM observations WHERE track_id = :tid AND field = :field "
+                        "AND source = :source"
+                    ),
+                    {"tid": track_id, "field": field, "source": source},
+                )
+            return
         conn.execute(
             text("DELETE FROM observations WHERE track_id = :tid AND field = :field"),
             {"tid": track_id, "field": field},

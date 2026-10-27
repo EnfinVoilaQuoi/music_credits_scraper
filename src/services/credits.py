@@ -352,13 +352,19 @@ def _retablir_sans_reponse(
     tracks: list[Track],
     options: OptionsCredits,
     avant: dict[int, dict],
-    synchro_obtenue: set[int],
+    synchro_obtenue: dict[int, set],
 ) -> None:
     """Remet l'état d'avant là où la passe forcée n'a RIEN obtenu, et ne purge les
     anciennes observations `lyrics_synced` que là où une nouvelle synchro les
     remplace (E7d : sans cette purge une source disparue ressusciterait son
     verdict à la lecture — mais la faire d'avance effaçait tout LRC que plus
-    aucune source ne rendait)."""
+    aucune source ne rendait).
+
+    `synchro_obtenue` : `{id(fiche): sources qui ont rendu un LRC}`. Seules ces
+    sources perdent leur ancienne observation (2026-10-27) : une source qui n'a
+    pas répondu à cette lecture ne prouve pas qu'elle n'a plus son LRC.
+    « Écorchée Vive » perdait ainsi son LRC LRCLIB (LRCLIB muet ce jour-là), et
+    la colonne basculait sur le LRC YTM du live."""
     for t in tracks:
         etat = avant.get(id(t))
         if etat is None:
@@ -376,10 +382,15 @@ def _retablir_sans_reponse(
                 setattr(t.lyrics, c, etat[f"lyrics.{c}"])
         if options.force_sync:
             if id(t) in synchro_obtenue:
-                if t.id:
-                    runtime.data_manager.delete_observations(t.id, "lyrics_synced")
+                repondues = sorted(synchro_obtenue[id(t)])
+                if t.id and repondues:
+                    runtime.data_manager.delete_observations(
+                        t.id, "lyrics_synced", sources=repondues
+                    )
                     # La durée de l'audio d'un LRC part avec lui.
-                    runtime.data_manager.delete_observations(t.id, CHAMP_DUREE_AUDIO)
+                    runtime.data_manager.delete_observations(
+                        t.id, CHAMP_DUREE_AUDIO, sources=repondues
+                    )
             elif not t.lyrics.instrumental:
                 for c in _CHAMPS_SYNC:
                     setattr(t.lyrics, c, etat[f"lyrics.{c}"])
@@ -479,7 +490,7 @@ def run(
                 bilan.interrompu("arrêt demandé avant la phase paroles/synchro")
                 return _sauver(runtime, artist, tracks, bilan)
             avant = _reset_forces(tracks, options)
-            synchro_obtenue: set[int] = set()
+            synchro_obtenue: dict[int, set] = {}
             if options.paroles_genius:
                 besoin = [t for t in tracks if t.lyrics.page_genius_a_relire()]
                 if besoin:
@@ -542,7 +553,7 @@ def run(
                             )
                         if outcome.lyrics_synced is not None:
                             garde.noter(t)
-                            synchro_obtenue.add(id(t))
+                            synchro_obtenue[id(t)] = set(outcome.sources_repondues)
                             if outcome.synced_kind in cpt:
                                 cpt[outcome.synced_kind] += 1
                             cpt["cross" if outcome.synced_is_cross else "review"] += 1

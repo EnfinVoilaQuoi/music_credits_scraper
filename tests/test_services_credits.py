@@ -49,6 +49,7 @@ class _Lyrics:
             synced_kind="lrclib",
             synced_is_cross=True,
             text=None,
+            sources_repondues={"lrclib"} if need_sync else set(),
         )
 
     def close(self):
@@ -66,8 +67,8 @@ class _DM:
     def record_pending(self, t):
         pass
 
-    def delete_observations(self, tid, field):
-        self.obs_deleted.append((tid, field))
+    def delete_observations(self, tid, field, sources=None):
+        self.obs_deleted.append((tid, field, tuple(sources or ())))
 
 
 def _rt(dm=None):
@@ -131,8 +132,12 @@ class TestForcer:
             force_sync=True,
         )
         credits.run(_rt(dm), Artist(name="Swing"), [t], opts, Hooks(), cl)
-        # Le LRC et la durée de son audio partent ensemble (2026-10-27).
-        assert dm.obs_deleted == [(t.id, "lyrics_synced"), (t.id, "lrc_duree_audio")]
+        # Le LRC et la durée de son audio partent ensemble, pour la seule source
+        # qui a répondu (2026-10-27).
+        assert dm.obs_deleted == [
+            (t.id, "lyrics_synced", ("lrclib",)),
+            (t.id, "lrc_duree_audio", ("lrclib",)),
+        ]
         assert lyr.appels and lyr.appels[0][2] is True  # need_sync malgré l'ancien LRC
 
     def test_force_sync_sans_reponse_garde_l_ancien_lrc(self):
@@ -310,3 +315,62 @@ def test_le_run_ne_passe_au_scraper_que_les_pages_a_relire():
     )
     bilan = credits.run(_rt(), Artist(name="Swing"), [recente, ancienne], opts, Hooks(), cl)
     assert lues == ["Ancienne"] and bilan.genius_recents == 1
+
+
+def test_synchro_forcee_garde_le_lrc_d_une_source_muette(data_manager):
+    """2026-10-27, « Écorchée Vive » : à la relance forcée, seul YTM répond.
+    Le LRC LRCLIB d'avant reste en lice : une source muette ne prouve pas
+    qu'elle n'a plus son LRC. Celui de YTM, qui a répondu, est remplacé."""
+    from src.enrichment.observation import Observation
+
+    lrclib, ancien_ytm, nouveau_ytm = (
+        "[00:01.00] studio\n[04:59.00] fin",
+        "[00:01.00] vieux\n[04:00.00] fin",
+        "[00:01.00] live\n[06:10.00] fin",
+    )
+    a = Artist(name="Diam’s")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Écorchée Vive", artist=a)
+    data_manager.save_track(t)
+    data_manager.upsert_observations(
+        t.id,
+        [
+            Observation("lyrics_synced", lrclib, "lrclib"),
+            Observation("lyrics_synced", ancien_ytm, "ytmusic"),
+        ],
+    )
+    (t,) = data_manager.get_artist_tracks(a.id)
+
+    class _SeulYtm(_Lyrics):
+        def enrich(self, track, artist_name, *, need_sync, need_text, garde=None):
+            track.observations.append(Observation("lyrics_synced", nouveau_ytm, "ytmusic"))
+            track.lyrics.synced, track.lyrics.synced_source = nouveau_ytm, "YouTube Music"
+            return SimpleNamespace(
+                lyrics_synced=nouveau_ytm,
+                synced_kind="ytm",
+                synced_is_cross=False,
+                text=None,
+                sources_repondues={"ytmusic"},
+            )
+
+    cl, _, _ = _clients(lyrics=_SeulYtm())
+    opts = credits.OptionsCredits(
+        genius=False, discogs=False, paroles_genius=False, paroles_ytm=False, force_sync=True
+    )
+    rt = Runtime(
+        data_manager=data_manager, genius_api=None, data_enricher=None, deleted=None, disabled=None
+    )
+    credits.run(rt, a, [t], opts, Hooks(), cl)
+    from sqlalchemy import text
+
+    with data_manager.engine.connect() as conn:
+        restantes = dict(
+            conn.execute(
+                text(
+                    "SELECT source, value FROM observations "
+                    "WHERE track_id = :t AND field = 'lyrics_synced'"
+                ),
+                {"t": t.id},
+            ).all()
+        )
+    assert restantes == {"lrclib": lrclib, "ytmusic": nouveau_ytm}

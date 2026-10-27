@@ -311,3 +311,33 @@ def test_paroles_de_secours_refusees_ne_reviennent_pas(data_manager):
 
     assert resoudre("les paroles d'un autre morceau").text is None  # espaces normalisés
     assert resoudre("les vraies paroles").text == "les vraies paroles"
+
+
+def test_sources_repondues_retenues_ou_ecartees():
+    """Une source qui a RENDU un LRC, même écarté (titre d'un autre morceau),
+    a répondu : son ancien LRC peut partir. Une source muette, non."""
+    lrclib = _FakeLRCLIB()
+    lrclib.get_synced = lambda *a, **k: {"lyrics_synced": _LRC, "title": "No Time"}
+    out = resolve_track_synced_lyrics(
+        _track(title="Time"),
+        "X",
+        lrclib=lrclib,
+        ytm=_FakeYTM(lrc=_LRC_OTHER),
+        mxm=None,
+        need_sync=True,
+        need_text=False,
+        sync_ytm=True,
+    )
+    assert out.lyrics_synced == _LRC_OTHER
+    assert out.sources_repondues == {"lrclib", "ytmusic"}
+    muet = resolve_track_synced_lyrics(
+        _track(),
+        "X",
+        lrclib=_FakeLRCLIB(),
+        ytm=_FakeYTM(lrc=_LRC),
+        mxm=None,
+        need_sync=True,
+        need_text=False,
+        sync_ytm=True,
+    )
+    assert muet.sources_repondues == {"ytmusic"}

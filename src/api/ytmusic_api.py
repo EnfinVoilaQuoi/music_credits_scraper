@@ -187,7 +187,9 @@ class YTMusicAPI:
                 from googleapiclient.discovery import build
 
                 yt = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
-                resp = yt.channels().list(part="id", forHandle="@" + handle).execute()
+                resp = ytmusic_brut.executer_youtube_data(
+                    yt.channels().list(part="id", forHandle="@" + handle)
+                )
                 items = resp.get("items") or []
                 if items:
                     cid = items[0]["id"]
@@ -227,7 +229,9 @@ class YTMusicAPI:
             from googleapiclient.discovery import build
 
             yt = build("youtube", "v3", developerKey=YOUTUBE_API_KEY)
-            resp = yt.videos().list(part="snippet", id=",".join(video_ids[:50])).execute()
+            resp = ytmusic_brut.executer_youtube_data(
+                yt.videos().list(part="snippet", id=",".join(video_ids[:50]))
+            )
 
             votes = Counter()
             names = {}
@@ -662,7 +666,9 @@ class YTMusicAPI:
             batch = unique_ids[i : i + _YT_BATCH_SIZE]
             try:
                 part = "statistics" if details is None else "statistics,contentDetails,snippet"
-                response = youtube.videos().list(part=part, id=",".join(batch)).execute()
+                response = ytmusic_brut.executer_youtube_data(
+                    youtube.videos().list(part=part, id=",".join(batch))
+                )
                 for item in response.get("items", []):
                     view_str = item.get("statistics", {}).get("viewCount")
                     if view_str is not None:
@@ -724,8 +730,8 @@ class YTMusicAPI:
         for i in range(0, len(unique_ids), _YT_BATCH_SIZE):
             batch = unique_ids[i : i + _YT_BATCH_SIZE]
             try:
-                response = (
-                    youtube.videos().list(part="statistics,snippet", id=",".join(batch)).execute()
+                response = ytmusic_brut.executer_youtube_data(
+                    youtube.videos().list(part="statistics,snippet", id=",".join(batch))
                 )
                 for item in response.get("items", []):
                     stats = item.get("statistics", {})

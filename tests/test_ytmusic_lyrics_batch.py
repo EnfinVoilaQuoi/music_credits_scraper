@@ -296,6 +296,7 @@ class _FauxYoutubeApi:
     def list(self, part=None, id=None):  # noqa: A002 — signature googleapiclient
         self.ids_demandes.append(id.split(","))
         self.parts.append(part)
+        self.uri = f"https://youtube.googleapis.com/youtube/v3/videos?part={part}&id={id}"
         return self
 
     def execute(self):

@@ -7,6 +7,8 @@ ARGUMENTS qu'ils reçoivent — c'est là que vivent les réglages (timeouts,
 retries, token) qu'un test d'intégration ne verrait qu'en production.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from src.api import discogs_api, genius_api
@@ -70,9 +72,13 @@ class TestGetArtistSongs:
 class TestDiscogsClient:
     def test_avec_et_sans_token(self, monkeypatch):
         vus = []
-        monkeypatch.setattr(
-            discogs_api.discogs_client, "Client", lambda ua, **kw: vus.append((ua, kw)) or "client"
-        )
+
+        class _Client:  # le brut se branche sur son fetcher
+            def __init__(self, ua, **kw):
+                vus.append((ua, kw))
+                self._fetcher = SimpleNamespace(fetch=lambda *a, **k: (b"{}", 200))
+
+        monkeypatch.setattr(discogs_api.discogs_client, "Client", _Client)
         discogs_api.DiscogsClient(user_token="tok")
         discogs_api.DiscogsClient(user_token=None)
         assert vus == [

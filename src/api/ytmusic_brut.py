@@ -17,6 +17,10 @@ rejeu, lui, sert de préférence la dernière lecture utilisable
 La page d'accueil que `ytmusicapi` lit une fois pour l'identifiant de visiteur
 n'est PAS gardée (une page entière, qui porte la clé d'API publique du site et
 ne dit rien des morceaux) ; en rejeu, une page minimale la remplace.
+
+YouTube Data API v3 (vues exactes, canaux) a son propre nom de source,
+`youtube_data` : `googleapiclient` rend la réponse déjà lue, gardée en JSON
+(même contenu, pas les mêmes octets) sous l'URI de la requête, sans la clé.
 """
 
 from __future__ import annotations
@@ -31,6 +35,8 @@ from src.persistence import brut
 
 #: Nom de la source dans le brut — celui de l'observabilité.
 SOURCE = "ytmusic"
+#: YouTube Data API v3 : aucune clé d'observabilité propre, un nom de brut.
+SOURCE_DATA = "youtube_data"
 #: La page d'où `ytmusicapi` tire l'identifiant de visiteur (jamais gardée).
 _ACCUEIL = "https://music.youtube.com"
 _ACCUEIL_REJEU = b'<script>ytcfg.set({"VISITOR_DATA": ""});</script>'
@@ -95,3 +101,25 @@ def client() -> YTMusic:
     session = requests.Session()
     session.request = partial(session.request, timeout=_DELAI_S)
     return YTMusic(requests_session=garder(session))
+
+
+def executer_youtube_data(requete) -> dict:
+    """`requete.execute()` d'une requête `googleapiclient`, son brut gardé —
+    un refus (`HttpError` : quota, clé) aussi, avec son statut. En rejeu :
+    la réponse gardée, ou `OSError` (rattrapée par les appelants, comme une
+    panne de transport) — jamais le réseau."""
+    if brut.rejeu_actif():
+        lu = brut.servir(SOURCE_DATA, requete.uri)
+        if lu is None:
+            raise OSError(f"brut absent (rejeu hors ligne) : {brut.url_sans_secret(requete.uri)}")
+        return json.loads(lu[1])
+    from googleapiclient.errors import HttpError
+
+    try:
+        reponse = requete.execute()
+    except HttpError as e:
+        brut.consigner(SOURCE_DATA, requete.uri, int(e.resp.status), e.content)
+        raise
+    corps = json.dumps(reponse, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    brut.consigner(SOURCE_DATA, requete.uri, 200, corps)
+    return reponse

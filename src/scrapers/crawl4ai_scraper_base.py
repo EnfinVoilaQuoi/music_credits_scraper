@@ -430,6 +430,12 @@ class CrawlAIScraperBase:
             async with scraper.session() as sess:
                 html = await sess.fetch(url, wait_for="css:…")
         """
+        from src.persistence import brut
+
+        if brut.rejeu_actif():
+            # Rejeu (chantier E) : les pages viennent du brut, aucun navigateur.
+            yield _BrowserSession(self, None)
+            return
         from patchright.async_api import async_playwright
 
         profile_dir = self.profile_dir or _profile_dir()
@@ -585,8 +591,17 @@ class _BrowserSession:
         """Navigue et rend le HTML rendu, ou `None` si la page n'est pas venue.
 
         `viewport` : taille de fenêtre le temps de CETTE page, rétablie après
-        (une liste virtualisée ne rend que ce qui tient à l'écran)."""
+        (une liste virtualisée ne rend que ce qui tient à l'écran).
+
+        Point de passage des pages de session (chantier E) : en REJEU, la page
+        gardée sous son URL (jamais le navigateur) ; sinon le HTML rendu d'une
+        source activée est gardé brut, avec le statut de la navigation."""
+        from src.persistence import brut
+
         key = self._scraper.health_key
+        if brut.rejeu_actif():
+            lu = brut.servir(key, url)
+            return lu[1].decode("utf-8") if lu else None
         avant = None
         if viewport:
             avant = self._page.viewport_size
@@ -609,8 +624,12 @@ class _BrowserSession:
     async def _fetch(
         self, url, key, wait_for, js_before_wait, wait_timeout, page_timeout, delay_before_return
     ) -> str | None:
+        from src.persistence import brut
+
         try:
-            await self._page.goto(url, wait_until="domcontentloaded", timeout=page_timeout)
+            reponse = await self._page.goto(
+                url, wait_until="domcontentloaded", timeout=page_timeout
+            )
             if wait_for and wait_for.startswith("css:"):
                 try:
                     await self._page.wait_for_selector(wait_for[4:], timeout=wait_timeout)
@@ -636,4 +655,5 @@ class _BrowserSession:
             source_usage.record_attempt(key, IssueKind.UNREACHABLE, detail="session : page vide")
             return None
         source_usage.record_attempt(key, IssueKind.OK, detail="session")
+        brut.consigner(key, url, reponse.status if reponse else None, html.encode("utf-8"))
         return html

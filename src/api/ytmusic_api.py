@@ -14,7 +14,6 @@ import unicodedata
 from urllib.parse import quote, unquote
 
 import requests
-from ytmusicapi import YTMusic
 from ytmusicapi.exceptions import YTMusicError
 
 # googleapiclient est une dépendance OPTIONNELLE (YouTube Data API v3, importée en
@@ -29,6 +28,7 @@ except ImportError:  # pragma: no cover
         """Sentinelle quand googleapiclient est absent (jamais levée)."""
 
 
+from src.api import ytmusic_brut
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.utils.duree_youtube import iso8601_secondes
@@ -144,7 +144,8 @@ class YTMusicAPI:
     """
 
     def __init__(self):
-        self.yt = YTMusic()
+        # Le brut de chaque réponse est gardé (chantier E, `ytmusic_brut`).
+        self.yt = ytmusic_brut.client()
         self._use_yt_api = bool(YOUTUBE_API_KEY)
         if self._use_yt_api:
             logger.info("YTMusicAPI : YouTube Data API v3 disponible (viewCount exact)")

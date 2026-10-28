@@ -320,9 +320,9 @@ class YouTubeSearcher:
 
         # Tenter d'initialiser ytmusicapi
         try:
-            from ytmusicapi import YTMusic
+            from src.api import ytmusic_brut
 
-            self.ytmusic = YTMusic()
+            self.ytmusic = ytmusic_brut.client()  # brut gardé (chantier E)
             self.ytmusic_available = True
             logger.info("YTMusic initialisé avec succès")
         except ImportError:

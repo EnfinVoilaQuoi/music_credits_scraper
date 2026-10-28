@@ -57,6 +57,12 @@ SOURCES_ACTIVES: frozenset[str] = frozenset(
         "lrclib",
         "musicbrainz",
         "itunes",
+        # Lot 5 (2026-10-28) : les sources des durées vidéo, des vues YTM et
+        # des compteurs Spotify. YTM par la session de `ytmusicapi`
+        # (`ytmusic_brut`, réponses vides ou bridées comprises) ; les pages
+        # Spotify RENDUES par la session navigateur (`_BrowserSession`).
+        "ytmusic",
+        "spotify_web",
     }
 )
 #: Lectures DIFFÉRENTES gardées par requête.
@@ -249,14 +255,23 @@ def rejeu_actif() -> bool:
     return _rejeu["actif"]
 
 
+def bridee(statut: int | None, corps: bytes) -> bool:
+    """PUR. Une lecture où la source n'a pas RÉPONDU : corps vide, 429, 5xx.
+    Un 404 est une réponse (une absence prouvée), pas une lecture bridée."""
+    return not bytes(corps).strip() or statut == 429 or (statut or 0) >= 500
+
+
 def servir(source: str | None, url: str, params=None) -> tuple[int, bytes] | None:
     """En rejeu : `(statut, corps)` de la dernière lecture gardée, ou None (et
-    l'absence est comptée) — jamais d'appel réseau."""
+    l'absence est comptée) — jamais d'appel réseau. Une lecture BRIDÉE (gardée
+    pour prouver que la source n'a pas répondu) ne masque pas une lecture
+    utilisable plus ancienne ; seule, elle est servie telle quelle."""
     if source in SOURCES_ACTIVES:
         lus = lectures(source, url, params)
         if lus:
             _rejeu["servies"] += 1
-            return lus[0]["statut"] or 200, lus[0]["corps"]
+            lu = next((x for x in lus if not bridee(x["statut"], x["corps"])), lus[0])
+            return lu["statut"] or 200, lu["corps"]
     _rejeu["absentes"].append(f"{source or '?'} {url_sans_secret(url, params)}")
     return None
 

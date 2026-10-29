@@ -62,11 +62,31 @@ class Politique:
 # ── Durées ──────────────────────────────────────────────────────────────────
 
 
+#: Source lue par une RECHERCHE de paroles (titre + artiste), sans identifiant ;
+#: `_HIT` la renomme hors de la famille `youtube` du vote quand elle est jugée.
+_HIT_DE_RECHERCHE = "ytmusic"
+_HIT = "ytmusic_recherche"
+
+
 def _dementie(durees: dict, source: str, editions, minimum: int):
     """La valeur de `source` est démentie FORMELLEMENT : au moins `minimum`
     catalogues SOLIDES d'autres familles la contredisent, ils s'accordent entre
     eux (à la tolérance du vote), aucun autre catalogue ne la soutient. Rend la
     durée commune des contradicteurs, sinon None."""
+    audio = durees.get(revue.SOURCE_AUDIO)
+    if (
+        source == _HIT_DE_RECHERCHE
+        and durees.get(source)
+        and audio
+        and abs(int(audio) - int(durees[source])) > TOLERANCE_S
+    ):
+        # La piste YTM est le HIT d'une recherche de paroles par titre, l'audio
+        # Topic une vidéo lue par son ID : en désaccord, ce sont deux fichiers,
+        # et l'audio dément le hit malgré leur famille commune (Kanye
+        # « Monster » #11401, 2026-10-29 : YTM 150 s, Topic et Apple 379 s —
+        # sans lui, Apple restait seul et le cas allait à l'humain).
+        durees = {**{s: d for s, d in durees.items() if s != source}, _HIT: durees[source]}
+        source = _HIT
     valeur = durees.get(source)
     vote = voter(durees, valeur, editions=editions) if valeur else None
     if vote is None or vote.nature != ISOLEE or "manual" in durees:

@@ -1,30 +1,19 @@
-"""Scraper pour récupérer le BPM depuis songbpm.com — version Playwright"""
+"""SongBPM — la LOGIQUE du scraper (matching artiste/titre, choix d'un résultat,
+lecture du texte d'une page de détail), sans navigateur.
+
+Le navigateur vit dans `SongBPMScraperAsync` (sous-classe, boucle asyncio) : la
+voie sync (Playwright bloquant) n'avait plus d'appelant en production et a été
+retirée. Cette classe reste la base de la logique PURE, que les cassettes et le
+juge de rapprochement appellent sans réseau (`choisir_resultat`).
+"""
 
 import re
-import threading
 from typing import Any
 
-from playwright.sync_api import (
-    Browser,
-    BrowserContext,
-    Page,
-)
-from playwright.sync_api import (
-    Error as PlaywrightError,
-)
-from playwright.sync_api import (
-    Playwright as PlaywrightInstance,
-)
-from playwright.sync_api import (
-    TimeoutError as PlaywrightTimeoutError,
-)
-
 from src.observability import source_usage
-from src.observability.issues import IssueKind
 from src.persistence import brut
-from src.scrapers.playwright_manager import get_playwright
 from src.utils.corrections_fiches import cle_page_songbpm
-from src.utils.logger import get_logger, log_api
+from src.utils.logger import get_logger
 from src.utils.title_matching import either_contains_as_words
 from src.utils.version_descriptors import meme_version_mesuree
 
@@ -35,72 +24,20 @@ _SOURCE = "songbpm"
 
 
 class SongBPMScraper:
-    """Scrape songbpm.com pour obtenir le BPM, Key et Duration (Playwright)"""
+    """Logique de songbpm.com : BPM, Key et Duration (le transport est dans l'async)."""
 
     def __init__(self, headless: bool = False):
         self.base_url = "https://songbpm.com/"
         self.headless = headless
-        self._playwright: PlaywrightInstance | None = None
-        self.browser: Browser | None = None
-        self.context: BrowserContext | None = None
-        self.page: Page | None = None
+        # Posés par la sous-classe async (objets `playwright.async_api`).
+        self._playwright: Any = None
+        self.browser: Any = None
+        self.context: Any = None
+        self.page: Any = None
         self.spotify_id_pattern = re.compile(
             r"spotify\.com/(?:intl-[a-z]{2}/)?track/([a-zA-Z0-9]{22})"
         )
-        self._owner_thread: int | None = None
-        # Init PARESSEUSE : driver créé au premier usage, dans le thread utilisateur
         logger.info(f"SongBPMScraper initialisé (headless={self.headless}, driver lazy)")
-
-    def _init_driver(self):
-        try:
-            logger.info(f"🌐 Initialisation Playwright SongBPM (headless={self.headless})...")
-            self._playwright = get_playwright()
-            self._owner_thread = threading.get_ident()
-            self.browser = self._playwright.chromium.launch(
-                headless=self.headless,
-                args=[
-                    "--no-sandbox",
-                    "--disable-dev-shm-usage",
-                    "--disable-gpu",
-                    "--disable-webgl",
-                    "--disable-webgl2",
-                ],
-            )
-            self.context = self.browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            )
-            # Bloquer les images pour accélérer
-            self.context.route("**/*.{png,jpg,jpeg,gif,webp,svg,ico}", lambda route: route.abort())
-            self.page = self.context.new_page()
-            self.page.add_init_script(
-                "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-            )
-            logger.info("✅ SongBPM: Playwright initialisé avec succès")
-        except Exception as e:
-            logger.error(f"❌ Erreur initialisation Playwright SongBPM: {e}")
-            self._cleanup_resources()
-            raise
-
-    def _cleanup_resources(self):
-        # NB: ne pas stopper self._playwright — instance partagée (playwright_manager)
-        for attr in ("page", "context", "browser"):
-            obj = getattr(self, attr, None)
-            if obj:
-                try:
-                    obj.close()
-                except PlaywrightError:
-                    pass
-                setattr(self, attr, None)
-
-    def _ensure_driver(self):
-        """Crée (ou re-crée) le driver si absent ou créé dans un autre thread."""
-        if self.page is not None and self._owner_thread == threading.get_ident():
-            return
-        if self.page is not None:
-            logger.info("♻️ SongBPM: changement de thread détecté — réinitialisation du driver")
-        self._cleanup_resources()
-        self._init_driver()
 
     # ──────────────────────────────────────────────────────────────────────────
     # Méthodes de logique pure (inchangées par rapport à v1)
@@ -146,7 +83,7 @@ class SongBPMScraper:
         """Une navigation = une TENTATIVE (statut HTTP), sous l'observation en
         cours. Sans elles, un succès sortait `indeterminate` et une panne
         avalée devenait `absent` (2026-09-29 : 186 `indeterminate` en un jour).
-        Commun aux deux jumeaux : `goto` rend la réponse, ou `None`."""
+        `goto` rend la réponse, ou `None`."""
         if reponse is not None:
             source_usage.record_response(reponse.url, reponse.status, source_key=_SOURCE)
 
@@ -154,7 +91,7 @@ class SongBPMScraper:
     def _garder(url: str, statut: int | None, html: str | None) -> None:
         """La page rendue va au brut (chantier E) : SongBPM se lit par le DOM,
         sans réponse HTTP à intercepter — c'est le HTML que les sélecteurs ont
-        lu qui est gardé. Commun aux deux jumeaux ; ne lève jamais."""
+        lu qui est gardé. Ne lève jamais."""
         if html:
             brut.consigner(_SOURCE, url, statut, html.encode("utf-8"))
 
@@ -338,78 +275,9 @@ class SongBPMScraper:
             f"non corroboré par une durée indépendante ({duree_fiche or 'aucune'})"
         )
 
-    # ──────────────────────────────────────────────────────────────────────────
-    # Gestion cookies (Playwright)
-    # ──────────────────────────────────────────────────────────────────────────
-
-    def _handle_cookies(self):
-        try:
-            agree_selectors = [
-                ".qc-cmp2-summary-buttons button[mode='primary']",
-                "button.css-47sehv",
-                "button:has-text('AGREE')",
-                "button:has-text('Accept all')",
-                "button:has-text('Accept')",
-                "button:has-text('I understand')",
-            ]
-            for selector in agree_selectors:
-                try:
-                    btn = self.page.query_selector(selector)
-                    if btn and btn.is_visible():
-                        btn.click()
-                        logger.info(f"✅ Popup cookies fermé via: {selector}")
-                        return
-                except PlaywrightError:
-                    continue
-        except PlaywrightError as e:
-            logger.debug(f"Gestion cookies (non bloquant): {e}")
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # Extraction des détails (page de détail d'un morceau)
-    # ──────────────────────────────────────────────────────────────────────────
-
-    def _extract_track_details(self, detail_url: str, timeout: int = 30) -> dict[str, Any]:
-        details = {}
-        try:
-            # Les liens du site sont relatifs (/@artiste/titre) → URL absolue requise
-            if detail_url.startswith("/"):
-                detail_url = "https://songbpm.com" + detail_url
-            logger.info(f"📄 Navigation détails: {detail_url}")
-            reponse = self.page.goto(
-                detail_url, wait_until="domcontentloaded", timeout=timeout * 1000
-            )
-            self._noter_reponse(reponse)
-            self._garder(self.page.url, reponse.status if reponse else None, self.page.content())
-
-            content_selectors = [
-                "div.lg\\:prose-xl",
-                "div[class*='prose']",
-                "main",
-                "article",
-            ]
-            full_text = None
-            for selector in content_selectors:
-                el = self.page.query_selector(selector)
-                if el and el.is_visible():
-                    full_text = el.inner_text()
-                    break
-
-            if not full_text:
-                body = self.page.query_selector("body")
-                full_text = body.inner_text() if body else ""
-
-            clean_text = re.sub(r"\s+", " ", full_text).replace("\xa0", " ")
-            details = self._details_from_text(clean_text)
-            logger.info(f"✅ Détails extraits: {details}")
-        except PlaywrightTimeoutError:
-            logger.warning(f"⏰ Timeout ({timeout}s) lors de la récupération des détails")
-        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
-            logger.error(f"❌ Erreur extraction détails: {e}")
-        return details
-
     def _details_from_text(self, clean_text: str) -> dict[str, Any]:
         """Mode/key/time_signature depuis le texte de la page de détail
-        (regex) — logique PURE, commune sync/async (F3c). Le repli LLM est
+        (regex) — logique PURE. Le repli LLM est
         retiré (2026-10-12) : il comblait `key_from_paragraph` et
         `time_signature`, que le fournisseur ne relit pas ; le mode, seul champ
         utile, est lu par regex."""
@@ -438,293 +306,3 @@ class SongBPMScraper:
             details["time_signature"] = int(time_sig_match.group(1))
 
         return details
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # Recherche sur SongBPM
-    # ──────────────────────────────────────────────────────────────────────────
-
-    def _get_search_results(self) -> list[dict[str, Any]]:
-        results = []
-        try:
-            containers = self.page.query_selector_all("div.bg-card")
-            logger.debug(f"📋 {len(containers)} conteneurs trouvés")
-
-            for container in containers:
-                try:
-                    result = {}
-
-                    track_links = container.query_selector_all("a[href*='/@']")
-                    if not track_links:
-                        continue
-
-                    track_link = track_links[0]
-                    href = track_link.get_attribute("href") or ""
-                    if "/@" not in href:
-                        continue
-                    path = href.split("songbpm.com")[-1] if "songbpm.com" in href else href
-                    if path.count("/") < 2:
-                        continue
-                    if any(
-                        s in href.lower()
-                        for s in ["/apple-music", "/spotify", "/amazon", "/youtube"]
-                    ):
-                        continue
-
-                    result["detail_url"] = href
-
-                    # Titre et artiste
-                    info_divs = track_link.query_selector_all("div.flex-1")
-                    for info_div in info_divs:
-                        paragraphs = info_div.query_selector_all("p")
-                        if len(paragraphs) >= 2:
-                            artist_class = paragraphs[0].get_attribute("class") or ""
-                            title_class = paragraphs[1].get_attribute("class") or ""
-                            if "text-sm" in artist_class and (
-                                "text-lg" in title_class or "text-2xl" in title_class
-                            ):
-                                result["artist"] = paragraphs[0].inner_text().strip()
-                                result["title"] = paragraphs[1].inner_text().strip()
-                                break
-
-                    if "title" not in result or "artist" not in result:
-                        continue
-
-                    # BPM, Key, Duration
-                    metrics = track_link.query_selector_all("div.flex.flex-1.flex-col.items-center")
-                    for metric in metrics:
-                        spans = metric.query_selector_all("span")
-                        if len(spans) >= 2:
-                            label = spans[0].inner_text().strip().upper()
-                            value = spans[1].inner_text().strip()
-                            if label == "BPM":
-                                try:
-                                    result["bpm"] = int(value)
-                                except ValueError:
-                                    pass
-                            elif label == "KEY":
-                                result["key"] = value
-                            elif label == "DURATION":
-                                result["duration"] = value
-
-                    # Spotify ID
-                    spotify_links = container.query_selector_all("a[href*='spotify.com/track/']")
-                    if spotify_links:
-                        spotify_url = spotify_links[0].get_attribute("href") or ""
-                        sid = self._extract_spotify_id_from_url(spotify_url)
-                        if sid:
-                            result["spotify_id"] = sid
-                            result["spotify_url"] = spotify_url
-
-                    if "title" in result and "artist" in result and "detail_url" in result:
-                        results.append(result)
-                        logger.info(f"✅ Résultat: {result['artist']} - {result['title']}")
-
-                except (
-                    PlaywrightError,
-                    AttributeError,
-                    KeyError,
-                    IndexError,
-                    TypeError,
-                    ValueError,
-                ) as e:
-                    logger.debug(f"Erreur conteneur: {e}")
-                    continue
-
-        except (PlaywrightError, AttributeError, KeyError, IndexError, TypeError, ValueError) as e:
-            logger.error(f"❌ Erreur extraction résultats: {e}")
-        return results
-
-    def _perform_search(
-        self,
-        track_title: str,
-        artist_name: str,
-        spotify_id: str | None = None,
-        max_results_to_check: int = 5,
-        fetch_details: bool = True,
-        reload_homepage: bool = True,
-        titre_juge: str | None = None,
-        pages_refusees: frozenset[str] | set[str] = frozenset(),
-        garde=None,
-        duree_fiche: int | None = None,
-    ) -> dict[str, Any] | None:
-        try:
-            if reload_homepage:
-                logger.info("🌐 Chargement page d'accueil SongBPM...")
-                self._noter_reponse(
-                    self.page.goto(self.base_url, wait_until="domcontentloaded", timeout=30_000)
-                )
-                self._handle_cookies()
-
-            search_selector = "input[name='query'][placeholder='type a song, get a bpm']"
-            try:
-                self.page.wait_for_selector(search_selector, timeout=10_000)
-            except PlaywrightTimeoutError:
-                logger.error("⏰ Champ de recherche introuvable")
-                source_usage.record_attempt(
-                    _SOURCE, IssueKind.PARSE, detail="champ de recherche introuvable"
-                )
-                return None
-
-            search_query = f"{artist_name} {track_title}"
-            logger.info(f"🔍 Recherche: '{search_query}'")
-            self.page.fill(search_selector, search_query)
-            self.page.press(search_selector, "Enter")
-
-            # Attendre les résultats
-            try:
-                self.page.wait_for_selector("div.bg-card", timeout=10_000)
-            except PlaywrightTimeoutError:
-                logger.warning(f"❌ Aucun résultat pour '{track_title}'")
-                return None
-
-            self._garder(self.page.url, None, self.page.content())
-            results = self._get_search_results()
-            if not results:
-                return None
-
-            # `titre_juge` : le titre COMPLET quand la requête a été
-            # nettoyée — sinon « Blues (Live at AK Studios) » cherché comme
-            # « Blues » acceptait la page de l'original (2026-09-27).
-            choix = self.choisir_resultat(
-                results,
-                titre_juge or track_title,
-                artist_name,
-                spotify_id,
-                max_results_to_check,
-                pages_refusees,
-                garde,
-                duree_fiche,
-            )
-            if choix is not None:
-                i, result = choix
-                logger.info(f"✅ Correspondance trouvée (résultat #{i})")
-                if fetch_details and result.get("detail_url"):
-                    try:
-                        details = self._extract_track_details(result["detail_url"])
-                        result.update(details)
-                    except (
-                        PlaywrightError,
-                        AttributeError,
-                        KeyError,
-                        TypeError,
-                        ValueError,
-                    ) as e:
-                        logger.warning(f"⚠️ Détails inaccessibles: {e}")
-                log_api("SongBPM", f"search/{track_title}", True)
-                return result
-
-            logger.info(
-                f"∅ Aucune correspondance parmi {min(len(results), max_results_to_check)} résultat(s)"
-            )
-            return None
-
-        except PlaywrightTimeoutError as e:
-            source_usage.note_failure(_SOURCE, e)
-            logger.error("❌ SongBPM: Timeout Playwright")
-            self._reset_browser_on_error()
-            return None
-        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
-            source_usage.note_failure(_SOURCE, e)
-            logger.error(f"❌ SongBPM: Erreur recherche: {e}")
-            self._reset_browser_on_error()
-            return None
-
-    def search_track(
-        self,
-        track_title: str,
-        artist_name: str,
-        spotify_id: str | None = None,
-        max_results_to_check: int = 5,
-        fetch_details: bool = True,
-        pages_refusees: frozenset[str] | set[str] = frozenset(),
-        garde=None,
-        duree_fiche: int | None = None,
-    ) -> dict[str, Any] | None:
-        self._ensure_driver()
-        if not self.page:
-            logger.error("❌ SongBPM: Browser non initialisé")
-            return None
-
-        logger.info(f"🔍 SongBPM: '{track_title}' par {artist_name}")
-        # UNE observation : la recherche et son repli « sans parenthèses » sont
-        # deux essais du même appel logique.
-        with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_title}") as obs:
-            return self._search_track_body(
-                obs,
-                track_title,
-                artist_name,
-                spotify_id,
-                max_results_to_check,
-                fetch_details,
-                pages_refusees,
-                garde,
-                duree_fiche,
-            )
-
-    def _search_track_body(
-        self,
-        obs,
-        track_title: str,
-        artist_name: str,
-        spotify_id: str | None,
-        max_results_to_check: int,
-        fetch_details: bool,
-        pages_refusees: frozenset[str] | set[str] = frozenset(),
-        garde=None,
-        duree_fiche: int | None = None,
-    ):
-        """Corps de `search_track`, sous l'observation ouverte par elle."""
-        result = self._perform_search(
-            track_title=track_title,
-            artist_name=artist_name,
-            spotify_id=spotify_id,
-            max_results_to_check=max_results_to_check,
-            fetch_details=fetch_details,
-            pages_refusees=pages_refusees,
-            garde=garde,
-            duree_fiche=duree_fiche,
-        )
-        if result:
-            log_api("SongBPM", f"search/{track_title}", True)
-            obs.ok()
-            return result
-
-        # Fallback sans parenthèses
-        if re.search(r"[\(\)\[\]]", track_title):
-            cleaned = self._remove_parentheses_and_brackets(track_title)
-            if cleaned and cleaned != track_title:
-                logger.info(f"🔄 Nouvelle tentative: '{cleaned}'")
-                result = self._perform_search(
-                    track_title=cleaned,
-                    artist_name=artist_name,
-                    spotify_id=spotify_id,
-                    max_results_to_check=max_results_to_check,
-                    fetch_details=fetch_details,
-                    reload_homepage=False,
-                    titre_juge=track_title,
-                    pages_refusees=pages_refusees,
-                    garde=garde,
-                    duree_fiche=duree_fiche,
-                )
-                if result:
-                    log_api("SongBPM", f"search/{track_title}", True)
-                    obs.ok()
-                    return result
-
-        log_api("SongBPM", f"search/{track_title}", False)
-        obs.absent("aucun résultat retenu")
-        return None
-
-    def _reset_browser_on_error(self):
-        logger.warning("⚠️ Réinitialisation du browser après erreur")
-        self._cleanup_resources()
-
-    def close(self):
-        self._cleanup_resources()
-        logger.info("✅ SongBPM: Browser fermé")
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        self.close()

@@ -1,9 +1,9 @@
 """Provider SongBPM (scrape) — DÉPARTAGE du vote BPM + Key/Mode/Duration/Spotify ID.
 
-Corps historique de `DataEnricher._enrich_with_songbpm`, déplacé sans changement
-de logique. Le timeout de garde (threading.Timer 30 s) déménage tel quel ; il
-sera remplacé par asyncio.timeout en phase F. Le BPM alimente le scrutin (§8.3),
-le Spotify ID trouvé est validé par la fonction d'unicité fournie via le contexte.
+Une seule voie : ASYNC (scraper Playwright dans la boucle, garde `asyncio.timeout`).
+La voie sync (scraper bloquant sur le thread du run) n'avait plus d'appelant en
+production depuis que `DataEnricher` fournit toujours la variante async : retirée.
+Le BPM alimente le scrutin (§8.3) ; l'ID Spotify trouvé n'est que proposé.
 """
 
 import asyncio
@@ -28,7 +28,6 @@ from src.utils.track_mapper import _clean_duration
 from src.utils.version_descriptors import titre_generique
 
 logger = get_logger(__name__)
-# playwright sync/async partagent Error/TimeoutError (TimeoutError ⊂ Error).
 
 
 def fiche_du_meme_id(track: Track, spotify_id: str | None, artist_tracks) -> Track | None:
@@ -74,24 +73,20 @@ class SongBpmProvider:
     # « tout a échoué » qui déclenche le nettoyage de l'orchestrateur.
     error_result = None
 
-    def __init__(self, scraper=None, scraper_factory=None, async_scraper_factory=None):
-        # PROPRIÉTAIRE de son scraper (créé lazy, fermé par close()).
+    def __init__(self, scraper=None, scraper_factory=None):
+        # PROPRIÉTAIRE de son scraper ASYNC (créé lazy dans la boucle, fermé par aclose()).
         self._resource = LazyResource(scraper, scraper_factory, label="scraper SongBPM")
-        # Variante ASYNC (F3c) : vit dans la boucle, fermée par aclose().
-        self._async_resource = LazyResource(
-            None, async_scraper_factory, label="scraper SongBPM async"
-        )
 
     def is_available(self) -> bool:
         return self._resource.available()
 
     def close(self) -> None:
-        """Ferme le scraper si ce provider l'a créé (recréé au run suivant)."""
-        self._resource.close()
+        """Rien à fermer ici : le scraper vit dans la boucle asyncio, fermé par
+        `aclose()` (le browser meurt là où il est né)."""
 
     async def aclose(self) -> None:
-        """Ferme le scraper ASYNC s'il l'a créé (browsers de la boucle, F3c)."""
-        await self._async_resource.aclose()
+        """Ferme le scraper s'il l'a créé (browsers de la boucle, F3c)."""
+        await self._resource.aclose()
 
     def gate(self, track: Track, ctx: EnrichmentContext) -> str | None:
         """DÉPARTAGE (§8.3) : scrape seulement si les APIs n'ont pas de consensus
@@ -141,7 +136,7 @@ class SongBpmProvider:
 
     @staticmethod
     def _artist_name(track: Track) -> str:
-        """Artiste de recherche : artiste principal si featuring (commun sync/async)."""
+        """Artiste de recherche : artiste principal si featuring."""
         if track.is_featuring and track.primary_artist_name:
             logger.info(
                 f"🎤 Featuring détecté, utilisation de l'artiste principal: "
@@ -152,75 +147,11 @@ class SongBpmProvider:
 
     def _validated_spotify_id(self, track: Track, ctx: EnrichmentContext) -> str | None:
         """Spotify ID du track, ignoré s'il est revendiqué par un autre titre
-        (commun sync/async ; règle partagée avec ReccoBeats)."""
+        (règle partagée avec ReccoBeats)."""
         return ctx.spotify_id_utilisable(track, "SongBPM")
 
-    def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
-        scraper = self._resource.get()
-        if not scraper:
-            return False
-
-        try:
-            artist_name = self._artist_name(track)
-            spotify_id = self._validated_spotify_id(track, ctx)
-
-            # Timeout de garde (30 s) : un Timer invalide un résultat trop tardif.
-            # NOTE (AUDIT.md §3.6) : l'ancien code tentait de fermer un attribut
-            # Selenium `.driver` qui n'existe plus depuis la migration Playwright
-            # (no-op silencieux). On ne force PAS la fermeture depuis le thread du
-            # Timer : l'API sync de Playwright n'est pas thread-safe, et le scraper
-            # applique déjà ses propres timeouts de navigation (goto timeout=30s).
-            # (Branche Unix `signal.alarm` supprimée le 2026-07-11 — app Windows-only.)
-            # Voie ASYNC : remplacé par asyncio.timeout (cf. enrich_async, F3c).
-            import threading
-
-            timeout_seconds = 30
-
-            track_data = None
-            timer_expired = {"value": False}
-
-            def timeout_func():
-                timer_expired["value"] = True
-
-            timer = threading.Timer(timeout_seconds, timeout_func)
-            timer.start()
-
-            try:
-                track_data = scraper.search_track(
-                    track.title,
-                    artist_name,
-                    spotify_id=spotify_id,
-                    fetch_details=True,
-                    pages_refusees=pages_songbpm_refusees(track),
-                    garde=garde_pour(track, EXCLUES_SONGBPM),
-                    duree_fiche=duree_independante(
-                        track.durations_observees, sources_exclues=EXCLUES_SONGBPM
-                    ),
-                )
-            finally:
-                timer.cancel()
-
-            if timer_expired["value"]:
-                logger.warning(
-                    f"⏰ SongBPM : délai de {timeout_seconds}s dépassé pour "
-                    f"'{track.title}' — résultat ignoré"
-                )
-                return False
-
-            if not track_data:
-                return False
-
-            return self._apply_track_data(track, ctx, track_data)
-
-        except TimeoutError as e:
-            logger.warning(f"⏰ SongBPM : délai dépassé pour '{track.title}' : {e}")
-            return False
-        except (PlaywrightError, KeyError, TypeError, ValueError) as e:
-            logger.error(f"Erreur SongBPM pour {track.title}: {e}")
-            return False
-
     def _apply_track_data(self, track: Track, ctx: EnrichmentContext, track_data: dict) -> bool:
-        """Application des données SongBPM au track (commun sync/async)."""
+        """Application des données SongBPM au track."""
         force_update = ctx.force_update
         artist_tracks = ctx.artist_tracks
         updated = False
@@ -311,14 +242,12 @@ class SongBpmProvider:
         return updated
 
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
-        """Voie async (F3c) : scraper Playwright ASYNC natif dans la boucle ;
-        `asyncio.timeout(30)` remplace le threading.Timer de garde — même
-        budget, mais l'annulation INTERROMPT la recherche (le Timer laissait
-        finir et jetait le résultat) et le driver est recyclé pour repartir
-        sain. Sans variante async configurée, repli sur le pont sync F2."""
-        scraper = self._async_resource.get()
+        """Scraper Playwright ASYNC natif dans la boucle ; `asyncio.timeout(30)`
+        borne la recherche — budget, mais l'annulation INTERROMPT la recherche et le driver est
+        recyclé pour repartir sain."""
+        scraper = self._resource.get()
         if scraper is None:
-            return await ctx.sync_runner.run(self.enrich, track, ctx)
+            return False
 
         try:
             artist_name = self._artist_name(track)

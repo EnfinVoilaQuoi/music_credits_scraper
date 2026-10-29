@@ -12,8 +12,6 @@ from src.api.getsongbpm_api import GetSongBPMFetcher
 from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 from src.concurrency.serial_worker import SerialWorker
 from src.models import Track
-from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
-from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
 from src.utils.bpm_vote import BpmBallot
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_title
@@ -87,9 +85,8 @@ class DataEnricher:
         from src.scrapers.spotify_id_scraper_async import SpotifyIDScraperAsync
 
         self._spotify_id_provider = SpotifyIdProvider(
-            scraper_factory=lambda: SpotifyIDScraper(headless=headless_spotify_scraper),
-            # Variante ASYNC (F3b) : vit dans la boucle, fermée par aclose().
-            async_scraper_factory=lambda: SpotifyIDScraperAsync(headless=headless_spotify_scraper),
+            # Scraper ASYNC (F3b) : vit dans la boucle, fermé par aclose().
+            scraper_factory=lambda: SpotifyIDScraperAsync(headless=headless_spotify_scraper),
         )
         self._reccobeats_provider = ReccoBeatsProvider(
             client_factory=lambda: ReccoBeatsIntegratedClient(headless=headless_reccobeats),
@@ -103,9 +100,8 @@ class DataEnricher:
         from src.scrapers.songbpm_scraper_async import SongBPMScraperAsync
 
         self._songbpm_provider = SongBpmProvider(
-            scraper_factory=lambda: SongBPMScraper(headless=headless_songbpm),
-            # Variante ASYNC (F3c) : vit dans la boucle, fermée par aclose().
-            async_scraper_factory=lambda: SongBPMScraperAsync(headless=headless_songbpm),
+            # Scraper ASYNC (F3c) : vit dans la boucle, fermé par aclose().
+            scraper_factory=lambda: SongBPMScraperAsync(headless=headless_songbpm),
         )
         # BPM Finder (audioaidynamics) RETIRÉ le 2026-10-11 (décision utilisateur) :
         # 61 % d'échecs sur 30 jours, 22-25 % de désaccord sur le BPM et 50 % sur
@@ -230,10 +226,6 @@ class DataEnricher:
             f"déjà revendiqué par un autre titre, '{titre_tiers}'"
         )
         return False
-
-    # get_unique_spotify_id : déplacé dans src/enrichment/providers/spotify_id.py
-    # (SpotifyIdProvider.get_unique_spotify_id). L'unicité d'ID reste
-    # validate_spotify_id_unique ci-dessus (partagée, injectée via le contexte).
 
     # ================== NOUVEAU: NETTOYAGE DES DONNÉES ERRONÉES ==================
 

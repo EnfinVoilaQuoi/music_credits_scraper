@@ -6,9 +6,8 @@ mort, soit un « pas sur Spotify » permanent. La distinction existait déjà da
 l'observabilité (`absent` vs `timeout/unreachable/crash/…`) : `exiger_reponse`
 la relit à la sortie d'`observe()` et lève `SansReponse`, sans second verdict.
 
-Au passage : le jumeau ASYNC du scraper Spotify ID (celui que l'app emprunte)
-n'avait ni le plancher de pertinence ni le filtre du choix LLM — la fin de
-recherche est désormais PARTAGÉE, et testée ici sur les DEUX voies.
+Au passage : la fin de recherche du scraper Spotify ID (plancher de pertinence,
+constat d'absence) est testée ici sur la variante async, la seule qui cherche.
 """
 
 import asyncio
@@ -22,7 +21,6 @@ from src.models.track import Track
 from src.observability import source_usage
 from src.observability.issues import IssueKind, SansReponse, classify_exception
 from src.scrapers.spotify_id_scraper_async import SpotifyIDScraperAsync
-from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
 
 # ── Observabilité ────────────────────────────────────────────────────────────
 
@@ -135,14 +133,6 @@ class _PageAsync(_Page):
         return [_LienAsync(self.texte)]
 
 
-def _sync(tmp_path, texte):
-    s = SpotifyIDScraper(cache_file=str(tmp_path / "c.json"), headless=True)
-    s._ensure_driver = lambda: None
-    s._handle_cookies = lambda: None
-    s.page = _Page(texte)
-    return s, lambda: s.get_spotify_id("Isha", "Durag")
-
-
 def _async(tmp_path, texte):
     s = SpotifyIDScraperAsync(cache_file=str(tmp_path / "c.json"), headless=True)
 
@@ -155,9 +145,9 @@ def _async(tmp_path, texte):
     return s, lambda: asyncio.run(s.get_spotify_id_async("Isha", "Durag"))
 
 
-@pytest.fixture(params=[_sync, _async], ids=["sync", "async"])
-def jumeau(request, tmp_path):
-    return lambda texte: request.param(tmp_path, texte)
+@pytest.fixture
+def jumeau(tmp_path):
+    return lambda texte: _async(tmp_path, texte)
 
 
 class TestFinDeRecherchePartagee:
@@ -166,8 +156,8 @@ class TestFinDeRecherchePartagee:
         assert chercher() == _BON
         assert s.cache["isha::durag"] == _BON
 
-    def test_plancher_de_pertinence_sur_les_deux_voies(self, jumeau):
-        """Le jumeau async rendait `found_tracks[0]` quel que soit son score."""
+    def test_plancher_de_pertinence(self, jumeau):
+        """Sans plancher, `found_tracks[0]` était rendu quel que soit son score."""
         s, chercher = jumeau("une autre chanson de quelqu'un d'autre")
         assert chercher() is None  # absence CONSTATÉE : aucune exception
         assert s.cache["isha::durag"] == "not_found"
@@ -184,9 +174,6 @@ class TestFinDeRecherchePartagee:
 
 
 class _ScraperMuet:
-    def get_spotify_id(self, artist, title):
-        raise SansReponse("spotify_embed", IssueKind.CRASH, "browser mort")
-
     async def get_spotify_id_async(self, artist, title):
         raise SansReponse("spotify_embed", IssueKind.CRASH, "browser mort")
 
@@ -195,20 +182,9 @@ def _track():
     return Track(title="Durag", artist=Artist(name="Isha"))
 
 
-def test_provider_sync_ne_date_pas_une_panne():
+def test_provider_ne_date_pas_une_panne():
     track = _track()
-    assert (
-        SpotifyIdProvider(_ScraperMuet()).get_unique_spotify_id(
-            track, EnrichmentContext(), force_scraper=True
-        )
-        is None
-    )
-    assert track.spotify_id_checked_at is None
-
-
-def test_provider_async_ne_date_pas_une_panne():
-    track = _track()
-    provider = SpotifyIdProvider(async_scraper_factory=_ScraperMuet)
+    provider = SpotifyIdProvider(scraper_factory=_ScraperMuet)
     assert asyncio.run(provider.enrich_async(track, EnrichmentContext())) is False
     assert track.spotify_id_checked_at is None
 

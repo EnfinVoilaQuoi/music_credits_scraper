@@ -256,6 +256,52 @@ def test_orphelins_reccobeats_et_rattrapage(data_manager):
     assert orphelins_reccobeats(data_manager.engine) == []
 
 
+def test_rattrapage_reccobeats_passe_chez_les_soeurs(data_manager):
+    """Deux lignes SŒURS portent la même mesure ReccoBeats orpheline : la
+    retirer d'une seule, c'est la voir revenir par l'union de fin de
+    transaction au prochain `save_track` de l'autre (2026-10-29)."""
+    swing = Artist(name="Swing")
+    swing.id = data_manager.save_artist(swing)
+    isha = Artist(name="Isha")
+    isha.id = data_manager.save_artist(isha)
+    chez_swing = Track(title="Grünt #33", artist=swing)
+    chez_swing.genius_id = 3365192
+    chez_swing.id = data_manager.save_track(chez_swing)
+    chez_isha = Track(title="Grünt #33", artist=isha)
+    chez_isha.genius_id = 3365192
+    chez_isha.id = data_manager.save_track(chez_isha)
+    for ligne in (chez_swing, chez_isha):
+        data_manager.upsert_observations(
+            ligne.id,
+            [
+                Observation("duration", 3753, "reccobeats"),
+                Observation("bpm", 93, "reccobeats"),
+                Observation("reccobeats_resolution", "isrc", "reccobeats"),
+                Observation("duration", 316, "songbpm"),
+            ],
+        )
+
+    rapport = data_manager.clear_orphan_reccobeats_measures(chez_swing.id)
+    assert len(rapport["reccobeats_retirees"]) == 3
+    data_manager.save_track(chez_isha)
+
+    with data_manager.engine.connect() as conn:
+        restes = conn.execute(
+            text(
+                "SELECT track_id, field FROM observations "
+                "WHERE track_id IN (:a, :b) AND source = 'reccobeats'"
+            ),
+            {"a": chez_swing.id, "b": chez_isha.id},
+        ).all()
+        durees = conn.execute(
+            text("SELECT duration FROM tracks WHERE id IN (:a, :b)"),
+            {"a": chez_swing.id, "b": chez_isha.id},
+        ).scalars()
+        assert restes == []
+        assert [str(d) for d in durees] == ["316", "316"]
+    assert orphelins_reccobeats(data_manager.engine) == []
+
+
 # ── Lot 2 : ISRC hérités de l'ancien get_isrc (2026-09-23) ──────────────────
 
 

@@ -374,3 +374,60 @@ def test_synchro_forcee_garde_le_lrc_d_une_source_muette(data_manager):
             ).all()
         )
     assert restantes == {"lrclib": lrclib, "ytmusic": nouveau_ytm}
+
+
+def test_lrc_sans_duree_audio_ne_relit_que_les_lrc_lrclib_sans_audio(data_manager):
+    """2026-10-28 : la relecture forcée de LRCLIB pour Kanye ne tenait pas en 2 h.
+    `lrc_sans_duree_audio` ne passe au fournisseur que les fiches dont le LRC
+    LRCLIB n'a pas la durée de SON audio."""
+    from src.enrichment.observation import Observation
+    from src.utils.lrc_garde import CHAMP_DUREE_AUDIO
+
+    lrc = "[00:01.00] x\n[02:00.00] fin"
+    a = Artist(name="Kanye West")
+    a.id = data_manager.save_artist(a)
+    for titre, obs in (
+        ("Sans durée", [Observation("lyrics_synced", lrc, "lrclib")]),
+        (
+            "Avec durée",
+            [
+                Observation("lyrics_synced", lrc, "lrclib"),
+                Observation(CHAMP_DUREE_AUDIO, 130, "lrclib"),
+            ],
+        ),
+        ("LRC YTM seul", [Observation("lyrics_synced", lrc, "ytmusic")]),
+        ("Sans LRC", []),
+    ):
+        t = Track(title=titre, artist=a)
+        data_manager.save_track(t)
+        if obs:
+            data_manager.upsert_observations(t.id, obs)
+    fiches = data_manager.get_artist_tracks(a.id)
+
+    cl, _, lyrics = _clients()
+    opts = credits.OptionsCredits(
+        genius=False,
+        discogs=False,
+        youtube=False,
+        paroles_genius=False,
+        paroles_ytm=False,
+        sync_ytm=False,
+        force_sync=True,
+        lrc_sans_duree_audio=True,
+    )
+    rt = Runtime(
+        data_manager=data_manager, genius_api=None, data_enricher=None, deleted=None, disabled=None
+    )
+    bilan = credits.run(rt, a, fiches, opts, Hooks(), cl)
+    assert [titre for titre, *_ in lyrics.appels] == ["Sans durée"]
+    assert bilan.morceaux == 1
+
+
+def test_l_option_lrc_sans_duree_audio_passe_par_la_cli():
+    from src.cli import build_parser, options_credits
+
+    a = build_parser().parse_args(
+        ["credits", "Kanye West", "--force-sync", "--lrc-sans-duree-audio"]
+    )
+    assert options_credits(a).lrc_sans_duree_audio
+    assert not options_credits(build_parser().parse_args(["credits", "X"])).lrc_sans_duree_audio

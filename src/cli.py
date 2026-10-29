@@ -189,6 +189,11 @@ def _credits_args(p: argparse.ArgumentParser) -> None:
     _bool_flags(p, "ytm", True, "timestamps YTM (source 2)")
     _bool_flags(p, "musixmatch", False, "timestamps Musixmatch (dernier recours)")
     p.add_argument("--force-sync", action="store_true")
+    p.add_argument(
+        "--lrc-sans-duree-audio",
+        action="store_true",
+        help="seulement les fiches dont le LRC LRCLIB n'a pas la durée de son audio",
+    )
 
 
 def _enrich_args(p: argparse.ArgumentParser) -> None:
@@ -383,6 +388,7 @@ def options_credits(a: argparse.Namespace) -> credits.OptionsCredits:
         sync_ytm=a.ytm,
         sync_musixmatch=a.musixmatch,
         force_sync=a.force_sync,
+        lrc_sans_duree_audio=getattr(a, "lrc_sans_duree_audio", False),
     )
 
 

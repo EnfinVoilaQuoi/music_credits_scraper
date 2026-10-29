@@ -39,6 +39,10 @@ class OptionsCredits:
     sync_musixmatch: bool = False
     force_sync: bool = False
     tout_youtube: bool = False
+    #: Ne traiter que les fiches dont le LRC LRCLIB n'a pas la durée de SON audio
+    #: (lus avant le 2026-10-27) : avec `force_sync`, la relecture qui la pose
+    #: sans refaire toute la discographie (Kanye : 2 h ne suffisaient pas).
+    lrc_sans_duree_audio: bool = False
 
     @property
     def paroles(self) -> bool:
@@ -396,6 +400,15 @@ def _retablir_sans_reponse(
                     setattr(t.lyrics, c, etat[f"lyrics.{c}"])
 
 
+def lrc_sans_duree_audio(observations) -> bool:
+    """PUR. La fiche porte un LRC LRCLIB sans la durée de l'audio de cette lecture
+    (`CHAMP_DUREE_AUDIO`, posée à la lecture depuis le 2026-10-27) : la règle « un
+    LRC ne court pas au-delà de SON audio » ne peut pas le juger."""
+    lrc = {o.source for o in observations if o.field == "lyrics_synced"}
+    avec_duree = {o.source for o in observations if o.field == CHAMP_DUREE_AUDIO}
+    return "lrclib" in lrc - avec_duree
+
+
 @etape_de_flux("Crédits & paroles")
 def run(
     runtime: Runtime,
@@ -408,6 +421,12 @@ def run(
     """Les trois phases puis la sauvegarde. À appeler HORS de la boucle asyncio
     (les crawls Genius passent par `run_sync`), sous `run_scope(Flow.ENRICHMENT)`."""
     clients = clients or Clients()
+    if options.lrc_sans_duree_audio:
+        tracks = [
+            t
+            for t in tracks
+            if t.id and lrc_sans_duree_audio(runtime.data_manager.get_observations(t.id))
+        ]
     bilan = BilanCredits(morceaux=len(tracks))
     if not tracks:
         bilan.interrompu("aucun morceau à traiter")

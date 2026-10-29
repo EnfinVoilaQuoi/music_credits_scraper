@@ -17,7 +17,7 @@ from src.gui.dialogs import report
 from src.gui.workers.lifecycle import run_worker
 from src.observability import source_usage
 from src.observability.registry import Flow
-from src.services import identite
+from src.services import cycle, identite
 from src.services.runtime import Hooks
 from src.utils.logger import get_logger
 
@@ -166,14 +166,12 @@ def run_identite(app, options: identite.OptionsIdentite):
     def corps():
         try:
             artist.tracks = app.runtime.data_manager.discographie_reunie(artist)
-            bilan = identite.run(
-                app.runtime,
-                artist,
-                options,
-                Hooks(
-                    progress=progress, should_stop=stop_requested, confirmer_ecarts=confirmer_ecarts
-                ),
+            hooks = Hooks(
+                progress=progress, should_stop=stop_requested, confirmer_ecarts=confirmer_ecarts
             )
+            bilan = identite.run(app.runtime, artist, options, hooks)
+            # La passe du panneau, comme après `identite` seule en CLI.
+            cycle.corriger_apres_etape_seule(app.runtime, artist, "identite", bilan, hooks)
             texte = identite.resume(bilan, artist)
             app.root.after(0, app._update_artist_info)
             app.root.after(0, lambda: report.show_scrollable_report(app, "Identité", texte))

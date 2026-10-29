@@ -112,12 +112,22 @@ def executer_etape_seule(
     `CORRIGER_APRES_ETAPE_SEULE`, la passe du panneau sur la discographie
     rechargée — ce que le cycle complet fait une fois, à la fin."""
     b = executer_etape(runtime, artist, etape, options, hooks)
+    corriger_apres_etape_seule(runtime, artist, etape, b, hooks)
+    return b
+
+
+def corriger_apres_etape_seule(
+    runtime: Runtime, artist: Artist, etape: str, b: Bilan, hooks: Hooks
+) -> None:
+    """La passe du panneau après une étape lancée seule, pour
+    `CORRIGER_APRES_ETAPE_SEULE` — appelée aussi par les workers de la GUI CTk,
+    qui lancent le service de l'étape eux-mêmes (sans elle, rien ne la passait
+    après une Identité ou des Streams lancés depuis l'IHM)."""
     if etape in CORRIGER_APRES_ETAPE_SEULE and not hooks.should_stop():
         from src.services import revue_auto
 
         _recharger(runtime, artist)
         b.corrections = revue_auto.corriger_apres_run(runtime.data_manager, artist).appliquees
-    return b
 
 
 def executer_etape(

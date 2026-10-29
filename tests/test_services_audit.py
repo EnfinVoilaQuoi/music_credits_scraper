@@ -519,3 +519,31 @@ def test_une_duree_trop_courte_pour_ses_paroles(duree, paroles, fausse):
     from src.utils.duree_youtube import trop_courte_pour_les_paroles
 
     assert trop_courte_pour_les_paroles(duree, paroles) is fausse
+
+
+def test_duree_discogs_dementie_par_deezer_et_apple_hors_critere(data_manager, isha):
+    """CORRECTIFS D (2026-10-29) : 33 durées Discogs démenties par Deezer ET
+    Apple (B.B. Jacques « Donjon » 170 s pour 134 s). L'erreur est dans la
+    tracklist Discogs elle-même (release 24758360 : « Donjon » 2:50, « 2h22 »
+    2:14), pas dans le rapprochement par titre ; le run la repose. Discogs est
+    FRAGILE (contredit, ne soutient jamais) et 7e des priorités : la colonne
+    garde les catalogues, et l'audit ne compte rien au critère."""
+    from src.enrichment.observation import Observation
+
+    _, t = isha
+    data_manager.record_discography_observations(
+        t.id,
+        [
+            Observation("duration", 134, "deezer"),
+            Observation("duration", 134, "apple_music"),
+            Observation("duration", 134, "spotify_web"),
+            Observation("duration", 170, "discogs"),
+        ],
+    )
+    with data_manager.engine.connect() as conn:
+        colonne = conn.execute(
+            text("SELECT duration FROM tracks WHERE id = :t"), {"t": t.id}
+        ).scalar()
+    assert int(colonne) == 134
+    audit = au.auditer(data_manager, ["Isha"])
+    assert [c for c in audit.cas if t.id in c.pistes and c.nature in au.NATURES_DU_CRITERE] == []

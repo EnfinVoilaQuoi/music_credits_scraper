@@ -64,6 +64,22 @@ class TestPartiesDuTitre:
         assert contenants.parties_du_titre("24/7") == []
         assert contenants.parties_du_titre("C+C") == []
 
+    def test_barre_oblique_sans_espaces_hors_chiffres(self):
+        """Kanye « Chakras/We Free », Médine « Le Mal Qu'on a Fait/… » ; une
+        date ou une fraction n'est pas une jointure."""
+        assert contenants.parties_du_titre("Chakras/We Free") == ["Chakras", "We Free"]
+        assert contenants.parties_du_titre("Houston We Got A Problem/ Me Too") == [
+            "Houston We Got A Problem",
+            "Me Too",
+        ]
+        assert contenants.parties_du_titre("La Récolte/Fils de Colonisé/Internationale") == [
+            "La Récolte",
+            "Fils de Colonisé",
+            "Internationale",
+        ]
+        for titre in ("11/09", "68 3/4", "Freestyle 02/02/21", "7/7"):
+            assert contenants.parties_du_titre(titre) == [], titre
+
     def test_dans_une_parenthese_c_est_un_seul_morceau(self):
         """Kanye « LAST BREATH (First Pressing / Single Version) »."""
         assert contenants.parties_du_titre("LAST BREATH (First Pressing / Single Version)") == []
@@ -358,6 +374,26 @@ class TestPoseEnBase:
         relu = _par_id(data_manager, a)[medley.id]
         assert contenants.ids_contenus(relu) == [c.id for c in contenus]
         assert contenants.contenant_sans_page(relu)
+
+    def test_la_regle_de_l_etape_discographie_pose_une_fois(self, data_manager, flynt_en_base):
+        """`lier_par_la_regle` (fin de l'étape discographie) pose la relation
+        d'origine « regle:titres_joints » ; relancée, elle ne fait rien."""
+        a, ids = flynt_en_base
+        fiches = list(_par_id(data_manager, a).values())
+        faits = liens_contenus.lier_par_la_regle(data_manager, "Flynt", fiches)
+        assert faits == [
+            "Compte à rebours + Vieux avant l'âge ⊃ Compte à rebours + Vieux avant l’âge"
+        ]
+        relu = _par_id(data_manager, a)
+        medley = relu[ids["Compte à rebours + Vieux avant l'âge"]]
+        assert contenants.ids_contenus(medley) == [
+            ids["Compte à rebours"],
+            ids["Vieux avant l’âge"],
+        ]
+        assert {r.get("origine") for r in contenants.relations_contient(medley)} == {
+            contenants.ORIGINE_REGLE
+        }
+        assert liens_contenus.lier_par_la_regle(data_manager, "Flynt", list(relu.values())) == []
 
     def test_la_decision_consignee_est_une_union(self, data_manager):
         medley = {"titre": "Crazy + 6G", "album": "Rétrographie (Mixtape)"}

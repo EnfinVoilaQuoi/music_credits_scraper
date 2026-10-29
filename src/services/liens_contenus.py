@@ -7,8 +7,10 @@ provenance — `manuel` (décision consignée en table `corrections`, exportée)
 `regle:titres_joints` — pour survivre à l'alignement des lignes sœurs sur une
 page Genius relue (`track_soeurs.avec_relations_manuelles`).
 
-La règle n'est pas branchée sur le cycle : simulée sur toute la base et
-montrée d'abord (`scripts/poser_contenants.py --regle`).
+La règle tourne en fin d'étape discographie (`lier_par_la_regle`, 2026-10-29,
+après simulation sur toute la base : 3 medleys de Kanye ; ceux de Flynt et de
+Médine étaient déjà posés à la main) ; `scripts/poser_contenants.py --regle`
+la simule.
 """
 
 from __future__ import annotations
@@ -54,3 +56,15 @@ def propositions(fiches) -> list[tuple[object, list]]:
         if manquants:
             resultat.append((t, manquants))
     return resultat
+
+
+def lier_par_la_regle(dm, artiste: str, fiches) -> list[str]:
+    """Pose les liens que la règle des titres joints propose parmi les
+    `fiches` d'UN artiste (fin de l'étape discographie) ; rend « medley ⊃
+    contenus » pour chaque medley lié."""
+    faits = []
+    for t, contenus in propositions(fiches):
+        ajoutes = lier(dm, t, contenus, artiste, contenants.ORIGINE_REGLE, apply=True)
+        if ajoutes:
+            faits.append(f"{t.title} ⊃ " + " + ".join(c.title for c in ajoutes))
+    return faits

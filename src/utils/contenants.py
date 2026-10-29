@@ -67,10 +67,11 @@ def contenants_par_contenu(tracks) -> dict[int, list]:
 
 # ── Règle des titres joints (« A + B », « A / B ») ───────────────────────────
 
-#: Jointure de deux titres : « + » ou « / » ENTOURÉ d'espaces (« 24/7 » et
-#: « C+C » sont des titres, pas des jointures) et hors parenthèses
-#: (« LAST BREATH (First Pressing / Single Version) » est UN morceau).
-_JOINTURE = re.compile(r"\s+[+/]\s+")
+#: Jointure de deux titres, hors parenthèses (« LAST BREATH (First Pressing /
+#: Single Version) » est UN morceau) : « + » ENTOURÉ d'espaces (« C+C » est un
+#: titre) ; « / » avec ou sans espaces (« Chakras/We Free », les triples de
+#: Médine), sauf entre deux chiffres (« 24/7 », « 11/09 », « 68 3/4 »).
+_JOINTURE = re.compile(r"\s+\+\s+|(?<!\d)\s*/\s*|\s*/\s*(?!\d)")
 
 
 def parties_du_titre(titre: str | None) -> list[str]:

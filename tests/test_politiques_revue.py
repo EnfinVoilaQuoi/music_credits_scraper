@@ -557,6 +557,77 @@ def test_lien_deezer_dementi_par_des_sources_fragiles_seules_est_garde():
     assert pol.arbitrage_liens_deezer(cas, t, None).action == "delier_deezer"
 
 
+@pytest.mark.parametrize(
+    "titre, piste, durees, editions",
+    [
+        # MC Solaar, « Le tour de la question » (live) : la page du studio.
+        ("Onzieme commandement", 176, {"apple_music": 202, "spotify_web": 202, "youtube": 203}, ()),
+        # Kid Cudi, « A Kid Named Cudi ».
+        ("The Prayer", 200, {"apple_music": 219, "spotify_web": 219, "youtube": 220}, ()),
+    ],
+)
+def test_liens_a_revoir_delies_a_la_simulation(titre, piste, durees, editions):
+    """Passage à blanc du 2026-10-29 : les liens que la famille délie, le run
+    les a depuis remplacés par une page à la durée des catalogues (témoin)."""
+    t = _t(titre, durations_observees=durees)
+    t.durees_editions = editions
+    ecart = {"piste": {"title": titre, "duration": piste}}
+    cas = _cas("deezer_link_review", t, {"ecart": ecart, "piste_deezer": 5})
+    assert pol.arbitrage_liens_deezer(cas, t, None).action == "delier_deezer"
+
+
+@pytest.mark.parametrize(
+    "titre, durees, editions",
+    [
+        # Kanye « Ghetto » : 3 contre 3 (Deezer, l'audio et YTM d'un côté).
+        (
+            "Ghetto",
+            {
+                "deezer": 204,
+                "youtube": 205,
+                "ytmusic": 205,
+                "apple_music": 220,
+                "spotify_web": 219,
+                "songbpm": 220,
+            },
+            (),
+        ),
+        # Kid Cudi « Take 'Em High » : YTM soutient Deezer.
+        (
+            "Take ’Em High",
+            {"deezer": 207, "ytmusic": 208, "apple_music": 179, "spotify_web": 179, "songbpm": 179},
+            (),
+        ),
+        # Flynt « Rap théorie » : l'édition Deezer (mixtape, 198 s) explique les
+        # témoins ; deux catalogues solides seulement.
+        (
+            "Rap théorie",
+            {
+                "deezer": 262,
+                "legacy": 262,
+                "discogs": 198,
+                "spotify_web": 197,
+                "youtube": 198,
+                "ytmusic": 198,
+            },
+            (198,),
+        ),
+        # Kanye « Plentiful » : la métadonnée Deezer est fausse, la lecture va
+        # au bout (verdict humain 2026-10-29) — 7 s, sous le seuil d'un retrait,
+        # même devant trois catalogues.
+        ("Plentiful", {"deezer": 181, "spotify_web": 188, "youtube": 189, "apple_music": 188}, ()),
+    ],
+)
+def test_durees_deezer_laissees_a_l_humain_a_la_simulation(titre, durees, editions):
+    """Passage à blanc du 2026-10-29 : les cas `duree_deezer` actifs de la base,
+    aucun n'est délié — pas trois catalogues solides d'accord contre Deezer à
+    plus de 10 s."""
+    t = _t(titre, durations_observees=durees)
+    t.durees_editions = editions
+    cas = _cas("duree_deezer", t, {"deezer_id": 5})
+    assert pol.arbitrage_liens_deezer(cas, t, None) is None
+
+
 class TestIdSpotifyVersion:
     """« ID Spotify d'une autre version » (2026-10-29) : la version que la page
     nomme a sa propre fiche, à une autre durée, et Deezer confirme celle de

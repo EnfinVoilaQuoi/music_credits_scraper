@@ -917,7 +917,7 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     return None
 
 
-# ── Famille « liens Deezer » (délier) — PAS ENCORE validée ─────────────────
+# ── Famille « liens Deezer » (délier) — branchée le 2026-10-29 ─────────────
 
 #: Délier un lien Deezer que la durée dément, au seuil des RETRAITS validés
 #: (3 catalogues indépendants d'accord, plus de 10 s) ; garder (✓ Normal) un

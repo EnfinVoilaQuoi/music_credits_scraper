@@ -406,6 +406,9 @@ def test_mxm_get_synced_as_source3_async_success(monkeypatch, tmp_path):
         "source": "Musixmatch",
         "confidence": 1,
         "note": "source unique (Musixmatch, dernier recours)",
+        # Le morceau apparié et SA durée : la garde « titre + année » les juge.
+        "title": "Solo",
+        "duree_piste": 200,
     }
 
 

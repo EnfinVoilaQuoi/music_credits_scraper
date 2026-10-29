@@ -33,6 +33,7 @@ from src.utils.logger import get_logger
 # Extraction du video id : helper partagé (factorisé, cf. youtube_utils). Alias
 # privé conservé pour ne pas toucher les appelants internes.
 from src.utils.spotify_identity import artistes_connus
+from src.utils.titre_annee import EXCLUES_YOUTUBE, garde_parmi
 from src.utils.youtube_utils import artiste_de_recherche
 from src.utils.youtube_utils import extract_video_id as _extract_video_id
 
@@ -891,6 +892,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                     max_results=5,
                     album=t.album,
                     artistes_connus=tuple(artistes_connus(t)),
+                    garde=garde_parmi(t, db_tracks, EXCLUES_YOUTUBE),
                 )
                 best = results[0] if results else None
                 if (

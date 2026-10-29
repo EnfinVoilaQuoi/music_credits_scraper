@@ -2265,7 +2265,9 @@ class TrackRepository:
             logger.error(f"Erreur oublier_paroles_ytm({track_id}): {e}")
             return False
 
-    def retirer_mesures_songbpm(self, track_id: int, retirees: list | None = None) -> int:
+    def retirer_mesures_songbpm(
+        self, track_id: int, retirees: list | None = None, source: str = "songbpm"
+    ) -> int:
         """Retire tout ce que SongBPM a dit d'une fiche (BPM, tonalité, durée…)
         et ré-arbitre la durée — quand la page SongBPM était celle d'une AUTRE
         version (2026-09-26 : « Intro (A2) » prenait le « Intro » de Booba venu,
@@ -2273,7 +2275,10 @@ class TrackRepository:
         audio se lisent des observations : les retirer suffit. Appliqué aux
         lignes SŒURS (observations partagées). Rend le nombre retiré ;
         `retirees` reçoit les lignes (correction rétablissable, comme
-        `retirer_lrc`)."""
+        `retirer_lrc`). `source` : `getsongbpm` pour les mesures GetSongBPM
+        (2026-10-29 : mêmes lignes sœurs, même ré-arbitrage)."""
+        if source not in ("songbpm", "getsongbpm"):
+            raise ValueError(f"source de mesures inconnue : {source!r}")
         total = [0]
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
@@ -2285,7 +2290,7 @@ class TrackRepository:
                             {
                                 "track_id": tid,
                                 "field": o.field,
-                                "source": "songbpm",
+                                "source": source,
                                 "value": o.value,
                                 "confidence": o.confidence,
                                 "seen_at": str(o.seen_at) if o.seen_at else None,
@@ -2293,16 +2298,14 @@ class TrackRepository:
                             for o in conn.execute(
                                 text(
                                     "SELECT field, value, confidence, seen_at FROM observations "
-                                    "WHERE track_id = :id AND source = 'songbpm'"
+                                    "WHERE track_id = :id AND source = :s"
                                 ),
-                                {"id": tid},
+                                {"id": tid, "s": source},
                             ).all()
                         )
                     total[0] += conn.execute(
-                        text(
-                            "DELETE FROM observations WHERE track_id = :id AND source = 'songbpm'"
-                        ),
-                        {"id": tid},
+                        text("DELETE FROM observations WHERE track_id = :id AND source = :s"),
+                        {"id": tid, "s": source},
                     ).rowcount
                     self._ecrire_colonnes_discographie(
                         conn, tid, self._arbitrer_discographie(conn, tid, ["duration"])
@@ -6334,6 +6337,28 @@ class TrackRepository:
             for titre, disque, sid in lignes
             if cle_album(disque) == cle and not titre_generique(titre or "")
         ]
+
+    def durees_observees_des_fiches(self, ids) -> dict[int, dict[str, float]]:
+        """`{id: {source: durée}}` observées des fiches `ids` (garde « titre +
+        année nue », `titre_annee` : la durée indépendante d'une jumelle)."""
+        ids = [int(i) for i in ids if i is not None]
+        if not ids:
+            return {}
+        marques = ", ".join(f":t{n}" for n in range(len(ids)))
+        durees: dict[int, dict[str, float]] = {}
+        with self.engine.connect() as conn:
+            for tid, source, valeur in conn.execute(
+                text(
+                    "SELECT track_id, source, value FROM observations "
+                    f"WHERE field = 'duration' AND track_id IN ({marques})"
+                ),
+                {f"t{n}": tid for n, tid in enumerate(ids)},
+            ):
+                try:
+                    durees.setdefault(tid, {})[source] = float(valeur)
+                except (TypeError, ValueError):
+                    continue
+        return durees
 
     def titres_des_fiches_propres(self, artist_id: int) -> list[tuple[int, str]]:
         """`[(id, titre)]` des fiches PROPRES de l'artiste — ni ligne d'invité,

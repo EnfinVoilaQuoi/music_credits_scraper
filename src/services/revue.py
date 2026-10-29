@@ -1746,6 +1746,187 @@ def certif_d_un_autre_titre(track, _ctx=None):
     return None
 
 
+# ── Titre + année nue : la donnée de la jumelle ─────────────────────────────
+
+
+#: Sources de durée assez SOLIDES pour qu'une règle RETIRE une donnée sur leur
+#: foi : les catalogues. Une vidéo (« Tout ira bien (2017) » de Booba, vidéo de
+#: 195 s face à 186 s) ou SongBPM ne suffisent pas — « on ne retire que ce
+#: qu'on peut montrer » ; leur cas va à l'humain.
+TEMOINS_DE_RETRAIT = frozenset(
+    {"manual", "deezer", "apple_music", "spotify_web", "ytmusic", "discogs"}
+)
+
+
+def _durees_jumelles(track, jumelle, ctx, exclues):
+    """(durée indépendante de la fiche, de la jumelle) — `titre_annee`, les
+    valeurs que l'une copie de l'autre écartées, les catalogues seuls."""
+    from src.utils.titre_annee import ORDRE_DES_TEMOINS, garde_parmi
+
+    fragiles = {s for s in ORDRE_DES_TEMOINS if s not in TEMOINS_DE_RETRAIT}
+    garde = garde_parmi(track, [jumelle], set(exclues) | fragiles)
+    if garde is None:
+        return None, None
+    return garde.duree, garde.jumelles[0][2]
+
+
+def _a_qui(duree_donnee, d_fiche, d_jumelle):
+    """« fiche », « jumelle », « meme » (un seul enregistrement : rien à
+    trancher) ou None (indécidable) — par la durée que la donnée porte."""
+    from src.utils.titre_annee import TOLERANCE
+
+    if d_fiche is not None and d_jumelle is not None and abs(d_fiche - d_jumelle) <= TOLERANCE:
+        return "meme"
+    if duree_donnee is None or d_fiche is None or d_jumelle is None:
+        return None
+    a_la_fiche = abs(duree_donnee - d_fiche) <= TOLERANCE
+    a_la_jumelle = abs(duree_donnee - d_jumelle) <= TOLERANCE
+    if a_la_jumelle and not a_la_fiche:
+        return "jumelle"
+    if a_la_fiche and not a_la_jumelle:
+        return "fiche"
+    return None
+
+
+def _partages_avec(track, jumelle, ctx):
+    """`[(donnée, preuves, à qui)]` que la fiche et sa jumelle portent toutes
+    deux. « à qui » : « jumelle » (la donnée revient à la jumelle : la fiche la
+    perd), « fiche », « meme », ou None (indécidable)."""
+    from src.utils.corrections_fiches import empreinte_lrc
+    from src.utils.lrc_garde import CHAMP_DUREE_AUDIO, fin_du_lrc
+    from src.utils.titre_annee import (
+        EXCLUES_LRC,
+        EXCLUES_SONGBPM,
+        EXCLUES_YOUTUBE,
+        garde_parmi,
+    )
+
+    sortie = []
+    for source, champs in (
+        ("songbpm", ("bpm", "key", "mode", "duration")),
+        ("getsongbpm", ("bpm", "key", "mode")),
+    ):
+        a = {c: _mesures(ctx, track, c).get(source) for c in champs}
+        b = {c: _mesures(ctx, jumelle, c).get(source) for c in champs}
+        if (a.get("bpm") or a.get("key")) and a == b:
+            d_fiche, d_jumelle = _durees_jumelles(track, jumelle, ctx, EXCLUES_SONGBPM)
+            duree = int(float(a["duration"])) if a.get("duration") else None
+            sortie.append((source, {"mesures": a}, _a_qui(duree, d_fiche, d_jumelle)))
+    lrc = track.lyrics.synced
+    # Le LRC de la jumelle : sa colonne, ou un LRC qu'une de ses sources lui a
+    # servi (#11846 « Used To Love U (2003) » porte le LRC YTM de « Used to
+    # Love U », dont la colonne garde celui de LRCLIB).
+    lrc_jumelle = {
+        empreinte_lrc(str(o.value))
+        for o in ctx.obs.get(jumelle.id, [])
+        if o.field == "lyrics_synced" and o.value
+    } | ({empreinte_lrc(jumelle.lyrics.synced)} if jumelle.lyrics.synced else set())
+    if lrc and empreinte_lrc(lrc) in lrc_jumelle:
+        empreinte = empreinte_lrc(lrc)
+        sources = {
+            o.source
+            for o in ctx.obs.get(track.id, [])
+            if o.field == "lyrics_synced" and empreinte_lrc(str(o.value)) == empreinte
+        }
+        audios = _mesures(ctx, track, CHAMP_DUREE_AUDIO)
+        audio = next((int(float(audios[s])) for s in sorted(sources) if audios.get(s)), None)
+        d_fiche, d_jumelle = _durees_jumelles(track, jumelle, ctx, EXCLUES_LRC)
+        a_qui = _a_qui(audio, d_fiche, d_jumelle)
+        fin = fin_du_lrc(lrc)
+        # Un LRC qui court au-delà d'une fiche ne peut pas être le sien.
+        if a_qui is None and fin and d_fiche is not None and d_jumelle is not None:
+            if d_fiche + 2 < fin <= d_jumelle + 2:
+                a_qui = "jumelle"
+            elif d_jumelle + 2 < fin <= d_fiche + 2:
+                a_qui = "fiche"
+        sortie.append(("lrc", {"empreinte": empreinte, "audio": audio, "fin": fin}, a_qui))
+    garde_f = garde_parmi(track, [jumelle], EXCLUES_YOUTUBE)
+    garde_j = garde_parmi(jumelle, [track], EXCLUES_YOUTUBE)
+    des_jumelles = {v.video_id for v in jumelle.videos or [] if v.video_id}
+    for v in track.videos or []:
+        if not v.video_id or v.video_id not in des_jumelles:
+            continue
+        a_qui = None
+        if garde_f is not None and garde_j is not None and v.title:
+            refus_f, refus_j = garde_f.motif_video(v.title), garde_j.motif_video(v.title)
+            if refus_f and not refus_j:
+                a_qui = "jumelle"
+            elif refus_j and not refus_f:
+                a_qui = "fiche"
+        sortie.append(
+            ("video", {"video_id": v.video_id, "titre": v.title, "impact": v.views or 0}, a_qui)
+        )
+    for champ in ("spotify_id", "deezer_id", "isrc"):
+        valeur = getattr(track, champ)
+        if valeur and str(valeur) == str(getattr(jumelle, champ) or ""):
+            sortie.append((champ, {champ: valeur}, None))
+    return sortie
+
+
+def _vu_de_l_autre_cote(jumelle, track, donnee, ctx) -> bool:
+    """La jumelle voit-elle aussi ce partage ? Un LRC qu'une source de la
+    jumelle lui a servi sans qu'il tienne sa colonne ne se voit que de la
+    fiche qui le porte : le cas y reste."""
+    return any(d == donnee for d, _, _ in _partages_avec(jumelle, track, ctx))
+
+
+#: Ce que la fiche perd, par donnée, quand la source la donne à la jumelle :
+#: l'action de la politique (`politiques_revue.politique_jumelle_annee`).
+ACTIONS_JUMELLE = {
+    "songbpm": "retirer_songbpm",
+    "getsongbpm": "retirer_getsongbpm",
+    "lrc": "retirer_lrc",
+    "video": "retirer_video_recherche",
+}
+
+
+def donnee_de_la_jumelle(track, ctx):
+    """« Suzy » / « Suzy 2003 » (2026-10-29, `titre_annee`) : la fiche et sa
+    JUMELLE (même artiste, titre qui ne diffère que par une année finale nue)
+    portent la MÊME donnée — mesures SongBPM ou GetSongBPM, LRC, vidéo, ID
+    Spotify / Deezer, ISRC. C'est le rattrapage des données posées avant la
+    règle, ou avant que la jumelle existe.
+
+    Un cas par fiche, celle qui PERD la donnée quand la source dit à qui elle
+    revient (durée de la donnée compatible avec la seule jumelle, LRC qui court
+    au-delà de la fiche, titre de vidéo à l'année de la jumelle) : `retirer` est
+    posé, une règle tranche. Deux fiches d'un même enregistrement (durées
+    indépendantes à ± 2 s) ne font aucun cas : partager est juste. Sinon le
+    cas va à l'humain, une fois par paire (sur la fiche au plus petit id, ou
+    sur la seule qui voie le partage) ;
+    une homonymie exacte (« Suzy (Version radio) ») n'est pas de son ressort."""
+    from src.utils.titre_annee import jumelles
+
+    titres = ctx.memo("titres_disco", lambda: [(t.id, t.title) for t in ctx.disco])
+    par_id = ctx.memo("fiches_par_id", lambda: {t.id: t for t in ctx.disco})
+    indecis = []
+    for jid, _ in jumelles(track.id, track.title, titres):
+        jumelle = par_id.get(jid)
+        if jumelle is None:
+            continue
+        for donnee, preuves, a_qui in _partages_avec(track, jumelle, ctx):
+            preuves = {**preuves, "donnee": donnee, "jumelle": jumelle.id}
+            if a_qui == "jumelle":
+                quoi = "la vidéo" if donnee == "video" else donnee
+                return (
+                    f"{quoi} de « {jumelle.title} » (#{jumelle.id}) : la source la lui "
+                    f"donne, pas à « {track.title} »",
+                    {**preuves, "retirer": True, "track_ids": [track.id], "garder": jumelle.id},
+                )
+            if a_qui is None and (
+                track.id < jumelle.id or not _vu_de_l_autre_cote(jumelle, track, donnee, ctx)
+            ):
+                indecis.append((donnee, preuves, jumelle))
+    if indecis:
+        donnee, preuves, jumelle = indecis[0]
+        return (
+            f"{donnee} partagé(e) avec « {jumelle.title} » (#{jumelle.id}) — les sources "
+            "ne disent pas à qui il revient",
+            preuves,
+        )
+    return None
+
+
 # ── Détecteurs d'ARTISTE ────────────────────────────────────────────────────
 
 
@@ -1788,6 +1969,9 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "id_catalogue_partage", "Même ID de catalogue, deux pages", "🪪", id_catalogue_partage
     ),
     Detecteur("compteur_partage", "Même compteur Spotify, deux fiches", "🧮", compteur_partage),
+    Detecteur(
+        "jumelle_annee", "Donnée partagée avec la jumelle à l'année", "📅", donnee_de_la_jumelle
+    ),
     Detecteur("id_spotify_propose", "ID Spotify proposé (SongBPM)", "🆔", id_spotify_propose),
     Detecteur(
         "songbpm_original",

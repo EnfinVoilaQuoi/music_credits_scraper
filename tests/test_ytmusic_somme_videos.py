@@ -784,7 +784,9 @@ class TestVideoDeLaRecherche:
         import src.youtube.youtube_searcher as ys
 
         class _Chercheur:
-            def search_track(self, artist, title, max_results=5, album=None, artistes_connus=()):
+            def search_track(
+                self, artist, title, max_results=5, album=None, artistes_connus=(), garde=None
+            ):
                 return [
                     {
                         "video_id": "trouveetrou",

@@ -12,7 +12,9 @@ from src.enrichment.base import Capability, LazyResource
 from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
+from src.utils.corrections_fiches import CHAMP_PAGE_GETSONGBPM, pages_getsongbpm_refusees
 from src.utils.logger import get_logger
+from src.utils.titre_annee import EXCLUES_SONGBPM, garde_pour
 
 logger = get_logger(__name__)
 
@@ -88,7 +90,12 @@ class GetSongBpmProvider:
 
             try:
                 song_data = await fetcher.fetch_track_bpm_async(
-                    ctx.http, artist_name, track.title, track.album
+                    ctx.http,
+                    artist_name,
+                    track.title,
+                    track.album,
+                    garde=garde_pour(track, EXCLUES_SONGBPM),
+                    refusees=pages_getsongbpm_refusees(track),
                 )
             except (httpx.HTTPError, ValueError) as api_error:
                 logger.error(f"GetSongBPM: ❌ Exception API: {api_error}")
@@ -143,6 +150,15 @@ class GetSongBpmProvider:
             )
             logger.info(f"GetSongBPM: ✅ Time Signature: {song_data.time_signature}")
             updated = True
+
+        # La chanson lue (DÉCLARÉE, jamais arbitrée) : un retrait des mesures
+        # saura laquelle refuser (`corrections_fiches.CHAMP_PAGE_GETSONGBPM`).
+        if updated and song_data.song_id:
+            from src.enrichment.observation import Observation
+
+            ctx.observations.append(
+                Observation(CHAMP_PAGE_GETSONGBPM, str(song_data.song_id), "getsongbpm")
+            )
 
         if updated:
             logger.info(f"GetSongBPM: ✅ SUCCÈS '{track.title}'")

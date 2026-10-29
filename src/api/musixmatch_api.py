@@ -720,6 +720,10 @@ class MusixmatchAPI:
             "source": "Musixmatch",
             "musixmatch_track_id": tid,
             "duration": tdur,
+            # Le morceau apparié tel que Musixmatch le nomme, et SA durée (pas
+            # celle de la requête) : la garde « titre + année » les juge.
+            "title": track.get("track_name"),
+            "duree_piste": track.get("track_length"),
             "instrumental": instrumental,
         }
 
@@ -739,6 +743,8 @@ class MusixmatchAPI:
             "source": "Musixmatch",
             "confidence": 1,
             "note": "source unique (Musixmatch, dernier recours)",
+            "title": hit.get("title"),
+            "duree_piste": hit.get("duree_piste"),
         }
 
 

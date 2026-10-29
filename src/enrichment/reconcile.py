@@ -129,12 +129,14 @@ CHAMPS_DECLARES: frozenset[str] = frozenset(
     # et YTM ensemble tombaient dans le repli, un avertissement par fiche).
     # `songbpm_page` (2026-10-27) : la page SongBPM d'où viennent les mesures
     # (`corrections_fiches.CHAMP_PAGE_SONGBPM`) — un retrait en fait un refus.
+    # `getsongbpm_page` (2026-10-29) : son pendant GetSongBPM (ID de la chanson).
     {
         "spotify_id_propose",
         "apple_music_id_propose",
         "discogs_position",
         "lrc_duree_audio",
         "songbpm_page",
+        "getsongbpm_page",
     }
 )
 

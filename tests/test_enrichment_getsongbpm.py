@@ -19,6 +19,7 @@ class _FakeSongData:
     mode: str | None = None
     time_signature: str | None = None
     error: str | None = None
+    song_id: str | None = None
 
 
 class _FakeFetcher:
@@ -26,7 +27,9 @@ class _FakeFetcher:
         self._song_data = song_data
         self.calls = []
 
-    async def fetch_track_bpm_async(self, http, artist, title, album=None):
+    async def fetch_track_bpm_async(
+        self, http, artist, title, album=None, garde=None, refusees=frozenset()
+    ):
         self.calls.append((artist, title))
         return self._song_data
 
@@ -80,7 +83,9 @@ class _RaisingFetcher:
     def __init__(self, exc):
         self._exc = exc
 
-    async def fetch_track_bpm_async(self, http, artist, title, album=None):
+    async def fetch_track_bpm_async(
+        self, http, artist, title, album=None, garde=None, refusees=frozenset()
+    ):
         raise self._exc
 
 

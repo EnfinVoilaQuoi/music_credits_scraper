@@ -168,7 +168,13 @@ class GetSongBPMFetcher:
         return " ".join(s.lower().strip().split())
 
     def _select_hit(
-        self, hits: list, artist: str, title: str, album: str | None = None
+        self,
+        hits: list,
+        artist: str,
+        title: str,
+        album: str | None = None,
+        garde=None,
+        refusees: frozenset[str] | set[str] = frozenset(),
     ) -> dict | None:
         """
         Choisit le meilleur hit 'song' dont l'ARTISTE correspond (ancre stricte).
@@ -179,6 +185,13 @@ class GetSongBPMFetcher:
         SON disque : le hit doit porter l'album de la fiche. Mesuré le
         2026-10-13 : 5 des 13 titres génériques vérifiables avaient le BPM d'un
         homonyme (les Skit de Kanye, l'Intro de Josman).
+
+        Un hit à l'année de la JUMELLE de la fiche (`garde`,
+        `titre_annee.GardeAnnee`) n'est pas candidat : « Suzy » de Diam's
+        portait les mesures de « Suzy 2003 » (2026-10-27). L'API ne donne pas de
+        durée : seule la durée indépendante de la jumelle peut le sauver. Une
+        chanson REFUSÉE pour la fiche (`refusees`, ID GetSongBPM retirés) non
+        plus : la suivante la remplace.
         """
         from src.utils.spotify_identity import memes_disques
 
@@ -205,6 +218,10 @@ class GetSongBPMFetcher:
             # par inclusion ci-dessous donnait à « Intro » de Josman le BPM de
             # « Doigt D'Honneur (Intro) », et à « Blues » celui de son live.
             if not meme_version_mesuree(title, h.get("title", "")):
+                continue
+            if garde is not None and garde.refuse(h.get("title")):
+                continue
+            if refusees and str(h.get("id") or "") in refusees:
                 continue
             if generique:
                 disque = h.get("album")
@@ -242,7 +259,13 @@ class GetSongBPMFetcher:
         return artist, title, params
 
     def _selected_from_response(
-        self, data: dict, artist: str, title: str, album: str | None = None
+        self,
+        data: dict,
+        artist: str,
+        title: str,
+        album: str | None = None,
+        garde=None,
+        refusees: frozenset[str] | set[str] = frozenset(),
     ) -> dict | None:
         """Sélection du hit validé dans une réponse 200 (commun sync/async).
 
@@ -250,7 +273,7 @@ class GetSongBPMFetcher:
         """
         hits = data.get("search")
         if isinstance(hits, list) and hits:
-            selected = self._select_hit(hits, artist, title, album)
+            selected = self._select_hit(hits, artist, title, album, garde, refusees)
             if selected is None:
                 logger.debug(
                     f"GetSongBPM: {len(hits)} hit(s) mais aucun match artiste+titre pour {artist} - {title}"
@@ -260,7 +283,13 @@ class GetSongBPMFetcher:
         return None
 
     async def _search_track_async(
-        self, http: "AsyncHttpSession", artist: str, title: str, album: str | None = None
+        self,
+        http: "AsyncHttpSession",
+        artist: str,
+        title: str,
+        album: str | None = None,
+        garde=None,
+        refusees: frozenset[str] | set[str] = frozenset(),
     ) -> dict | None:
         """Voie async (seule voie depuis le 2026-10-13, la sync `_search_track` est retirée) (mêmes retries/backoffs, sleep non bloquant)."""
         artist, title, params = self._lookup_params(artist, title)
@@ -271,7 +300,9 @@ class GetSongBPMFetcher:
                 response = await http.get(url, params=params, headers=_ASYNC_HEADERS, timeout=15)
 
                 if response.status_code == 200:
-                    return self._selected_from_response(response.json(), artist, title, album)
+                    return self._selected_from_response(
+                        response.json(), artist, title, album, garde, refusees
+                    )
 
                 elif response.status_code == 429:
                     wait_time = 10 * (attempt + 1)
@@ -356,15 +387,25 @@ class GetSongBPMFetcher:
         return song
 
     async def fetch_track_bpm_async(
-        self, http: "AsyncHttpSession", artist: str, title: str, album: str | None = None
+        self,
+        http: "AsyncHttpSession",
+        artist: str,
+        title: str,
+        album: str | None = None,
+        garde=None,
+        refusees: frozenset[str] | set[str] = frozenset(),
     ) -> SongData:
-        """Voie async (seule voie depuis le 2026-10-13, la sync `fetch_track_bpm` est retirée) (même cache, même sélection)."""
-        cached = self._cached_song(artist, title, album)
+        """Voie async (seule voie depuis le 2026-10-13, la sync `fetch_track_bpm` est retirée) (même cache, même sélection).
+
+        Avec une `garde` (fiche à JUMELLE, `titre_annee`), le cache n'est pas
+        lu : il ne garde pas le titre du hit choisi, choisi sans la garde. Ni
+        avec des chansons `refusees` (IDs retirés de la fiche)."""
+        cached = self._cached_song(artist, title, album) if garde is None and not refusees else None
         if cached is not None:
             return cached  # servi par le cache : aucune sollicitation de la source
 
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            track_data = await self._search_track_async(http, artist, title, album)
+            track_data = await self._search_track_async(http, artist, title, album, garde, refusees)
             if track_data is None:
                 obs.absent("aucun hit validé")
             return self._song_from_track_data(artist, title, track_data, album)

@@ -261,6 +261,23 @@ def _corriger_songbpm(dm, track, cas: Cas) -> tuple[str, dict]:
     )
 
 
+def _corriger_getsongbpm(dm, track, cas: Cas) -> tuple[str, dict]:
+    """Les mesures GetSongBPM de la fiche partent (lignes sœurs comprises), et
+    la chanson GetSongBPM d'où elles venaient est refusée — quand elle est
+    connue (`getsongbpm_page`, observée depuis le 2026-10-29)."""
+    from src.utils.corrections_fiches import refuser_pages_retirees
+
+    retirees: list[dict] = []
+    n = dm.retirer_mesures_songbpm(track.id, retirees=retirees, source="getsongbpm")
+    if not n:
+        raise LookupError("plus aucune mesure GetSongBPM sur la fiche")
+    refuser_pages_retirees(track, retirees, origine=f"regle:{cas.detecteur}")
+    return (
+        f"{n} mesure(s) GetSongBPM retirée(s) de « {track.title} » — {cas.motif}",
+        {"type": "observations", "observations": retirees},
+    )
+
+
 def _rendus_a_l_humain(dm, artist_id: int) -> set[tuple[str, str]]:
     """Les cas dont une correction PAR RÈGLE a été défaite (« ↩ Rétablir ») :
     l'humain a dit non, la règle ne les reprend plus."""
@@ -570,6 +587,7 @@ _CORRECTEURS_DE_REGLE = {
     "deezer_appliquer": _deezer_appliquer,
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,
     "retirer_songbpm": _corriger_songbpm,
+    "retirer_getsongbpm": _corriger_getsongbpm,
     "retirer_spotify": _corriger_spotify,
     "partager_compteur": _partager_compteur,
     "poser_id": _poser_id,
@@ -731,13 +749,17 @@ def retablir(dm, artiste, correction: dict) -> str:
         )
     elif annulation.get("type") == "observations":
         from src.utils.corrections_fiches import (
+            oublier_page_getsongbpm_refusee,
             oublier_page_songbpm_refusee,
             pages_des_observations,
+            pages_getsongbpm_des_observations,
         )
 
         # Mesures SongBPM rétablies : leur page n'est plus refusée.
         for page in pages_des_observations(annulation.get("observations")):
             oublier_page_songbpm_refusee(track, page)
+        for page in pages_getsongbpm_des_observations(annulation.get("observations")):
+            oublier_page_getsongbpm_refusee(track, page)
         n = dm.restaurer_observations(annulation.get("observations") or [])
         compte_rendu = f"{n} mesure(s) rétablie(s) sur « {track.title} »"
     elif annulation.get("type") == "spotify":

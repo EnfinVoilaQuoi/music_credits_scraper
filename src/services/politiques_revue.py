@@ -1268,6 +1268,9 @@ REGLES_ETENDUES = frozenset(
         # entrent quand les catalogues suffisent à la preuve.
         ("generique_duree", "normal"),
         ("duree_songbpm", "retirer_songbpm"),
+        # 2026-10-29, décision utilisateur : la chaîne d'un autre artiste ET une
+        # durée que toutes celles de la fiche démentent (e62, e63).
+        ("video_autre_chaine", "retirer_video_recherche"),
     }
 )
 
@@ -1452,7 +1455,19 @@ def politique_songbpm_version(cas, track, ctx):
     return _SONGBPM_PAR_LE_VOTE(cas, track, ctx)
 
 
+def politique_video_autre_chaine(cas, track, _ctx):
+    """Le détecteur exige déjà les deux témoins (chaîne d'un artiste étranger,
+    durée contredite par toutes celles de la fiche) : le lien part, par un
+    refus de règle (« ↩ Rétablir » le rend)."""
+    if cas.detecteur != "video_autre_chaine" or track is None:
+        return None
+    return Arbitrage(
+        "vidéo d'un autre artiste : retirer le lien", "retirer_video_recherche", cas.motif
+    )
+
+
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "video_autre_chaine": politique_video_autre_chaine,
     "generique_duree": politique_generique_distincts,
     "duree_songbpm": politique_songbpm_version,
     "id_spotify_version": politique_id_spotify_version,

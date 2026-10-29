@@ -1387,6 +1387,61 @@ def recherche_perimee(track, _ctx=None):
     )
 
 
+#: Sources de durée de la fiche tirées d'une VIDÉO : elles ne jugent pas une
+#: vidéo (l'une d'elles peut venir de celle-ci).
+_DUREES_DE_VIDEO = frozenset({"youtube_video", "youtube_officiel"})
+#: Écart au-delà duquel une durée dément la vidéo : celui des actions
+#: DESTRUCTIVES (`politiques_revue.ECART_VERSION_S`) — « Banlieue » de 113 et
+#: la vidéo de Rim'K (membre du groupe), 9 s d'écart, restent à l'humain.
+_ECART_LIEN_ETRANGER_S = 10
+
+
+def video_d_une_autre_chaine(track, ctx=None):
+    """Une vidéo que la fiche porte SEULE, dont la chaîne (e63, « X - Topic » ou
+    officielle déclarée) nomme un artiste ÉTRANGER à la fiche (ni son
+    principal, ni un invité, ni l'artiste de la ligne) ET dont la durée (e62)
+    contredit, de plus de `_ECART_LIEN_ETRANGER_S`, TOUTES les durées de la fiche
+    — au moins un catalogue lu par ID parmi elles, aucune source hors vidéo
+    d'accord : le morceau d'un autre (« Viser la victoire » d'Admiral T portait
+    « Promis à la victoire » de Kery James). La chaîne seule ne prouve rien :
+    groupe, label, artiste en tête de la parution (320 vidéos sur 409 à la
+    durée des catalogues, mesuré le 2026-10-29) ; sans durée à comparer, ou
+    une durée d'accord (« Welcome To The World », Discogs 185 s = la vidéo
+    de Kevin Rudolf 184 s, l'ID Spotify à 254 s peut être le faux), rien."""
+    if not track.videos:
+        return None
+    proprietaires = _proprietaires_des_videos(ctx) if ctx is not None else {}
+    observees = track.durations_observees or {}
+    catalogues = [int(d) for s in _DUREES_PAR_ID if (d := observees.get(s))]
+    hors_video = [
+        int(d) for s, d in observees.items() if d and s not in _DUREES_DE_VIDEO and s != "legacy"
+    ]
+    if not catalogues:
+        return None
+    for v in track.videos:
+        if not v.duration or not v.channel:
+            continue
+        if len({_page(t) for t in proprietaires.get(v.video_id, [track])}) > 1:
+            continue  # partagée : `video_partagee` la juge
+        chaine = _chaine_de([track], v.video_id)
+        if chaine is None or _place_de_l_artiste(track, chaine[1]) != "étranger":
+            continue
+        if any(abs(d - v.duration) <= _ECART_LIEN_ETRANGER_S for d in hors_video):
+            continue
+        return (
+            f"vidéo de « {chaine[0]} » ({v.duration} s) : ni l'artiste ni la durée de la "
+            f"fiche ({', '.join(f'{d} s' for d in sorted(set(catalogues)))})",
+            {
+                "video_id": v.video_id,
+                "track_ids": [track.id],
+                "chaine": chaine[0],
+                "duree_video": v.duration,
+                "impact": v.views or 0,
+            },
+        )
+    return None
+
+
 def video_etrangere(track, ctx=None):
     """Une vidéo rattachée dont le titre ne nomme pas le morceau : peut-être
     celle d'un autre (Kanye « Heartless - Recorded At RAK Studios » → vidéo de
@@ -2197,6 +2252,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         nature_du_cas=nature_credits_api,
     ),
     Detecteur("annotee", "Page « Non-Music » sans trace", "🏷️", page_annotee_sans_trace),
+    Detecteur(
+        "video_autre_chaine",
+        "Vidéo d'un autre artiste (chaîne et durée)",
+        "📺",
+        video_d_une_autre_chaine,
+    ),
     # Pour INFORMATION (décision utilisateur 2026-10-26, « la vérif manuelle,
     # c'est pour les cas que le code ne peut pas trancher ») : une page qui ne
     # porte rien (ni paroles, ni plateforme, ni album, ni vidéo, ni tiers

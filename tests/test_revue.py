@@ -1131,6 +1131,44 @@ class TestVideoPartagee:
         ((_, _, preuves),) = revue.video_partagee(ctx)
         assert "garder" not in preuves
 
+    def test_une_video_d_un_autre_artiste_et_d_une_autre_duree(self):
+        """« Viser la victoire » d'Admiral T portait « Promis à la victoire » de
+        Kery James : chaîne d'un artiste étranger ET durée que toutes celles de
+        la fiche démentent (2026-10-29) — le lien part, par règle."""
+        from src.services import politiques_revue
+
+        v = TrackVideo(video_id="V", title="Promis à la victoire", channel="Kery James - Topic")
+        v.duration = 257
+        t = _t("Viser la victoire", 1, videos=[v], genius_id=11)
+        t.primary_artist_name = "Admiral T"
+        t.durations_observees = {"deezer": 303, "spotify_web": 303}
+        ctx = _ctx(t)
+        motif, preuves = revue.video_d_une_autre_chaine(t, ctx)
+        assert "Kery James - Topic" in motif and preuves["track_ids"] == [1]
+        cas = revue.Cas("video_autre_chaine", 1, "M", motif, 0, preuves, "k")
+        assert politiques_revue.arbitrage_etendu(cas, t, ctx).action == "retirer_video_recherche"
+
+    def test_une_seule_raison_ne_suffit_pas(self):
+        def cas(chaine="Kery James - Topic", duree=257, durees=None, invites=None):
+            v = TrackVideo(video_id="V", title="X", channel=chaine)
+            v.duration = duree
+            t = _t("Viser la victoire", 1, videos=[v], genius_id=11)
+            t.primary_artist_name = "Admiral T"
+            t.featured_artists = invites
+            t.durations_observees = durees if durees is not None else {"deezer": 303}
+            return revue.video_d_une_autre_chaine(t, _ctx(t))
+
+        assert cas() is not None
+        assert cas(chaine="Admiral T - Topic") is None  # son artiste
+        assert cas(chaine="Release - Topic") is None  # aucun artiste
+        assert cas(chaine="Johnny Dee") is None  # un particulier
+        assert cas(invites="Kery James") is None  # un invité de la fiche
+        assert cas(duree=None) is None  # durée de la vidéo inconnue
+        assert cas(durees={}) is None  # rien à comparer
+        assert cas(durees={"youtube_video": 303}) is None  # aucun catalogue lu par ID
+        assert cas(duree=295) is None  # 8 s : pas assez pour un retrait
+        assert cas(durees={"deezer": 303, "discogs": 258}) is None  # une source d'accord
+
     def test_la_recherche_dit_l_interprete_principal(self):
         vue = TrackVideo(
             video_id="B",

@@ -200,6 +200,28 @@ class TestEtapeIdentite:
         cycle.executer_etape(_rt([]), _artist([]), "identite", o, Hooks())
         assert vus == [o.identite]
 
+    @pytest.mark.parametrize(
+        ("etape", "corrige"),
+        [("identite", True), ("streams", True), ("credits", False), ("disco", False)],
+    )
+    def test_une_etape_seule_qui_pose_des_id_passe_le_correcteur(self, monkeypatch, etape, corrige):
+        """2026-10-28 : l'identité de Kanye pose deux ID que la règle « le
+        catalogue désigne la page » retire — le correcteur ne tournait qu'après
+        `credits`, `certifs` et le cycle complet."""
+        from src.services import revue_auto
+
+        monkeypatch.setattr(cycle, "executer_etape", lambda *a: Bilan())
+        appels = []
+        monkeypatch.setattr(
+            revue_auto,
+            "corriger_apres_run",
+            lambda dm, a: appels.append(a.name) or SimpleNamespace(appliquees=["x"]),
+        )
+        art = _artist([])
+        b = cycle.executer_etape_seule(_rt([]), art, etape, cycle.OptionsCycle(), Hooks())
+        assert appels == ([art.name] if corrige else [])
+        assert b.corrections == (["x"] if corrige else [])
+
     def test_rattrapage_discogs_en_fin_de_cycle(self, monkeypatch):
         from src.services import identite, revue_auto
 

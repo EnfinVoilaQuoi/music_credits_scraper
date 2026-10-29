@@ -611,7 +611,7 @@ def _executer_commande(a: argparse.Namespace, runtime: Runtime) -> tuple[int, ob
     etape = "certifs" if a.commande == "certifs" else a.commande  # certifs → action "search"
     options = options_etape_seule(a, etape)
     art = _charger(runtime, a, creer=(etape == "disco"))
-    b = cycle.executer_etape(runtime, art, etape, options, hooks)
+    b = cycle.executer_etape_seule(runtime, art, etape, options, hooks)
     _imprimer_bilan(etape, cycle.resume_etape(etape, b, options, art))
     if etape == "identite" and _deezer_ambigu(b):
         return AMBIGU, art

@@ -97,6 +97,29 @@ def _recharger(runtime: Runtime, artist: Artist) -> None:
     artist.tracks = runtime.data_manager.discographie_reunie(artist)
 
 
+#: Étapes dont le service ne passe pas lui-même le correcteur du panneau
+#: (`credits` et `certifs` le font) et qui posent des ID : seules, elles le
+#: passent en fin d'étape. Le 2026-10-28, l'identité de Kanye avait posé deux ID
+#: que la règle « le catalogue désigne la page » aurait retirés — elle n'a
+#: jamais tourné.
+CORRIGER_APRES_ETAPE_SEULE = ("identite", "streams")
+
+
+def executer_etape_seule(
+    runtime: Runtime, artist: Artist, etape: str, options: OptionsCycle, hooks: Hooks
+) -> Bilan:
+    """Une étape lancée SEULE (sous-commande de la CLI) : l'étape, puis, pour
+    `CORRIGER_APRES_ETAPE_SEULE`, la passe du panneau sur la discographie
+    rechargée — ce que le cycle complet fait une fois, à la fin."""
+    b = executer_etape(runtime, artist, etape, options, hooks)
+    if etape in CORRIGER_APRES_ETAPE_SEULE and not hooks.should_stop():
+        from src.services import revue_auto
+
+        _recharger(runtime, artist)
+        b.corrections = revue_auto.corriger_apres_run(runtime.data_manager, artist).appliquees
+    return b
+
+
 def executer_etape(
     runtime: Runtime, artist: Artist, etape: str, options: OptionsCycle, hooks: Hooks
 ) -> Bilan:

@@ -57,7 +57,7 @@ from src.utils.duree_youtube import (
     dementie_par_les_paroles,
     est_un_clip,
 )
-from src.utils.title_matching import cle_album, normalize_title
+from src.utils.title_matching import normalize_title
 from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
@@ -148,7 +148,6 @@ FAMILLES = {
     "certif_version": "certif de l'original sur une version à descripteur",
     "certif_autre": "certif à titre non équivalent (autre écart)",
     "streams_double": "même compteur Spotify sur deux pages Genius",
-    "video_partagee": "même vidéo sur plusieurs fiches (vues comptées NULLE PART)",
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
     # ── Invariants : cible ZÉRO ──
@@ -614,29 +613,9 @@ def streams(c, par) -> list[Cas]:
         tid: total_ytm(propres.get(tid, {}), compteurs.get(tid, {}), exclues.get(tid, set()))
         for tid in set(propres) | set(compteurs)
     }
-    for (_, vid), liste in vids.items():
-        if (
-            len(liste) > 1
-            and len({ids[x[0]]["genius_id"] for x in liste} - {None})
-            + sum(1 for x in liste if ids[x[0]]["genius_id"] is None)
-            > 1
-            # Clip double d'un même album : compté une fois au niveau de
-            # l'album (décision utilisateur 2026-10-10) — pas une anomalie.
-            and not (
-                all(ids[x[0]]["album"] for x in liste)
-                and len({cle_album(ids[x[0]]["album"]) for x in liste}) == 1
-            )
-        ):
-            t = ids[liste[0][0]]
-            cas.append(
-                Cas(
-                    "video_partagee",
-                    t["artiste"],
-                    [x[0] for x in liste],
-                    f"{vid} {max(v or 0 for _, v in liste):,} vues : "
-                    + " | ".join(_lib(ids[x[0]]) for x in liste),
-                )
-            )
+    # Une vidéo portée par plusieurs fiches se juge au panneau, son seul juge
+    # (`revue:video_partagee`, `revue.partage_a_juger`) : l'audit en comptait
+    # 33 en erreurs que le panneau tenait pour information (2026-10-29).
     for tid, t in ids.items():
         col = t["ytm_streams"] or 0
         s = sommes.get(tid)

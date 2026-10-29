@@ -402,6 +402,10 @@ def actions_pour(cas: Cas) -> list[Action]:
     """Les actions proposées pour un cas (hors « ✓ Normal », toujours là)."""
     d = cas.detecteur
     if d == "video_partagee":
+        # Entre pages homonymes, la vidéo est à l'UNE d'elles : la retirer de
+        # toutes serait faux.
+        if cas.preuves.get("homonymes"):
+            return []
         return [
             Action(
                 "rejeter_video_partagee",

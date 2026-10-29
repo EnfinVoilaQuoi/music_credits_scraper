@@ -393,6 +393,63 @@ class TestRecherchePerimee:
         assert "revue:recherche_perimee" in decisions
 
 
+class TestVideoPartagee:
+    """Une vidéo portée par plusieurs fiches n'a qu'UN juge, le panneau
+    (`revue.video_partagee`, `revue.partage_a_juger`) : l'audit en comptait 33
+    en erreurs que le panneau tenait pour information ou ne voyait pas
+    (2026-10-29). L'audit compte le cas du panneau, avec SA nature."""
+
+    @staticmethod
+    def _fiches(dm, albums, titres=("KING", "KING"), video_titre="KING"):
+        from src.models import TrackVideo
+
+        a = Artist(name="Ye")
+        a.id = dm.save_artist(a)
+        for i, (titre, album) in enumerate(zip(titres, albums, strict=True)):
+            t = Track(title=titre, artist=a, album=album)
+            t.genius_id = 900 + i
+            dm.save_track(t)
+            dm.record_track_videos(
+                t.id, [TrackVideo(video_id="g6vAQpxo35g", title=video_titre, views=800)]
+            )
+
+    def test_l_audit_compte_le_cas_du_panneau_avec_sa_nature(self, data_manager):
+        from src.services import revue
+
+        self._fiches(data_manager, ("BULLY", "VULTURES 1"))
+        assert "video_partagee" not in au.FAMILLES
+        assert not any(
+            "video_partagee" in f for f in _familles(au.auditer(data_manager, ["Ye"], revue=False))
+        )
+
+        audit = au.auditer(data_manager, ["Ye"], persistance=False)
+        (cas,) = [c for c in audit.cas if "video_partagee" in c.famille]
+        artiste = data_manager.get_artist_by_name("Ye")
+        artiste.tracks = data_manager.discographie_reunie(artiste)
+        (panneau,) = [
+            c
+            for c in revue.analyser(data_manager, artiste).actifs
+            if c.detecteur == "video_partagee"
+        ]
+        assert (cas.famille, cas.nature) == ("revue:video_partagee", panneau.nature)
+        # Deux pages homonymes d'un même artiste : ses vues ne comptent nulle
+        # part, rien dans la base ne départage — une information.
+        assert panneau.nature == au.INFORMATION and panneau.preuves["homonymes"]
+
+    def test_meme_disque_ni_audit_ni_panneau(self, data_manager):
+        """Clip double d'un même album : compté au niveau de l'album
+        (décision utilisateur 2026-10-10), un cas pour personne."""
+        self._fiches(data_manager, ("BULLY", "BULLY"), ("KING", "Album entier"), "Ye - BULLY")
+        audit = au.auditer(data_manager, ["Ye"], persistance=False)
+        assert not [c for c in audit.cas if "video_partagee" in c.famille]
+
+    def test_clip_qui_nomme_deux_titres_distincts_n_est_pas_un_cas(self, data_manager):
+        """« Prélude avant l'amour / A4 » d'A2H : la vidéo nomme chacune."""
+        self._fiches(data_manager, ("L'amour", "A4"), ("Prélude", "A4"), "Ye - Prélude / A4")
+        audit = au.auditer(data_manager, ["Ye"], persistance=False)
+        assert not [c for c in audit.cas if "video_partagee" in c.famille]
+
+
 def test_id_de_catalogue_entre_pages_laisse_au_panneau():
     """Spotify / Deezer entre deux PAGES : `revue:id_catalogue_partage` le
     compte (une fois) ; un ISRC, ou une fiche sans page, reste à l'audit."""

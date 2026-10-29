@@ -170,7 +170,7 @@ class TestRelation:
     def test_un_contenant_sans_page_n_est_pas_reclame_a_genius(self):
         fiches = _flynt()
         medley = fiches[0]
-        assert est_manquant(medley, Manque.CREDITS_GENIUS)
+        assert est_manquant(medley, Manque.PAROLES)
         medley.relationships = [contenants.relation_vers(fiches[1], "Flynt")]
         assert not est_manquant(medley, Manque.CREDITS_GENIUS)
         assert not est_manquant(medley, Manque.PAROLES)
@@ -228,6 +228,57 @@ class TestEtapeCredits:
         )
         credits.run(_rt(), Artist(name="Flynt"), [medley, solo], opts, Hooks(), cl)
         assert lus == ["Compte à rebours", "paroles:Compte à rebours"]
+
+
+class TestSansPageGenius:
+    """Une fiche SANS adresse Genius (venue de Deezer : « Rétroduction » de
+    Flynt) ne part jamais au crawl Genius : ni échec, ni manque à retenter."""
+
+    def test_pas_de_credits_genius_a_reclamer_sans_page(self):
+        t = _fiche(9714, "Rétroduction", "Rétrographie (Mixtape)")
+        assert not est_manquant(t, Manque.CREDITS_GENIUS)
+        assert est_manquant(t, Manque.CREDITS_DISCOGS)
+
+    def test_une_page_gagnee_plus_tard_la_rend_manquante(self):
+        t = _fiche(9714, "Rétroduction", "Rétrographie (Mixtape)")
+        t.genius_url = "https://genius.com/Flynt-retroduction-lyrics"
+        assert est_manquant(t, Manque.CREDITS_GENIUS)
+
+    def test_le_crawl_ne_recoit_que_les_fiches_avec_page(self):
+        from src.services import credits
+        from src.services.runtime import Hooks
+        from tests.test_services_credits import _clients, _rt
+
+        sans = _fiche(9714, "Rétroduction", "Rétrographie (Mixtape)")
+        avec = _fiche(1257, "Compte à rebours", "1 pour la plume", genius_id=11)
+        recus = []
+
+        class _Genius:
+            def scrape_multiple_tracks(self, tracks, progress_callback=None):
+                recus.extend(t.title for t in tracks)
+                return {"success": len(tracks), "failed": 0, "errors": []}
+
+            def scrape_lyrics_batch(self, tracks, progress_callback=None):
+                recus.extend(f"paroles:{t.title}" for t in tracks)
+                return {"success": len(tracks), "failed": 0, "errors": []}
+
+            def close(self):
+                pass
+
+        cl, _, _ = _clients(genius=_Genius())
+        opts = credits.OptionsCredits(
+            discogs=False, youtube=False, paroles_ytm=False, sync_lrclib=False, sync_ytm=False
+        )
+        bilan = credits.run(_rt(), Artist(name="Flynt"), [sans, avec], opts, Hooks(), cl)
+        assert recus == ["Compte à rebours", "paroles:Compte à rebours"]
+        assert bilan.genius["failed"] == 0
+
+    def test_avec_page_genius(self):
+        from src.services.credits import avec_page_genius
+
+        sans = _fiche(9714, "Rétroduction")
+        avec = _fiche(1257, "Compte à rebours", genius_id=11)
+        assert avec_page_genius([sans, avec], "Genius") == [avec]
 
 
 # ── Présentation : le lien dans les deux sens ────────────────────────────────

@@ -16,7 +16,6 @@ from src.models import Artist, Track
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES
 from src.observability import source_usage
 from src.services.runtime import Bilan, Hooks, Manque, Runtime, morceaux_a_traiter
-from src.utils.contenants import contenant_sans_page
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.logger import etape_de_flux, get_logger
 from src.utils.lrc_garde import CHAMP_DUREE_AUDIO, GardeLrc, sans_lrc
@@ -128,6 +127,17 @@ class BilanCredits(Bilan):
 #: le cas ») — un run sans `--manquants` relisait TOUTES les pages, plusieurs
 #: heures de navigateur chez Kanye (~3 700 fiches) pour des pages vues la veille.
 RELECTURE_GENIUS = timedelta(days=30)
+
+
+def avec_page_genius(tracks, phase: str) -> list:
+    """Les morceaux qui ont une page Genius à lire. Sans adresse Genius (fiche
+    venue de Deezer, medley), le crawl ne lirait rien et compterait un échec à
+    chaque run (2026-10-29 : 5 fiches Deezer et 8 medleys de *Rétrographie*) ;
+    une fiche qui gagne plus tard sa page y revient d'elle-même."""
+    avec = [t for t in tracks if t.genius_url]
+    if len(avec) < len(tracks):
+        logger.info(f"{phase} : {len(tracks) - len(avec)} morceau(x) sans page Genius, non lu(s)")
+    return avec
 
 
 def pages_a_relire(tracks, *, force: bool, maintenant: datetime | None = None) -> list:
@@ -443,14 +453,7 @@ def run(
             # Pas de purge anticipée en mode forcé (2026-09-27) : le scraper
             # remplace les crédits `genius` d'un morceau quand SA page est lue,
             # et seulement alors — un échec de page n'efface rien.
-            # Un medley sans page Genius : ses crédits sont sur les fiches qu'il
-            # contient, rien à lire (il comptait en échec à chaque run).
-            avec_page = [t for t in tracks if not contenant_sans_page(t)]
-            if len(avec_page) < len(tracks):
-                logger.info(
-                    f"Genius : {len(tracks) - len(avec_page)} medley(s) sans page, "
-                    "crédits sur les fiches contenues"
-                )
+            avec_page = avec_page_genius(tracks, "Genius")
             a_lire = pages_a_relire(avec_page, force=options.force_credits)
             bilan.genius_recents = len(avec_page) - len(a_lire)
             if bilan.genius_recents:
@@ -520,8 +523,7 @@ def run(
             avant = _reset_forces(tracks, options)
             synchro_obtenue: dict[int, set] = {}
             if options.paroles_genius:
-                # Un medley sans page : ses paroles sont sur les fiches contenues.
-                avec_page = [t for t in tracks if not contenant_sans_page(t)]
+                avec_page = avec_page_genius(tracks, "Paroles (Genius)")
                 besoin = [t for t in avec_page if t.lyrics.page_genius_a_relire()]
                 if besoin:
                     scraper = scraper or clients.genius()

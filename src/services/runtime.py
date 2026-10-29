@@ -200,6 +200,12 @@ def est_manquant(track: Track, kind: Manque) -> bool:
     if kind in (Manque.CREDITS_GENIUS, Manque.PAROLES) and contenant_sans_page(track):
         return False
     if kind is Manque.CREDITS_GENIUS:
+        # Sans adresse Genius (fiche venue de Deezer), il n'y a pas de page à
+        # lire : rien à retenter tant qu'elle n'en a pas (2026-10-29, 5 fiches
+        # de *Rétrographie* en échec à chaque run). Une page gagnée plus tard
+        # la rend « manquante » d'elle-même.
+        if not track.genius_url:
+            return False
         return not any(c.source == "genius" for c in track.credits)
     if kind is Manque.CREDITS_DISCOGS:
         return not any(c.source == "discogs" for c in track.credits)

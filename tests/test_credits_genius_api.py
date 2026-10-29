@@ -122,6 +122,7 @@ class TestStatut:
         """`--manquants` ne regarde que la source `genius` : des crédits API
         seuls laissent le morceau À SCRAPER — c'est tout le statut."""
         t = Track(title="T")
+        t.genius_url = "https://genius.com/X-t-lyrics"
         t.credits = [_api("A", CreditRole.PRODUCER), _api("B", CreditRole.WRITER)]
         assert est_manquant(t, Manque.CREDITS_GENIUS)
 

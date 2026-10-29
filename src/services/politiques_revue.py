@@ -430,6 +430,26 @@ LRC_AUTRE_MIN = 0.9
 #: Un LRC qui s'arrête au moins tant de secondes avant la fin de la fiche est
 #: celui d'une prise plus courte (témoin exigé pour le retirer, 2026-10-26).
 LRC_COURT_S = 30
+#: Part des paires de mots d'un LRC retrouvées dans les paroles Genius sous
+#: laquelle il n'est pas un EXTRAIT de la page (2026-10-29) : un couplet
+#: synchronisé d'un freestyle collectif y serait presque entier (≥ 0,6, le
+#: seuil des LRC justes) ; les LRC YouTube Music des Grünt en retrouvent 0,11
+#: à 0,17 — des mots-outils (« c'est », « j'ai »), pas des phrases.
+LRC_ETRANGER_MAX = 0.3
+
+
+def _part_du_lrc_dans_la_page(track) -> float | None:
+    """Part des paires de mots du LRC présentes dans les paroles Genius de la
+    fiche — dans CE sens seulement : une page qui transcrit une émission
+    entière contient tout couplet qui en est extrait. None : non jugeable."""
+    from src.utils.concordance_paroles import MOTS_MIN, bigrammes, mots, paroles_de_reference
+
+    ref = paroles_de_reference(track.lyrics.text, track.lyrics.source)
+    lrc = track.lyrics.synced
+    if len(mots(ref)) < MOTS_MIN or len(mots(lrc)) < MOTS_MIN:
+        return None
+    paires = bigrammes(lrc)
+    return len(paires & bigrammes(ref)) / len(paires) if paires else None
 
 
 def politique_lrc(cas, track, ctx):
@@ -471,6 +491,15 @@ def politique_lrc(cas, track, ctx):
                 f"{(autre or 0):.0%} de l'autre ; {temoin}",
             )
         return None
+    part = _part_du_lrc_dans_la_page(track) if cas.detecteur == "lrc_live" else None
+    if trop_court and part is not None and part < LRC_ETRANGER_MAX:
+        # Une session : ni l'autre fiche ni la durée ne servent de témoin, le
+        # texte de la page, si (2026-10-29, Grünt et VH1 Storytellers).
+        return Arbitrage(
+            "LRC d'un autre enregistrement que la session : le retirer",
+            "retirer_lrc",
+            f"{part:.0%} de ses paires de mots dans les paroles de la page ; {temoin}",
+        )
     if autre is not None and autre >= LRC_AUTRE_MIN and trop_court:
         return Arbitrage(
             "LRC d'une autre fiche : le retirer",

@@ -186,6 +186,49 @@ def test_lrc_aux_paroles_proches_mais_a_sa_place_reste():
     assert pol.politique_lrc(cas, t, revue.contexte([t])) is None
 
 
+_EMISSION = (
+    "Je rappe depuis la cave avec les frères du quartier on garde la flamme\n"
+    "Les micros chauffent la nuit tombe sur la ville et personne ne recule\n"
+    "Le beat tourne encore on passe le relais au suivant sans jamais trembler\n"
+    "Mon couplet sort du cœur les mots tapent fort comme la pluie sur le béton"
+)
+
+
+def _session(lrc, duree=1800):
+    t = _t("Grünt #59", 1, duration=duree)
+    t.lyrics.text, t.lyrics.source = _EMISSION, "genius"
+    t.lyrics.synced = lrc
+    return t, _cas("lrc_live", t, {"recouvrement": 0.47})
+
+
+def test_lrc_live_etranger_a_la_page_et_court_se_retire():
+    """Grünt : un LRC YouTube Music de 2 min pour une émission de 30 min, dont
+    les phrases ne sont pas dans la page (2026-10-29)."""
+    lrc = (
+        "[00:01.00] Tu sais que je reste vrai la ville dort encore\n"
+        "[00:40.00] Elle danse sous les néons et moi je compte les heures\n"
+        "[01:50.00] Le quartier attend la pluie personne ne parle de demain"
+    )
+    t, cas = _session(lrc)
+    assert pol.arbitrage_etendu(cas, t, revue.contexte([t])).action == "retirer_lrc"
+    # Sans durée, ou presque à la durée : rien ne prouve qu'il n'est pas d'elle.
+    t.duration = None
+    assert pol.politique_lrc(cas, t, revue.contexte([t])) is None
+    t.duration = 120
+    assert pol.politique_lrc(cas, t, revue.contexte([t])) is None
+
+
+def test_lrc_live_d_un_couplet_de_la_page_reste():
+    """Un couplet synchronisé de l'émission : ses phrases sont dans la page."""
+    lrc = (
+        "[00:01.00] Je rappe depuis la cave avec les frères du quartier\n"
+        "[00:40.00] Les micros chauffent la nuit tombe sur la ville\n"
+        "[01:50.00] Mon couplet sort du cœur les mots tapent fort"
+    )
+    t, cas = _session(lrc)
+    assert pol.politique_lrc(cas, t, revue.contexte([t])) is None
+
+
 class TestEcartsDeezer:
     def _cas(self, detecteur, titre, artist_id=7, isrc=None, piste_id=1):
         ecart = {

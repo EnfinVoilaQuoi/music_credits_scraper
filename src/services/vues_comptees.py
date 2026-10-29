@@ -31,6 +31,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from src.services.revue import cle_du_cas, video_nomme
+from src.utils.contenants import video_de_disque
 
 DETECTEUR = "video_etrangere"
 
@@ -80,6 +81,11 @@ def vue_comptee(
     valides,
     recherche: dict | None = None,
 ) -> bool:
+    # Le disque ENTIER (« FULL EP ») n'est pas le morceau : compté une fois
+    # au niveau de l'album (`streams_calculator.clips_doubles`), quelle que
+    # soit la provenance du lien (2026-10-29).
+    if video_de_disque(titre, fiche.album):
+        return False
     if source == "search_auto":
         return recherche_valide(fiche, recherche)
     if source != "genius_media" or not titre:

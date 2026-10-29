@@ -193,6 +193,13 @@ DONNEES_DE_PAGE = (
 ORIGINE_MANUELLE = "manuel"
 
 
+def hors_page(relation: dict) -> bool:
+    """PUR. Relation que la page Genius ne donne pas : posée à la main, ou par
+    une règle (« regle:… », la relation `contient` des titres joints)."""
+    origine = relation.get("origine") or ""
+    return origine == ORIGINE_MANUELLE or origine.startswith("regle:")
+
+
 def avec_relations_manuelles(relations_json: str | None, toutes: list) -> str | None:
     """PUR. Les relations de la page qui gagne, PLUS les relations manuelles de
     toute la famille qu'elles n'ont pas déjà (même type, même titre). Sans
@@ -215,7 +222,7 @@ def avec_relations_manuelles(relations_json: str | None, toutes: list) -> str | 
     ajout = False
     for brut in toutes:
         for r in lire(brut):
-            if r.get("origine") == ORIGINE_MANUELLE and cle(r) not in vues:
+            if hors_page(r) and cle(r) not in vues:
                 relations.append(r)
                 vues.add(cle(r))
                 ajout = True

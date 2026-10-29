@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import re
 
+from src.utils.contenants import VIDEO_DE_DISQUE
+
 SOURCE_AUDIO = "youtube"
 SOURCE_VIDEO = "youtube_video"
 #: Vidéo (hors clip) d'une chaîne OFFICIELLE de l'artiste ou de son label
@@ -61,7 +63,10 @@ NON_MORCEAU = re.compile(
     r"snippet|extrait|mixtape|mix-tape|mix[eé] par|plan[eè]te ?rap|full album|"
     r"int[ée]gral|\(\d ?- ?\d\)|best of|meilleur de|"
     # « [FREE] … type beat » : des instrumentaux à vendre, jamais le morceau.
-    r"\[free\]|type ?beat",
+    r"\[free\]|type ?beat|"
+    # Un disque ENTIER (« (FULL EP) », « (Album entier) », « FULL BEAT-TAPE »,
+    # 2026-10-29) : compté à l'album, jamais la durée d'une fiche.
+    + VIDEO_DE_DISQUE.pattern,
     re.IGNORECASE,
 )
 

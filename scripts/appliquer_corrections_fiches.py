@@ -17,6 +17,8 @@ Actions d'une entrée (toutes optionnelles) :
   lien_youtube: url                    `set_youtube_link` (source manual)
   inedit: true                         `record_unreleased`
   version_de / cover_de / remix_de / sample_de: {désignation}   relation
+  contient: [{désignation}, …]         medley : relation `contient` vers chaque
+                                       fiche contenue (absente : en attente)
   tiers: {role, principal}             version d'un tiers (rôle secondaire)
   retirer_credits: [{nom, role}]       `forget_credit` (+ mémoire de save_track)
 
@@ -28,10 +30,12 @@ Désignation : {"genius_id": N}, sinon {"titre": …, "album": …} (fiche Deeze
 
 import argparse
 import sys
+from types import SimpleNamespace
 
 if sys.platform == "win32" and "pytest" not in sys.modules:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+from src.services import liens_contenus
 from src.utils import corrections_fiches as cf
 from src.utils.title_matching import normalize_title
 from src.utils.track_soeurs import ORIGINE_MANUELLE
@@ -238,6 +242,19 @@ def appliquer(ctx: _Contexte, artiste: str, entree: dict, lire_identite, journal
             }
         )
         fait(f"{type_rel} → « {cible.title} » ({cible.id})")
+    contenus = []
+    for designation in entree.get("contient") or []:
+        cible, m = ctx.trouver(artiste, designation)
+        if cible is None:
+            # Jamais créée : la décision reste consignée, liée quand la fiche existera.
+            journal.append(f"   ⏳ {nom} : fiche contenue {designation} {m} — en attente")
+            continue
+        contenus.append(cible)
+    rels, ajoutes = liens_contenus.relations_avec(
+        SimpleNamespace(id=track.id, relationships=rels), contenus, artiste, ORIGINE_MANUELLE
+    )
+    for c in ajoutes:
+        fait(f"contient → « {c.title} » ({c.id})")
     if apply and rels != list(track.relationships or []):
         dm.record_relationships(track.id, rels)
     tiers = entree.get("tiers")

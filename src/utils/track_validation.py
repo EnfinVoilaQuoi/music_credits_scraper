@@ -30,6 +30,7 @@ from datetime import date
 from enum import StrEnum
 from types import MappingProxyType
 
+from src.utils.contenants import contenant_sans_page
 from src.utils.dates import completer
 from src.utils.logger import get_logger
 from src.utils.paroles_genius import inedit_par_le_texte, texte_utile
@@ -386,12 +387,16 @@ def evaluer(track, ctx: Contexte | None = None) -> Constat:
             manques.append(Manque.DATE)
         if not duree_valide(track):
             manques.append(Manque.DUREE)
-        if not credits_valides(track):
-            manques.append(Manque.CREDITS)
-
-        manques_paroles, details_paroles = paroles_valides(track, ctx)
-        manques.extend(manques_paroles)
-        details.extend(details_paroles)
+        if contenant_sans_page(track):
+            # Medley sans page Genius : crédits et paroles vivent sur les
+            # fiches qu'il contient (`utils.contenants`).
+            details.append("Crédits et paroles non exigés — medley, sur les fiches contenues")
+        else:
+            if not credits_valides(track):
+                manques.append(Manque.CREDITS)
+            manques_paroles, details_paroles = paroles_valides(track, ctx)
+            manques.extend(manques_paroles)
+            details.extend(details_paroles)
 
         bpm, tonalite = audio_valide(track)
         if not bpm:

@@ -192,6 +192,13 @@ def constat_perime(checked_at, release_date, maintenant: datetime | None = None)
 
 
 def est_manquant(track: Track, kind: Manque) -> bool:
+    from src.utils.contenants import contenant_sans_page
+
+    # Un medley sans page Genius n'a ni crédits ni paroles à lui : ils sont sur
+    # les fiches qu'il contient (2026-10-29 : 13 fiches de *Rétrographie*
+    # réclamées aux crédits à chaque run).
+    if kind in (Manque.CREDITS_GENIUS, Manque.PAROLES) and contenant_sans_page(track):
+        return False
     if kind is Manque.CREDITS_GENIUS:
         return not any(c.source == "genius" for c in track.credits)
     if kind is Manque.CREDITS_DISCOGS:

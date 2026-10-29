@@ -16,6 +16,7 @@ from src.models import Artist, Track
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES
 from src.observability import source_usage
 from src.services.runtime import Bilan, Hooks, Manque, Runtime, morceaux_a_traiter
+from src.utils.contenants import contenant_sans_page
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.logger import etape_de_flux, get_logger
 from src.utils.lrc_garde import CHAMP_DUREE_AUDIO, GardeLrc, sans_lrc
@@ -442,8 +443,16 @@ def run(
             # Pas de purge anticipée en mode forcé (2026-09-27) : le scraper
             # remplace les crédits `genius` d'un morceau quand SA page est lue,
             # et seulement alors — un échec de page n'efface rien.
-            a_lire = pages_a_relire(tracks, force=options.force_credits)
-            bilan.genius_recents = len(tracks) - len(a_lire)
+            # Un medley sans page Genius : ses crédits sont sur les fiches qu'il
+            # contient, rien à lire (il comptait en échec à chaque run).
+            avec_page = [t for t in tracks if not contenant_sans_page(t)]
+            if len(avec_page) < len(tracks):
+                logger.info(
+                    f"Genius : {len(tracks) - len(avec_page)} medley(s) sans page, "
+                    "crédits sur les fiches contenues"
+                )
+            a_lire = pages_a_relire(avec_page, force=options.force_credits)
+            bilan.genius_recents = len(avec_page) - len(a_lire)
             if bilan.genius_recents:
                 logger.info(
                     f"Genius : {bilan.genius_recents} page(s) lue(s) depuis moins de "
@@ -511,11 +520,13 @@ def run(
             avant = _reset_forces(tracks, options)
             synchro_obtenue: dict[int, set] = {}
             if options.paroles_genius:
-                besoin = [t for t in tracks if t.lyrics.page_genius_a_relire()]
+                # Un medley sans page : ses paroles sont sur les fiches contenues.
+                avec_page = [t for t in tracks if not contenant_sans_page(t)]
+                besoin = [t for t in avec_page if t.lyrics.page_genius_a_relire()]
                 if besoin:
                     scraper = scraper or clients.genius()
                     bilan.paroles = scraper.scrape_lyrics_batch(
-                        tracks,
+                        avec_page,
                         progress_callback=lambda c, tot, nom: hooks.progress(
                             c, tot, nom, "Paroles (Genius)"
                         ),

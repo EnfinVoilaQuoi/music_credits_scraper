@@ -499,6 +499,54 @@ def memoriser_fusion(artiste: str, absorbee: dict, gardee: dict) -> None:
     ecrire_atomique(FICHIER, donnees, fin="\n")
 
 
+def memoriser_contenus(artiste: str, contenant: dict, contenus: list[dict]) -> list[dict]:
+    """Consigne À LA MAIN les fiches que `contenant` contient (action
+    `contient` de la table `corrections`, exportée avec les décisions) :
+    l'union avec ce qui était déjà décidé, dans l'ordre. Rend la liste
+    consignée. Une fiche contenue encore absente y reste désignée, en attente :
+    elle sera liée quand elle existera, jamais créée."""
+    if moteur is None:
+        raise RuntimeError("aucune base ouverte (construire un DataManager d'abord)")
+    from datetime import datetime
+
+    from sqlalchemy import text
+
+    with moteur.begin() as conn:
+        brut = conn.execute(
+            text(
+                "SELECT valeur FROM corrections WHERE cle_fiche = :cle AND artiste = :artiste "
+                "AND action = 'contient'"
+            ),
+            {"cle": _cle_fiche(contenant), "artiste": artiste},
+        ).scalar()
+        deja = json.loads(brut) if brut else []
+        liste = deja + [d for d in contenus if d not in deja]
+        if liste == deja:
+            return liste
+        if brut is not None:
+            conn.execute(
+                text(
+                    "UPDATE corrections SET valeur = :valeur WHERE cle_fiche = :cle "
+                    "AND artiste = :artiste AND action = 'contient'"
+                ),
+                {
+                    "valeur": json.dumps(liste, ensure_ascii=False, sort_keys=True),
+                    "cle": _cle_fiche(contenant),
+                    "artiste": artiste,
+                },
+            )
+        else:
+            _inserer_correction(
+                conn,
+                artiste,
+                contenant,
+                "contient",
+                liste,
+                datetime.now().isoformat(timespec="seconds"),
+            )
+    return liste
+
+
 def memoriser_id_refuse(track, spotify_id: str, origine: str | None = None) -> None:
     """Consigne un ID Spotify retiré (panneau « À trancher » à la main, ou une
     règle — `origine` « regle:<code> ») : relu par le gate d'identité
@@ -835,6 +883,7 @@ ACTIONS = (
     "cover_de",
     "remix_de",
     "sample_de",
+    "contient",
     "tiers",
 )
 

@@ -143,7 +143,9 @@ def test_songbpm_refuse_la_page_de_la_jumelle():
         {"title": "Suzy", "artist": "Diam's", "duration": "3:59", "detail_url": "/@d/b"},
     ]
     g = garde(1, "Suzy", {"deezer": 239}, SUZY, {2: {"deezer": 254}})
-    assert scraper.choisir_resultat(resultats, "Suzy", "Diam's")[0] == 1  # sans la garde
+    # Sans la garde (et la durée de la page confirmée, sinon le titre CONTENU
+    # « Suzy 2003 » serait refusé de lui-même) : la page de la jumelle passe.
+    assert scraper.choisir_resultat(resultats, "Suzy", "Diam's", duree_fiche=254)[0] == 1
     i, choisi = scraper.choisir_resultat(resultats, "Suzy", "Diam's", garde=g)
     assert (i, choisi["title"]) == (1, "Suzy")
 
@@ -356,3 +358,44 @@ def test_mesures_getsongbpm_retirees_par_regle_puis_retablies(data_manager, arti
     assert pages_getsongbpm_refusees(t) == set()
     (t,) = data_manager.get_artist_tracks(artiste.id)
     assert t.audio.bpm == 95
+
+
+class TestTitreContenuSongbpm:
+    """2026-10-29 : « Boss » de SongBPM posé sur « Boss Cypher » (OrelSan) — un
+    titre CONTENU dans l'autre, un mot en plus dans le titre principal, exige
+    une durée indépendante de la fiche à ± 2 s de la page (règle du juge
+    Spotify). Mesuré : 20 paires aux mesures SongBPM identiques ainsi posées."""
+
+    RESULTATS = [{"title": "Boss", "artist": "OrelSan", "duration": "3:09", "detail_url": "/@o/b"}]
+
+    def _scraper(self):
+        from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
+
+        return SongBPMScraper.__new__(SongBPMScraper)
+
+    def test_sans_duree_independante_refuse(self):
+        s = self._scraper()
+        assert s.choisir_resultat(self.RESULTATS, "Boss Cypher", "OrelSan") is None
+        # Durée contraire (la vidéo de 34 min) : refusé aussi.
+        assert (
+            s.choisir_resultat(self.RESULTATS, "Boss Cypher", "OrelSan", duree_fiche=2070) is None
+        )
+
+    def test_dans_les_deux_sens(self):
+        """« Maybe » de Kid Cudi recevait la page de « Maybe So » (220 s)."""
+        s = self._scraper()
+        resultats = [{"title": "Maybe So", "artist": "Kid Cudi", "duration": "3:40"}]
+        assert s.choisir_resultat(resultats, "Maybe", "Kid Cudi", duree_fiche=173) is None
+
+    def test_une_duree_independante_concordante_suffit(self):
+        s = self._scraper()
+        assert s.choisir_resultat(self.RESULTATS, "Boss Cypher", "OrelSan", duree_fiche=190)
+
+    def test_titre_exact_annotation_ou_id_ne_sont_pas_vises(self):
+        s = self._scraper()
+        assert s.choisir_resultat(self.RESULTATS, "Boss", "OrelSan")
+        annote = [{"title": "Boss (feat. Stromae)", "artist": "OrelSan", "duration": "3:09"}]
+        assert s.choisir_resultat(annote, "Boss", "OrelSan")
+        par_id = [{**self.RESULTATS[0], "spotify_id": "SP"}]
+        # L'ID Spotify tranche avant le titre : même ID, accepté.
+        assert s.choisir_resultat(par_id, "Boss Cypher", "OrelSan", spotify_id="SP")

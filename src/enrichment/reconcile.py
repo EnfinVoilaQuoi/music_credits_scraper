@@ -157,11 +157,16 @@ DISCOGRAPHY_PRIORITIES: dict[str, tuple[str, ...]] = {
     # n'ont pas : les deux ne se croisent pas) (2026-09-27).
     # `apple_music` (lot B6, 2026-09-29) : la fiche iTunes d'un identifiant
     # VÉRIFIÉ — le fichier du distributeur, comme l'audio Topic (mesuré à ±1 s).
+    # `ytmusic` passe derrière `youtube` et `apple_music` (2026-10-29) : il lit
+    # le HIT d'une recherche de paroles par titre, eux lisent par identifiant
+    # (« Monster » de Kanye : 150 s contre 379 s chez Apple, Discogs et Topic).
+    # Simulé sur la base : 15 durées changent, 12 d'1 s vers le fichier du
+    # distributeur, aucune contre le témoin des autres catalogues.
     "duration": (
         "deezer",
-        "ytmusic",
         "youtube",
         "apple_music",
+        "ytmusic",
         "songbpm",
         # Durée de la piste sur le disque Discogs, saisie par des contributeurs
         # (35/36 à ±5 s de Deezer, 2026-09-29) : après SongBPM.

@@ -2,9 +2,9 @@
  "priorites": {
   "duration": [
    "deezer",
-   "ytmusic",
    "youtube",
    "apple_music",
+   "ytmusic",
    "songbpm",
    "discogs",
    "spotify_web",
@@ -22,11 +22,17 @@
   ]
  },
  "simulation": {
-  "date": "2026-10-14",
+  "date": "2026-10-29",
   "resultat": {
    "duration": {
-    "fiches_changees": 0,
-    "exemples": []
+    "fiches_changees": 15,
+    "exemples": [
+     "Kid Cudi — What is it? (skit) : 20 → 19",
+     "Kanye West — Blow it Up : 203 → 202",
+     "Kanye West — What Am I To Do? : 289 → 288",
+     "A2H — From Scratch : 99 → 98",
+     "Booba — Lollipop (French Remix) : 263 → 262"
+    ]
    }
   }
  }

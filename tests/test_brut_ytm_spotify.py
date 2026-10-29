@@ -20,7 +20,9 @@ from src.persistence import brut
 
 ACCUEIL = "https://music.youtube.com"
 BROWSE = "https://music.youtube.com/youtubei/v1/browse"
-CLE_API = "AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30"
+# Factice : la vraie clé du client web (publique, servie à tout visiteur et
+# embarquée par `ytmusicapi`) déclenchait l'alerte de secret de GitHub.
+CLE_API = "cle-de-test-du-client-web"
 
 
 def _reponse(statut: int, corps: bytes) -> requests.Response:

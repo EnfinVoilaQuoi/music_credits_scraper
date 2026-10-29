@@ -164,11 +164,22 @@ class TestPolitique:
         arbitrage = juger(cas, a, ctx)
         assert arbitrage.action == "retirer_spotify" and "Dans Ma Bulle" in arbitrage.raison
 
-    def test_paroles_proches_ce_n_est_pas_un_id_faux(self):
-        """« Tree » / « That Tree » (0,39) : l'humain."""
+    def test_paroles_proches_un_seul_temoin_l_humain(self):
+        """« Tree » / « That Tree » (0,39) : un seul ID dit l'autre morceau."""
         a, _b, ctx, cas = self._paire("Tree", "That Tree", paroles=0.39)
-        juger = pol.politique_compteur_partage(lambda _s: {"name": "That Tree"})
+        juger = pol.politique_compteur_partage({"SA": {"name": "That Tree"}}.get)
         assert juger(cas, a, ctx) is None
+
+    def test_les_deux_id_servent_l_autre_morceau(self):
+        """2026-10-29, « Open Arms (just SZA) » (0,71) : les deux ID servent la
+        version avec Travis — quelles que soient les paroles, celui de « just
+        SZA » est faux."""
+        a, _b, ctx, cas = self._paire("Open Arms (just SZA)", "Open Arms", paroles=0.71)
+        juger = pol.politique_compteur_partage(
+            lambda _s: {"name": "Open Arms (feat. Travis Scott)", "artists": ["SZA"]}
+        )
+        arbitrage = juger(cas, a, ctx)
+        assert arbitrage.action == "retirer_spotify" and "les deux ID" in arbitrage.raison
 
     def test_chacun_son_titre_compteur_partage(self):
         a, b, ctx, cas = self._paire("Back Like That", "Back Like That (Remix)", paroles=0.18)

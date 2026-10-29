@@ -1085,6 +1085,18 @@ def politique_compteur_partage(lire_spotify: Callable) -> Callable:
                 "normal",
                 f"l'ID de « {autre.title} » sert « {servi_a.titre} », ce morceau",
             )
+        # Les DEUX ID servent l'autre morceau, quelles que soient les paroles
+        # (2026-10-29, « Champions » de Travis à 0,86, « Open Arms (just SZA) »
+        # à 0,71 : Deezer et YouTube lui donnent 216 s, l'ID sert la version
+        # avec Travis, 239 s). Simulé sur toute la base : 1 cas actif, juste.
+        if page_t is autre and page_a is autre:
+            commun = "" if paroles is None else f" ; paroles communes {paroles:.0%}"
+            return Arbitrage(
+                "les deux ID servent l'autre morceau : retirer celui-ci",
+                "retirer_spotify",
+                f"Spotify sert « {servi_t.titre} » pour les deux ID : {critere_t} désigne "
+                f"« {autre.title} » (#{autre.id}){commun}",
+            )
         if page_t is track and page_a is autre:
             return _garde_du_compteur(track, autre, ctx, "Spotify sert le titre de chaque fiche")
         return None

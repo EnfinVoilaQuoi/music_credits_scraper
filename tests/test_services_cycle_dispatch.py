@@ -40,6 +40,7 @@ def _artist(tracks):
 def _track(tid, *, bpm=None, streams_ok=False):
     t = Track(title=f"T{tid}", artist=Artist(name="Swing"))
     t.id = tid
+    t.genius_url = f"https://genius.com/Swing-t{tid}-lyrics"
     t.audio.bpm, t.audio.key = bpm, ("C" if bpm else None)
     if streams_ok:
         t.streams.spotify_streams, t.streams.ytm_streams = 1, 1

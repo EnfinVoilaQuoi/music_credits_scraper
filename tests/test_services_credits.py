@@ -80,6 +80,8 @@ def _rt(dm=None):
 def _track(title, **kw):
     t = Track(title=title, artist=Artist(name="Swing"))
     t.id = hash(title) % 1000
+    # Une page Genius : sans elle, le run ne la lirait pas (`avec_page_genius`).
+    t.genius_url = f"https://genius.com/Swing-{t.id}-lyrics"
     for k, v in kw.items():
         setattr(t, k, v)
     return t

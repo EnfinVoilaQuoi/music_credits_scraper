@@ -302,6 +302,39 @@ class TestDoublons:
         a, b = _t("Boss", 1, genius_id=7), _t("BOSS", 2, genius_id=7)
         assert revue.doublon_de_titre(a, _ctx(a, b)) is None
 
+    def test_paroles_distinctes_deux_morceaux(self):
+        """2026-10-29 : « Famous » de *The Life of Pablo* et celui avec Playboi
+        Carti — les paroles Genius ne partagent aucune phrase."""
+        a, b = _t("Famous", 1, genius_id=1), _t("Famous", 2, genius_id=2)
+        a.lyrics.text, a.lyrics.source = PAROLES_UN, "genius"
+        b.lyrics.text, b.lyrics.source = PAROLES_DEUX, "genius"
+        assert revue.doublon_de_titre(a, _ctx(a, b)) is None
+
+    def test_memes_paroles_ou_sans_paroles_reste_a_trancher(self):
+        a, b = _t("Famous", 1, genius_id=1), _t("Famous", 2, genius_id=2)
+        assert revue.doublon_de_titre(a, _ctx(a, b)) is not None
+        a.lyrics.text, a.lyrics.source = PAROLES_UN, "genius"
+        b.lyrics.text, b.lyrics.source = PAROLES_UN + "\nEncore une ligne", "genius"
+        assert revue.doublon_de_titre(a, _ctx(a, b)) is not None
+
+    def test_paroles_hors_genius_ne_disent_rien(self):
+        a, b = _t("Famous", 1, genius_id=1), _t("Famous", 2, genius_id=2)
+        a.lyrics.text, a.lyrics.source = PAROLES_UN, "YouTube Music"
+        b.lyrics.text, b.lyrics.source = PAROLES_DEUX, "genius"
+        assert revue.doublon_de_titre(a, _ctx(a, b)) is not None
+
+
+PAROLES_UN = (
+    "I just wanted you to know that I been thinking of the summer nights\n"
+    "Driving down the coast with the windows open singing every line\n"
+    "Never thought that we would make it this far from the bottom of the city"
+)
+PAROLES_DEUX = (
+    "Money on my mind and the diamonds on my wrist they keep on shining\n"
+    "Pull up in the foreign with the gang behind me ready for the war\n"
+    "Counting up the paper every morning got no time to rest at all"
+)
+
 
 class TestVideos:
     def _v(self, titre, vues=10):

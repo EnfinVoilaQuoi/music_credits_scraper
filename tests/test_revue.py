@@ -507,6 +507,20 @@ class TestPagesEtCredits:
             revue.page_annotee_sans_trace(_t("X", genius_url=t.genius_url, spotify_id="S")) is None
         )
 
+    def test_page_annotee_sans_info_deja_montree_pour_information(self):
+        """2026-10-29 : « NICE THAT » — page lue qui ne dit rien (🕳️), déjà
+        montrée pour information ; pas une décision de plus."""
+        from datetime import datetime
+
+        t = _t("NICE THAT", genius_url="https://genius.com/Kanye-west-nice-that-annotated")
+        t.lyrics.scraped_at = t.last_scraped = datetime(2026, 9, 26)
+        t.lyrics.text, t.lyrics.source = "(...)", "genius"
+        assert revue.page_sans_info(t) is not None
+        assert revue.page_annotee_sans_trace(t) is None
+        # Une anecdote la fait sortir de 🕳️ : elle redevient une décision.
+        t.anecdotes = "Snippet joué en 2018."
+        assert revue.page_annotee_sans_trace(t) is not None
+
     def test_credits_api_non_confirmes(self):
         from datetime import datetime
 

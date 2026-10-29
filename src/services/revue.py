@@ -1051,12 +1051,16 @@ def page_sans_info(track, _ctx=None):
 def page_annotee_sans_trace(track, _ctx=None):
     """URL Genius `-annotated` (le tag « Non-Music ») sans aucune trace de
     plateforme : c'est ainsi qu'on a trouvé les pages poubelles du 2026-09-26
-    (29 supprimées sur 47). Le tag seul couvre aussi de vrais skits."""
+    (29 supprimées sur 47). Le tag seul couvre aussi de vrais skits. Une page
+    qui ne dit rien (`sans_info`) est déjà montrée pour information (🕳️,
+    décision utilisateur 2026-10-26) : elle n'est pas une décision de plus
+    (« NICE THAT », « Real shit », 2026-10-29)."""
     if (
         (track.genius_url or "").endswith("-annotated")
         and not track.spotify_id
         and not track.deezer_id
         and not track.videos
+        and not sans_info(track)
     ):
         return ("page Genius « Non-Music » sans trace de plateforme ni vidéo", {})
     return None

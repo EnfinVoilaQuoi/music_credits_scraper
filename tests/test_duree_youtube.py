@@ -101,6 +101,17 @@ class TestChainesDeConfiance:
         assert nature_de("Booba", {"channel": "b20baofficiel"}) == OFFICIELLE
         assert nature_de("Booba", {"channel": "Booba fan"}) is None
 
+    def test_l_artiste_que_nomme_une_chaine(self):
+        """e63 : « X - Topic » nomme X, sauf « Release » ; une chaîne officielle
+        déclarée nomme son artiste ; une autre chaîne, personne."""
+        from src.utils.chaines_youtube import artiste_de_la_chaine
+
+        assert artiste_de_la_chaine("Yo Gotti - Topic") == "Yo Gotti"
+        assert artiste_de_la_chaine("Release - Topic") is None
+        assert artiste_de_la_chaine("B20baOfficiel") == "Booba"
+        assert artiste_de_la_chaine("Johnny Dee") is None
+        assert artiste_de_la_chaine(None) is None
+
     def test_une_chaine_de_leaks_nomme_autrement(self):
         """« Sky City » (*Yandhi*) : la vidéo s'appelle « City In The Sky »."""
         leak = {

@@ -494,6 +494,50 @@ class TestDureeDeLaVideo:
         assert lue.duration == 200
 
 
+class TestChaineDeLaVideo:
+    """e63 — la chaîne de LA vidéo (« Yo Gotti - Topic ») : une lue remplace
+    l'ancienne, une passe qui ne la connaît pas ne la vide jamais."""
+
+    def _video(self, **kw):
+        return TrackVideo(video_id="aaaaaaaaaaa", **kw)
+
+    def test_aller_retour(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(
+            track.id, [self._video(channel="Yo Gotti - Topic", channel_id="UCx")]
+        )
+        (lue,) = data_manager.get_track_videos(track.id)
+        assert (lue.channel, lue.channel_id) == ("Yo Gotti - Topic", "UCx")
+        (fiche,) = data_manager.get_artist_tracks(artist.id)
+        assert [v.channel for v in fiche.videos] == ["Yo Gotti - Topic"]
+
+    def test_une_passe_sans_chaine_ne_l_efface_pas_et_une_lue_la_remplace(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(
+            track.id, [self._video(channel="Yo Gotti - Topic", channel_id="UCx")]
+        )
+        data_manager.record_track_videos(track.id, [self._video(views=5)])
+        (lue,) = data_manager.get_track_videos(track.id)
+        assert (lue.channel, lue.channel_id, lue.views) == ("Yo Gotti - Topic", "UCx", 5)
+        data_manager.record_track_videos(track.id, [self._video(channel="Yo Gotti")])
+        (lue,) = data_manager.get_track_videos(track.id)
+        assert (lue.channel, lue.channel_id) == ("Yo Gotti", "UCx")
+
+    def test_la_fusion_garde_la_chaine_du_doublon(self, data_manager):
+        artist = _artiste(data_manager)
+        garde = _morceau(data_manager, artist, "Déluge")
+        doublon = _morceau(data_manager, artist, "Deluge")
+        data_manager.record_track_videos(garde.id, [self._video()])
+        data_manager.record_track_videos(doublon.id, [self._video(channel="Isha - Topic")])
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        (lue,) = data_manager.get_track_videos(garde.id)
+        assert lue.channel == "Isha - Topic"
+
+
 class TestTitresInvisibles:
     """`save_track` est le point de passage UNIQUE d'un titre vers la base : le
     nettoyage y est posé, ce qui rend le doublon IMPOSSIBLE plutôt que réparable."""

@@ -97,6 +97,8 @@ def update_video_views(artist, tracks, data_manager, api=None, track_ids=None) -
                     kind=kind,
                     views=info.get("views"),
                     title=info.get("title"),
+                    # La chaîne (e63), lue par le même appel.
+                    channel=info.get("channel"),
                 )
             )
             report["videos"] += 1

@@ -1100,9 +1100,13 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         # celle de la fiche n'en est qu'un verdict (étape 7), et une vidéo
         # partagée par deux pages ne se départage que par la sienne.
         for video_id, video in videos.items():
-            duree = (details_videos.get(video_id) or {}).get("duration")
-            if duree:
-                video.duration = duree
+            detail = details_videos.get(video_id) or {}
+            if detail.get("duration"):
+                video.duration = detail["duration"]
+            # Sa chaîne (e63), du même appel : elle dit à quelle page revient
+            # une vidéo partagée, et trahit un lien vers le morceau d'un autre.
+            video.channel = detail.get("channel") or video.channel
+            video.channel_id = detail.get("channel_id") or video.channel_id
         data_manager.record_track_videos(track_id, list(videos.values()))
 
     # Totaux d'ALBUM : les morceaux tels qu'écrits ci-dessus + les clips doubles

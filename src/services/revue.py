@@ -1387,6 +1387,61 @@ def recherche_perimee(track, _ctx=None):
     )
 
 
+#: Sources de durée de la fiche tirées d'une VIDÉO : elles ne jugent pas une
+#: vidéo (l'une d'elles peut venir de celle-ci).
+_DUREES_DE_VIDEO = frozenset({"youtube_video", "youtube_officiel"})
+#: Écart au-delà duquel une durée dément la vidéo : celui des actions
+#: DESTRUCTIVES (`politiques_revue.ECART_VERSION_S`) — « Banlieue » de 113 et
+#: la vidéo de Rim'K (membre du groupe), 9 s d'écart, restent à l'humain.
+_ECART_LIEN_ETRANGER_S = 10
+
+
+def video_d_une_autre_chaine(track, ctx=None):
+    """Une vidéo que la fiche porte SEULE, dont la chaîne (e63, « X - Topic » ou
+    officielle déclarée) nomme un artiste ÉTRANGER à la fiche (ni son
+    principal, ni un invité, ni l'artiste de la ligne) ET dont la durée (e62)
+    contredit, de plus de `_ECART_LIEN_ETRANGER_S`, TOUTES les durées de la fiche
+    — au moins un catalogue lu par ID parmi elles, aucune source hors vidéo
+    d'accord : le morceau d'un autre (« Viser la victoire » d'Admiral T portait
+    « Promis à la victoire » de Kery James). La chaîne seule ne prouve rien :
+    groupe, label, artiste en tête de la parution (320 vidéos sur 409 à la
+    durée des catalogues, mesuré le 2026-10-29) ; sans durée à comparer, ou
+    une durée d'accord (« Welcome To The World », Discogs 185 s = la vidéo
+    de Kevin Rudolf 184 s, l'ID Spotify à 254 s peut être le faux), rien."""
+    if not track.videos:
+        return None
+    proprietaires = _proprietaires_des_videos(ctx) if ctx is not None else {}
+    observees = track.durations_observees or {}
+    catalogues = [int(d) for s in _DUREES_PAR_ID if (d := observees.get(s))]
+    hors_video = [
+        int(d) for s, d in observees.items() if d and s not in _DUREES_DE_VIDEO and s != "legacy"
+    ]
+    if not catalogues:
+        return None
+    for v in track.videos:
+        if not v.duration or not v.channel:
+            continue
+        if len({_page(t) for t in proprietaires.get(v.video_id, [track])}) > 1:
+            continue  # partagée : `video_partagee` la juge
+        chaine = _chaine_de([track], v.video_id)
+        if chaine is None or _place_de_l_artiste(track, chaine[1]) != "étranger":
+            continue
+        if any(abs(d - v.duration) <= _ECART_LIEN_ETRANGER_S for d in hors_video):
+            continue
+        return (
+            f"vidéo de « {chaine[0]} » ({v.duration} s) : ni l'artiste ni la durée de la "
+            f"fiche ({', '.join(f'{d} s' for d in sorted(set(catalogues)))})",
+            {
+                "video_id": v.video_id,
+                "track_ids": [track.id],
+                "chaine": chaine[0],
+                "duree_video": v.duration,
+                "impact": v.views or 0,
+            },
+        )
+    return None
+
+
 def video_etrangere(track, ctx=None):
     """Une vidéo rattachée dont le titre ne nomme pas le morceau : peut-être
     celle d'un autre (Kanye « Heartless - Recorded At RAK Studios » → vidéo de
@@ -1537,7 +1592,61 @@ def _temoins_du_proprietaire(fiches, v) -> list[tuple[str, str]]:
         temoins.append((seule, "seule page que la vidéo nomme"))
     if (par_duree := _par_la_duree(fiches, v.video_id)) is not None:
         temoins.append(par_duree)
+    if (par_chaine := _par_la_chaine(fiches, v.video_id)) is not None:
+        temoins.append(par_chaine)
     return temoins
+
+
+def _chaine_de(fiches, video_id) -> tuple[str, str] | None:
+    """`(nom de la chaîne, artiste qu'elle nomme)` de la vidéo (e63), lue sur
+    l'une quelconque des lignes qui la portent, ou None."""
+    from src.utils.chaines_youtube import artiste_de_la_chaine
+
+    for t in fiches:
+        lien = _lien_de(t, video_id)
+        if lien is not None and lien.channel:
+            artiste = artiste_de_la_chaine(lien.channel, lien.channel_id)
+            return (lien.channel, artiste) if artiste else None
+    return None
+
+
+def _place_de_l_artiste(t, artiste: str) -> str:
+    """Où `artiste` (celui d'une chaîne) se tient sur la fiche `t` :
+    « principal », « lié » (invité, ou artiste de la ligne), ou « étranger »."""
+    cible = normalize_name(artiste)
+    if not cible:
+        return "lié"  # un nom qui ne se compare pas ne prouve rien
+
+    def nomme(nom: str | None) -> bool:
+        n = normalize_name(nom or "")
+        return bool(n) and (contains_as_words(n, cible) or contains_as_words(cible, n))
+
+    if nomme(t.primary_artist_name or (t.artist.name if t.artist else "")):
+        return "principal"
+    if nomme(t.artist.name if t.artist else "") or any(nomme(a) for a in t.featured_artists_list):
+        return "lié"
+    return "étranger"
+
+
+def _par_la_chaine(fiches, video_id):
+    """`(page, témoin)` : la chaîne de la vidéo (e63, « X - Topic » ou chaîne
+    officielle déclarée) nomme l'interprète principal d'UNE page, et aucun
+    artiste — principal, invité, artiste de la ligne — des autres (2026-10-29 :
+    « Castro » de « Yo Gotti - Topic » → Yo Gotti, pas CyHi ; « Hiver » de
+    « aladin 135 - Topic » → Aladin 135, pas PLK)."""
+    chaine = _chaine_de(fiches, video_id)
+    if chaine is None:
+        return None
+    nom, artiste = chaine
+    places: dict = {}
+    for t in fiches:
+        places.setdefault(_page(t), set()).add(_place_de_l_artiste(t, artiste))
+    principales = [p for p, s in places.items() if "principal" in s]
+    if len(principales) != 1:
+        return None
+    if any(s != {"étranger"} for p, s in places.items() if p != principales[0]):
+        return None
+    return principales[0], f"chaîne de l'interprète : {nom}"
 
 
 #: Sources de durée lues par l'IDENTIFIANT d'un catalogue : jamais par la
@@ -2143,6 +2252,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         nature_du_cas=nature_credits_api,
     ),
     Detecteur("annotee", "Page « Non-Music » sans trace", "🏷️", page_annotee_sans_trace),
+    Detecteur(
+        "video_autre_chaine",
+        "Vidéo d'un autre artiste (chaîne et durée)",
+        "📺",
+        video_d_une_autre_chaine,
+    ),
     # Pour INFORMATION (décision utilisateur 2026-10-26, « la vérif manuelle,
     # c'est pour les cas que le code ne peut pas trancher ») : une page qui ne
     # porte rien (ni paroles, ni plateforme, ni album, ni vidéo, ni tiers

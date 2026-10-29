@@ -593,6 +593,9 @@ class TrackVideo:
     # "album"}` du résultat ytmusicapi — le verdict des vues comptées la
     # rejuge au score courant. None = inconnu (autre provenance, ou d'avant).
     recherche: dict | None = None
+    # Durée de la vidéo elle-même, en secondes (e62) — pas celle de la fiche.
+    # None = inconnue.
+    duration: int | None = None
 
 
 @dataclass(eq=False)

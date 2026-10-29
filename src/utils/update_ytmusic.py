@@ -1096,6 +1096,13 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
             logger.debug(f"🎛️ « {titre} » : {len(comptees)} vidéos comptées")
 
     for track_id, videos in videos_vues.items():
+        # La durée de CHAQUE vidéo (e62), lue par le même appel que ses vues :
+        # celle de la fiche n'en est qu'un verdict (étape 7), et une vidéo
+        # partagée par deux pages ne se départage que par la sienne.
+        for video_id, video in videos.items():
+            duree = (details_videos.get(video_id) or {}).get("duration")
+            if duree:
+                video.duration = duree
         data_manager.record_track_videos(track_id, list(videos.values()))
 
     # Totaux d'ALBUM : les morceaux tels qu'écrits ci-dessus + les clips doubles

@@ -39,7 +39,12 @@ from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
 from src.utils.positions_disque import position_retenue
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
-from src.utils.track_mapper import _clean_duration, recherche_de_ligne, track_from_row
+from src.utils.track_mapper import (
+    _clean_duration,
+    duree_video_de_ligne,
+    recherche_de_ligne,
+    track_from_row,
+)
 from src.utils.track_soeurs import (
     CLES_LOCALES_DES_RELATIONS,
     aligner_lien_youtube_des_soeurs,
@@ -161,6 +166,12 @@ def _recherche_en_json(recherche: dict | None) -> str | None:
         },
         ensure_ascii=False,
     )
+
+
+def _duree_video(duree: int | None) -> int | None:
+    """`TrackVideo.duration` → colonne `track_videos.duration` (e62). None (ou
+    une durée nulle, qu'aucune vidéo n'a) laisse la valeur en place."""
+    return duree if duree and duree > 0 else None
 
 
 #: Condition SQL « cet homonyme est interdit » pour le RETRAIT DU MARQUEUR
@@ -1497,6 +1508,21 @@ class TrackRepository:
                           AND d.views IS NOT NULL
                           AND (track_videos.views IS NULL OR track_videos.views_updated IS NULL
                                OR d.views_updated > track_videos.views_updated)
+                    )"""),
+                    {"delete_id": delete_id, "keep_id": keep_id},
+                )
+                # Durée de la vidéo (e62) : la copie gardée qui n'en a pas prend
+                # celle du doublon — c'est la même vidéo.
+                conn.execute(
+                    text("""
+                    UPDATE track_videos SET
+                      duration = (SELECT d.duration FROM track_videos d
+                                  WHERE d.track_id = :delete_id
+                                    AND d.video_id = track_videos.video_id)
+                    WHERE track_id = :keep_id AND duration IS NULL AND EXISTS (
+                        SELECT 1 FROM track_videos d
+                        WHERE d.track_id = :delete_id AND d.video_id = track_videos.video_id
+                          AND d.duration IS NOT NULL
                     )"""),
                     {"delete_id": delete_id, "keep_id": keep_id},
                 )
@@ -6206,7 +6232,7 @@ class TrackRepository:
                     r["video_id"]: r
                     for r in conn.execute(
                         text(
-                            "SELECT video_id, url, kind, source, views, title "
+                            "SELECT video_id, url, kind, source, views, title, duration "
                             "FROM track_videos WHERE track_id = :tid"
                         ),
                         {"tid": track_id},
@@ -6220,9 +6246,10 @@ class TrackRepository:
                         conn.execute(
                             text(
                                 "INSERT INTO track_videos (track_id, video_id, url, kind, "
-                                "source, views, views_updated, created_at, title, recherche) "
+                                "source, views, views_updated, created_at, title, recherche, "
+                                "duration) "
                                 "VALUES (:tid, :vid, :url, :kind, :source, :views, :vu, :now, "
-                                ":title, :recherche)"
+                                ":title, :recherche, :duration)"
                             ),
                             {
                                 "tid": track_id,
@@ -6235,6 +6262,7 @@ class TrackRepository:
                                 "now": now,
                                 "title": video.title,
                                 "recherche": _recherche_en_json(video.recherche),
+                                "duration": _duree_video(video.duration),
                             },
                         )
                     else:
@@ -6243,7 +6271,8 @@ class TrackRepository:
                                 "UPDATE track_videos SET url = :url, kind = :kind, "
                                 "source = :source, views = :views, title = :title, "
                                 "views_updated = COALESCE(:vu, views_updated), "
-                                "recherche = COALESCE(:recherche, recherche) "
+                                "recherche = COALESCE(:recherche, recherche), "
+                                "duration = :duration "
                                 "WHERE track_id = :tid AND video_id = :vid"
                             ),
                             {
@@ -6258,6 +6287,9 @@ class TrackRepository:
                                 ),
                                 "vu": now if video.views is not None else None,
                                 "recherche": _recherche_en_json(video.recherche),
+                                # La vidéo est la même : une durée lue remplace
+                                # l'ancienne, une absence ne vide jamais.
+                                "duration": _duree_video(video.duration) or ancienne["duration"],
                             },
                         )
                     ecrites += 1
@@ -6708,7 +6740,8 @@ class TrackRepository:
                     conn.execute(
                         text(
                             "SELECT track_id, video_id, url, kind, source, views, "
-                            "views_updated, title, recherche FROM track_videos WHERE track_id = :tid"
+                            "views_updated, title, recherche, duration FROM track_videos "
+                            "WHERE track_id = :tid"
                         ),
                         {"tid": track_id},
                     )
@@ -6735,7 +6768,7 @@ class TrackRepository:
             conn.execute(
                 text(
                     "SELECT v.track_id, v.video_id, v.url, v.kind, v.source, v.views, "
-                    "v.views_updated, v.title, v.recherche FROM track_videos v "
+                    "v.views_updated, v.title, v.recherche, v.duration FROM track_videos v "
                     "JOIN tracks t ON t.id = v.track_id WHERE t.artist_id = :aid"
                 ),
                 {"aid": artist_id},
@@ -6764,6 +6797,7 @@ class TrackRepository:
                     views_updated=r["views_updated"],
                     title=r["title"],
                     recherche=recherche_de_ligne(r["recherche"]),
+                    duration=duree_video_de_ligne(r["duration"]),
                 )
             )
         for videos in par_track.values():

@@ -4044,23 +4044,43 @@ class TrackRepository:
         `reccobeats` résolues par cet ISRC sont restées. Même geste que
         `_retirer_mesures_par_isrc`, hors du contexte d'un retrait d'ID —
         garde-fou : n'agit que si `isrc` est bien VIDE en base (sinon la
-        résolution ISRC est peut-être encore valide, ce n'est pas un orphelin)."""
+        résolution ISRC est peut-être encore valide, ce n'est pas un orphelin).
+
+        Le retrait vaut pour toute la famille de lignes SŒURS (2026-10-29) :
+        laissée chez une sœur, la mesure revenait par l'union de fin de
+        transaction. Une sœur qui porte un ISRC rend la mesure non orpheline
+        pour toute la famille : on ne touche alors à rien."""
         rapport = {"reccobeats_retirees": []}
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
-                ligne = (
-                    conn.execute(text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": track_id})
-                    .mappings()
-                    .first()
-                )
-                if ligne is None or ligne["isrc"]:
-                    return rapport
-                rapport["reccobeats_retirees"] = self._retirer_mesures_par_isrc(conn, track_id)
-                if "duration" in {f for f, _ in rapport["reccobeats_retirees"]}:
-                    self._ecrire_colonnes_discographie(
-                        conn, track_id, self._arbitrer_discographie(conn, track_id, {"duration"})
+
+                def orpheline(tid: int) -> bool:
+                    ligne = (
+                        conn.execute(text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": tid})
+                        .mappings()
+                        .first()
                     )
+                    return ligne is not None and not ligne["isrc"]
+
+                if not orpheline(track_id):
+                    return rapport
+                jumelles: list[int] = []
+                effacer_chez_les_soeurs(conn, track_id, jumelles.append)
+                if not all(orpheline(j) for j in jumelles):
+                    return rapport
+
+                def retirer(tid: int) -> list[tuple[str, str]]:
+                    retirees = self._retirer_mesures_par_isrc(conn, tid)
+                    if "duration" in {f for f, _ in retirees}:
+                        self._ecrire_colonnes_discographie(
+                            conn, tid, self._arbitrer_discographie(conn, tid, {"duration"})
+                        )
+                    return retirees
+
+                rapport["reccobeats_retirees"] = retirer(track_id)
+                for jumelle in jumelles:
+                    retirer(jumelle)
             return rapport
         except SQLAlchemyError as e:
             logger.error(f"Erreur clear_orphan_reccobeats_measures (track_id={track_id}): {e}")

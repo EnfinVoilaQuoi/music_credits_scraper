@@ -200,6 +200,14 @@ STREAMS_SOURCES = ("kworb", "spotify_web")
 #: `duree_youtube.DUREE_MIN_MORCEAU`, leur durée est celle d'un EXTRAIT.
 _VIDEOS_ORDINAIRES = frozenset({"youtube_video", "youtube_officiel"})
 
+#: Sources lues par le TITRE, jamais par un identifiant de catalogue : les
+#: vidéos ordinaires et les sources fragiles du vote (`vote_durees.FRAGILES`).
+#: Une durée de l'une d'elles que les paroles Genius ne peuvent pas tenir
+#: (`duree_youtube.trop_courte_pour_les_paroles`) est celle d'un autre morceau
+#: ou d'un extrait. Une source lue par un ID (Deezer, Apple, Spotify) n'est
+#: pas visée : c'est alors la page Genius qui peut être la fausse.
+_LUES_PAR_LE_TITRE = _VIDEOS_ORDINAIRES | frozenset({"songbpm", "discogs", "legacy"})
+
 
 #: Veto du vote dans le verdict de durée — PROPOSITION, interrupteur BAISSÉ
 #: (2026-10-27). Levé, la source en tête de l'ordre cède quand sa valeur est
@@ -247,6 +255,10 @@ def resoudre_duree(
         24 s) ; sans titre connu, pas de filtre ;
       · plus de 15 min que les paroles Genius démentent — l'entretien entier
         (« Kanye West Sway Freestyle » : 73 mots pour 34 min).
+    Et toute durée lue par le TITRE (`_LUES_PAR_LE_TITRE` : vidéo ordinaire,
+    SongBPM, Discogs, legacy) trop courte pour les paroles Genius (plus de 8
+    mots/s, 2026-10-29) : « Boss Cypher » 189 s SongBPM pour 6 223 mots, la
+    vidéo de 34 min fait la colonne ; « Shemale » 27 s, un extrait, plus rien.
     Règle de VERDICT : l'observation reste, la colonne cesse de la porter, y
     compris pour ce qui a été posé avant elle. La même fonction pour
     `reconcile` et le repository.
@@ -259,15 +271,20 @@ def resoudre_duree(
         DUREE_MIN_MORCEAU,
         court_par_nature,
         dementie_par_les_paroles,
+        trop_courte_pour_les_paroles,
     )
     from src.utils.track_mapper import _clean_duration
 
     court = titre is None or court_par_nature(titre)
 
     def recevable(o) -> bool:
-        if o.source not in _VIDEOS_ORDINAIRES:
+        if o.source not in _LUES_PAR_LE_TITRE:
             return True
         d = _clean_duration(o.value) or 0
+        if trop_courte_pour_les_paroles(d, paroles):
+            return False
+        if o.source not in _VIDEOS_ORDINAIRES:
+            return True
         return (court or d >= DUREE_MIN_MORCEAU) and not dementie_par_les_paroles(d, paroles)
 
     retenues = [o for o in observations if recevable(o)]

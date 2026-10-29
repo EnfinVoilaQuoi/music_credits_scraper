@@ -596,6 +596,9 @@ class TrackVideo:
     # Durée de la vidéo elle-même, en secondes (e62) — pas celle de la fiche.
     # None = inconnue.
     duration: int | None = None
+    # Chaîne de la vidéo (e63) : nom affiché et identifiant. None = inconnue.
+    channel: str | None = None
+    channel_id: str | None = None
 
 
 @dataclass(eq=False)

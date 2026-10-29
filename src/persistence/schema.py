@@ -562,6 +562,11 @@ track_videos = Table(
     # celle de la fiche n'en est qu'un verdict, et une vidéo partagée par deux
     # pages au même titre ne se départage que par la sienne. NULL = inconnue.
     Column("duration", Integer),
+    # Chaîne de LA vidéo (e63, `snippet` de YouTube Data, même appel que la
+    # durée) : nom affiché et identifiant stable. « X - Topic » nomme
+    # l'interprète d'une parution. NULL = inconnue.
+    Column("channel", Text),
+    Column("channel_id", Text),
     UniqueConstraint("track_id", "video_id"),
     sqlite_autoincrement=True,
 )

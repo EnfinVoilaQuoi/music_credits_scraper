@@ -166,6 +166,10 @@ class FakeDM:
         for v in videos:
             if v.duration is not None:
                 self.durees_videos[(track_id, v.video_id)] = v.duration
+        self.chaines_videos = getattr(self, "chaines_videos", {})
+        for v in videos:
+            if v.channel is not None:
+                self.chaines_videos[(track_id, v.video_id)] = v.channel
         vues = self.vues.setdefault(track_id, {})
         for v in videos:
             vues[v.video_id] = v.views if v.views is not None else vues.get(v.video_id)
@@ -567,6 +571,13 @@ def test_chaque_video_garde_sa_duree(sans_recherche):
         (5, "clipdouble1"): 400,
     }
     assert (6, ["sansduree11"]) in dm.video_writes
+    # e63 : la chaîne, lue par le même appel, suit chaque vidéo.
+    assert dm.chaines_videos == {
+        (1, "audioaudioa"): "Isha - Topic",
+        (4, "clipdouble1"): "ISHA",
+        (5, "clipdouble1"): "ISHA",
+        (6, "sansduree11"): "ISHA",
+    }
 
 
 class TestDureeVideoPerimee:

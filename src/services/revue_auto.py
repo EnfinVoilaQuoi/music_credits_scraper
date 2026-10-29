@@ -427,7 +427,7 @@ def _retirer_video_partagee(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict
             for r in conn.execute(
                 text(
                     "SELECT track_id, video_id, url, kind, source, views, title, recherche, "
-                    "duration "
+                    "duration, channel, channel_id "
                     "FROM track_videos WHERE video_id = :v AND track_id IN "
                     f"(SELECT id FROM tracks WHERE id IN ({fiches_cibles}) "
                     f"OR genius_id IN ({pages}))"
@@ -865,6 +865,9 @@ def retablir(dm, artiste, correction: dict) -> str:
                         recherche=recherche_de_ligne(lien["recherche"]),
                         # Absente des annulations d'avant e62.
                         duration=lien.get("duration"),
+                        # Absentes des annulations d'avant e63.
+                        channel=lien.get("channel"),
+                        channel_id=lien.get("channel_id"),
                     )
                 ],
             )

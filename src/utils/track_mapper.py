@@ -63,6 +63,15 @@ def duree_video_de_ligne(value) -> int | None:
     return secondes if secondes > 0 else None
 
 
+def chaine_de_ligne(value) -> str | None:
+    """`track_videos.channel` / `channel_id` (e63) → texte, ou None (absente
+    ou vide : une chaîne inconnue ne se devine pas)."""
+    texte = _clean(value)
+    if texte is None:
+        return None
+    return str(texte).strip() or None
+
+
 def _clean_datetime(value):
     """Horodatage DB (chemin `text()` : string ISO verbatim) → `datetime`.
 

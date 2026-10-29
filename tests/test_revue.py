@@ -106,6 +106,19 @@ class TestMesures:
         # Un instrumental a le même beat : attendu (décision utilisateur).
         assert revue.songbpm_copie_de_l_original(i, ctx) is None
 
+    def test_une_autre_tonalite_est_une_autre_page(self):
+        """2026-10-29 : « Jamm - Remix » et « Jamm », 95 bpm et 159 s chacun,
+        mais 5 mineur contre 6 majeur — deux pages SongBPM, pas une copie."""
+        o, v = _t("Jamm", 1), _t("Jamm - Remix", 2)
+        original = self._obs(songbpm={"bpm": 95, "duration": 159, "key": 6, "mode": 1})
+        remix = self._obs(songbpm={"bpm": 95, "duration": 159, "key": 5, "mode": 0})
+        assert revue.songbpm_copie_de_l_original(v, _ctx(o, v, obs={1: original, 2: remix})) is None
+        # Même tonalité, ou tonalité lue d'un seul côté : toujours une copie.
+        meme = self._obs(songbpm={"bpm": 95, "duration": 159, "key": 6, "mode": 1})
+        assert revue.songbpm_copie_de_l_original(v, _ctx(o, v, obs={1: original, 2: meme}))
+        sans = self._obs(songbpm={"bpm": 95, "duration": 159})
+        assert revue.songbpm_copie_de_l_original(v, _ctx(o, v, obs={1: original, 2: sans}))
+
 
 class TestLrc:
     def _avec(self, lrc, titre="X", n=50):

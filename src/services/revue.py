@@ -748,6 +748,13 @@ def songbpm_copie_de_l_original(track, ctx):
         return None
     v = {f: _songbpm(ctx, track, f) for f in ("bpm", "duration")}
     o = {f: _songbpm(ctx, socle, f) for f in ("bpm", "duration")}
+    # Une TONALITÉ lue des deux côtés et différente : deux pages SongBPM
+    # distinctes, la coïncidence de tempo et de durée n'est pas une copie
+    # (« Jamm - Remix » 5 mineur, « Jamm » 6 majeur, 2026-10-29).
+    for f in ("key", "mode"):
+        lue, originale = _songbpm(ctx, track, f), _songbpm(ctx, socle, f)
+        if lue is not None and originale is not None and lue != originale:
+            return None
     if v["bpm"] and v["duration"] and v == o:
         return (
             f"BPM {v['bpm']} et durée {v['duration']} s SongBPM identiques à « {socle.title} » "

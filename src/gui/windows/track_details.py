@@ -1503,6 +1503,7 @@ class TrackDetailsWindow:
         l'ID désigne). La confirmation ANNONCE ce qui sera retiré : un rejet qui
         emporte 4 observations sans le dire serait une mauvaise surprise.
         """
+        from src.utils.corrections_fiches import memoriser_id_refuse
         from src.utils.spotify_audit import rejeter_spotify_id
         from src.utils.spotify_identity import est_accepte, identite_concorde, lire_identite_http
 
@@ -1543,6 +1544,8 @@ class TrackDetailsWindow:
             ):
                 return
             rapport = rejeter_spotify_id(self.app.data_manager, track, principal)
+            # Refusé, sinon la prochaine identité le repose (« Forever », 2026-10-28).
+            memoriser_id_refuse(track, principal)
             retirees = len(rapport["observations_retirees"])
             if rapport["duree_suspecte"] and messagebox.askyesno(
                 "Durée suspecte",

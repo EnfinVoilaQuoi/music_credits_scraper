@@ -139,9 +139,14 @@ def appliquer(dm: DataManager, fautifs: list[dict]) -> None:
     sauvegarde = get_backup_manager().create_backup("before_repair_spotify_ids")
     print(f"\n💾 Backup : {sauvegarde}")
 
+    from src.utils.corrections_fiches import fiches_par_id, memoriser_id_refuse
+
+    fiches = fiches_par_id(f["track_id"] for f in fautifs)
     observations = durees = 0
     for f in fautifs:
         r = dm.clear_track_spotify_id(f["track_id"], f["spotify_id"])
+        # Refusé, sinon la prochaine identité le repose (« Forever », 2026-10-28).
+        memoriser_id_refuse(fiches[f["track_id"]], f["spotify_id"])
         observations += len(r["observations_retirees"])
         if r["duree_suspecte"]:
             # La durée n'a pas de provenance en base (le lot B la lui donnera) :

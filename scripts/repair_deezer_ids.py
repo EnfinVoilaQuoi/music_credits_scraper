@@ -96,9 +96,14 @@ def imprimer(fautifs: list[dict], autres: list[dict]) -> None:
 def appliquer(dm: DataManager, fautifs: list[dict]) -> None:
     sauvegarde = get_backup_manager().create_backup("before_repair_deezer_ids")
     print(f"\n💾 Backup : {sauvegarde}")
+    from src.utils.corrections_fiches import fiches_par_id, memoriser_deezer_refuse
+
+    fiches = fiches_par_id(f["track_id"] for f in fautifs)
     observations = liens = reperes = 0
     for f in fautifs:
         r = dm.clear_track_deezer_id(f["track_id"], f["deezer_id"])
+        # Refusé, sinon la prochaine identité le repose (« Forever », 2026-10-28).
+        memoriser_deezer_refuse(fiches[f["track_id"]], f["deezer_id"])
         observations += len(r["observations_retirees"])
         liens += r["liens_parution_retires"]
         if r["parution_reperee"]:

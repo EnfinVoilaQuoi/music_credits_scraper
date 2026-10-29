@@ -23,11 +23,11 @@ import customtkinter as ctk
 
 from src.concurrency.lifecycle import start_worker, stop_requested
 from src.services.revue import enregistrer_audit_spotify, enregistrer_homonymes_spotify
+from src.utils.corrections_fiches import fiches_par_id, memoriser_id_refuse
 from src.utils.logger import get_logger
 from src.utils.spotify_audit import (
     lignes_a_verifier,
     rejeter_spotify_id,
-    track_de_la_ligne,
     verifier_lignes,
 )
 
@@ -217,28 +217,15 @@ class VerificationSpotifyWindow(ctk.CTkToplevel):
             return
 
         par_id = {t.id: t for t in getattr(self.app.current_artist, "tracks", []) or []}
+        # Fiches non chargées (autre artiste, sélection partielle) : relues par
+        # leur DÉSIGNATION (page Genius, sinon titre + album), que le refus vise.
+        par_id |= fiches_par_id(e["track_id"] for e, _ in choisis if e["track_id"] not in par_id)
         retires = observations = 0
         for ecart, var in choisis:
-            track = par_id.get(ecart["track_id"])
-            if track is None:
-                # La fiche n'est pas chargée (autre artiste, sélection partielle) :
-                # on rejette quand même EN BASE, sur un objet reconstruit.
-                track = track_de_la_ligne(
-                    {
-                        "id": ecart["track_id"],
-                        "title": ecart["titre"],
-                        "artiste": ecart["artiste"],
-                        "duration": None,
-                        "is_featuring": False,
-                        "primary_artist_name": None,
-                    }
-                )
-                # On ne lui REPOSE pas l'identifiant : `clear_track_spotify_id`
-                # nettoie la base sur l'`id` du morceau, et cet objet-ci ne sert
-                # qu'à porter cet `id` — il est jeté aussitôt après. Le lui poser
-                # ferait de ce fichier un producteur d'identifiants aux yeux du
-                # crible AST, pour un objet que personne ne relit.
+            track = par_id[ecart["track_id"]]
             rapport = rejeter_spotify_id(self.app.data_manager, track, ecart["spotify_id"])
+            # Refusé, sinon la prochaine identité le repose (« Forever », 2026-10-28).
+            memoriser_id_refuse(track, ecart["spotify_id"])
             retires += 1
             observations += len(rapport["observations_retirees"])
             var.set(False)

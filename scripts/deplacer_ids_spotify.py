@@ -56,6 +56,7 @@ def main() -> int:
 
     from src.scrapers.kworb_scraper import KworbScraper
     from src.utils import update_kworb as uk
+    from src.utils.corrections_fiches import memoriser_id_refuse
     from src.utils.data_manager import DataManager
     from src.utils.kworb_links_manager import KworbLinksManager
     from src.utils.spotify_identity import lire_identite_http, valider_identite
@@ -101,6 +102,7 @@ def main() -> int:
             pose = ""
             if args.apply:
                 dm.clear_track_spotify_id(porteur.id, sid)
+                memoriser_id_refuse(porteur, sid)
                 if not bonne.spotify_id and valider_identite(bonne, sid, lire_identite_http):
                     dm.update_track_spotify_id(bonne.id, sid)
                     pose = " (posé sur la bonne fiche)"

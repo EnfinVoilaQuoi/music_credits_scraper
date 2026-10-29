@@ -43,16 +43,20 @@ def lier(dm, track, contenus, artiste: str, origine: str, *, apply: bool) -> lis
     return ajoutes
 
 
-def propositions(fiches) -> list[tuple[object, list]]:
+def propositions(fiches, refuses=None) -> list[tuple[object, list]]:
     """PUR. `[(contenant, contenus)]` que la règle des titres joints propose
-    parmi les fiches d'UN artiste, hors liens déjà posés."""
+    parmi les fiches d'UN artiste, hors liens déjà posés et hors liens REFUSÉS
+    (`refuses(contenant)` → clés `corrections_fiches.cle_contenu`)."""
+    from src.utils.corrections_fiches import cle_contenu
+
     resultat = []
     for t in fiches:
         contenus = contenants.proposer_contenus(t, fiches)
         if not contenus:
             continue
         deja = set(contenants.ids_contenus(t))
-        manquants = [c for c in contenus if c.id not in deja]
+        refus = refuses(t) if refuses else set()
+        manquants = [c for c in contenus if c.id not in deja and cle_contenu(c) not in refus]
         if manquants:
             resultat.append((t, manquants))
     return resultat
@@ -62,9 +66,26 @@ def lier_par_la_regle(dm, artiste: str, fiches) -> list[str]:
     """Pose les liens que la règle des titres joints propose parmi les
     `fiches` d'UN artiste (fin de l'étape discographie) ; rend « medley ⊃
     contenus » pour chaque medley lié."""
+    from src.utils.corrections_fiches import contenus_refuses
+
     faits = []
-    for t, contenus in propositions(fiches):
+    for t, contenus in propositions(fiches, contenus_refuses):
         ajoutes = lier(dm, t, contenus, artiste, contenants.ORIGINE_REGLE, apply=True)
         if ajoutes:
             faits.append(f"{t.title} ⊃ " + " + ".join(c.title for c in ajoutes))
     return faits
+
+
+def delier(dm, track, contenus, *, apply: bool) -> list:
+    """Retire la relation `contient` de `track` vers `contenus` (lignes sœurs
+    comprises) et la REFUSE : sans refus, la règle des titres joints la
+    reposerait au run suivant. Rend les contenus qui étaient liés."""
+    from src.utils.corrections_fiches import memoriser_contenu_refuse
+
+    lies = set(contenants.ids_contenus(track))
+    retires = [c for c in contenus if c.id in lies]
+    if apply and contenus:
+        dm.retirer_contenus(track.id, [c.id for c in contenus])
+        for c in contenus:
+            memoriser_contenu_refuse(track, c)
+    return retires

@@ -2768,6 +2768,59 @@ class TrackRepository:
             logger.error(f"Erreur record_relationships({track_id}): {e}")
             return False
 
+    def retirer_contenus(self, track_id: int, contenu_ids) -> int:
+        """Retire la relation `contient` du medley vers `contenu_ids`, sur la
+        ligne ET ses jumelles d'une même transaction : `record_relationships`
+        rendrait une relation hors page gardée chez une sœur. Le refus qui
+        l'empêche de revenir est consigné par l'appelant
+        (`liens_contenus.delier`). Rend le nombre de lignes modifiées."""
+        from src.utils.contenants import TYPE
+
+        cibles = {int(i) for i in contenu_ids}
+        faites = 0
+        try:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                gid = conn.execute(
+                    text("SELECT genius_id FROM tracks WHERE id = :id"), {"id": track_id}
+                ).scalar()
+                jumelles, _ = ids_soeurs(conn, track_id, gid)
+                # Chez une jumelle, la relation vise la ligne contenue de SON
+                # artiste : on la reconnaît à la page Genius du contenu.
+                urls = {
+                    u
+                    for (u,) in conn.execute(
+                        text("SELECT genius_url FROM tracks WHERE id IN :ids").bindparams(
+                            bindparam("ids", expanding=True)
+                        ),
+                        {"ids": sorted(cibles)},
+                    )
+                    if u
+                }
+
+                def visee(r) -> bool:
+                    return r.get("type") == TYPE and (
+                        r.get("track_id") in cibles or (r.get("url") or None) in urls
+                    )
+
+                for tid in [track_id, *jumelles]:
+                    brut = conn.execute(
+                        text("SELECT relationships FROM tracks WHERE id = :id"), {"id": tid}
+                    ).scalar()
+                    relations = json.loads(brut) if brut else []
+                    gardees = [r for r in relations if not visee(r)]
+                    if len(gardees) == len(relations):
+                        continue
+                    self._toucher(conn, tid)
+                    conn.execute(
+                        text("UPDATE tracks SET relationships = :rels WHERE id = :id"),
+                        {"rels": serialiser_relations(gardees), "id": tid},
+                    )
+                    faites += 1
+            return faites
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_contenus({track_id}): {e}")
+            return 0
+
     def retirer_cles_locales_des_relations(self, *, appliquer: bool = False) -> list[int]:
         """Réparation : retire des `relationships` stockées les clés locales à
         la machine (`CLES_LOCALES_DES_RELATIONS`, le `cover_path` des samples

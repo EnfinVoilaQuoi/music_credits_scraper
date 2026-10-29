@@ -243,11 +243,15 @@ def appliquer(ctx: _Contexte, artiste: str, entree: dict, lire_identite, journal
         )
         fait(f"{type_rel} → « {cible.title} » ({cible.id})")
     contenus = []
+    # Un lien retiré depuis (refus `contenu`, `liens_contenus.delier`) prime.
+    refuses = cf.contenus_refuses(track) if entree.get("contient") else set()
     for designation in entree.get("contient") or []:
         cible, m = ctx.trouver(artiste, designation)
         if cible is None:
             # Jamais créée : la décision reste consignée, liée quand la fiche existera.
             journal.append(f"   ⏳ {nom} : fiche contenue {designation} {m} — en attente")
+            continue
+        if cf.cle_contenu(cible) in refuses:
             continue
         contenus.append(cible)
     rels, ajoutes = liens_contenus.relations_avec(

@@ -395,6 +395,56 @@ class TestPoseEnBase:
         }
         assert liens_contenus.lier_par_la_regle(data_manager, "Flynt", list(relu.values())) == []
 
+    def test_un_lien_delie_est_refuse_et_la_regle_ne_le_repose_pas(
+        self, data_manager, flynt_en_base
+    ):
+        a, ids = flynt_en_base
+        liens_contenus.lier_par_la_regle(
+            data_manager, "Flynt", list(_par_id(data_manager, a).values())
+        )
+        fiches = _par_id(data_manager, a)
+        medley = fiches[ids["Compte à rebours + Vieux avant l'âge"]]
+        vieux = fiches[ids["Vieux avant l’âge"]]
+        assert liens_contenus.delier(data_manager, medley, [vieux], apply=False) == [vieux]
+        assert contenants.ids_contenus(_par_id(data_manager, a)[medley.id]) != []
+        liens_contenus.delier(data_manager, medley, [vieux], apply=True)
+        relu = _par_id(data_manager, a)
+        assert contenants.ids_contenus(relu[medley.id]) == [ids["Compte à rebours"]]
+        assert cf.contenus_refuses(relu[medley.id]) == {cf.cle_contenu(vieux)}
+        # La règle ne repropose pas le lien refusé (ni l'autre, déjà posé).
+        assert liens_contenus.lier_par_la_regle(data_manager, "Flynt", list(relu.values())) == []
+        assert contenants.ids_contenus(_par_id(data_manager, a)[medley.id]) == [
+            ids["Compte à rebours"]
+        ]
+
+    def test_delier_retire_aussi_chez_la_soeur(self, data_manager):
+        """Un medley à page Genius porté par deux artistes : la relation gardée
+        chez la sœur reviendrait par `record_relationships` (relation hors page)."""
+        lignes = {}
+        for nom in ("Kanye West", "Kid Cudi"):
+            art = Artist(name=nom)
+            art.id = data_manager.save_artist(art)
+            for titre, gid in (("Bad Night / Rap Tarantino", 99), ("Bad Night", 1)):
+                t = Track(title=titre, artist=art)
+                t.genius_id, t.genius_url = gid, f"https://genius.com/x-{gid}"
+                lignes[(nom, titre)] = data_manager.save_track(t)
+        for nom in ("Kanye West", "Kid Cudi"):
+            art = data_manager.get_artist_by_name(nom)
+            fiches = _par_id(data_manager, art)
+            medley = fiches[lignes[(nom, "Bad Night / Rap Tarantino")]]
+            contenu = fiches[lignes[(nom, "Bad Night")]]
+            liens_contenus.lier(data_manager, medley, [contenu], nom, "manuel", apply=True)
+        kanye = data_manager.get_artist_by_name("Kanye West")
+        fiches = _par_id(data_manager, kanye)
+        medley = fiches[lignes[("Kanye West", "Bad Night / Rap Tarantino")]]
+        liens_contenus.delier(
+            data_manager, medley, [fiches[lignes[("Kanye West", "Bad Night")]]], apply=True
+        )
+        for nom in ("Kanye West", "Kid Cudi"):
+            art = data_manager.get_artist_by_name(nom)
+            relu = _par_id(data_manager, art)[lignes[(nom, "Bad Night / Rap Tarantino")]]
+            assert contenants.ids_contenus(relu) == [], nom
+
     def test_la_decision_consignee_est_une_union(self, data_manager):
         medley = {"titre": "Crazy + 6G", "album": "Rétrographie (Mixtape)"}
         assert cf.memoriser_contenus("Flynt", medley, [{"genius_id": 1}]) == [{"genius_id": 1}]

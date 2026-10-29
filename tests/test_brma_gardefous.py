@@ -335,6 +335,3 @@ class TestCodeDeSortie:
         assert self._lancer(monkeypatch, tmp_path, True, cdp=None, run=run) == 1
         assert lances == []
         assert "route CDP" in capsys.readouterr().out
-
-
-# ── Le repli LLM (famille A : les sélecteurs sont cassés) ─────────────────────

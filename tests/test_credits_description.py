@@ -132,9 +132,6 @@ class TestParseDescriptionClip:
         assert credits[0].name == "Tysko"
 
 
-# ── Repli LLM ────────────────────────────────────────────────────────────────
-
-
 # ── Mesuré sur A2H (2026-09-22) : 16 descriptions, 4 crédits trouvés ─────────
 
 WAXX_AUDIO = """\

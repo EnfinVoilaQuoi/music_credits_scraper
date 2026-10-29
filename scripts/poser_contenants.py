@@ -54,7 +54,9 @@ def a_la_main(dm, artiste: str, contenant_id: int, contenus_ids: list[int], appl
     for c in contenus:
         print(f"   · {_decrire(c)}")
     if not apply:
-        ajoutes = liens_contenus.lier(dm, contenant, contenus, artiste, ORIGINE_MANUELLE, apply=False)
+        ajoutes = liens_contenus.lier(
+            dm, contenant, contenus, artiste, ORIGINE_MANUELLE, apply=False
+        )
         print(f"   {len(ajoutes)} lien(s) à poser")
         print("\n(à blanc — relancer avec --apply pour écrire)")
         return 0
@@ -77,7 +79,9 @@ def par_la_regle(dm, artistes: list[str], apply: bool) -> int:
         if artist is None:
             print(f"⚠️ Artiste inconnu : {nom}")
             continue
-        lots += [(nom, t, c) for t, c in liens_contenus.propositions(dm.get_artist_tracks(artist.id))]
+        lots += [
+            (nom, t, c) for t, c in liens_contenus.propositions(dm.get_artist_tracks(artist.id))
+        ]
     for nom, t, contenus in lots:
         print(f"{nom} — {_decrire(t)}")
         for c in contenus:

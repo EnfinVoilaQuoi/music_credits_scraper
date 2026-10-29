@@ -259,17 +259,29 @@ class SongBPMScraper:
         spotify_id: str | None = None,
         max_results_to_check: int = 5,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
+        garde=None,
     ) -> tuple[int, dict[str, Any]] | None:
         """Le premier des `max_results_to_check` résultats que `_match_track`
         accepte, avec sa place (1 = premier), sinon None. PUR (aucun accès à la
         page) : commun aux deux jumeaux, et rejoué tel quel par la cassette
         SongBPM (`tests/test_cassettes.py`). Une page REFUSÉE pour la fiche
         (`pages_refusees`, chemins de `cle_page_songbpm`) n'est pas candidate :
-        la suivante la remplace."""
+        la suivante la remplace. Une page à l'année de la JUMELLE de la fiche
+        (`garde`, `titre_annee.GardeAnnee` : « Suzy » / « Suzy 2003 ») non plus,
+        sauf durée indépendante de la fiche à ± 2 s de celle de la page."""
         if pages_refusees:
             results = [
                 r for r in results if cle_page_songbpm(r.get("detail_url")) not in pages_refusees
             ]
+        if garde is not None:
+            gardes = []
+            for r in results:
+                motif = garde.motif(r.get("title"), r.get("duration"))
+                if motif:
+                    logger.info(f"❌ REJET: {motif}")
+                else:
+                    gardes.append(r)
+            results = gardes
         for i, result in enumerate(results[:max_results_to_check], 1):
             if self._match_track(
                 result["title"],
@@ -488,6 +500,7 @@ class SongBPMScraper:
         reload_homepage: bool = True,
         titre_juge: str | None = None,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
+        garde=None,
     ) -> dict[str, Any] | None:
         try:
             if reload_homepage:
@@ -534,6 +547,7 @@ class SongBPMScraper:
                 spotify_id,
                 max_results_to_check,
                 pages_refusees,
+                garde,
             )
             if choix is not None:
                 i, result = choix
@@ -577,6 +591,7 @@ class SongBPMScraper:
         max_results_to_check: int = 5,
         fetch_details: bool = True,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
+        garde=None,
     ) -> dict[str, Any] | None:
         self._ensure_driver()
         if not self.page:
@@ -595,6 +610,7 @@ class SongBPMScraper:
                 max_results_to_check,
                 fetch_details,
                 pages_refusees,
+                garde,
             )
 
     def _search_track_body(
@@ -606,6 +622,7 @@ class SongBPMScraper:
         max_results_to_check: int,
         fetch_details: bool,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
+        garde=None,
     ):
         """Corps de `search_track`, sous l'observation ouverte par elle."""
         result = self._perform_search(
@@ -615,6 +632,7 @@ class SongBPMScraper:
             max_results_to_check=max_results_to_check,
             fetch_details=fetch_details,
             pages_refusees=pages_refusees,
+            garde=garde,
         )
         if result:
             log_api("SongBPM", f"search/{track_title}", True)
@@ -635,6 +653,7 @@ class SongBPMScraper:
                     reload_homepage=False,
                     titre_juge=track_title,
                     pages_refusees=pages_refusees,
+                    garde=garde,
                 )
                 if result:
                     log_api("SongBPM", f"search/{track_title}", True)

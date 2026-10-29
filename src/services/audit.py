@@ -768,7 +768,12 @@ def refus_vivants(c, pistes) -> list[Cas]:
     sœurs partagent, sur toute ligne de la même page Genius. Un écrivain de
     retrait qui oublie une ligne, ou un producteur qui ne relit pas le refus,
     se voit ici (CORRECTIFS : « valeur refusée encore vivante chez une sœur »)."""
-    from src.utils.corrections_fiches import CHAMP_PAGE_SONGBPM, designe, empreinte_lrc
+    from src.utils.corrections_fiches import (
+        CHAMP_PAGE_GETSONGBPM,
+        CHAMP_PAGE_SONGBPM,
+        designe,
+        empreinte_lrc,
+    )
 
     tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     if "refus" not in tables:
@@ -791,6 +796,12 @@ def refus_vivants(c, pistes) -> list[Cas]:
         (CHAMP_PAGE_SONGBPM,),
     ):
         pages_songbpm[r["track_id"]].add(r["value"])
+    pages_getsongbpm = collections.defaultdict(set)
+    for r in c.execute(
+        "SELECT track_id, value FROM observations WHERE field = ? AND source = 'getsongbpm'",
+        (CHAMP_PAGE_GETSONGBPM,),
+    ):
+        pages_getsongbpm[r["track_id"]].add(str(r["value"]))
 
     def porte(t, nature, valeur) -> bool:
         if nature == "id_spotify":
@@ -805,12 +816,15 @@ def refus_vivants(c, pistes) -> list[Cas]:
             return bool(t["lyrics"]) and empreinte_lrc(t["lyrics"]) == valeur
         if nature == "page_songbpm":
             return valeur in pages_songbpm[t["id"]]
+        if nature == "page_getsongbpm":
+            return valeur in pages_getsongbpm[t["id"]]
         return False
 
     cas = []
     for r in c.execute(
         "SELECT genius_id, artiste, titre, album, nature, valeur FROM refus "
-        "WHERE nature IN ('id_spotify', 'id_deezer', 'video', 'lrc', 'paroles', 'page_songbpm')"
+        "WHERE nature IN ('id_spotify', 'id_deezer', 'video', 'lrc', 'paroles', 'page_songbpm', "
+        "'page_getsongbpm')"
     ):
         if r["genius_id"] is not None:
             visees = par_genius.get(int(r["genius_id"]), [])

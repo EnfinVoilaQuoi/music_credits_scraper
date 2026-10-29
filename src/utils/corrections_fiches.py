@@ -660,6 +660,38 @@ def oublier_page_songbpm_refusee(track, page: str) -> bool:
     return _oublier(track, "page_songbpm", cle_page_songbpm(page))
 
 
+#: Champ d'observation (source `getsongbpm`, DÉCLARÉ, jamais arbitré) : l'ID de
+#: la chanson GetSongBPM d'où viennent les mesures — le pendant de
+#: `CHAMP_PAGE_SONGBPM` (2026-10-29, Diam's « Suzy » aux mesures de « Suzy 2003 »).
+CHAMP_PAGE_GETSONGBPM = "getsongbpm_page"
+
+
+def pages_getsongbpm_refusees(track) -> set[str]:
+    """IDs de chansons GetSongBPM dont les mesures ont été retirées de la fiche :
+    le client ne les reprend plus (`GetSongBPMFetcher._select_hit`)."""
+    return {r["valeur"] for r in _lignes(track, "page_getsongbpm")}
+
+
+def memoriser_page_getsongbpm_refusee(track, song_id, origine: str | None = None) -> bool:
+    return _memoriser(track, "page_getsongbpm", str(song_id or "").strip(), origine=origine)
+
+
+def oublier_page_getsongbpm_refusee(track, song_id) -> bool:
+    return _oublier(track, "page_getsongbpm", str(song_id or "").strip())
+
+
+def pages_getsongbpm_des_observations(observations) -> list[str]:
+    """PUR. Les chansons GetSongBPM que portent ces observations, sans doublon."""
+    vues: list[str] = []
+    for o in observations or ():
+        champ, valeur = (
+            (o.get("field"), o.get("value")) if isinstance(o, dict) else (o.field, o.value)
+        )
+        if champ == CHAMP_PAGE_GETSONGBPM and valeur and str(valeur) not in vues:
+            vues.append(str(valeur))
+    return vues
+
+
 def pages_des_observations(observations) -> list[str]:
     """PUR. Les pages SongBPM que portent ces observations (dicts retirés ou
     objets), sans doublon, dans l'ordre."""
@@ -674,11 +706,14 @@ def pages_des_observations(observations) -> list[str]:
 
 
 def refuser_pages_retirees(track, observations, origine: str | None = None) -> int:
-    """Consigne le refus de chaque page SongBPM qu'un retrait de mesures vient
-    d'emporter. Rend le nombre de refus posés."""
+    """Consigne le refus de chaque page SongBPM — ou chanson GetSongBPM — qu'un
+    retrait de mesures vient d'emporter. Rend le nombre de refus posés."""
     return sum(
         bool(memoriser_page_songbpm_refusee(track, p, origine=origine))
         for p in pages_des_observations(observations)
+    ) + sum(
+        bool(memoriser_page_getsongbpm_refusee(track, p, origine=origine))
+        for p in pages_getsongbpm_des_observations(observations)
     )
 
 

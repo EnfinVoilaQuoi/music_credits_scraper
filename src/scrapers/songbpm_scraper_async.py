@@ -283,6 +283,7 @@ class SongBPMScraperAsync(SongBPMScraper):
         reload_homepage: bool = True,
         titre_juge: str | None = None,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
+        garde=None,
     ) -> dict[str, Any] | None:
         try:
             if reload_homepage:
@@ -331,6 +332,7 @@ class SongBPMScraperAsync(SongBPMScraper):
                 spotify_id,
                 max_results_to_check,
                 pages_refusees,
+                garde,
             )
             if choix is not None:
                 i, result = choix
@@ -374,6 +376,7 @@ class SongBPMScraperAsync(SongBPMScraper):
         max_results_to_check: int = 5,
         fetch_details: bool = True,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
+        garde=None,
     ) -> dict[str, Any] | None:
         await self._ensure_driver_async()
         if not self.page:
@@ -391,6 +394,7 @@ class SongBPMScraperAsync(SongBPMScraper):
                 max_results_to_check,
                 fetch_details,
                 pages_refusees,
+                garde,
             )
 
     async def _search_track_async_body(
@@ -402,6 +406,7 @@ class SongBPMScraperAsync(SongBPMScraper):
         max_results_to_check: int,
         fetch_details: bool,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
+        garde=None,
     ):
         """Corps de `search_track_async`, sous l'observation ouverte par elle."""
         result = await self._perform_search_async(
@@ -411,6 +416,7 @@ class SongBPMScraperAsync(SongBPMScraper):
             max_results_to_check=max_results_to_check,
             fetch_details=fetch_details,
             pages_refusees=pages_refusees,
+            garde=garde,
         )
         if result:
             log_api("SongBPM", f"search/{track_title}", True)
@@ -431,6 +437,7 @@ class SongBPMScraperAsync(SongBPMScraper):
                     reload_homepage=False,
                     titre_juge=track_title,
                     pages_refusees=pages_refusees,
+                    garde=garde,
                 )
                 if result:
                     log_api("SongBPM", f"search/{track_title}", True)

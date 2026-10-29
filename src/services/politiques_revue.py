@@ -1225,8 +1225,30 @@ REGLES_ETENDUES = frozenset(
         ("video_partagee", "retirer_video_partagee"),
         # 2026-10-29 : 7 liens sur 11, artiste étranger ou autre remix montrés.
         ("recherche_perimee", "retirer_video_recherche"),
+        # 2026-10-29 : « titre + année nue », règle décidée par l'utilisateur
+        # (rapport `titre_annee_2026-10-27.md` du studio), simulée sur la copie.
+        ("jumelle_annee", "retirer_songbpm"),
+        ("jumelle_annee", "retirer_getsongbpm"),
+        ("jumelle_annee", "retirer_lrc"),
+        ("jumelle_annee", "retirer_video_recherche"),
     }
 )
+
+
+def politique_jumelle_annee(cas, track, _ctx):
+    """La donnée qu'une fiche partage avec sa JUMELLE « titre + année nue »
+    revient à la jumelle quand la source le dit (`revue.donnee_de_la_jumelle`
+    a posé `retirer`) : la fiche la perd, par un refus de règle. Les
+    identifiants (ID Spotify, Deezer, ISRC) restent à l'humain."""
+    from src.services.revue import ACTIONS_JUMELLE
+
+    preuves = cas.preuves or {}
+    if cas.detecteur != "jumelle_annee" or track is None or not preuves.get("retirer"):
+        return None
+    action = ACTIONS_JUMELLE.get(preuves.get("donnee"))
+    if action is None:
+        return None
+    return Arbitrage("donnée de la jumelle : la retirer de la fiche", action, cas.motif)
 
 
 def politique_recherche_perimee(cas, track, _ctx):
@@ -1299,6 +1321,7 @@ _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "kworb_proposition": politique_kworb_tiers,
     "video_partagee": politique_video_partagee,
     "recherche_perimee": politique_recherche_perimee,
+    "jumelle_annee": politique_jumelle_annee,
 }
 
 

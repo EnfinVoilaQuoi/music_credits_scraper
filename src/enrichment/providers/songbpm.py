@@ -23,6 +23,7 @@ from src.utils.corrections_fiches import (
 )
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import CHAMP_ID_PROPOSE
+from src.utils.titre_annee import EXCLUES_SONGBPM, garde_pour
 from src.utils.track_mapper import _clean_duration
 from src.utils.version_descriptors import titre_generique
 
@@ -191,6 +192,7 @@ class SongBpmProvider:
                     spotify_id=spotify_id,
                     fetch_details=True,
                     pages_refusees=pages_songbpm_refusees(track),
+                    garde=garde_pour(track, EXCLUES_SONGBPM),
                 )
             finally:
                 timer.cancel()
@@ -328,6 +330,7 @@ class SongBpmProvider:
                         spotify_id=spotify_id,
                         fetch_details=True,
                         pages_refusees=pages_songbpm_refusees(track),
+                        garde=garde_pour(track, EXCLUES_SONGBPM),
                     )
             except TimeoutError:
                 # Un délai sur UN morceau n'est pas une erreur du programme : il

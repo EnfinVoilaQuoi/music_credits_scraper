@@ -17,7 +17,13 @@ class _FakeScraper:
         self.calls = []
 
     def search_track(
-        self, title, artist, spotify_id=None, fetch_details=False, pages_refusees=frozenset()
+        self,
+        title,
+        artist,
+        spotify_id=None,
+        fetch_details=False,
+        pages_refusees=frozenset(),
+        garde=None,
     ):
         self.calls.append((title, artist, spotify_id, fetch_details))
         self.pages_refusees = pages_refusees
@@ -34,7 +40,13 @@ class _FakeScraperAsync(_FakeScraper):
         self.ferme = False
 
     async def search_track_async(
-        self, title, artist, spotify_id=None, fetch_details=False, pages_refusees=frozenset()
+        self,
+        title,
+        artist,
+        spotify_id=None,
+        fetch_details=False,
+        pages_refusees=frozenset(),
+        garde=None,
     ):
         self.calls.append((title, artist, spotify_id, fetch_details))
         self.pages_refusees = pages_refusees

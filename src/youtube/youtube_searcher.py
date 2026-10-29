@@ -37,6 +37,21 @@ class RechercheBridee(Exception):
     """YTM a rendu une réponse VIDE à une recherche : son bridage."""
 
 
+def _sous_la_garde(results: list[dict], garde) -> list[dict]:
+    """PUR. Les résultats, ceux à l'année de la JUMELLE de la fiche notés 0 et
+    rangés derrière (`titre_annee.GardeAnnee.motif_video`)."""
+    if garde is None or not results:
+        return results
+    notes = []
+    for r in results:
+        motif = garde.motif_video(r.get("title"), r.get("duration"))
+        if motif:
+            logger.info(f"Recherche YouTube : « {r.get('title')} » écarté — {motif}")
+            r = {**r, "relevance_score": 0.0}
+        notes.append(r)
+    return sorted(notes, key=lambda x: x.get("relevance_score", 0), reverse=True)
+
+
 def cache_key(artist: str, title: str) -> str:
     """Clé de cache d'une recherche. UN seul calcul, pour que la lecture,
     l'écriture et la PURGE (rejet d'un lien) visent la même entrée."""
@@ -381,10 +396,26 @@ class YouTubeSearcher:
         max_results: int = 25,
         album: str | None = None,
         artistes_connus=(),
+        garde=None,
     ) -> list[dict]:
         """Recherche principale avec cache et fallbacks. `album` : le disque de
         la fiche, qui juge un titre générique ; `artistes_connus` : ceux de la
-        fiche, qui jugent un remixeur nommé (`relevance_score`)."""
+        fiche, qui jugent un remixeur nommé (`relevance_score`) ; `garde` : sa
+        JUMELLE « titre + année » (`titre_annee`), appliquée aussi aux
+        résultats du cache, notés avant elle."""
+        return _sous_la_garde(
+            self._search_track(artist, title, max_results, album, artistes_connus), garde
+        )
+
+    def _search_track(
+        self,
+        artist: str,
+        title: str,
+        max_results: int,
+        album: str | None,
+        artistes_connus,
+    ) -> list[dict]:
+        """Corps de `search_track`, sans la garde « titre + année »."""
 
         # Vérifier le cache d'abord
         cle = cache_key(artist, title)

@@ -279,7 +279,7 @@ class TestFetchTrackBpm:
         source_usage.reset()
         appels = []
 
-        async def fake_search(http, artist, title, album=None):
+        async def fake_search(http, artist, title, album=None, garde=None, refusees=frozenset()):
             appels.append(title)
             return _song(titre=title) if title == "Titre" else None
 

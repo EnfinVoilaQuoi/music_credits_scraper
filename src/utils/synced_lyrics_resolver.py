@@ -115,6 +115,22 @@ def resolve_track_synced_lyrics(
     from src.utils.corrections_fiches import empreinte_lrc, lrc_refuses
 
     refuses = lrc_refuses(track)
+    # « Suzy » / « Suzy 2003 » : le LRC d'un morceau à l'année de la JUMELLE
+    # n'est pas le sien (2026-10-29, `titre_annee` — « Muzik (2003) », 56 s,
+    # portait le LRC YTM de 170 s de « Muzik »).
+    from src.utils.titre_annee import EXCLUES_LRC, garde_pour
+
+    garde_annee = garde_pour(track, EXCLUES_LRC)
+
+    def _annee_de_la_jumelle(res, source, cle_duree="duration"):
+        motif = (
+            garde_annee.motif(res.get("title"), res.get(cle_duree))
+            if (garde_annee is not None and res and res.get("title"))
+            else None
+        )
+        if motif:
+            logger.info(f"⏭ {track.title}: LRC {source} écarté — {motif}")
+        return motif is not None
 
     def _retenu(lrc, source):
         if lrc and lrc_dementi(paroles, lrc):
@@ -156,6 +172,10 @@ def resolve_track_synced_lyrics(
     ytm_lrc = (ytm_res.get("lyrics_synced") if ytm_res else None) if sync_ytm else None
     if ytm_lrc and need_sync:
         out.sources_repondues.add("ytmusic")
+    if ytm_lrc and _annee_de_la_jumelle(
+        {"title": ytm_res.get("title"), "duree": ytm_res.get("duree_audio")}, "YTM", "duree"
+    ):
+        ytm_lrc = None
     ytm_lrc = _retenu(ytm_lrc, "YTM")
 
     # SOURCE 1 (LRCLIB) : match sur la durée ±2 s.
@@ -184,6 +204,8 @@ def resolve_track_synced_lyrics(
                     f"⏭ {track.title}: LRC LRCLIB écarté — titre « {titre_lrclib} » "
                     "d'un autre morceau, et aucune parole pour juger"
                 )
+            elif lr and _annee_de_la_jumelle(lr, "LRCLIB"):
+                pass
             elif lr:
                 lrclib_lrc = _retenu(lr.get("lyrics_synced"), "LRCLIB")
                 lrclib_duree = lr.get("duration")
@@ -230,6 +252,8 @@ def resolve_track_synced_lyrics(
                 logger.debug(f"Musixmatch échec '{artist_name} - {track.title}': {e}")
             if mres and mres.get("lrc"):
                 out.sources_repondues.add("musixmatch")
+            if mres and _annee_de_la_jumelle(mres, "Musixmatch", "duree_piste"):
+                mres = None
             if mres and not _retenu(mres["lrc"], "Musixmatch"):
                 mres = None
             if mres:

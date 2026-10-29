@@ -1263,6 +1263,11 @@ REGLES_ETENDUES = frozenset(
         # 2026-10-29 : 3 cas sur 6 ; témoins la fiche de la version que Spotify
         # nomme (son propre ID, sa durée) et Deezer / Apple de la fiche.
         ("id_spotify_version", "normal"),
+        # 2026-10-29, décision utilisateur (« si on est sûr avec les data […]
+        # au moindre doute, on tranche pas ») : versions et titres génériques
+        # entrent quand les catalogues suffisent à la preuve.
+        ("generique_duree", "normal"),
+        ("duree_songbpm", "retirer_songbpm"),
     }
 )
 
@@ -1392,7 +1397,64 @@ def politique_id_spotify_version(cas, track, ctx):
     )
 
 
+def _identites(track) -> tuple:
+    return (
+        str(track.isrc).upper() if track.isrc else None,
+        str(track.deezer_id) if track.deezer_id else None,
+        track.spotify_id,
+    )
+
+
+def politique_generique_distincts(cas, track, ctx):
+    """Deux titres génériques à la même durée (« Interlude » et « Outro » de
+    *Premier mandat*, 50 s) : une COÏNCIDENCE quand chaque fiche a ses propres
+    ISRC, ID Deezer et ID Spotify, tous distincts, et que sa durée est
+    soutenue par au moins trois catalogues solides (2026-10-29). Le moindre
+    identifiant manquant ou partagé : l'humain. ✓ Normal, rien ne change."""
+    if cas.detecteur != "generique_duree" or track is None:
+        return None
+    ids_autres = set((cas.preuves or {}).get("autres") or ())
+    autres = [t for t in ctx.disco if t.id in ids_autres]
+    if not autres or len(autres) != len(ids_autres):
+        return None
+    fiches = [track, *autres]
+    identites = [_identites(t) for t in fiches]
+    for rang in range(3):
+        valeurs = [i[rang] for i in identites]
+        if None in valeurs or len(set(valeurs)) != len(valeurs):
+            return None
+    for t in fiches:
+        vote = voter(_durees(t), t.duration, editions=tuple(t.durees_editions or ()))
+        solides = (vote.pour if vote else set()) - {famille(s) for s in FRAGILES}
+        if not vote or vote.nature != SOUTENUE or len(solides) < 3:
+            return None
+    return Arbitrage(
+        "durée réelle, partagée par coïncidence : ✓ Normal",
+        "normal",
+        f"{track.duration} s ; ISRC, ID Deezer et Spotify distincts, durées soutenues "
+        "par 3 catalogues ou plus sur chaque fiche",
+    )
+
+
+_SONGBPM_PAR_LE_VOTE = politique_durees(3)
+
+
+def politique_songbpm_version(cas, track, ctx):
+    """La page SongBPM d'une VERSION ou d'un titre générique, démentie par au
+    moins trois catalogues solides d'accord entre eux, à plus de
+    `ECART_VERSION_S` (« Hasta La Vista (Intro) » 203 s contre 14-16 s ;
+    « Niagara Falls […] [ChoppedNotSlopped] » 207 s, la version normale,
+    contre 252 s) : la même preuve que pour un original
+    (`REGLES_VALIDEES`), étendue le 2026-10-29. Un original passe par
+    `arbitrage_valide`."""
+    if cas.detecteur != "duree_songbpm" or track is None or titre_d_original(track.title):
+        return None
+    return _SONGBPM_PAR_LE_VOTE(cas, track, ctx)
+
+
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "generique_duree": politique_generique_distincts,
+    "duree_songbpm": politique_songbpm_version,
     "id_spotify_version": politique_id_spotify_version,
     "bpm": politique_bpm,
     "tonalite": politique_tonalite,

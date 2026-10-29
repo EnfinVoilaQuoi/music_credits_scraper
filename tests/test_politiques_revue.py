@@ -449,7 +449,9 @@ def test_generique_retirer_songbpm_n_est_pas_valide():
 def test_les_regles_ne_touchent_ni_versions_ni_generiques():
     """« On garde les cas ambigus […] à la main, intro outro interlude remix
     live » (2026-10-20) : Travis « Niagara Falls […] [ChoppedNotSlopped] »
-    perdait son SongBPM au passage à blanc."""
+    perdait son SongBPM au passage à blanc. Les règles VALIDÉES restent aux
+    originaux ; depuis le 2026-10-29, une version démentie par 3 catalogues
+    passe par `politique_songbpm_version` (`TestSongbpmVersion`)."""
     durees = {"songbpm": 207, "deezer": 252, "spotify_web": 252, "youtube": 253}
     original = _t("Niagara Falls", durations_observees=dict(durees))
     version = _t("Niagara Falls [ChoppedNotSlopped]", durations_observees=dict(durees))
@@ -558,3 +560,75 @@ class TestIdSpotifyVersion:
         cas, cs, ctx = self._cas_kpop()
         cas.preuves["spotify_sert"] = "K-POP (feat. Bad Bunny & The Weeknd)"
         assert pol.arbitrage_etendu(cas, cs, ctx).action == "normal"
+
+
+class TestGeneriqueDistincts:
+    """Décision utilisateur 2026-10-29 : « Interlude » et « Outro » de Diam's,
+    50 s chacun, chacun ses identifiants — une coïncidence, ✓ Normal."""
+
+    DUREES = {"apple_music": 50, "deezer": 50, "spotify_web": 50, "youtube": 51}
+
+    def _paire(self, **autre):
+        a = _t(
+            "Interlude",
+            1,
+            duration=50,
+            isrc="FRZ1",
+            deezer_id=1,
+            spotify_id="S1",
+            durations_observees=dict(self.DUREES),
+        )
+        kw = dict(
+            duration=50,
+            isrc="FRZ2",
+            deezer_id=2,
+            spotify_id="S2",
+            durations_observees=dict(self.DUREES),
+        )
+        kw.update(autre)
+        b = _t("Outro", 2, **kw)
+        return (
+            _cas("generique_duree", a, {"duree": 50, "autres": [2]}),
+            a,
+            SimpleNamespace(disco=[a, b]),
+        )
+
+    def test_identifiants_distincts_et_catalogues_d_accord(self):
+        cas, a, ctx = self._paire()
+        assert pol.arbitrage_etendu(cas, a, ctx).action == "normal"
+
+    def test_un_identifiant_partage_ou_manquant_l_humain(self):
+        for autre in ({"isrc": "FRZ1"}, {"deezer_id": None}, {"spotify_id": "S1"}):
+            cas, a, ctx = self._paire(**autre)
+            assert pol.arbitrage_etendu(cas, a, ctx) is None, autre
+
+    def test_durees_trop_peu_soutenues_l_humain(self):
+        cas, a, ctx = self._paire(durations_observees={"deezer": 50, "songbpm": 50})
+        assert pol.arbitrage_etendu(cas, a, ctx) is None
+
+
+class TestSongbpmVersion:
+    """Décision utilisateur 2026-10-29 : les versions et titres génériques
+    perdent aussi une page SongBPM que 3 catalogues démentent."""
+
+    def test_version_dementie_par_trois_catalogues(self):
+        durees = {"songbpm": 207, "deezer": 252, "spotify_web": 252, "youtube": 253}
+        t = _t("Niagara Falls (Foot or 2) [ChoppedNotSlopped]", durations_observees=durees)
+        assert pol.arbitrage_etendu(_cas("duree_songbpm", t), t, None).action == "retirer_songbpm"
+
+    def test_intro_dementie(self):
+        durees = {"songbpm": 203, "apple_music": 16, "deezer": 15, "spotify_web": 15, "youtube": 16}
+        t = _t("Hasta La Vista (Intro)", durations_observees=durees)
+        assert pol.arbitrage_etendu(_cas("duree_songbpm", t), t, None).action == "retirer_songbpm"
+
+    def test_deux_catalogues_ou_dix_secondes_l_humain(self):
+        t = _t("Live (Remix)", durations_observees={"songbpm": 207, "deezer": 252, "youtube": 253})
+        assert pol.arbitrage_etendu(_cas("duree_songbpm", t), t, None) is None
+        durees = {"songbpm": 127, "deezer": 137, "spotify_web": 137, "youtube": 138}
+        t = _t("Wait (Remix)", durations_observees=durees)
+        assert pol.arbitrage_etendu(_cas("duree_songbpm", t), t, None) is None
+
+    def test_un_original_reste_a_la_regle_validee(self):
+        durees = {"songbpm": 207, "deezer": 252, "spotify_web": 252, "youtube": 253}
+        t = _t("Niagara Falls", durations_observees=durees)
+        assert pol.politique_songbpm_version(_cas("duree_songbpm", t), t, None) is None

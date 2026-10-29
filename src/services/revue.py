@@ -80,7 +80,14 @@ from src.utils.version_descriptors import (
     titre_generique,
 )
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
-from src.utils.vote_durees import ISOLEE, MAJORITAIRE, SOUTENUE, editions_distinctes, voter
+from src.utils.vote_durees import (
+    ISOLEE,
+    MAJORITAIRE,
+    SOUTENUE,
+    TOLERANCE_S,
+    editions_distinctes,
+    voter,
+)
 
 #: Écart de durée au-delà duquel deux sources ne décrivent plus le même fichier
 #: (2 s = même fichier ; 5 s = tolérance inter-plateformes, comme la revue des
@@ -1528,7 +1535,52 @@ def _temoins_du_proprietaire(fiches, v) -> list[tuple[str, str]]:
     seule = _elue(fiches, lambda t: video_nomme(t, v))
     if seule:
         temoins.append((seule, "seule page que la vidéo nomme"))
+    if (par_duree := _par_la_duree(fiches, v.video_id)) is not None:
+        temoins.append(par_duree)
     return temoins
+
+
+#: Sources de durée lues par l'IDENTIFIANT d'un catalogue : jamais par la
+#: vidéo elle-même (ni `youtube`, l'audio Topic, ni la recherche YTM).
+_DUREES_PAR_ID = ("deezer", "apple_music", "spotify_web", "reccobeats")
+#: Écart au-delà duquel une page n'est pas l'enregistrement de la vidéo (la
+#: tolérance du vote, `vote_durees.TOLERANCE_S`).
+_ECART_AUTRE_PAGE_S = TOLERANCE_S
+
+
+def _par_la_duree(fiches, video_id):
+    """`(page, témoin)` : la durée de la VIDÉO (`track_videos.duration`, e62)
+    est celle des catalogues d'UNE page, à 2 s, et toutes les autres pages
+    ont des catalogues à plus de `_ECART_AUTRE_PAGE_S` (2026-10-29 : « KING »
+    157 s, VULTURES 1 157 s, BULLY 126 s ; « I CAN'T WAIT » 128 s, BULLY
+    127 s, DELUXE 137 s). Une page sans durée de catalogue ne se juge pas :
+    rien."""
+    duree = next(
+        (
+            lien.duration
+            for t in fiches
+            if (lien := _lien_de(t, video_id)) is not None and lien.duration
+        ),
+        None,
+    )
+    if not duree:
+        return None
+    proches = set()
+    for t in fiches:
+        catalogues = [
+            int(d)
+            for s in _DUREES_PAR_ID
+            if (d := (t.durations_observees or {}).get(s)) is not None
+        ]
+        if not catalogues:
+            return None
+        if all(abs(d - duree) <= 2 for d in catalogues):
+            proches.add(_page(t))
+        elif not all(abs(d - duree) > _ECART_AUTRE_PAGE_S for d in catalogues):
+            return None  # ni elle, ni nettement une autre : rien ne se dit
+    if len(proches) != 1:
+        return None
+    return next(iter(proches)), f"durée de la vidéo ({duree} s) = ses catalogues seuls"
 
 
 def partage_a_juger(fiches) -> bool:

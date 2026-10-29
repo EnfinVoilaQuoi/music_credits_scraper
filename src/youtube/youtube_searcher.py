@@ -91,6 +91,7 @@ def relevance_score(
     # Le nom du disque que Genius ajoute à un titre générique n'en fait pas
     # partie : « Intro (Table d'écoute) » est l'« Intro » de *Table d'écoute*.
     target_title = titre_sans_son_disque(target_title, album)
+    result_title = sans_mention_du_disque(result_title, album)
     if titre_generique(target_title) and not meme_album(album, result_album):
         return 0.0
     artistes = [*result_artists, *invites_nommes(result_title)]
@@ -103,6 +104,29 @@ def relevance_score(
         _pertinence(forme, artistes, target_artist, target_title)
         for forme in formes_publiees(result_title)
     )
+
+
+#: « (Extrait du projet Art de rue) », « - Extrait de l'album Oderunt Poetas » :
+#: « tiré du disque », comme « From the album » — pas un extrait coupé.
+_MENTION_DU_DISQUE = re.compile(
+    r"\s*[\(\[]?\s*[-–—/]*\s*(?:extrait|tir[ée]e?)\s+(?:du|de\s+l['’]|de\s+la|de)\s*"
+    r"(?:projet|album|ep|mixtape|street\s+album|disque)?\s*(?P<disque>[^\)\]]+?)\s*[\)\]]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def sans_mention_du_disque(titre: str | None, album: str | None) -> str | None:
+    """PUR. Le titre d'un résultat sans la mention « Extrait du projet X »
+    quand X est le disque de la fiche (2026-10-29 : « Y'en a (Extrait du projet
+    Art de rue) », 0,55 sous le seuil, est le même enregistrement à 1 s près).
+    Une autre provenance (« extrait du spectacle LA HAINE », une BO, une
+    compilation) reste dans le titre."""
+    if not titre or not album:
+        return titre
+    m = _MENTION_DU_DISQUE.search(titre)
+    if m is None or not meme_album(album, m["disque"]):
+        return titre
+    return titre[: m.start()].rstrip(" -–—/") or titre
 
 
 def _pertinence(

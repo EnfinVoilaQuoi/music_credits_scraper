@@ -558,6 +558,37 @@ class TestRefusATortDuScore:
         # Disque inconnu d'un côté : rien ne prouve que c'est la bonne Intro.
         assert relevance_score("Intro", ["Booba"], "Booba", "Intro") == 0
 
+    def test_extrait_du_disque_de_la_fiche(self):
+        """2026-10-29 : « Y'en a (Extrait du projet Art de rue) » est « tiré du
+        disque », le même enregistrement à 1 s près — 0,55 sous le seuil
+        avant. Une autre provenance (spectacle, BO, compilation) reste."""
+        from src.youtube.youtube_searcher import relevance_score, sans_mention_du_disque
+
+        assert (
+            relevance_score(
+                "Y'en a (Extrait du projet Art de rue)",
+                ["Sadek"],
+                "Sadek",
+                "Y’en a",
+                album="Art de rue",
+            )
+            == 1.0
+        )
+        assert (
+            sans_mention_du_disque(
+                "Eau en poudre - Lucio Bukowski / Oster Lapwass - Extrait de l'album Oderunt Poetas",
+                "Oderunt Poetas",
+            )
+            == "Eau en poudre - Lucio Bukowski / Oster Lapwass"
+        )
+        for titre, album in (
+            ("Médine - L’4MOUR / extrait du spectacle LA HAINE (clip officiel)", "Grand Médine"),
+            ("Pas bien (Extrait de la BO de « En Passant Pécho »)", "Pas bien"),
+            ("Téléphone (Extrait de CRCLR MVT SAISON II)", "LMF"),
+            ("Y'en a (Extrait du projet Art de rue)", None),
+        ):
+            assert sans_mention_du_disque(titre, album) == titre
+
     def test_la_recherche_garde_artistes_et_disque(self, searcher):
         """Pour REJUGER un lien quand le score change : la chaîne ne nomme que
         le premier artiste (« Simorgh » pour un disque avec Lucio Bukowski)."""

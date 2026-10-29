@@ -1231,6 +1231,9 @@ REGLES_ETENDUES = frozenset(
         ("jumelle_annee", "retirer_getsongbpm"),
         ("jumelle_annee", "retirer_lrc"),
         ("jumelle_annee", "retirer_video_recherche"),
+        # 2026-10-29 : 3 cas sur 6 ; témoins la fiche de la version que Spotify
+        # nomme (son propre ID, sa durée) et Deezer / Apple de la fiche.
+        ("id_spotify_version", "normal"),
     }
 )
 
@@ -1310,7 +1313,58 @@ def politique_kworb_tiers(cas, _track, ctx):
     )
 
 
+def politique_id_spotify_version(cas, track, ctx):
+    """La page Spotify de l'ID nomme une AUTRE version (« Deep Diving - me n ü
+    Remix » pour « Deep Diving », « K-POP » pour « K-POP (Chopped &
+    Screwed) ») ; l'ID est pourtant celui de la fiche quand trois choses le
+    montrent (2026-10-29) :
+      · la version nommée a SA fiche chez l'artiste, avec son propre ID
+        Spotify — l'ID de la fiche n'est pas le sien ;
+      · sa durée diffère de celle de l'ID de plus de `ECART_VERSION_S` ;
+      · un catalogue de la fiche lu par SON identifiant (Deezer, Apple) donne
+        la durée de l'ID, à `ECART_FICHIER_S` près.
+    ✓ Normal : aucune donnée ne change. Deux versions à la même durée
+    (instrumental, édition) restent à l'humain."""
+    from src.services.revue import _titre_sans_feat
+
+    preuves = cas.preuves or {}
+    sert = preuves.get("spotify_sert")
+    if cas.detecteur != "id_spotify_version" or track is None or not sert:
+        return None
+    durees = _durees(track)
+    d_id = durees.get("spotify_web")
+    temoin = next(
+        (
+            (s, durees[s])
+            for s in ("deezer", "apple_music")
+            if durees.get(s) and d_id and abs(int(durees[s]) - int(d_id)) <= ECART_FICHIER_S
+        ),
+        None,
+    )
+    if temoin is None:
+        return None
+    cle = _titre_sans_feat(sert)
+    ids_de_la_fiche = {track.spotify_id, *(track.spotify_ids or [])}
+    nommees = [t for t in ctx.disco if t is not track and _titre_sans_feat(t.title) == cle]
+    if not nommees or not all(
+        t.spotify_id
+        and t.spotify_id not in ids_de_la_fiche
+        and t.duration
+        and abs(int(t.duration) - int(d_id)) > ECART_VERSION_S
+        for t in nommees
+    ):
+        return None
+    autre = nommees[0]
+    return Arbitrage(
+        "l'ID est celui de la fiche : la version nommée a sa propre fiche",
+        "normal",
+        f"« {autre.title} » : ID {autre.spotify_id}, {autre.duration} s ; l'ID de la "
+        f"fiche {d_id} s = {temoin[0]} {temoin[1]} s",
+    )
+
+
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "id_spotify_version": politique_id_spotify_version,
     "bpm": politique_bpm,
     "tonalite": politique_tonalite,
     "lrc_douteux": politique_lrc,

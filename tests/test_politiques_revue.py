@@ -473,3 +473,45 @@ def test_lien_deezer_dementi_par_des_sources_fragiles_seules_est_garde():
     # Trois catalogues solides d'accord contre, plus de 10 s : on délie.
     t.durations_observees = {"spotify_web": 110, "youtube": 110, "apple_music": 111}
     assert pol.arbitrage_liens_deezer(cas, t, None).action == "delier_deezer"
+
+
+class TestIdSpotifyVersion:
+    """« ID Spotify d'une autre version » (2026-10-29) : la version que la page
+    nomme a sa propre fiche, à une autre durée, et Deezer confirme celle de
+    l'ID — ✓ Normal ; deux versions à la même durée restent à l'humain."""
+
+    def _cas_kpop(self, duree_original=185, deezer=273, id_original="ORIG"):
+        cs = _t(
+            "K-POP (Chopped & Screwed)",
+            1,
+            spotify_id="CS",
+            spotify_ids=["CS"],
+            durations_observees={"spotify_web": 273, "deezer": deezer},
+        )
+        original = _t("K-POP", 2, spotify_id=id_original, duration=duree_original)
+        cas = _cas("id_spotify_version", cs, {"spotify_id": "CS", "spotify_sert": "K-POP"})
+        return cas, cs, SimpleNamespace(disco=[cs, original])
+
+    def test_la_version_nommee_a_sa_fiche_d_une_autre_duree(self):
+        cas, cs, ctx = self._cas_kpop()
+        arbitrage = pol.arbitrage_etendu(cas, cs, ctx)
+        assert arbitrage.action == "normal" and "deezer 273" in arbitrage.raison
+
+    def test_meme_duree_l_humain(self):
+        """« MELTDOWN (Instrumental) » : l'instrumental dure autant."""
+        cas, cs, ctx = self._cas_kpop(duree_original=270)
+        assert pol.arbitrage_etendu(cas, cs, ctx) is None
+
+    def test_sans_catalogue_qui_confirme_l_humain(self):
+        cas, cs, ctx = self._cas_kpop(deezer=185)
+        assert pol.arbitrage_etendu(cas, cs, ctx) is None
+
+    def test_meme_id_ou_sans_fiche_l_humain(self):
+        cas, cs, ctx = self._cas_kpop(id_original="CS")
+        assert pol.arbitrage_etendu(cas, cs, ctx) is None
+        assert pol.arbitrage_etendu(cas, cs, SimpleNamespace(disco=[cs])) is None
+
+    def test_le_feat_du_titre_servi_ne_compte_pas(self):
+        cas, cs, ctx = self._cas_kpop()
+        cas.preuves["spotify_sert"] = "K-POP (feat. Bad Bunny & The Weeknd)"
+        assert pol.arbitrage_etendu(cas, cs, ctx).action == "normal"

@@ -260,6 +260,7 @@ class SongBPMScraper:
         max_results_to_check: int = 5,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
         garde=None,
+        duree_fiche: int | None = None,
     ) -> tuple[int, dict[str, Any]] | None:
         """Le premier des `max_results_to_check` résultats que `_match_track`
         accepte, avec sa place (1 = premier), sinon None. PUR (aucun accès à la
@@ -268,7 +269,9 @@ class SongBPMScraper:
         (`pages_refusees`, chemins de `cle_page_songbpm`) n'est pas candidate :
         la suivante la remplace. Une page à l'année de la JUMELLE de la fiche
         (`garde`, `titre_annee.GardeAnnee` : « Suzy » / « Suzy 2003 ») non plus,
-        sauf durée indépendante de la fiche à ± 2 s de celle de la page."""
+        sauf durée indépendante de la fiche à ± 2 s de celle de la page. Un
+        titre CONTENU dans l'autre exige aussi cette durée (`duree_fiche`,
+        `titre_contenu_non_corrobore`)."""
         if pages_refusees:
             results = [
                 r for r in results if cle_page_songbpm(r.get("detail_url")) not in pages_refusees
@@ -291,8 +294,49 @@ class SongBPMScraper:
                 result_spotify_id=result.get("spotify_id"),
                 search_spotify_id=spotify_id,
             ):
+                motif = self.titre_contenu_non_corrobore(
+                    result, titre_juge, spotify_id, duree_fiche
+                )
+                if motif:
+                    logger.info(f"❌ REJET: {motif}")
+                    continue
                 return i, result
         return None
+
+    def titre_contenu_non_corrobore(
+        self,
+        result: dict[str, Any],
+        titre_juge: str,
+        spotify_id: str | None,
+        duree_fiche: int | None,
+    ) -> str | None:
+        """PUR. Le motif du refus d'un résultat accepté parce qu'un titre
+        CONTIENT l'autre avec un mot en plus dans le titre principal (« Boss »
+        pour « Boss Cypher », « Maybe So » pour « Maybe »), sauf durée
+        INDÉPENDANTE de la fiche (`duree_fiche`, sans SongBPM) à ± 2 s de celle
+        de la page — la règle du juge Spotify (2026-10-14). Une simple
+        annotation (`memes_titres_principaux`) ou un accord par ID Spotify ne
+        sont pas visés. Mesuré le 2026-10-29 : 20 paires de fiches aux mesures
+        SongBPM identiques par un titre contenu ; dans 18, une durée
+        indépendante désigne la propriétaire de la page et l'autre n'en a pas
+        ou la dément."""
+        from src.utils.spotify_identity import memes_titres_principaux
+        from src.utils.track_mapper import _clean_duration
+
+        if result.get("spotify_id") and spotify_id:
+            return None
+        rt, st = self._title_key(result.get("title") or ""), self._title_key(titre_juge)
+        if not rt or not st or rt == st or not either_contains_as_words(st, rt):
+            return None
+        if memes_titres_principaux(titre_juge, result.get("title")):
+            return None
+        duree_page = _clean_duration(result.get("duration"))
+        if duree_fiche and duree_page and abs(duree_page - duree_fiche) <= 2:
+            return None
+        return (
+            f"titre contenu : SongBPM sert « {result.get('title')} » ({duree_page or '?'} s), "
+            f"non corroboré par une durée indépendante ({duree_fiche or 'aucune'})"
+        )
 
     # ──────────────────────────────────────────────────────────────────────────
     # Gestion cookies (Playwright)
@@ -501,6 +545,7 @@ class SongBPMScraper:
         titre_juge: str | None = None,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
         garde=None,
+        duree_fiche: int | None = None,
     ) -> dict[str, Any] | None:
         try:
             if reload_homepage:
@@ -548,6 +593,7 @@ class SongBPMScraper:
                 max_results_to_check,
                 pages_refusees,
                 garde,
+                duree_fiche,
             )
             if choix is not None:
                 i, result = choix
@@ -592,6 +638,7 @@ class SongBPMScraper:
         fetch_details: bool = True,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
         garde=None,
+        duree_fiche: int | None = None,
     ) -> dict[str, Any] | None:
         self._ensure_driver()
         if not self.page:
@@ -611,6 +658,7 @@ class SongBPMScraper:
                 fetch_details,
                 pages_refusees,
                 garde,
+                duree_fiche,
             )
 
     def _search_track_body(
@@ -623,6 +671,7 @@ class SongBPMScraper:
         fetch_details: bool,
         pages_refusees: frozenset[str] | set[str] = frozenset(),
         garde=None,
+        duree_fiche: int | None = None,
     ):
         """Corps de `search_track`, sous l'observation ouverte par elle."""
         result = self._perform_search(
@@ -633,6 +682,7 @@ class SongBPMScraper:
             fetch_details=fetch_details,
             pages_refusees=pages_refusees,
             garde=garde,
+            duree_fiche=duree_fiche,
         )
         if result:
             log_api("SongBPM", f"search/{track_title}", True)
@@ -654,6 +704,7 @@ class SongBPMScraper:
                     titre_juge=track_title,
                     pages_refusees=pages_refusees,
                     garde=garde,
+                    duree_fiche=duree_fiche,
                 )
                 if result:
                     log_api("SongBPM", f"search/{track_title}", True)

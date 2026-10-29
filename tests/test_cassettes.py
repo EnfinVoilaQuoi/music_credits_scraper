@@ -102,6 +102,9 @@ def test_la_cassette_songbpm_a_des_dents(monkeypatch):
     from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
 
     monkeypatch.setattr(SongBPMScraper, "meme_version", lambda self, a, b: True)
+    # La garde du titre CONTENU refuserait aussi la page : seul le juge de la
+    # version est éprouvé ici.
+    monkeypatch.setattr(SongBPMScraper, "titre_contenu_non_corrobore", lambda *_a, **_k: None)
     cassette = _cassette_songbpm()
     _, en_plus = _ecart(cassette["attendu"], cassettes.rejouer_songbpm(cassette))
     assert any("Solo Dolo, Pt. IV" in x and "nightmare" in x.lower() for x in en_plus)

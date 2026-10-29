@@ -24,6 +24,7 @@ class _FakeScraper:
         fetch_details=False,
         pages_refusees=frozenset(),
         garde=None,
+        duree_fiche=None,
     ):
         self.calls.append((title, artist, spotify_id, fetch_details))
         self.pages_refusees = pages_refusees
@@ -47,6 +48,7 @@ class _FakeScraperAsync(_FakeScraper):
         fetch_details=False,
         pages_refusees=frozenset(),
         garde=None,
+        duree_fiche=None,
     ):
         self.calls.append((title, artist, spotify_id, fetch_details))
         self.pages_refusees = pages_refusees

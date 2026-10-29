@@ -1133,6 +1133,21 @@ class TestVideoPartagee:
         ctx = _ctx(_t("Donjon", 1, videos=[clip]), _t("2h22", 2, videos=[clip]))
         assert revue.video_partagee(ctx) == []
 
+    def test_deux_pages_homonymes_que_la_video_nomme_sont_un_cas_sans_retrait(self):
+        """« KING » de *BULLY* et de *VULTURES 1* (2026-10-29) : la vidéo les
+        nomme toutes deux, rien ne dit laquelle elle est. Un cas, sans le geste
+        « retirer de ces fiches », qui l'ôterait aussi de la bonne."""
+        from src.services import revue_actions
+
+        clip = self._v("K", "KING", 800)
+        a = _t("KING", 1, videos=[clip], genius_id=11, album="BULLY")
+        b = _t("KING", 2, videos=[clip], genius_id=12, album="VULTURES 1")
+        ((_, motif, preuves),) = revue.video_partagee(_ctx(a, b))
+        assert preuves["homonymes"] and preuves["track_ids"] == [1, 2]
+        assert "même titre" in motif
+        cas = revue.Cas("video_partagee", None, "KING", motif, 800, preuves, "k")
+        assert revue_actions.actions_pour(cas) == []
+
     def test_l_action_retire_la_video_de_toutes_les_fiches_muettes(self, monkeypatch):
         from src.services import revue_actions
 

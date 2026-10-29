@@ -1499,6 +1499,34 @@ def _temoins_du_proprietaire(fiches, v) -> list[tuple[str, str]]:
     return temoins
 
 
+def partage_a_juger(fiches) -> bool:
+    """Une vidéo portée par `fiches` est-elle un partage à juger ? Il faut
+    deux PAGES (les lignes sœurs n'en font qu'une), pas toutes sur le même
+    disque (clip double compté au niveau de l'album, décision utilisateur
+    2026-10-10). Le seul juge : le panneau et l'audit l'appellent tous deux."""
+    pages = {_page(t) for t in fiches}
+    albums = {cle_album(t.album) for t in fiches if t.album}
+    return len(pages) >= 2 and not (all(t.album for t in fiches) and len(albums) == 1)
+
+
+def _titre_sans_parentheses(track) -> str:
+    return _mots(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", track.title or ""))
+
+
+def pages_homonymes(fiches) -> bool:
+    """Deux des fiches portent-elles le même titre, l'un CONTENU dans l'autre
+    (parenthèses ôtées) : « KING » / « KING », « 530 » / « 530 (Haikou LP) »,
+    « Jeunes entrepreneurs » / « Booska Jeunes entrepreneurs » ? Une vidéo qui
+    les nomme toutes ne départage rien. Un titre fait de signes seuls (« * »,
+    « *** » de *Chambre 140*) n'a pas de mots : il vaut tous les autres."""
+    titres = [_titre_sans_parentheses(t) for t in fiches]
+    return any(
+        not a or not b or contains_as_words(a, b) or contains_as_words(b, a)
+        for i, a in enumerate(titres)
+        for b in titres[i + 1 :]
+    )
+
+
 def proprietaire_et_temoin(fiches, v):
     """`(fiche, témoin)` à qui revient une vidéo que plusieurs PAGES portent,
     sinon `(None, None)`. Le motif dominant des vidéos partagées est
@@ -1510,9 +1538,7 @@ def proprietaire_et_temoin(fiches, v):
     au niveau de l'album) : None. Simulé sur toute la base le 2026-10-27
     (interprète seul : 41 des 90 vidéos partagées tranchées, aucune démentie
     par les témoins) ; les quatre autres témoins le 2026-10-29."""
-    pages = {_page(t) for t in fiches}
-    albums = {cle_album(t.album) for t in fiches if t.album}
-    if len(pages) < 2 or (all(t.album for t in fiches) and len(albums) == 1):
+    if not partage_a_juger(fiches):
         return None, None
     temoins = _temoins_du_proprietaire(fiches, v)
     if not temoins or len({page for page, _ in temoins}) != 1:
@@ -1533,10 +1559,17 @@ def video_partagee(ctx):
     (album entier, EP complet, film, freestyle collectif mal rattaché) : UN
     cas, avec les fiches concernées — ses vues sont comptées sur chacune.
     Quand les témoins désignent SA fiche (`proprietaire_et_temoin`), le cas porte la fiche à garder (`garder`)
-    et les autres (`track_ids`) : une règle le tranche."""
+    et les autres (`track_ids`) : une règle le tranche. Une vidéo qui nomme
+    toutes ses fiches n'est un cas que si elles sont HOMONYMES
+    (`pages_homonymes`) : rien ne dit laquelle elle est (`homonymes`) ; un
+    clip double qui nomme deux titres distincts n'en est pas un.
+
+    C'est le SEUL juge des vidéos partagées : l'audit compte ses cas
+    (`revue:video_partagee`), il n'a plus sa famille (2026-10-29 : 33 erreurs
+    à l'audit, 11 informations au panneau pour les mêmes vidéos)."""
     cas = []
     for video_id, fiches in _proprietaires_des_videos(ctx).items():
-        if len(fiches) < 2:
+        if len(fiches) < 2 or not partage_a_juger(fiches):
             continue
         v = next(x for x in fiches[0].videos if x.video_id == video_id)
         if not v.title:
@@ -1568,6 +1601,22 @@ def video_partagee(ctx):
             continue
         muettes = [t for t in fiches if not video_nomme(t, v)]
         if not muettes:
+            if pages_homonymes(fiches):
+                noms = ", ".join(f"« {t.title} » (#{t.id})" for t in fiches[:4])
+                cas.append(
+                    (
+                        v.title,
+                        f"vidéo portée par {len(fiches)} pages au même titre ({noms}) : "
+                        "rien dans la base ne dit laquelle elle est",
+                        {
+                            "video_id": video_id,
+                            "kind": video_id,
+                            "track_ids": [t.id for t in fiches],
+                            "homonymes": True,
+                            "impact": v.views or 0,
+                        },
+                    )
+                )
             continue
         noms = ", ".join(f"« {t.title} »" for t in muettes[:4])
         if len(muettes) > 4:

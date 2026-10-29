@@ -69,3 +69,36 @@ def test_l_id_d_une_edition_se_juge_sur_la_duree_de_l_edition(data_manager):
         0
     ]
     assert track_de_la_ligne(lignes["SPA2"]).durations_observees == {"deezer": 182}
+
+
+def test_l_id_principal_note_en_edition_se_juge_sur_la_duree_de_l_edition(data_manager):
+    """Lunatic « Le crime paie » (294 s) : le seul ID Spotify est celui de la
+    version de 4:40, notée en édition et gardée en ID principal (2026-10-29)."""
+    artiste = Artist(name="Booba")
+    artiste.id = data_manager.save_artist(artiste)
+    t = Track(title="Le crime paie", artist=artiste)
+    t.spotify_id = "SP440"
+    t.duration = 294
+    t.observations = [Observation("duration", 294, "deezer")]
+    t.id = data_manager.save_track(t)
+    data_manager.record_track_edition(t.id, "Version 4:40", spotify_id="SP440", duration=280)
+
+    (ligne,) = lignes_a_verifier(data_manager.engine)
+    track = track_de_la_ligne(ligne)
+    assert ligne["principal"] and track.duration == 280 and track.durations_observees == {}
+    assert identite_concorde(
+        track, {"name": "Le crime paie", "artists": ["Booba"], "duration": 281}
+    )[0]
+
+
+def test_sans_edition_l_id_principal_reste_juge_sur_la_fiche(data_manager):
+    artiste = Artist(name="Booba")
+    artiste.id = data_manager.save_artist(artiste)
+    t = Track(title="Le crime paie", artist=artiste)
+    t.spotify_id = "SP440"
+    t.duration = 294
+    t.id = data_manager.save_track(t)
+    data_manager.record_track_edition(t.id, "Version 4:40", spotify_id="AUTRE", duration=280)
+
+    (ligne,) = lignes_a_verifier(data_manager.engine)
+    assert track_de_la_ligne(ligne).duration == 294

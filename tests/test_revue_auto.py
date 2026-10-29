@@ -432,17 +432,18 @@ def test_retablir_un_rattachement_retire_l_autre_edition_deezer(data_manager, ar
     assert data_manager.get_track_releases(fiche.id) == []
 
 
-# ── Famille « liens Deezer » (délier ; NON validée : interrupteur baissé) ────
+# ── Famille « liens Deezer » (délier ; branchée le 2026-10-29) ───────────────
 
 
-def test_liens_deezer_interrupteur_baisse_par_defaut():
-    assert revue_auto.REGLES_LIENS_DEEZER_BRANCHEES is False
+def test_liens_deezer_interrupteur_leve():
+    assert revue_auto.REGLES_LIENS_DEEZER_BRANCHEES is True
 
 
-def test_lien_deezer_dementi_delie_puis_retabli(data_manager, artiste, monkeypatch):
+def test_lien_deezer_dementi_delie_puis_retabli(data_manager, artiste):
+    """Interrupteur levé d'office : la fin de run délie, « ↩ Rétablir » rend
+    l'ID, sa durée et retire le refus de la règle."""
     from src.utils.corrections_fiches import deezer_refuses, origine_du_refus
 
-    monkeypatch.setattr(revue_auto, "REGLES_LIENS_DEEZER_BRANCHEES", True)
     durees = {"deezer": 262, "apple_music": 198, "youtube": 198, "spotify_web": 197}
     _fiche_durees(data_manager, artiste, "Rap théorie", 30, durees, deezer_id=4242)
     _charger(data_manager, artiste)

@@ -62,6 +62,30 @@ def token_discogs() -> str | None:
 # importable d'ici.
 
 
+def _garder_le_brut(fetcher) -> None:
+    """Branche le brut (chantier E) sur le fetcher de `discogs_client`, qui fait
+    ses requêtes lui-même. Chaque GET est gardé avec son statut (un 404 est une
+    réponse) ; le jeton part en paramètre à part, jamais dans l'URL gardée. En
+    rejeu : servi depuis le brut, ou erreur de connexion — jamais le réseau."""
+    from src.persistence import brut
+
+    origine = fetcher.fetch
+
+    def fetch(client, method, url, data=None, headers=None, json=True):
+        get = str(method).upper() == "GET"
+        if brut.rejeu_actif():
+            lu = brut.servir(_SOURCE, url) if get else None
+            if lu is None:
+                raise requests.ConnectionError(f"brut absent (rejeu hors ligne) : {url}")
+            return lu[1], lu[0]
+        contenu, statut = origine(client, method, url, data=data, headers=headers, json=json)
+        if get:
+            brut.consigner(_SOURCE, url, statut, contenu)
+        return contenu, statut
+
+    fetcher.fetch = fetch
+
+
 class DiscogsClient:
     """Client pour interagir avec l'API Discogs"""
 
@@ -91,6 +115,7 @@ class DiscogsClient:
         except Exception as e:
             logger.error(f"❌ Erreur initialisation Discogs API: {e}")
             raise
+        _garder_le_brut(self.client._fetcher)
 
     def _check_rate_limit(self):
         """Vérifie et gère le rate limit de l'API Discogs"""

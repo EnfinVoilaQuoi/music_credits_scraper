@@ -114,6 +114,9 @@ DOMAIN_TO_KEY: dict[str, str] = {
     "music.youtube.com": "ytmusic",
     "www.youtube.com": "ytmusic",
     "apic-desktop.musixmatch.com": "musixmatch",
+    # L'hôte que le client iOS interroge VRAIMENT (`MUSIXMATCH_API_BASE`) :
+    # sans lui, ses réponses n'avaient ni source ni brut (2026-10-28).
+    "apic.musixmatch.com": "musixmatch",
     "snepmusique.com": "snep",
     "musicbrainz.org": "musicbrainz",
     "itunes.apple.com": "itunes",

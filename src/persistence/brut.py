@@ -57,12 +57,31 @@ SOURCES_ACTIVES: frozenset[str] = frozenset(
         "lrclib",
         "musicbrainz",
         "itunes",
+        # Lot 5 (2026-10-28) : les sources des durées vidéo, des vues YTM et
+        # des compteurs Spotify. YTM par la session de `ytmusicapi`
+        # (`ytmusic_brut`, réponses vides ou bridées comprises) ; les pages
+        # Spotify RENDUES par la session navigateur (`_BrowserSession`).
+        "ytmusic",
+        "spotify_web",
+        # Lot 6 (2026-10-28) : Musixmatch par l'AsyncHttpSession, Discogs par
+        # le fetcher de `discogs_client`, YouTube Data API par l'exécution de
+        # ses requêtes (`ytmusic_brut.executer_youtube_data`).
+        "musixmatch",
+        "discogs",
+        "youtube_data",
     }
 )
 #: Lectures DIFFÉRENTES gardées par requête.
 LECTURES_GARDEES = 2
 #: Paramètres d'URL qui ne doivent JAMAIS être écrits.
 _SECRETS = ("key", "token", "secret", "password", "auth", "signature", "sig")
+#: Paramètres qui changent à CHAQUE appel sans désigner la donnée (horodatage
+#: anti-cache de Musixmatch) : hors de la clé, sinon aucune lecture ne se
+#: retrouverait ni ne se dédoublonnerait.
+_VOLATILS: dict[str, frozenset[str]] = {"musixmatch": frozenset({"t"})}
+#: Requêtes dont la RÉPONSE est un secret (le jeton de session de Musixmatch) :
+#: jamais gardées. Par fin de chemin d'URL.
+_REPONSES_SECRETES: dict[str, tuple[str, ...]] = {"musixmatch": ("/token.get",)}
 
 _verrou = threading.Lock()
 _connexion: sqlite3.Connection | None = None
@@ -75,14 +94,20 @@ def _secret(nom: str) -> bool:
     return any(s in n for s in _SECRETS)
 
 
-def url_sans_secret(url: str, params: dict | None = None) -> str:
+def url_sans_secret(url: str, params: dict | None = None, exclus=frozenset()) -> str:
     """PUR. L'URL complète (paramètres fusionnés, TRIÉS), sans les paramètres
-    d'authentification — la même requête donne toujours la même chaîne."""
+    d'authentification ni ceux de `exclus` — la même requête donne toujours la
+    même chaîne."""
     parts = urlsplit(url)
     paires = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)]
     paires += [(str(k), str(v)) for k, v in (params or {}).items() if v is not None]
-    paires = sorted((k, v) for k, v in paires if not _secret(k))
+    paires = sorted((k, v) for k, v in paires if not _secret(k) and k not in exclus)
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(paires), ""))
+
+
+def _requete(source: str | None, url: str, params=None) -> str:
+    """La clé d'une requête de `source` : sans secret ni paramètre volatil."""
+    return url_sans_secret(url, params, _VOLATILS.get(source or "", frozenset()))
 
 
 def _ouvrir() -> sqlite3.Connection:
@@ -125,7 +150,9 @@ def consigner(source: str, url: str, statut: int | None, corps: bytes, params=No
     global _erreur_dite
     if source not in SOURCES_ACTIVES or not isinstance(corps, bytes | bytearray):
         return
-    requete = url_sans_secret(url, params)
+    if urlsplit(url).path.endswith(_REPONSES_SECRETES.get(source, ())):
+        return
+    requete = _requete(source, url, params)
     empreinte = hashlib.sha1(corps).hexdigest()
     maintenant = datetime.now().isoformat(timespec="seconds")
     try:
@@ -172,7 +199,7 @@ def consigner(source: str, url: str, statut: int | None, corps: bytes, params=No
 def lectures(source: str, url: str, params=None) -> list[dict]:
     """Les lectures gardées d'une requête, la plus récente d'abord :
     `[{statut, corps (bytes), premiere_lecture, derniere_lecture}]`."""
-    requete = url_sans_secret(url, params)
+    requete = _requete(source, url, params)
     with _verrou:
         conn = _ouvrir()
         lignes = conn.execute(
@@ -249,15 +276,24 @@ def rejeu_actif() -> bool:
     return _rejeu["actif"]
 
 
+def bridee(statut: int | None, corps: bytes) -> bool:
+    """PUR. Une lecture où la source n'a pas RÉPONDU : corps vide, 429, 5xx.
+    Un 404 est une réponse (une absence prouvée), pas une lecture bridée."""
+    return not bytes(corps).strip() or statut == 429 or (statut or 0) >= 500
+
+
 def servir(source: str | None, url: str, params=None) -> tuple[int, bytes] | None:
     """En rejeu : `(statut, corps)` de la dernière lecture gardée, ou None (et
-    l'absence est comptée) — jamais d'appel réseau."""
+    l'absence est comptée) — jamais d'appel réseau. Une lecture BRIDÉE (gardée
+    pour prouver que la source n'a pas répondu) ne masque pas une lecture
+    utilisable plus ancienne ; seule, elle est servie telle quelle."""
     if source in SOURCES_ACTIVES:
         lus = lectures(source, url, params)
         if lus:
             _rejeu["servies"] += 1
-            return lus[0]["statut"] or 200, lus[0]["corps"]
-    _rejeu["absentes"].append(f"{source or '?'} {url_sans_secret(url, params)}")
+            lu = next((x for x in lus if not bridee(x["statut"], x["corps"])), lus[0])
+            return lu["statut"] or 200, lu["corps"]
+    _rejeu["absentes"].append(f"{source or '?'} {_requete(source, url, params)}")
     return None
 
 

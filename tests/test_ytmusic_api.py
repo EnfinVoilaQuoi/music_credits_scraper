@@ -10,10 +10,17 @@ Harnais : `YTMusicAPI.__new__` (le `__init__` réel instancie un client
 `YTMusic()` qui interroge le réseau) + un faux client posé en `self.yt`.
 """
 
+from urllib.parse import urlencode
+
 import pytest
 import requests
 
 from src.api.ytmusic_api import YTMusicAPI, _normalize, _parse_views
+
+
+def _uri(point: str, params: dict) -> str:
+    """L'URI d'une requête YouTube Data (le brut la garde sous elle)."""
+    return f"https://youtube.googleapis.com/youtube/v3/{point}?{urlencode(params)}"
 
 
 class _FauxYT:
@@ -156,6 +163,7 @@ class TestResolutionDeCanal:
         class _Channels:
             def list(self, **kw):
                 assert kw["forHandle"] == "@ISHAOfficiel"
+                self.uri = _uri("channels", kw)
                 return self
 
             def execute(self):
@@ -232,6 +240,7 @@ class TestDeductionDeCanalParVote:
     def _api_avec_videos(self, monkeypatch, items):
         class _Videos:
             def list(self, **kw):
+                self.uri = _uri("videos", kw)
                 return self
 
             def execute(self):
@@ -417,6 +426,7 @@ class TestComptesDeVuesEnLot:
         class _Videos:
             def list(self, **kw):
                 appels.append(kw["id"])
+                self.uri = _uri("videos", kw)
                 return self
 
             def execute(self):

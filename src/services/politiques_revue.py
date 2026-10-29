@@ -1267,6 +1267,7 @@ REGLES_ETENDUES = frozenset(
         # au moindre doute, on tranche pas ») : versions et titres génériques
         # entrent quand les catalogues suffisent à la preuve.
         ("generique_duree", "normal"),
+        ("duree_songbpm", "retirer_songbpm"),
     }
 )
 
@@ -1435,8 +1436,25 @@ def politique_generique_distincts(cas, track, ctx):
     )
 
 
+_SONGBPM_PAR_LE_VOTE = politique_durees(3)
+
+
+def politique_songbpm_version(cas, track, ctx):
+    """La page SongBPM d'une VERSION ou d'un titre générique, démentie par au
+    moins trois catalogues solides d'accord entre eux, à plus de
+    `ECART_VERSION_S` (« Hasta La Vista (Intro) » 203 s contre 14-16 s ;
+    « Niagara Falls […] [ChoppedNotSlopped] » 207 s, la version normale,
+    contre 252 s) : la même preuve que pour un original
+    (`REGLES_VALIDEES`), étendue le 2026-10-29. Un original passe par
+    `arbitrage_valide`."""
+    if cas.detecteur != "duree_songbpm" or track is None or titre_d_original(track.title):
+        return None
+    return _SONGBPM_PAR_LE_VOTE(cas, track, ctx)
+
+
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "generique_duree": politique_generique_distincts,
+    "duree_songbpm": politique_songbpm_version,
     "id_spotify_version": politique_id_spotify_version,
     "bpm": politique_bpm,
     "tonalite": politique_tonalite,

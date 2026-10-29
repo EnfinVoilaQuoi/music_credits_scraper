@@ -449,7 +449,9 @@ def test_generique_retirer_songbpm_n_est_pas_valide():
 def test_les_regles_ne_touchent_ni_versions_ni_generiques():
     """« On garde les cas ambigus […] à la main, intro outro interlude remix
     live » (2026-10-20) : Travis « Niagara Falls […] [ChoppedNotSlopped] »
-    perdait son SongBPM au passage à blanc."""
+    perdait son SongBPM au passage à blanc. Les règles VALIDÉES restent aux
+    originaux ; depuis le 2026-10-29, une version démentie par 3 catalogues
+    passe par `politique_songbpm_version` (`TestSongbpmVersion`)."""
     durees = {"songbpm": 207, "deezer": 252, "spotify_web": 252, "youtube": 253}
     original = _t("Niagara Falls", durations_observees=dict(durees))
     version = _t("Niagara Falls [ChoppedNotSlopped]", durations_observees=dict(durees))
@@ -603,3 +605,30 @@ class TestGeneriqueDistincts:
     def test_durees_trop_peu_soutenues_l_humain(self):
         cas, a, ctx = self._paire(durations_observees={"deezer": 50, "songbpm": 50})
         assert pol.arbitrage_etendu(cas, a, ctx) is None
+
+
+class TestSongbpmVersion:
+    """Décision utilisateur 2026-10-29 : les versions et titres génériques
+    perdent aussi une page SongBPM que 3 catalogues démentent."""
+
+    def test_version_dementie_par_trois_catalogues(self):
+        durees = {"songbpm": 207, "deezer": 252, "spotify_web": 252, "youtube": 253}
+        t = _t("Niagara Falls (Foot or 2) [ChoppedNotSlopped]", durations_observees=durees)
+        assert pol.arbitrage_etendu(_cas("duree_songbpm", t), t, None).action == "retirer_songbpm"
+
+    def test_intro_dementie(self):
+        durees = {"songbpm": 203, "apple_music": 16, "deezer": 15, "spotify_web": 15, "youtube": 16}
+        t = _t("Hasta La Vista (Intro)", durations_observees=durees)
+        assert pol.arbitrage_etendu(_cas("duree_songbpm", t), t, None).action == "retirer_songbpm"
+
+    def test_deux_catalogues_ou_dix_secondes_l_humain(self):
+        t = _t("Live (Remix)", durations_observees={"songbpm": 207, "deezer": 252, "youtube": 253})
+        assert pol.arbitrage_etendu(_cas("duree_songbpm", t), t, None) is None
+        durees = {"songbpm": 127, "deezer": 137, "spotify_web": 137, "youtube": 138}
+        t = _t("Wait (Remix)", durations_observees=durees)
+        assert pol.arbitrage_etendu(_cas("duree_songbpm", t), t, None) is None
+
+    def test_un_original_reste_a_la_regle_validee(self):
+        durees = {"songbpm": 207, "deezer": 252, "spotify_web": 252, "youtube": 253}
+        t = _t("Niagara Falls", durations_observees=durees)
+        assert pol.politique_songbpm_version(_cas("duree_songbpm", t), t, None) is None

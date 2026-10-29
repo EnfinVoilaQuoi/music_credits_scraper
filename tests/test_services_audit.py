@@ -443,3 +443,22 @@ def test_certif_admise_par_le_juge_n_est_qu_une_information(titre, titre_certif,
     }
     (cas,) = au.certifs([piste])
     assert cas.nature == nature
+
+
+@pytest.mark.parametrize(
+    "duree, paroles, fausse",
+    [
+        # L'« Outro » de Di-Meh (12 rappeurs) sous l'audio de 167 s de Népal.
+        (167, "mot " * 1350, True),
+        # Le même texte à sa vraie durée.
+        (330, "mot " * 1350, False),
+        # Un rap rapide reste sous le plafond (Flynt, 7,6 mots/s).
+        (102, "mot " * 773, False),
+        (167, None, False),
+        (None, "mot " * 1350, False),
+    ],
+)
+def test_une_duree_trop_courte_pour_ses_paroles(duree, paroles, fausse):
+    from src.utils.duree_youtube import trop_courte_pour_les_paroles
+
+    assert trop_courte_pour_les_paroles(duree, paroles) is fausse

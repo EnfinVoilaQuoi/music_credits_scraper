@@ -56,6 +56,7 @@ from src.utils.duree_youtube import (
     court_par_nature,
     dementie_par_les_paroles,
     est_un_clip,
+    trop_courte_pour_les_paroles,
 )
 from src.utils.title_matching import cle_album, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
@@ -142,6 +143,7 @@ FAMILLES = {
     "instrumental_lrc": "instrumental (constaté ou titre) avec LRC ou paroles",
     "duree_video": "durée tirée d'une vidéo qui n'est pas le morceau",
     "duree_aberrante": "durée < 25 s ou > 15 min",
+    "duree_paroles": "durée trop courte pour les paroles Genius (> 8 mots/s : l'une des deux est fausse)",
     "lrc_trop_long": "LRC minuté au-delà de la durée de la fiche (l'un des deux est faux)",
     "certif_plus_long": "certif dont le titre a des mots EN PLUS",
     "certif_album": "certif de catégorie album sur un morceau",
@@ -440,6 +442,18 @@ def durees(c, pistes) -> list[Cas]:
             continue
         cas.append(Cas("duree_aberrante", t["artiste"], [t["id"]], f"{_lib(t)} {d}s"))
     cas += lrc_trop_longs(c, pistes)
+    for t in pistes:
+        ref = paroles_de_reference(t["lyrics"], t["lyrics_source"])
+        if t["duration"] and trop_courte_pour_les_paroles(t["duration"], ref):
+            mots = len(ref.split())
+            cas.append(
+                Cas(
+                    "duree_paroles",
+                    t["artiste"],
+                    [t["id"]],
+                    f"{_lib(t)} {t['duration']}s, {mots} mots",
+                )
+            )
     return cas
 
 

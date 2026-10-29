@@ -118,6 +118,24 @@ def dementie_par_les_paroles(duree, paroles: str | None) -> bool:
     return duree > DUREE_MAX_MORCEAU and bool(mots) and mots / duree < MOTS_PAR_SECONDE_MIN
 
 
+#: Plafond du débit : au-delà, la durée est trop COURTE pour les paroles —
+#: extrait, autre version, ou paroles d'un autre morceau (2026-10-29 : l'« Outro »
+#: de Di-Meh, 12 rappeurs, à 167 s = 6,6 mots/s ; mesuré sur la base, un net
+#: écart entre 7,6 et 9 mots/s, 13 fiches au-delà de 8, toutes fausses).
+MOTS_PAR_SECONDE_MAX = 8
+
+
+def trop_courte_pour_les_paroles(duree, paroles: str | None) -> bool:
+    """PUR. Les paroles Genius ne tiennent pas dans la durée (plus de
+    `MOTS_PAR_SECONDE_MAX` mots par seconde) : l'une des deux est fausse."""
+    try:
+        duree = int(duree)
+    except (TypeError, ValueError):
+        return False
+    mots = len((paroles or "").split())
+    return duree > 0 and mots / duree > MOTS_PAR_SECONDE_MAX
+
+
 #: Un CLIP a son propre montage (« On contrôle la zone » : clip 4:04, CD 4:48 ;
 #: décision utilisateur 2026-10-13 : « la mention Clip officiel doit bloquer
 #: la durée »).

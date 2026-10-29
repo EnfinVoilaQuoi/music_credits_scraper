@@ -779,3 +779,73 @@ class TestLienYoutube:
         data_manager.save_track(isha)
         assert self._lien(data_manager, swing.id)[0].endswith("AAAAAAAAAAA")
         assert self._lien(data_manager, isha.id)[0].endswith("BBBBBBBBBBB")
+
+
+class TestEcrivainsHorsSaveTrack:
+    """Un écrivain qui ne passe pas par `save_track` touche UNE ligne : la fin
+    de transaction (`_recalculer_touchees`) unit les observations de la
+    famille, et chaque retrait passe chez les sœurs (« Outro » : 167 s chez
+    Josman, 421 s chez Népal, 2026-10-29)."""
+
+    @staticmethod
+    def _observations(data_manager, track_id, champ):
+        with data_manager.engine.connect() as conn:
+            return {
+                (r[0], str(r[1]))
+                for r in conn.execute(
+                    text(
+                        "SELECT source, value FROM observations WHERE track_id = :t AND field = :f"
+                    ),
+                    {"t": track_id, "f": champ},
+                )
+            }
+
+    def test_une_duree_posee_sur_une_ligne_arrive_chez_la_soeur(self, data_manager, famille):
+        swing, isha = famille
+        for ligne in famille:
+            data_manager.record_duration_observation(ligne.id, 421, "legacy")
+        data_manager.record_duration_observation(swing.id, 167, "youtube")
+        assert _colonne(data_manager, isha.id, "duration") == 167
+        assert ("youtube", "167") in self._observations(data_manager, isha.id, "duration")
+
+    def test_une_duree_video_retiree_part_de_toute_la_famille(self, data_manager, famille):
+        swing, isha = famille
+        data_manager.record_duration_observation(swing.id, 167, "youtube")
+        data_manager.retirer_durees_video(isha.id)
+        for ligne in famille:
+            assert self._observations(data_manager, ligne.id, "duration") == set()
+            assert _colonne(data_manager, ligne.id, "duration") is None
+
+    def test_une_observation_oubliee_ne_revient_pas_par_la_soeur(self, data_manager, famille):
+        swing, isha = famille
+        data_manager.record_duration_observation(swing.id, 200, "deezer")
+        data_manager.forget_discography_observation(isha.id, "duration", "deezer", 200)
+        for ligne in famille:
+            assert ("deezer", "200") not in self._observations(data_manager, ligne.id, "duration")
+
+    def test_l_isrc_rempli_arrive_chez_la_soeur_vide(self, data_manager, famille):
+        swing, isha = famille
+        data_manager.fill_track_identities(swing.id, isrc="FR9W12217454")
+        assert _colonne(data_manager, isha.id, "isrc") == "FR9W12217454"
+
+    def test_le_lien_retire_part_de_la_soeur_qui_porte_la_meme_video(self, data_manager, famille):
+        swing, isha = famille
+        for ligne in famille:
+            data_manager.update_track_youtube_url(
+                ligne.id, "https://www.youtube.com/watch?v=AAAAAAAAAAA", "genius_media"
+            )
+        data_manager.clear_track_youtube_link(swing.id)
+        assert _colonne(data_manager, isha.id, "youtube_url") is None
+        data_manager.save_track(swing)
+        assert _colonne(data_manager, swing.id, "youtube_url") is None
+
+    def test_la_soeur_a_l_autre_video_garde_son_lien(self, data_manager, famille):
+        swing, isha = famille
+        data_manager.update_track_youtube_url(
+            swing.id, "https://www.youtube.com/watch?v=AAAAAAAAAAA", "manual"
+        )
+        data_manager.update_track_youtube_url(
+            isha.id, "https://www.youtube.com/watch?v=BBBBBBBBBBB", "manual"
+        )
+        data_manager.clear_track_youtube_link(swing.id)
+        assert _colonne(data_manager, isha.id, "youtube_url").endswith("BBBBBBBBBBB")

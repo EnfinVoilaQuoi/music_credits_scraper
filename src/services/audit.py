@@ -704,6 +704,14 @@ def _volatile(colonne: str) -> bool:
     )
 
 
+#: Verdicts DÉRIVÉS des observations de l'enregistrement : hors de
+#: `COLONNES_PARTAGEES` (ils voyagent par leurs observations), ils doivent
+#: pourtant être les mêmes sur chaque ligne — « Outro », 167 s chez Josman et
+#: 421 s chez Népal, ne se voyait pas (2026-10-29). Pas `ytm_streams` : total
+#: propre à chaque ligne.
+VERDICTS_D_ENREGISTREMENT = ("duration", "release_date", "isrc", "spotify_streams")
+
+
 def soeurs_divergentes(c, pistes) -> list[Cas]:
     """Deux lignes sœurs (même `genius_id`, artistes différents) aux valeurs
     différentes d'une colonne d'ENREGISTREMENT. La synchronisation ne fait que
@@ -711,7 +719,9 @@ def soeurs_divergentes(c, pistes) -> list[Cas]:
     symptôme que le chantier A doit faire tomber à zéro."""
     from src.utils.track_soeurs import COLONNES_PARTAGEES
 
-    colonnes = [col for col in COLONNES_PARTAGEES if not _volatile(col)]
+    colonnes = [
+        col for col in (*COLONNES_PARTAGEES, *VERDICTS_D_ENREGISTREMENT) if not _volatile(col)
+    ]
     gids = {t["genius_id"] for t in pistes if t["genius_id"]}
     if not gids:
         return []

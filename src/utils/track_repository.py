@@ -50,6 +50,7 @@ from src.utils.track_soeurs import (
     relations_a_stocker,
     serialiser_relations,
     synchroniser_soeurs,
+    unir_observations,
 )
 from src.utils.version_descriptors import titre_generique
 from src.utils.version_heritage import sans_heritage_couvert
@@ -1126,21 +1127,29 @@ class TrackRepository:
                 self._delete_observations(conn, track_id, field, sources)
 
     def _delete_observations(self, conn, track_id: int, field: str, sources=None) -> None:
+        """Le retrait vaut pour TOUTES les lignes de l'enregistrement : laissée
+        chez une sœur, l'observation reviendrait par l'union de fin de
+        transaction (`_recalculer_touchees`)."""
         self._toucher(conn, track_id)
-        if sources is not None:
-            for source in sources:
-                conn.execute(
-                    text(
-                        "DELETE FROM observations WHERE track_id = :tid AND field = :field "
-                        "AND source = :source"
-                    ),
-                    {"tid": track_id, "field": field, "source": source},
-                )
-            return
-        conn.execute(
-            text("DELETE FROM observations WHERE track_id = :tid AND field = :field"),
-            {"tid": track_id, "field": field},
-        )
+
+        def effacer(tid: int) -> None:
+            if sources is not None:
+                for source in sources:
+                    conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :tid AND field = :field "
+                            "AND source = :source"
+                        ),
+                        {"tid": tid, "field": field, "source": source},
+                    )
+                return
+            conn.execute(
+                text("DELETE FROM observations WHERE track_id = :tid AND field = :field"),
+                {"tid": tid, "field": field},
+            )
+
+        effacer(track_id)
+        effacer_chez_les_soeurs(conn, track_id, effacer)
 
     #: Sources dont chaque observation de date décrit une ÉDITION, pas
     #: l'enregistrement : la plus ancienne fait foi. Deezer sert un catalogue de
@@ -2909,22 +2918,30 @@ class TrackRepository:
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
-                supprimees = conn.execute(
-                    text(
-                        "DELETE FROM observations WHERE track_id = :tid "
-                        "AND field = 'spotify_streams' AND source = :src"
-                    ),
-                    {"tid": track_id, "src": source},
-                ).rowcount
-                if not supprimees:
+
+                # Lignes sœurs comprises : laissée chez l'une, l'observation
+                # reviendrait par l'union de fin de transaction.
+                def oublier(tid: int) -> int:
+                    supprimees = conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :tid "
+                            "AND field = 'spotify_streams' AND source = :src"
+                        ),
+                        {"tid": tid, "src": source},
+                    ).rowcount
+                    if supprimees:
+                        valeurs = self._arbitrer_streams(conn, tid) or {
+                            "spotify_streams": None,
+                            "spotify_streams_updated": None,
+                        }
+                        if source == "kworb":
+                            valeurs["spotify_daily_streams"] = None
+                        conn.execute(update(tracks).where(tracks.c.id == tid).values(**valeurs))
+                    return supprimees
+
+                if not oublier(track_id):
                     return False
-                valeurs = self._arbitrer_streams(conn, track_id) or {
-                    "spotify_streams": None,
-                    "spotify_streams_updated": None,
-                }
-                if source == "kworb":
-                    valeurs["spotify_daily_streams"] = None
-                conn.execute(update(tracks).where(tracks.c.id == track_id).values(**valeurs))
+                effacer_chez_les_soeurs(conn, track_id, oublier)
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur forget_spotify_streams_observation({track_id}, {source}): {e}")
@@ -3274,7 +3291,15 @@ class TrackRepository:
                 text("SELECT genius_id FROM tracks WHERE id = :t"), {"t": tid}
             ).scalar()
             if gid:
-                a_faire.update(ids_soeurs(conn, tid, gid)[0])
+                jumelles = ids_soeurs(conn, tid, gid)[0]
+                # Les observations de l'ENREGISTREMENT d'abord : un écrivain
+                # qui n'en pose que sur SA ligne laissait la sœur recalculer
+                # sans elles (« Outro » : 167 s chez Josman, 421 s chez Népal,
+                # 2026-10-29). Les retraits, eux, passent par
+                # `effacer_chez_les_soeurs` — garde : `test_retraits_d_observations`.
+                if jumelles:
+                    unir_observations(conn, [tid, *jumelles])
+                a_faire.update(jumelles)
         # Les AUTRES porteurs de leurs vidéos (même artiste) : une vidéo reçue
         # par l'union des sœurs peut devenir partagée avec une fiche hors de la
         # famille, dont le total change sans qu'elle ait été touchée
@@ -3577,16 +3602,24 @@ class TrackRepository:
                 ).scalar()
                 if actuelle is None or str(actuelle) != str(value):
                     return False
-                conn.execute(
-                    text(
-                        "DELETE FROM observations "
-                        "WHERE track_id = :tid AND field = :field AND source = :src"
-                    ),
-                    {"tid": track_id, "field": field, "src": source},
-                )
-                self._ecrire_colonnes_discographie(
-                    conn, track_id, self._arbitrer_discographie(conn, track_id, {field})
-                )
+
+                # Chez les sœurs aussi, et seulement si elles portent la MÊME
+                # valeur : sinon l'union de fin de transaction la rendrait.
+                def oublier(tid: int) -> None:
+                    if not conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :tid AND field = :field "
+                            "AND source = :src AND CAST(value AS TEXT) = :val"
+                        ),
+                        {"tid": tid, "field": field, "src": source, "val": str(value)},
+                    ).rowcount:
+                        return
+                    self._ecrire_colonnes_discographie(
+                        conn, tid, self._arbitrer_discographie(conn, tid, {field})
+                    )
+
+                oublier(track_id)
+                effacer_chez_les_soeurs(conn, track_id, oublier)
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur forget_discography_observation({track_id}, {field}): {e}")
@@ -3647,6 +3680,29 @@ class TrackRepository:
                 ecrites = {k: v for k, v in candidats.items() if avant[k] in (None, "")}
                 if ecrites:
                     self._ecrire_colonnes_discographie(conn, track_id, ecrites)
+
+                    # Les lignes sœurs VIDES se remplissent aussi (jamais de
+                    # remplacement) : l'ISRC n'a pas d'observation qui le
+                    # porterait jusqu'à elles (« Outro », chez Josman et non
+                    # chez Népal, 2026-10-29).
+                    gid = conn.execute(
+                        text("SELECT genius_id FROM tracks WHERE id = :tid"), {"tid": track_id}
+                    ).scalar()
+                    for tid in ids_soeurs(conn, track_id, gid)[0]:
+                        actuelles = (
+                            conn.execute(
+                                text(
+                                    "SELECT deezer_id, deezer_url, isrc, explicit_lyrics "
+                                    "FROM tracks WHERE id = :tid"
+                                ),
+                                {"tid": tid},
+                            )
+                            .mappings()
+                            .first()
+                        )
+                        vides = {k: v for k, v in ecrites.items() if actuelles[k] in (None, "")}
+                        if vides:
+                            self._ecrire_colonnes_discographie(conn, tid, vides)
             return {k: True for k in ecrites}
         except SQLAlchemyError as e:
             logger.error(f"Erreur fill_track_identities (track_id={track_id}): {e}")
@@ -5813,16 +5869,36 @@ class TrackRepository:
             return False
 
     def clear_track_youtube_link(self, track_id: int) -> bool:
-        """Efface le lien YouTube et sa provenance (repasse en recherche live)."""
+        """Efface le lien YouTube et sa provenance (repasse en recherche live),
+        chez les lignes sœurs aussi quand elles portent la MÊME vidéo : laissé
+        chez l'une, `_aligner_lien_youtube` le rendait à la synchronisation
+        suivante (« Ghost Town », « Sky High », retirés par la règle
+        `video_partagee` le 2026-10-29 chez une seule ligne)."""
         try:
-            stmt = (
-                update(tracks)
-                .where(tracks.c.id == track_id)
-                .values(youtube_url=None, youtube_url_source=None, updated_at=datetime.now())
-            )
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
-                conn.execute(stmt)
+                lien = conn.execute(
+                    text("SELECT youtube_url FROM tracks WHERE id = :t"), {"t": track_id}
+                ).scalar()
+                video = extract_video_id(lien) if lien else None
+
+                def vider(tid: int) -> None:
+                    if tid != track_id:
+                        sien = conn.execute(
+                            text("SELECT youtube_url FROM tracks WHERE id = :t"), {"t": tid}
+                        ).scalar()
+                        if not video or not sien or extract_video_id(sien) != video:
+                            return
+                    conn.execute(
+                        update(tracks)
+                        .where(tracks.c.id == tid)
+                        .values(
+                            youtube_url=None, youtube_url_source=None, updated_at=datetime.now()
+                        )
+                    )
+
+                vider(track_id)
+                effacer_chez_les_soeurs(conn, track_id, vider)
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur clear_track_youtube_link (track_id={track_id}): {e}")
@@ -6170,27 +6246,35 @@ class TrackRepository:
         durée de la vidéo rejetée (« DJ Aktive Mix », 18 s d'un skit,
         2026-10-27). Le retrait ôte la provenance : la colonne suit."""
         self._toucher(conn, track_id)
-        retirees = 0
-        for source in self._SOURCES_DUREE_VIDEO:
-            if source == sauf:
-                continue
-            retirees += conn.execute(
-                text(
-                    "DELETE FROM observations WHERE track_id = :tid "
-                    "AND field = 'duration' AND source = :s"
-                ),
-                {"tid": track_id, "s": source},
-            ).rowcount
-        if (
-            retirees
-            and not conn.execute(
-                text("SELECT 1 FROM observations WHERE track_id = :tid AND field = 'duration'"),
-                {"tid": track_id},
-            ).first()
-        ):
-            conn.execute(
-                text("UPDATE tracks SET duration = NULL WHERE id = :tid"), {"tid": track_id}
-            )
+
+        # Lignes sœurs comprises : laissée chez l'une, la durée reviendrait par
+        # l'union de fin de transaction.
+        def retirer(tid: int) -> int:
+            retirees = 0
+            for source in self._SOURCES_DUREE_VIDEO:
+                if source == sauf:
+                    continue
+                retirees += conn.execute(
+                    text(
+                        "DELETE FROM observations WHERE track_id = :tid "
+                        "AND field = 'duration' AND source = :s"
+                    ),
+                    {"tid": tid, "s": source},
+                ).rowcount
+            if (
+                retirees
+                and not conn.execute(
+                    text("SELECT 1 FROM observations WHERE track_id = :tid AND field = 'duration'"),
+                    {"tid": tid},
+                ).first()
+            ):
+                conn.execute(
+                    text("UPDATE tracks SET duration = NULL WHERE id = :tid"), {"tid": tid}
+                )
+            return retirees
+
+        retirees = retirer(track_id)
+        effacer_chez_les_soeurs(conn, track_id, retirer)
         return retirees
 
     def retirer_durees_video(self, track_id: int, sauf: str | None = None) -> int:
@@ -6974,10 +7058,17 @@ class TrackRepository:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
                 self._delete_observations(conn, track_id, "duration")
-                conn.execute(
-                    text("UPDATE tracks SET duration = NULL, updated_at = :now WHERE id = :tid"),
-                    {"tid": track_id, "now": datetime.now()},
-                )
+
+                def vider(tid: int) -> None:
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET duration = NULL, updated_at = :now WHERE id = :tid"
+                        ),
+                        {"tid": tid, "now": datetime.now()},
+                    )
+
+                vider(track_id)
+                effacer_chez_les_soeurs(conn, track_id, vider)
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur clear_track_duration (track_id={track_id}): {e}")

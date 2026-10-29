@@ -10,10 +10,11 @@ propriété casse, il RÉDUIT la suite au plus petit cas qui la casse.
 Propriétés :
 - après CHAQUE geste : aucune colonne dérivée ne s'écarte de ses faits
   (`rematerialiser` à blanc ne change rien) et aucune ligne n'est orpheline ;
-- après une SAUVEGARDE d'une ligne sœur : la famille est alignée
-  (`soeurs_divergentes` vide). Entre deux sauvegardes, une écriture sur UNE
-  sœur ne se propage pas encore — délibérément : propager à chaque écriture
-  ressusciterait un retrait fait sur une seule ligne.
+- après CHAQUE geste aussi, la famille est alignée (`soeurs_divergentes`
+  vide, verdicts dérivés compris) : la fin de transaction unit les
+  observations de la famille, et chaque retrait passe chez les sœurs — sans
+  quoi l'union le ressusciterait (2026-10-29 ; avant, l'alignement n'était
+  attendu qu'après une sauvegarde, et « Outro » gardait 421 s chez Népal).
 """
 
 import sqlite3
@@ -204,6 +205,6 @@ def test_les_invariants_tiennent_apres_toute_suite_d_ecritures(
 ):
     dm, ids = _nouvelle_base(_gabarit_base_migree, dossier_proprietes)
     for numero, geste in enumerate(gestes, start=1):
-        sauvee = _jouer(dm, ids, geste)
-        violations = _violations(dm, soeurs=sauvee)
+        _jouer(dm, ids, geste)
+        violations = _violations(dm, soeurs=True)
         assert not violations, f"après le geste {numero} {geste} : {violations}"

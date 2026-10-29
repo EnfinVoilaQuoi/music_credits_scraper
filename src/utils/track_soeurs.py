@@ -477,7 +477,7 @@ def _unir_credits(conn, source_id: int, cible_id: int) -> int:
     ).rowcount
 
 
-def _unir_observations(conn, ids: list[int]) -> int:
+def unir_observations(conn, ids: list[int]) -> int:
     """Chaque ligne reçoit, par `(field, source)`, l'observation la plus FRAÎCHE.
 
     Les observations sont la provenance : les partager, c'est partager ce que
@@ -485,6 +485,11 @@ def _unir_observations(conn, ids: list[int]) -> int:
     l'artiste sous lequel on le regarde. Chaque ligne ré-arbitre ensuite pour son
     propre compte, si bien que le verdict est identique partout sans qu'on ait eu
     à désigner un gagnant.
+
+    À fraîcheur ÉGALE (`seen_at` est à la seconde), la ligne `ids[0]` l'emporte :
+    c'est celle qu'un écrivain vient de toucher (`_recalculer_touchees`), deux
+    lectures dans la même seconde ne doivent pas lui rendre l'ancienne valeur
+    de sa sœur.
     """
     from sqlalchemy import text
 
@@ -495,18 +500,25 @@ def _unir_observations(conn, ids: list[int]) -> int:
     # que la ligne réécrit à chaque recalcul. L'unir ne faisait que tourner en
     # rond (176 « conflits » mesurés le 2026-10-12 après réalignement). Ses
     # compteurs sans mesure exacte (`ytm_compteurs`) aussi : le run de SON artiste.
-    meilleures = (
+    lignes = (
         conn.execute(
             text(
-                "SELECT field, source, value, confidence, MAX(seen_at) AS seen_at "
+                "SELECT track_id, field, source, value, confidence, seen_at "
                 f"FROM observations WHERE track_id IN ({marques}) "  # noqa: S608
-                "AND field NOT IN ('ytm_streams', 'ytm_compteurs') GROUP BY field, source"
+                "AND field NOT IN ('ytm_streams', 'ytm_compteurs')"
             ),
             params,
         )
         .mappings()
         .all()
     )
+    par_cle: dict = {}
+    for obs in lignes:
+        rang = (str(obs["seen_at"] or ""), obs["track_id"] == ids[0])
+        cle = (obs["field"], obs["source"])
+        if cle not in par_cle or rang > par_cle[cle][0]:
+            par_cle[cle] = (rang, obs)
+    meilleures = [obs for _, obs in par_cle.values()]
     ecrites = 0
     for obs in meilleures:
         for track_id in ids:
@@ -664,7 +676,7 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
             if source != cible:
                 rapport["credits"] += _unir_credits(conn, source, cible)
 
-    rapport["observations"] = _unir_observations(conn, famille)
+    rapport["observations"] = unir_observations(conn, famille)
     rapport["videos"] = _unir_table_additive(conn, famille, "track_videos", "video_id")
     rapport["spotify_ids"] = _unir_table_additive(conn, famille, "track_spotify_ids", "spotify_id")
     # `is_primary` RECOPIE `tracks.spotify_id` : une colonne comblée par une

@@ -513,6 +513,59 @@ def test_video_d_un_homonyme_retiree_par_regle_puis_retablie(data_manager, artis
     assert fiche.durations_observees.get("youtube") == 225
 
 
+def test_video_de_recherche_d_un_autre_artiste_retiree_puis_retablie(
+    data_manager, artiste, monkeypatch
+):
+    """2026-10-29 : la recherche avait posé l'« In Common (Kaskade Remix) » sur
+    le remix avec Kanye — un AUTRE remix, que le score refuse : le lien part,
+    refus de règle ; rétablir le rend. Une ressemblance de titre trop faible
+    (la bonne vidéo d'A2H sous un titre Genius générique) reste à l'humain."""
+    from src.models.track import TrackVideo
+    from src.utils.corrections_fiches import origine_du_refus, videos_refusees
+
+    monkeypatch.setattr(revue_auto, "REGLES_ETENDUES_BRANCHEES", True)
+    kaskade = TrackVideo(
+        video_id="1LPMUVgEDRI",
+        source="search_auto",
+        views=81_828,
+        title="In Common (Kaskade Remix)",
+        recherche={"titre": "In Common (Kaskade Remix)", "artistes": ["Alicia Keys"]},
+    )
+    episode = TrackVideo(
+        video_id="dyvjk44I6SM",
+        source="search_auto",
+        views=360,
+        title="Home Sweet Home (Episode 2)",
+        recherche={"titre": "Home Sweet Home (Episode 2)", "artistes": ["Kanye West"]},
+    )
+    remix = Track(
+        title="In Common (Remix)", artist=artiste, genius_id=21, primary_artist_name="Alicia Keys"
+    )
+    ep = Track(title="En attendant l’album (Episode 2)", artist=artiste, genius_id=22)
+    for t, v in ((remix, kaskade), (ep, episode)):
+        data_manager.save_track(t)
+        data_manager.record_track_videos(t.id, [v])
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len([a for a in bilan.appliquees if "1LPMUVgEDRI" in a]) == 1, bilan
+    fiches = {t.id: t for t in data_manager.get_artist_tracks(artiste.id)}
+    assert fiches[remix.id].videos == []
+    assert origine_du_refus(fiches[remix.id], "video", "1LPMUVgEDRI") == "regle:recherche_perimee"
+    assert [v.video_id for v in fiches[ep.id].videos] == ["dyvjk44I6SM"]
+
+    (correction,) = [
+        c
+        for c in data_manager.corrections_revue(artiste.id)
+        if c["action"] == "regle:retirer_video_recherche"
+    ]
+    _charger(data_manager, artiste)
+    revue_auto.retablir(data_manager, artiste, correction)
+    fiche = {t.id: t for t in data_manager.get_artist_tracks(artiste.id)}[remix.id]
+    assert [v.video_id for v in fiche.videos] == ["1LPMUVgEDRI"]
+    assert "1LPMUVgEDRI" not in videos_refusees(fiche)
+
+
 def test_remix_tiers_cree_par_regle_puis_retabli(data_manager, artiste):
     """Rétablir une fiche « remix par un tiers » créée par règle la supprime et
     rend la ligne Kworb à la proposition (2026-10-26)."""

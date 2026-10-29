@@ -1294,6 +1294,67 @@ def _proprietaires_des_videos(ctx) -> dict[str, list]:
     return ctx.memo("proprietaires_videos", fabrique)
 
 
+def raison_du_refus_de_recherche(track, recherche: dict) -> str:
+    """Pourquoi le score refuse ce que la recherche a vu : « artiste » (aucun
+    artiste du résultat n'est un artiste de la fiche — « Outro » de Dimeh
+    Todo sur celui de Di-Meh), « version » (un remixeur étranger à la fiche —
+    « In Common (Kaskade Remix) » sur le remix avec Travis), sinon « titre »
+    (ressemblance, titre générique sans disque, partie) : l'humain."""
+    from src.utils.title_matching import noms_de_meme_graphie
+    from src.utils.version_heritage import remixeur_etranger
+    from src.youtube.youtube_searcher import formes_publiees, invites_nommes
+
+    titre = recherche.get("titre") or ""
+    connus = [
+        n
+        for n in (
+            track.artist.name if track.artist else None,
+            track.primary_artist_name,
+            *(track.featured_artists or "").split(","),
+        )
+        if n and n.strip()
+    ]
+    vus = [*(recherche.get("artistes") or []), *invites_nommes(titre)]
+    if vus and not any(noms_de_meme_graphie(v, c) for v in vus for c in connus):
+        return "artiste"
+    if any(remixeur_etranger(track.title, forme, connus) for forme in formes_publiees(titre)):
+        return "version"
+    return "titre"
+
+
+#: Les refus que les données MONTRENT : une règle retire le lien.
+RAISONS_MONTREES = ("artiste", "version")
+
+
+def recherche_perimee(track, _ctx=None):
+    """Une vidéo posée par la RECHERCHE que le score courant refuse : ses vues
+    ne comptent déjà plus (`vues_comptees`, décision 2026-10-20) ; reste à
+    retirer le lien, ou à le valider (✔️ : il passe en `manual`). Ce qui était
+    une famille de l'audit (2026-10-29) : le panneau le tranche. UN cas par
+    fiche, une raison montrée d'abord."""
+    from src.services.vues_comptees import recherche_valide
+
+    refusees = [
+        (raison_du_refus_de_recherche(track, v.recherche), v)
+        for v in track.videos or []
+        if v.source == "search_auto" and v.recherche and not recherche_valide(track, v.recherche)
+    ]
+    if not refusees:
+        return None
+    raison, v = min(refusees, key=lambda rv: (rv[0] not in RAISONS_MONTREES, -(rv[1].views or 0)))
+    vus = ", ".join(v.recherche.get("artistes") or []) or "?"
+    return (
+        f"la recherche a vu « {v.recherche.get('titre')} » ({vus}) : le score le refuse "
+        f"({raison}), ses vues ne comptent pas",
+        {
+            "video_id": v.video_id,
+            "track_ids": [track.id],
+            "raison": raison,
+            "impact": v.views or 0,
+        },
+    )
+
+
 def video_etrangere(track, ctx=None):
     """Une vidéo rattachée dont le titre ne nomme pas le morceau : peut-être
     celle d'un autre (Kanye « Heartless - Recorded At RAK Studios » → vidéo de
@@ -1710,6 +1771,9 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "🎬",
         video_etrangere,
         nature_du_cas=nature_video_etrangere,
+    ),
+    Detecteur(
+        "recherche_perimee", "Vidéo de la recherche refusée par le score", "🔎", recherche_perimee
     ),
     Detecteur("vues_ytm", "Vues YouTube anormales", "📈", vues_youtube_anormales),
     Detecteur("duree_songbpm", "Durée SongBPM démentie par YouTube", "⏱️", duree_songbpm_dementie),

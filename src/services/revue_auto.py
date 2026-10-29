@@ -121,7 +121,7 @@ _SANS_FICHE = frozenset(
 )
 
 #: Correcteurs qui reçoivent l'artiste (ils rejouent l'action du panneau).
-_AVEC_ARTISTE = _SANS_FICHE | {"delier_deezer"}
+_AVEC_ARTISTE = _SANS_FICHE | {"delier_deezer", "retirer_video_recherche"}
 
 #: Préfixe de la note d'un « ✓ Normal » posé par une règle (et de l'origine
 #: d'un refus) — un humain n'en pose jamais.
@@ -440,9 +440,9 @@ def _retirer_video_partagee(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict
         dm.forget_track_video(t.id, vid)
         t.videos = [v for v in t.videos or [] if v.video_id != vid]
     gardee = fiches.get(cas.preuves.get("garder"))
+    retiree = f"vidéo {vid} retirée de {', '.join(f'« {t.title} »' for t in cibles)}"
     return (
-        f"vidéo {vid} retirée de {', '.join(f'« {t.title} »' for t in cibles)}, "
-        f"gardée par « {gardee.title if gardee else cas.preuves.get('garder')} »"
+        f"{retiree}, gardée par « {gardee.title} »" if gardee else f"{retiree} — {cas.motif}"
     ), {
         "type": "videos",
         "video_id": vid,
@@ -564,6 +564,8 @@ _CORRECTEURS_DE_REGLE = {
     "confirmer_lien": _confirmer_lien,
     "kworb_tiers": _kworb_tiers,
     "retirer_video_partagee": _retirer_video_partagee,
+    # Même geste pour UNE fiche : `track_ids` = [la fiche], refus de règle.
+    "retirer_video_recherche": _retirer_video_partagee,
     "delier_deezer": _delier_deezer,
     "deezer_appliquer": _deezer_appliquer,
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,

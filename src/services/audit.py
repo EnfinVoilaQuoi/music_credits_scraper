@@ -149,7 +149,6 @@ FAMILLES = {
     "streams_double": "même compteur Spotify sur deux pages Genius",
     "video_partagee": "même vidéo sur plusieurs fiches (vues comptées NULLE PART)",
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
-    "recherche_perimee": "vidéo de la recherche que le score courant refuse (vues non comptées)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
@@ -161,7 +160,9 @@ FAMILLES = {
 }
 
 #: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
-FAMILLES_DECISION = ("recherche_perimee",)
+#: `recherche_perimee` l'était jusqu'au 2026-10-29 : c'est désormais un
+#: détecteur du panneau (`revue:recherche_perimee`), qu'une règle tranche.
+FAMILLES_DECISION: tuple[str, ...] = ()
 
 #: Les familles dont la cible est zéro (une seule ligne = un défaut de code).
 INVARIANTS = (
@@ -574,22 +575,12 @@ def streams(c, par) -> list[Cas]:
                 artist=SimpleNamespace(name=t["artiste"]),
             )
             recherche = recherche_de_ligne(r["recherche"])
+            # Une vidéo de la recherche refusée se tranche au panneau
+            # (`revue:recherche_perimee`) ; l'audit n'en garde que l'exclusion.
             if not vues_comptees.vue_comptee(
                 fiche, r["video_id"], r["title"], r["source"], valides[t["artist_id"]], recherche
             ):
                 exclues[r["track_id"]].add(r["video_id"])
-                if r["source"] == "search_auto":
-                    cas.append(
-                        Cas(
-                            "recherche_perimee",
-                            t["artiste"],
-                            [t["id"]],
-                            f"{_lib(t)} ← « {recherche['titre']} » "
-                            f"({', '.join(recherche['artistes']) or '?'}) "
-                            f"{r['video_id']} {r['views'] or 0:,} vues",
-                            nature=DECISION,
-                        )
-                    )
             # Par ARTISTE : les lignes sœurs (même enregistrement chez l'invité)
             # partagent leurs vidéos par construction, ce n'est pas un double compte.
             vids[(ids[r["track_id"]]["artist_id"], r["video_id"])].append(

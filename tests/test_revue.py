@@ -1107,6 +1107,20 @@ class TestVideoPartagee:
         f = _t("FIANCÉE", 2, genius_id=12)
         assert revue.proprietaire_de_la_video([h, f], film) is None
 
+    def test_raison_du_refus_de_recherche(self):
+        """2026-10-29 : un artiste étranger, un autre remix se MONTRENT ; un nom
+        qui contient celui de la fiche (« Iam Ike Hill » / IAM) ne prouve rien."""
+        raison = revue.raison_du_refus_de_recherche
+        isha = _t("Interlude", 1, album="Vas-y chante")
+        assert raison(isha, {"titre": "Interlude", "artistes": ["AISHA"]}) == "artiste"
+        intro = _t("Intro", 2)
+        intro.primary_artist_name = "IAM"
+        assert raison(intro, {"titre": "Intro", "artistes": ["Iam Ike Hill"]}) == "titre"
+        remix = _t("In Common (Remix)", 3)
+        remix.primary_artist_name = "Alicia Keys"
+        vu = {"titre": "In Common (Kaskade Remix)", "artistes": ["Alicia Keys"]}
+        assert raison(remix, vu) == "version"
+
     def test_un_clip_d_un_meme_disque_n_est_pas_departage(self):
         clip = self._v("C", "Kanye West - Champions")
         a = _t("Champions", 1, genius_id=11, album="Cruel Summer")

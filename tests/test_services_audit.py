@@ -364,7 +364,8 @@ class TestYtmIncoherent:
 
 class TestRecherchePerimee:
     """Une vidéo de la recherche que le score courant refuse : ses vues ne
-    comptent pas, et l'audit la montre à trancher (retirer, ou ✔️)."""
+    comptent pas, et le PANNEAU la montre à trancher (`revue:recherche_perimee`,
+    2026-10-29 — c'était une famille de l'audit, comptée deux fois sinon)."""
 
     def test_la_video_refusee_est_a_trancher(self, data_manager):
         from src.models import TrackVideo
@@ -379,13 +380,15 @@ class TestRecherchePerimee:
             t.id,
             [TrackVideo(video_id="FC05EcH6dUw", source="search_auto", views=400, recherche=vu)],
         )
-        audit = au.auditer(data_manager, ["Django"], revue=False)
-        (cas,) = [c for c in audit.cas if c.famille == "recherche_perimee"]
+        sans_revue = au.auditer(data_manager, ["Django"], revue=False)
+        assert "recherche_perimee" not in _familles(sans_revue)
+        assert "ytm_incoherent" not in _familles(sans_revue)
+        audit = au.auditer(data_manager, ["Django"])
+        (cas,) = [c for c in audit.cas if c.famille == "revue:recherche_perimee"]
         assert cas.nature == au.DECISION and "Jango Jack" in cas.libelle
-        assert "ytm_incoherent" not in _familles(audit)
         # Affichée dans le bloc des décisions.
         decisions = au.tableau(audit).split("panneau : décisions")[1].split("── panneau")[0]
-        assert "recherche_perimee" in decisions
+        assert "revue:recherche_perimee" in decisions
 
 
 def test_id_de_catalogue_entre_pages_laisse_au_panneau():

@@ -1223,8 +1223,30 @@ REGLES_ETENDUES = frozenset(
         # 2026-10-27 : simulée sur toute la base (41 vidéos partagées sur 90),
         # témoins d'accord (album vu par la recherche, durées de catalogue).
         ("video_partagee", "retirer_video_partagee"),
+        # 2026-10-29 : 7 liens sur 11, artiste étranger ou autre remix montrés.
+        ("recherche_perimee", "retirer_video_recherche"),
     }
 )
+
+
+def politique_recherche_perimee(cas, track, _ctx):
+    """Une vidéo de la recherche que le score refuse, pour une raison que les
+    données MONTRENT (`revue.RAISONS_MONTREES` : artiste étranger, autre
+    remix) : le lien part, par un refus de règle. Une ressemblance de titre
+    trop faible reste à l'humain (« Home Sweet Home (Episode 2) » d'A2H, la
+    bonne vidéo sous une page Genius au titre générique)."""
+    from src.services.revue import RAISONS_MONTREES
+
+    preuves = cas.preuves or {}
+    if cas.detecteur != "recherche_perimee" or track is None:
+        return None
+    if preuves.get("raison") not in RAISONS_MONTREES:
+        return None
+    return Arbitrage(
+        "vidéo d'un autre morceau : retirer le lien",
+        "retirer_video_recherche",
+        cas.motif,
+    )
 
 
 def politique_video_partagee(cas, _track, _ctx):
@@ -1276,6 +1298,7 @@ _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "deezer_link_candidate": politique_liens_deezer,
     "kworb_proposition": politique_kworb_tiers,
     "video_partagee": politique_video_partagee,
+    "recherche_perimee": politique_recherche_perimee,
 }
 
 

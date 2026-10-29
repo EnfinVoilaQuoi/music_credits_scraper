@@ -632,3 +632,93 @@ class TestSongbpmVersion:
         durees = {"songbpm": 207, "deezer": 252, "spotify_web": 252, "youtube": 253}
         t = _t("Niagara Falls", durations_observees=durees)
         assert pol.politique_songbpm_version(_cas("duree_songbpm", t), t, None) is None
+
+
+class TestSongbpmTitreContenu:
+    """2026-10-29 : mesures SongBPM posées par un titre CONTENU avant la garde
+    de pose `cccebc7` (« Maybe » / « Maybe So » de Kid Cudi, « Reste » /
+    « reste à vivre »). Retirées de la fiche que ses catalogues démentent quand
+    ceux de l'autre les confirment ; le reste à l'humain, une fois par paire."""
+
+    MESURES = (("bpm", 140), ("key", 5), ("mode", 1), ("duration", 205))
+
+    def _paire(self, court, long, titres=("Reste", "reste à vivre")):
+        from src.enrichment.observation import Observation
+
+        a = _t(titres[0], 10, durations_observees={**court, "songbpm": 205})
+        b = _t(titres[1], 11, durations_observees={**long, "songbpm": 205})
+        obs = {t.id: [Observation(c, v, "songbpm") for c, v in self.MESURES] for t in (a, b)}
+        return a, b, revue.contexte([a, b], obs)
+
+    def test_dementie_ici_confirmee_la_retiree(self):
+        a, b, ctx = self._paire(
+            {"spotify_web": 186, "deezer": 186, "apple_music": 186},
+            {"spotify_web": 204, "deezer": 204},
+        )
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert preuves["retirer"] and preuves["garder"] == 11 and preuves["track_ids"] == [10]
+        assert revue.songbpm_titre_contenu(b, ctx) is None  # la propriétaire garde
+        arb = pol.arbitrage_etendu(_cas("songbpm_titre_contenu", a, preuves), a, ctx)
+        assert arb is not None and arb.action == "retirer_songbpm"
+
+    def test_une_video_pour_seule_contradiction_l_humain(self):
+        """« Maybe » n'a que sa vidéo (173 s) : trop fragile pour retirer."""
+        a, b, ctx = self._paire(
+            {"youtube_video": 173}, {"deezer": 205, "spotify_web": 205}, ("Maybe", "Maybe So")
+        )
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer") and preuves["fiche"] == "aucune"
+        assert preuves["l_autre"] == "confirme"
+        assert pol.arbitrage_etendu(_cas("songbpm_titre_contenu", a, preuves), a, ctx) is None
+        assert revue.songbpm_titre_contenu(b, ctx) is None  # une fois par paire
+
+    def test_ecart_d_edition_l_humain(self):
+        """À moins de `ECART_VERSION_S` : deux éditions d'un même enregistrement."""
+        a, b, ctx = self._paire({"deezer": 199}, {"deezer": 205})
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer")
+
+    def test_une_duree_independante_concordante_retient(self):
+        """Un catalogue contre, mais l'audio Topic à la durée de la page : l'humain."""
+        a, b, ctx = self._paire({"deezer": 186, "youtube": 205}, {"deezer": 204})
+        assert not revue.songbpm_titre_contenu(a, ctx)[1].get("retirer")
+
+    def test_une_valeur_copiee_de_l_autre_n_est_pas_un_temoin(self):
+        a, b, ctx = self._paire({"deezer": 186, "spotify_web": 204}, {"spotify_web": 204})
+        # Sans la copie, « Reste » n'a que Deezer contre ; l'autre n'a plus rien.
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer") and preuves["l_autre"] == "aucune"
+
+    def test_deux_fiches_confirmees_sans_cas(self):
+        """« La Récolte » et le medley qui la porte : même audio, rien à trancher."""
+        a, b, ctx = self._paire({"youtube": 205, "ytmusic": 205}, {"spotify_web": 204})
+        assert revue.songbpm_titre_contenu(a, ctx) is None
+        assert revue.songbpm_titre_contenu(b, ctx) is None
+
+    def test_sans_duree_songbpm_aucun_cas(self):
+        """« Jail » / « Jail, Pt. 2 » : même BPM, aucune durée de page."""
+        a, b, ctx = self._paire({"deezer": 186}, {"deezer": 204})
+        for t in (a, b):
+            ctx.obs[t.id] = [o for o in ctx.obs[t.id] if o.field != "duration"]
+        assert revue.songbpm_titre_contenu(a, ctx) is None
+        assert revue.songbpm_titre_contenu(b, ctx) is None
+
+    def test_titres_sans_inclusion_ou_jumelles_hors_champ(self):
+        a, b, ctx = self._paire({"deezer": 186}, {"deezer": 204}, ("Reste", "Partir"))
+        assert revue.songbpm_titre_contenu(a, ctx) is None
+        a, b, ctx = self._paire({"deezer": 186}, {"deezer": 204}, ("Suzy", "Suzy 2003"))
+        assert revue.songbpm_titre_contenu(a, ctx) is None  # `jumelle_annee`
+
+    def test_la_garde_de_pose_refuse_ensuite_la_meme_page(self):
+        """Le refus qui tient : aucune page SongBPM n'est gardée en base, mais la
+        garde `cccebc7` refuse à la fiche retirée la page de l'autre."""
+        from src.utils.titre_annee import EXCLUES_SONGBPM, duree_independante
+
+        a, b, ctx = self._paire(
+            {"spotify_web": 186, "deezer": 186}, {"spotify_web": 204, "deezer": 204}
+        )
+        assert revue.songbpm_titre_contenu(a, ctx)[1]["retirer"]
+        duree = duree_independante(a.durations_observees, sources_exclues=EXCLUES_SONGBPM)
+        page = {"title": b.title, "artist": "A2H", "duration": "3:25"}
+        juge = revue._juge_songbpm()
+        assert juge.choisir_resultat([page], a.title, "A2H", duree_fiche=duree) is None

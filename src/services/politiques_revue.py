@@ -1271,6 +1271,10 @@ REGLES_ETENDUES = frozenset(
         # 2026-10-29, décision utilisateur : la chaîne d'un autre artiste ET une
         # durée que toutes celles de la fiche démentent (e62, e63).
         ("video_autre_chaine", "retirer_video_recherche"),
+        # 2026-10-29 : mesures SongBPM posées par un titre CONTENU avant la
+        # garde de pose `cccebc7`, retirées de la fiche que ses catalogues
+        # démentent quand ceux de l'autre les confirment (simulée sur la copie).
+        ("songbpm_titre_contenu", "retirer_songbpm"),
     }
 )
 
@@ -1289,6 +1293,21 @@ def politique_jumelle_annee(cas, track, _ctx):
     if action is None:
         return None
     return Arbitrage("donnée de la jumelle : la retirer de la fiche", action, cas.motif)
+
+
+def politique_songbpm_titre_contenu(cas, track, _ctx):
+    """Les mesures SongBPM qu'une fiche partage avec une autre par un titre
+    CONTENU (`revue.songbpm_titre_contenu`) partent quand les catalogues de la
+    fiche les démentent et ceux de l'autre les confirment (`retirer` posé). Le
+    reste — une fiche sans catalogue, une vidéo pour seule contradiction —
+    reste à l'humain (décision utilisateur : au moindre doute, le code ne
+    tranche pas)."""
+    preuves = cas.preuves or {}
+    if cas.detecteur != "songbpm_titre_contenu" or track is None or not preuves.get("retirer"):
+        return None
+    return Arbitrage(
+        "mesures SongBPM de l'autre titre : les retirer de la fiche", "retirer_songbpm", cas.motif
+    )
 
 
 def politique_recherche_perimee(cas, track, _ctx):
@@ -1482,6 +1501,7 @@ _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "video_partagee": politique_video_partagee,
     "recherche_perimee": politique_recherche_perimee,
     "jumelle_annee": politique_jumelle_annee,
+    "songbpm_titre_contenu": politique_songbpm_titre_contenu,
 }
 
 

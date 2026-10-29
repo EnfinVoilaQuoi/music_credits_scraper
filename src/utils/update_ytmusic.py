@@ -43,7 +43,9 @@ logger = get_logger(__name__)
 # Normaliseur PARTAGÉ (même matching que update_kworb — cf. title_matching.py).
 # L'ancien normaliseur local ratait "MURDER INC"/"MURDER INC.", "SOAB"/"S.O.A.B",
 # "L’Augmentation - Pt. 2"/"L’augmentation, Pt. 2".
+from src.utils.title_matching import meme_album
 from src.utils.title_matching import normalize_title as _normalize_title
+from src.utils.version_descriptors import titre_generique
 
 
 def _infer_channel_from_youtube_links(
@@ -791,6 +793,19 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                     f"{echanges[entry['video_id']].title} » (la page d'album les a échangées)"
                 )
                 matched_track = echanges[entry["video_id"]]
+            if (
+                matched_track
+                and titre_generique(entry["title"])
+                and not meme_album(album_title, matched_track.album)
+            ):
+                # Un titre générique ne désigne une fiche qu'avec son disque
+                # (2026-10-29) : l'« Outro » de Népal (*444 Nuits*) se posait
+                # sur celui de Di-Meh (*Reste Calme*), avec sa durée.
+                logger.info(
+                    f"⏭️ « {entry['title']} » de « {album_title} » non rattaché à la fiche "
+                    f"de « {matched_track.album} » (titre générique, autre disque)"
+                )
+                matched_track = None
             if matched_track:
                 if streams is not None and retenu(matched_track.id):
                     video_id = entry.get("video_id")

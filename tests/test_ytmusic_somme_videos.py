@@ -834,3 +834,31 @@ class TestVideoDeLaRecherche:
 
         assert result["vues_ecartees"] == 400
         assert dm.durees == []
+
+
+class TestTitreGenerique:
+    """Un titre générique ne se rattache qu'à la fiche du même disque
+    (2026-10-29 : l'« Outro » de *444 Nuits* posé sur celui de *Reste Calme*)."""
+
+    def _api(self):
+        return FakeAPI(
+            raw_tracks=[{"title": "Outro", "video_id": "outrooutro0", "views_str": None}],
+            vues={"outrooutro0": 500},
+        )
+
+    def test_l_outro_d_un_autre_disque_n_est_pas_rattache(self, sans_recherche):
+        dm, _ = _lancer(self._api(), [_track(1, "Outro", album="Reste Calme")])
+        assert dm.totaux().get(1) is None
+        assert not dm.vues.get(1)
+
+    def test_l_outro_du_meme_disque_l_est(self, sans_recherche):
+        dm, _ = _lancer(self._api(), [_track(1, "Outro", album="Alb (Deluxe)")])
+        assert dm.totaux() == {1: 500}
+
+    def test_un_titre_ordinaire_garde_le_titre_seul(self, sans_recherche):
+        api = FakeAPI(
+            raw_tracks=[{"title": "Magot", "video_id": "magotmagot0", "views_str": None}],
+            vues={"magotmagot0": 500},
+        )
+        dm, _ = _lancer(api, [_track(1, "Magot", album="Autre disque")])
+        assert dm.totaux() == {1: 500}

@@ -112,6 +112,43 @@ class TestExtraitsVideo:
         assert reconcile([_obs("duration", 12, "youtube_video")])["duration"].value == 12
 
 
+class TestTropCourtePourLesParoles:
+    """2026-10-29 : une durée lue par le TITRE (vidéo ordinaire, SongBPM,
+    Discogs, legacy) que les paroles Genius ne peuvent pas tenir (> 8 mots/s)
+    n'est pas celle de la page — « Boss Cypher » 189 s SongBPM pour 6 223 mots."""
+
+    def test_la_source_suivante_fait_la_colonne(self):
+        obs = [_obs("duration", 189, "songbpm"), _obs("duration", 2070, "youtube_video")]
+        res = reconcile(obs, titre="Boss Cypher", paroles="mot " * 6223)
+        assert (res["duration"].value, res["duration"].source) == (2070, "youtube_video")
+
+    def test_seule_elle_ne_laisse_aucune_duree(self):
+        res = reconcile(
+            [_obs("duration", 27, "youtube_video")], titre="Shemale", paroles="mot " * 419
+        )
+        assert res["duration"].value is None
+
+    def test_discogs_et_legacy_aussi(self):
+        for source in ("discogs", "legacy"):
+            obs = [_obs("duration", 126, source), _obs("duration", 556, "youtube_video")]
+            res = reconcile(obs, titre="See Me Again", paroles="mot " * 1516)
+            assert res["duration"].value == 556, source
+
+    def test_un_catalogue_lu_par_son_id_reste_maitre(self):
+        """Deezer, Apple, Spotify lisent par un identifiant : c'est alors la
+        page Genius qui peut être la fausse (« La lutte est en marche »)."""
+        res = reconcile(
+            [_obs("duration", 209, "spotify_web")],
+            titre="La lutte est en marche",
+            paroles="mot " * 2342,
+        )
+        assert res["duration"].value == 209
+
+    def test_un_debit_tenable_ne_change_rien(self):
+        res = reconcile([_obs("duration", 180, "songbpm")], titre="Morceau", paroles="mot " * 1400)
+        assert res["duration"].value == 180
+
+
 class TestVetoDuVote:
     """Proposition du 2026-10-27, interrupteur BAISSÉ : une valeur que le vote
     des catalogues isole cède à la source suivante non démentie."""

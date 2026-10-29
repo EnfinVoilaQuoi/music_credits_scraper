@@ -430,6 +430,26 @@ LRC_AUTRE_MIN = 0.9
 #: Un LRC qui s'arrête au moins tant de secondes avant la fin de la fiche est
 #: celui d'une prise plus courte (témoin exigé pour le retirer, 2026-10-26).
 LRC_COURT_S = 30
+#: Part des paires de mots d'un LRC retrouvées dans les paroles Genius sous
+#: laquelle il n'est pas un EXTRAIT de la page (2026-10-29) : un couplet
+#: synchronisé d'un freestyle collectif y serait presque entier (≥ 0,6, le
+#: seuil des LRC justes) ; les LRC YouTube Music des Grünt en retrouvent 0,11
+#: à 0,17 — des mots-outils (« c'est », « j'ai »), pas des phrases.
+LRC_ETRANGER_MAX = 0.3
+
+
+def _part_du_lrc_dans_la_page(track) -> float | None:
+    """Part des paires de mots du LRC présentes dans les paroles Genius de la
+    fiche — dans CE sens seulement : une page qui transcrit une émission
+    entière contient tout couplet qui en est extrait. None : non jugeable."""
+    from src.utils.concordance_paroles import MOTS_MIN, bigrammes, mots, paroles_de_reference
+
+    ref = paroles_de_reference(track.lyrics.text, track.lyrics.source)
+    lrc = track.lyrics.synced
+    if len(mots(ref)) < MOTS_MIN or len(mots(lrc)) < MOTS_MIN:
+        return None
+    paires = bigrammes(lrc)
+    return len(paires & bigrammes(ref)) / len(paires) if paires else None
 
 
 def politique_lrc(cas, track, ctx):
@@ -471,6 +491,15 @@ def politique_lrc(cas, track, ctx):
                 f"{(autre or 0):.0%} de l'autre ; {temoin}",
             )
         return None
+    part = _part_du_lrc_dans_la_page(track) if cas.detecteur == "lrc_live" else None
+    if trop_court and part is not None and part < LRC_ETRANGER_MAX:
+        # Une session : ni l'autre fiche ni la durée ne servent de témoin, le
+        # texte de la page, si (2026-10-29, Grünt et VH1 Storytellers).
+        return Arbitrage(
+            "LRC d'un autre enregistrement que la session : le retirer",
+            "retirer_lrc",
+            f"{part:.0%} de ses paires de mots dans les paroles de la page ; {temoin}",
+        )
     if autre is not None and autre >= LRC_AUTRE_MIN and trop_court:
         return Arbitrage(
             "LRC d'une autre fiche : le retirer",
@@ -1231,6 +1260,9 @@ REGLES_ETENDUES = frozenset(
         ("jumelle_annee", "retirer_getsongbpm"),
         ("jumelle_annee", "retirer_lrc"),
         ("jumelle_annee", "retirer_video_recherche"),
+        # 2026-10-29 : 3 cas sur 6 ; témoins la fiche de la version que Spotify
+        # nomme (son propre ID, sa durée) et Deezer / Apple de la fiche.
+        ("id_spotify_version", "normal"),
     }
 )
 
@@ -1310,7 +1342,58 @@ def politique_kworb_tiers(cas, _track, ctx):
     )
 
 
+def politique_id_spotify_version(cas, track, ctx):
+    """La page Spotify de l'ID nomme une AUTRE version (« Deep Diving - me n ü
+    Remix » pour « Deep Diving », « K-POP » pour « K-POP (Chopped &
+    Screwed) ») ; l'ID est pourtant celui de la fiche quand trois choses le
+    montrent (2026-10-29) :
+      · la version nommée a SA fiche chez l'artiste, avec son propre ID
+        Spotify — l'ID de la fiche n'est pas le sien ;
+      · sa durée diffère de celle de l'ID de plus de `ECART_VERSION_S` ;
+      · un catalogue de la fiche lu par SON identifiant (Deezer, Apple) donne
+        la durée de l'ID, à `ECART_FICHIER_S` près.
+    ✓ Normal : aucune donnée ne change. Deux versions à la même durée
+    (instrumental, édition) restent à l'humain."""
+    from src.services.revue import _titre_sans_feat
+
+    preuves = cas.preuves or {}
+    sert = preuves.get("spotify_sert")
+    if cas.detecteur != "id_spotify_version" or track is None or not sert:
+        return None
+    durees = _durees(track)
+    d_id = durees.get("spotify_web")
+    temoin = next(
+        (
+            (s, durees[s])
+            for s in ("deezer", "apple_music")
+            if durees.get(s) and d_id and abs(int(durees[s]) - int(d_id)) <= ECART_FICHIER_S
+        ),
+        None,
+    )
+    if temoin is None:
+        return None
+    cle = _titre_sans_feat(sert)
+    ids_de_la_fiche = {track.spotify_id, *(track.spotify_ids or [])}
+    nommees = [t for t in ctx.disco if t is not track and _titre_sans_feat(t.title) == cle]
+    if not nommees or not all(
+        t.spotify_id
+        and t.spotify_id not in ids_de_la_fiche
+        and t.duration
+        and abs(int(t.duration) - int(d_id)) > ECART_VERSION_S
+        for t in nommees
+    ):
+        return None
+    autre = nommees[0]
+    return Arbitrage(
+        "l'ID est celui de la fiche : la version nommée a sa propre fiche",
+        "normal",
+        f"« {autre.title} » : ID {autre.spotify_id}, {autre.duration} s ; l'ID de la "
+        f"fiche {d_id} s = {temoin[0]} {temoin[1]} s",
+    )
+
+
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "id_spotify_version": politique_id_spotify_version,
     "bpm": politique_bpm,
     "tonalite": politique_tonalite,
     "lrc_douteux": politique_lrc,

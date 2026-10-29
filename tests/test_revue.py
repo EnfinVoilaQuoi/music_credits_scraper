@@ -106,6 +106,19 @@ class TestMesures:
         # Un instrumental a le même beat : attendu (décision utilisateur).
         assert revue.songbpm_copie_de_l_original(i, ctx) is None
 
+    def test_une_autre_tonalite_est_une_autre_page(self):
+        """2026-10-29 : « Jamm - Remix » et « Jamm », 95 bpm et 159 s chacun,
+        mais 5 mineur contre 6 majeur — deux pages SongBPM, pas une copie."""
+        o, v = _t("Jamm", 1), _t("Jamm - Remix", 2)
+        original = self._obs(songbpm={"bpm": 95, "duration": 159, "key": 6, "mode": 1})
+        remix = self._obs(songbpm={"bpm": 95, "duration": 159, "key": 5, "mode": 0})
+        assert revue.songbpm_copie_de_l_original(v, _ctx(o, v, obs={1: original, 2: remix})) is None
+        # Même tonalité, ou tonalité lue d'un seul côté : toujours une copie.
+        meme = self._obs(songbpm={"bpm": 95, "duration": 159, "key": 6, "mode": 1})
+        assert revue.songbpm_copie_de_l_original(v, _ctx(o, v, obs={1: original, 2: meme}))
+        sans = self._obs(songbpm={"bpm": 95, "duration": 159})
+        assert revue.songbpm_copie_de_l_original(v, _ctx(o, v, obs={1: original, 2: sans}))
+
 
 class TestLrc:
     def _avec(self, lrc, titre="X", n=50):
@@ -302,6 +315,39 @@ class TestDoublons:
         a, b = _t("Boss", 1, genius_id=7), _t("BOSS", 2, genius_id=7)
         assert revue.doublon_de_titre(a, _ctx(a, b)) is None
 
+    def test_paroles_distinctes_deux_morceaux(self):
+        """2026-10-29 : « Famous » de *The Life of Pablo* et celui avec Playboi
+        Carti — les paroles Genius ne partagent aucune phrase."""
+        a, b = _t("Famous", 1, genius_id=1), _t("Famous", 2, genius_id=2)
+        a.lyrics.text, a.lyrics.source = PAROLES_UN, "genius"
+        b.lyrics.text, b.lyrics.source = PAROLES_DEUX, "genius"
+        assert revue.doublon_de_titre(a, _ctx(a, b)) is None
+
+    def test_memes_paroles_ou_sans_paroles_reste_a_trancher(self):
+        a, b = _t("Famous", 1, genius_id=1), _t("Famous", 2, genius_id=2)
+        assert revue.doublon_de_titre(a, _ctx(a, b)) is not None
+        a.lyrics.text, a.lyrics.source = PAROLES_UN, "genius"
+        b.lyrics.text, b.lyrics.source = PAROLES_UN + "\nEncore une ligne", "genius"
+        assert revue.doublon_de_titre(a, _ctx(a, b)) is not None
+
+    def test_paroles_hors_genius_ne_disent_rien(self):
+        a, b = _t("Famous", 1, genius_id=1), _t("Famous", 2, genius_id=2)
+        a.lyrics.text, a.lyrics.source = PAROLES_UN, "YouTube Music"
+        b.lyrics.text, b.lyrics.source = PAROLES_DEUX, "genius"
+        assert revue.doublon_de_titre(a, _ctx(a, b)) is not None
+
+
+PAROLES_UN = (
+    "I just wanted you to know that I been thinking of the summer nights\n"
+    "Driving down the coast with the windows open singing every line\n"
+    "Never thought that we would make it this far from the bottom of the city"
+)
+PAROLES_DEUX = (
+    "Money on my mind and the diamonds on my wrist they keep on shining\n"
+    "Pull up in the foreign with the gang behind me ready for the war\n"
+    "Counting up the paper every morning got no time to rest at all"
+)
+
 
 class TestVideos:
     def _v(self, titre, vues=10):
@@ -473,6 +519,20 @@ class TestPagesEtCredits:
         assert (
             revue.page_annotee_sans_trace(_t("X", genius_url=t.genius_url, spotify_id="S")) is None
         )
+
+    def test_page_annotee_sans_info_deja_montree_pour_information(self):
+        """2026-10-29 : « NICE THAT » — page lue qui ne dit rien (🕳️), déjà
+        montrée pour information ; pas une décision de plus."""
+        from datetime import datetime
+
+        t = _t("NICE THAT", genius_url="https://genius.com/Kanye-west-nice-that-annotated")
+        t.lyrics.scraped_at = t.last_scraped = datetime(2026, 9, 26)
+        t.lyrics.text, t.lyrics.source = "(...)", "genius"
+        assert revue.page_sans_info(t) is not None
+        assert revue.page_annotee_sans_trace(t) is None
+        # Une anecdote la fait sortir de 🕳️ : elle redevient une décision.
+        t.anecdotes = "Snippet joué en 2018."
+        assert revue.page_annotee_sans_trace(t) is not None
 
     def test_credits_api_non_confirmes(self):
         from datetime import datetime

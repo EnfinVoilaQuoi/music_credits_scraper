@@ -186,6 +186,49 @@ def test_lrc_aux_paroles_proches_mais_a_sa_place_reste():
     assert pol.politique_lrc(cas, t, revue.contexte([t])) is None
 
 
+_EMISSION = (
+    "Je rappe depuis la cave avec les frères du quartier on garde la flamme\n"
+    "Les micros chauffent la nuit tombe sur la ville et personne ne recule\n"
+    "Le beat tourne encore on passe le relais au suivant sans jamais trembler\n"
+    "Mon couplet sort du cœur les mots tapent fort comme la pluie sur le béton"
+)
+
+
+def _session(lrc, duree=1800):
+    t = _t("Grünt #59", 1, duration=duree)
+    t.lyrics.text, t.lyrics.source = _EMISSION, "genius"
+    t.lyrics.synced = lrc
+    return t, _cas("lrc_live", t, {"recouvrement": 0.47})
+
+
+def test_lrc_live_etranger_a_la_page_et_court_se_retire():
+    """Grünt : un LRC YouTube Music de 2 min pour une émission de 30 min, dont
+    les phrases ne sont pas dans la page (2026-10-29)."""
+    lrc = (
+        "[00:01.00] Tu sais que je reste vrai la ville dort encore\n"
+        "[00:40.00] Elle danse sous les néons et moi je compte les heures\n"
+        "[01:50.00] Le quartier attend la pluie personne ne parle de demain"
+    )
+    t, cas = _session(lrc)
+    assert pol.arbitrage_etendu(cas, t, revue.contexte([t])).action == "retirer_lrc"
+    # Sans durée, ou presque à la durée : rien ne prouve qu'il n'est pas d'elle.
+    t.duration = None
+    assert pol.politique_lrc(cas, t, revue.contexte([t])) is None
+    t.duration = 120
+    assert pol.politique_lrc(cas, t, revue.contexte([t])) is None
+
+
+def test_lrc_live_d_un_couplet_de_la_page_reste():
+    """Un couplet synchronisé de l'émission : ses phrases sont dans la page."""
+    lrc = (
+        "[00:01.00] Je rappe depuis la cave avec les frères du quartier\n"
+        "[00:40.00] Les micros chauffent la nuit tombe sur la ville\n"
+        "[01:50.00] Mon couplet sort du cœur les mots tapent fort"
+    )
+    t, cas = _session(lrc)
+    assert pol.politique_lrc(cas, t, revue.contexte([t])) is None
+
+
 class TestEcartsDeezer:
     def _cas(self, detecteur, titre, artist_id=7, isrc=None, piste_id=1):
         ecart = {
@@ -473,3 +516,45 @@ def test_lien_deezer_dementi_par_des_sources_fragiles_seules_est_garde():
     # Trois catalogues solides d'accord contre, plus de 10 s : on délie.
     t.durations_observees = {"spotify_web": 110, "youtube": 110, "apple_music": 111}
     assert pol.arbitrage_liens_deezer(cas, t, None).action == "delier_deezer"
+
+
+class TestIdSpotifyVersion:
+    """« ID Spotify d'une autre version » (2026-10-29) : la version que la page
+    nomme a sa propre fiche, à une autre durée, et Deezer confirme celle de
+    l'ID — ✓ Normal ; deux versions à la même durée restent à l'humain."""
+
+    def _cas_kpop(self, duree_original=185, deezer=273, id_original="ORIG"):
+        cs = _t(
+            "K-POP (Chopped & Screwed)",
+            1,
+            spotify_id="CS",
+            spotify_ids=["CS"],
+            durations_observees={"spotify_web": 273, "deezer": deezer},
+        )
+        original = _t("K-POP", 2, spotify_id=id_original, duration=duree_original)
+        cas = _cas("id_spotify_version", cs, {"spotify_id": "CS", "spotify_sert": "K-POP"})
+        return cas, cs, SimpleNamespace(disco=[cs, original])
+
+    def test_la_version_nommee_a_sa_fiche_d_une_autre_duree(self):
+        cas, cs, ctx = self._cas_kpop()
+        arbitrage = pol.arbitrage_etendu(cas, cs, ctx)
+        assert arbitrage.action == "normal" and "deezer 273" in arbitrage.raison
+
+    def test_meme_duree_l_humain(self):
+        """« MELTDOWN (Instrumental) » : l'instrumental dure autant."""
+        cas, cs, ctx = self._cas_kpop(duree_original=270)
+        assert pol.arbitrage_etendu(cas, cs, ctx) is None
+
+    def test_sans_catalogue_qui_confirme_l_humain(self):
+        cas, cs, ctx = self._cas_kpop(deezer=185)
+        assert pol.arbitrage_etendu(cas, cs, ctx) is None
+
+    def test_meme_id_ou_sans_fiche_l_humain(self):
+        cas, cs, ctx = self._cas_kpop(id_original="CS")
+        assert pol.arbitrage_etendu(cas, cs, ctx) is None
+        assert pol.arbitrage_etendu(cas, cs, SimpleNamespace(disco=[cs])) is None
+
+    def test_le_feat_du_titre_servi_ne_compte_pas(self):
+        cas, cs, ctx = self._cas_kpop()
+        cas.preuves["spotify_sert"] = "K-POP (feat. Bad Bunny & The Weeknd)"
+        assert pol.arbitrage_etendu(cas, cs, ctx).action == "normal"

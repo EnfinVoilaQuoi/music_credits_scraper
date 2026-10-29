@@ -45,6 +45,7 @@ from src.utils.compteurs_partages import (
 from src.utils.concordance_paroles import (
     MOTS_MIN,
     SEUIL_FAUX,
+    SEUIL_FAUX_BIGRAMMES,
     SEUIL_JUSTE,
     SEUIL_JUSTE_BIGRAMMES,
     bigrammes,
@@ -747,6 +748,13 @@ def songbpm_copie_de_l_original(track, ctx):
         return None
     v = {f: _songbpm(ctx, track, f) for f in ("bpm", "duration")}
     o = {f: _songbpm(ctx, socle, f) for f in ("bpm", "duration")}
+    # Une TONALITÉ lue des deux côtés et différente : deux pages SongBPM
+    # distinctes, la coïncidence de tempo et de durée n'est pas une copie
+    # (« Jamm - Remix » 5 mineur, « Jamm » 6 majeur, 2026-10-29).
+    for f in ("key", "mode"):
+        lue, originale = _songbpm(ctx, track, f), _songbpm(ctx, socle, f)
+        if lue is not None and originale is not None and lue != originale:
+            return None
     if v["bpm"] and v["duration"] and v == o:
         return (
             f"BPM {v['bpm']} et durée {v['duration']} s SongBPM identiques à « {socle.title} » "
@@ -1050,12 +1058,16 @@ def page_sans_info(track, _ctx=None):
 def page_annotee_sans_trace(track, _ctx=None):
     """URL Genius `-annotated` (le tag « Non-Music ») sans aucune trace de
     plateforme : c'est ainsi qu'on a trouvé les pages poubelles du 2026-09-26
-    (29 supprimées sur 47). Le tag seul couvre aussi de vrais skits."""
+    (29 supprimées sur 47). Le tag seul couvre aussi de vrais skits. Une page
+    qui ne dit rien (`sans_info`) est déjà montrée pour information (🕳️,
+    décision utilisateur 2026-10-26) : elle n'est pas une décision de plus
+    (« NICE THAT », « Real shit », 2026-10-29)."""
     if (
         (track.genius_url or "").endswith("-annotated")
         and not track.spotify_id
         and not track.deezer_id
         and not track.videos
+        and not sans_info(track)
     ):
         return ("page Genius « Non-Music » sans trace de plateforme ni vidéo", {})
     return None
@@ -1119,6 +1131,18 @@ def _disques_distincts(a, b) -> bool:
     return bool(ca and cb) and not (ca.startswith(cb) or cb.startswith(ca))
 
 
+def _paroles_distinctes(a, b) -> bool:
+    """Les paroles Genius des deux pages DÉMENTENT le doublon : moins de
+    `SEUIL_FAUX_BIGRAMMES` de paires de mots communes (l'oracle des LRC : deux
+    morceaux différents y tombent à 99 %). Deux morceaux au même titre, pas un
+    doublon (« Famous » de *The Life of Pablo* et celui avec Playboi Carti et
+    Future, 3 % ; 2026-10-29). Sans paroles jugeables, rien n'est dit."""
+    ra = paroles_de_reference(a.lyrics.text, a.lyrics.source)
+    rb = paroles_de_reference(b.lyrics.text, b.lyrics.source)
+    paires = recouvrement_bigrammes(ra, rb) if ra and rb else None
+    return paires is not None and paires < SEUIL_FAUX_BIGRAMMES
+
+
 def doublon_de_titre(track, ctx):
     """Deux fiches de l'artiste au même titre, à la casse et à la ponctuation
     près (Booba « 3G » / « 3 G ») : doublon à fusionner, ou deux morceaux
@@ -1133,6 +1157,7 @@ def doublon_de_titre(track, ctx):
         if t is not track
         and not (t.genius_id and track.genius_id and t.genius_id == track.genius_id)
         and not _disques_distincts(t, track)
+        and not _paroles_distinctes(t, track)
     ]
     if autres and any(
         t.id is not None and track.id is not None and t.id < track.id for t in autres

@@ -282,6 +282,48 @@ class TestDureeDeclaree:
         assert api.get_lyrics("ISHA", "Titre")["source"] == "YouTube Music"
 
 
+class TestConstatParDonnee:
+    """WIP 2026-10-21 : « pas de LRC » ferait-il taire la recherche de
+    paroles ? Non (vérifié le 2026-10-29) : l'absence `ytmusic` n'est posée que
+    si YTM ne rend AUCUNE parole — ni texte ni LRC, la même réponse vaut pour
+    les deux. Un texte sans LRC est un `ok`, qui lève le constat."""
+
+    @pytest.fixture(autouse=True)
+    def _verdicts(self):
+        from src.observability import source_usage as su
+
+        su.reset()
+        su.set_sink(None)
+        yield
+        su.reset()
+
+    @staticmethod
+    def _verdict():
+        from src.observability import source_usage as su
+
+        (verdict,) = su.flush()
+        return verdict.issue
+
+    def test_un_texte_sans_lrc_n_est_pas_une_absence(self, api):
+        from src.observability.issues import IssueKind
+
+        api.yt = _YTLyrics(
+            search=[_resultat()],
+            watch={"lyrics": "b1"},
+            lyrics_sync=requests.RequestException("pas de synchro"),
+            lyrics={"lyrics": "Des paroles"},
+        )
+        assert api.get_lyrics("ISHA", "Titre")["lyrics_synced"] is None
+        assert self._verdict() == IssueKind.OK
+
+    def test_aucune_parole_est_une_absence(self, api):
+        from src.observability.issues import IssueKind
+
+        api.yt = _YTLyrics(search=[_resultat()], watch={})
+        assert api.get_lyrics("ISHA", "Titre") is None
+        assert self._verdict() == IssueKind.ABSENT
+
+
 class _FauxYoutubeApi:
     """Remplace `googleapiclient.discovery.build` : sert des `items` préparés."""
 

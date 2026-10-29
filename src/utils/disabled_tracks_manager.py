@@ -27,7 +27,12 @@ class DisabledTracksManager:
         safe_name = safe_name.replace(" ", "_").lower()
         return self.disabled_tracks_dir / f"{safe_name}_disabled.json"
 
-    def save_disabled_tracks(self, artist_name: str, disabled_track_ids: set[int]) -> bool:
+    def save_disabled_tracks(
+        self,
+        artist_name: str,
+        disabled_track_ids: set[int],
+        motifs: dict[int, dict] | None = None,
+    ) -> bool:
         """
         Sauvegarde les morceaux désactivés pour un artiste
 
@@ -41,6 +46,11 @@ class DisabledTracksManager:
         try:
             file_path = self._get_artist_file(artist_name)
 
+            # Le motif d'une page qui reste désactivée la suit ; celui d'une
+            # page réactivée part avec elle (l'IHM ne connaît que les IDs).
+            if motifs is None:
+                motifs = self.load_motifs(artist_name)
+            gardes = {str(tid): motifs[tid] for tid in disabled_track_ids if tid in motifs}
             # Convertir le set en liste pour la sérialisation JSON
             data = {
                 "artist_name": artist_name,
@@ -48,6 +58,8 @@ class DisabledTracksManager:
                 "last_updated": str(datetime.now()),
                 "version": "2.0",  # Version 2.0 utilise des IDs au lieu d'indices
             }
+            if gardes:
+                data["motifs"] = gardes
 
             ecrire_atomique(file_path, data)
 
@@ -108,6 +120,45 @@ class DisabledTracksManager:
                 f"Erreur lors du chargement des morceaux désactivés pour {artist_name}: {e}"
             )
             return set()
+
+    def load_motifs(self, artist_name: str) -> dict[int, dict]:
+        """Pourquoi chaque page a été désactivée, quand on le sait (2026-10-29) :
+        `{track_id: {"motif", "origine", "le"}}`. Une désactivation faite dans
+        l'IHM n'a pas de motif : rien ne la réactive d'office."""
+        try:
+            file_path = self._get_artist_file(artist_name)
+            if not file_path.exists():
+                return {}
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.error(f"Motifs de désactivation illisibles pour {artist_name}: {e}")
+            return {}
+        motifs = data.get("motifs") if isinstance(data, dict) else None
+        if not isinstance(motifs, dict):
+            return {}
+        return {
+            int(tid): m for tid, m in motifs.items() if str(tid).isdigit() and isinstance(m, dict)
+        }
+
+    def desactiver(
+        self, artist_name: str, track_ids: Iterable[int], motif: str, origine: str
+    ) -> bool:
+        """Désactive `track_ids` en notant le motif (« page_vide »…) et qui l'a
+        décidé (« regle:page_vide », « manuel ») : c'est ce qui permet de les
+        réactiver quand le motif tombe (`services.pages_vides`)."""
+        ids = set(self.load_disabled_tracks(artist_name))
+        motifs = self.load_motifs(artist_name)
+        le = datetime.now().isoformat(timespec="seconds")
+        for tid in track_ids:
+            ids.add(tid)
+            motifs[tid] = {"motif": motif, "origine": origine, "le": le}
+        return self.save_disabled_tracks(artist_name, ids, motifs)
+
+    def reactiver(self, artist_name: str, track_ids: Iterable[int]) -> bool:
+        retirer = set(track_ids)
+        ids = self.load_disabled_tracks(artist_name) - retirer
+        return self.save_disabled_tracks(artist_name, ids)
 
     def cleanup_orphans(self, artist_names: Iterable[str]) -> int:
         """Supprime les fichiers dont AUCUN artiste de la base ne porte le nom.

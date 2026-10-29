@@ -73,6 +73,8 @@ class BilanDisco(Bilan):
     images: int = 0
     featurings_total: int = 0
     total_en_base: int = 0
+    #: Pages désactivées car vides, réactivées (remplies, ou constat expiré).
+    pages_reactivees: int = 0
     #: Certifs/relations recalculées mais NON enregistrées (contrôle de fin de flux).
     oublies: list[str] = field(default_factory=list)
 
@@ -508,6 +510,11 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     from src.services.lignes_tiers import rattraper
 
     rattraper(dm, artist, artist.tracks)
+    # Une page désactivée car VIDE que Genius a remplie revient (`pages_vides`).
+    from src.services.pages_vides import reactiver_pages_remplies
+
+    if runtime.disabled is not None:
+        bilan.pages_reactivees = reactiver_pages_remplies(runtime.disabled, artist, artist.tracks)
     bilan.total_en_base = len(artist.tracks)
     bilan.featurings_total = sum(1 for t in artist.tracks if t.is_featuring)
     bilan.albums_api = sum(1 for t in nouveaux if t.album)

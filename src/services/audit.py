@@ -41,6 +41,7 @@ from types import SimpleNamespace
 
 from src.services import vues_comptees
 from src.services.revue import DECISION, INFORMATION, RUN, _titre_sans_feat, video_nomme
+from src.utils.cert_titres import certif_du_morceau
 from src.utils.compteurs_partages import titres_parents
 from src.utils.concordance_paroles import (
     jugeable,
@@ -522,7 +523,16 @@ def certifs(pistes) -> list[Cas]:
                 famille = "certif_version"
             else:
                 famille = "certif_autre"
-            cas.append(Cas(famille, t["artiste"], [t["id"]], lib))
+            # Un verdict, un seul endroit (2026-10-29) : ce que le JUGE de la
+            # pose admet (`certif_du_morceau` — titre coupé par la source,
+            # sous-titre, featuring, édition, certif d'une version sur
+            # l'original sans fiche de version, décisions utilisateur du
+            # 2026-10-09) reste montré, pour information ; seul ce qu'il refuse
+            # — une certif posée avant une règle et pas rejouée — est une erreur.
+            # Les 12 cas `certif_plus_long` / `certif_autre` du 2026-10-29 étaient
+            # tous admis par le juge.
+            nature = INFORMATION if certif_du_morceau(t["title"], ct) else ERREUR
+            cas.append(Cas(famille, t["artiste"], [t["id"]], lib, nature))
     return cas
 
 

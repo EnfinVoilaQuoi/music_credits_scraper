@@ -4,6 +4,8 @@ Les invariants de persistance ont une cible ZÉRO : chacun est montré ici sur
 une base saine (rien), puis sur la base qu'on abîme exprès (le défaut se voit).
 """
 
+import json
+
 import pytest
 from sqlalchemy import text
 
@@ -412,3 +414,32 @@ def test_id_de_catalogue_entre_pages_laisse_au_panneau():
     assert [c.libelle.split(" ")[0] for c in au.ids_partages(par)] == ["isrc"]
     sans_page = {1: [_r(1, 10, spotify_id="SP"), _r(2, None, spotify_id="SP")]}
     assert [c.libelle.split(" ")[0] for c in au.ids_partages(sans_page)] == ["spotify_id"]
+
+
+@pytest.mark.parametrize(
+    "titre, titre_certif, nature",
+    [
+        # Admis par le juge de la pose (décisions utilisateur du 2026-10-09) :
+        # sous-titre, titre coupé par la source, édition, invités entre
+        # parenthèses, certif d'une version sur l'original sans fiche de version.
+        ("Make Her Say (I Poke Her Face)", "MAKE HER SAY", au.INFORMATION),
+        ("L'empire du côté obscur", "L'empire du c", au.INFORMATION),
+        ("Je danse le mia", "JE DANSE LE MIA REMAST 2016", au.INFORMATION),
+        ("Euphoria", "EUPHORIA (KAASH PAIGE & TRAVIS SCOTT)", au.INFORMATION),
+        ("Dolce Camara", "DOLCE CAMARA (SNIGHT B REMIX)", au.INFORMATION),
+        # Refusé par le juge : posé avant une règle, pas rejoué.
+        ("Life", "TUBA LIFE", au.ERREUR),
+        ("Suzy (Live 2006)", "SUZY", au.ERREUR),
+    ],
+)
+def test_certif_admise_par_le_juge_n_est_qu_une_information(titre, titre_certif, nature):
+    """Un verdict, un seul endroit (2026-10-29) : l'audit ne compte en erreur
+    que ce que `certif_du_morceau` refuse."""
+    piste = {
+        "id": 1,
+        "title": titre,
+        "artiste": "X",
+        "certifications": json.dumps([{"title": titre_certif, "category": "single"}]),
+    }
+    (cas,) = au.certifs([piste])
+    assert cas.nature == nature

@@ -282,6 +282,60 @@ class TestEchoDesVersions:
         apply_certifications(booba, [instru], matcher)
         assert [e["certification"] for e in instru.certs.reelles] == ["Or"]
 
+    def _remix_de_kanye(self):
+        kanye = Artist(name="Kanye West")
+        remix = Track(title="Alors on danse", artist=kanye, is_featuring=True)
+        remix.id = 1
+        remix.primary_artist_name = "Stromae"
+        remix.relationships = [
+            {"type": "remix_of", "title": "Alors on danse", "artist": "Stromae", "url": "u"}
+        ]
+        return kanye, remix
+
+    def test_une_version_que_seul_genius_nomme_ne_prend_pas_les_certifs_de_l_original(self):
+        """Kanye « Alors on danse » est le remix (relation Genius `remix_of`) :
+        les certifs créditées à Stromae seul sont celles de l'original (2026-10-29)."""
+        kanye, remix = self._remix_de_kanye()
+        matcher = _FakeMatcher(
+            tracks={
+                "Alors on danse": [
+                    _match(artist_name="STROMAE", title="ALORS ON DANSE", certification="Diamant"),
+                    _match(
+                        artist_name="STROMAE FEAT. KANYE WEST",
+                        title="ALORS ON DANSE",
+                        certification="Or",
+                    ),
+                ]
+            }
+        )
+        apply_certifications(kanye, [remix], matcher)
+        assert [e["certification"] for e in remix.certs.reelles] == ["Or"]
+
+    def test_la_relation_vers_notre_propre_artiste_ne_retire_rien(self):
+        """Deux pages Kanye « Life Of The Party » liées entre elles : la certif
+        de Kanye n'est pas « celle d'un autre »."""
+        kanye = Artist(name="Kanye West")
+        t = Track(title="Life Of The Party", artist=kanye)
+        t.relationships = [
+            {"type": "remix_of", "title": "Life Of The Party", "artist": "Kanye West"}
+        ]
+        matcher = _FakeMatcher(
+            tracks={
+                "Life Of The Party": [_match(artist_name="KANYE WEST", title="LIFE OF THE PARTY")]
+            }
+        )
+        apply_certifications(kanye, [t], matcher)
+        assert len(t.certs.reelles) == 1
+
+    def test_une_relation_vers_un_autre_titre_ne_retire_rien(self):
+        kanye, remix = self._remix_de_kanye()
+        remix.relationships = [{"type": "remix_of", "title": "Autre chose", "artist": "Stromae"}]
+        matcher = _FakeMatcher(
+            tracks={"Alors on danse": [_match(artist_name="STROMAE", title="ALORS ON DANSE")]}
+        )
+        apply_certifications(kanye, [remix], matcher)
+        assert len(remix.certs.reelles) == 1
+
     def test_l_echo_est_recalcule_a_chaque_application(self):
         artist, socle, live = self._disco()
         matcher = _FakeMatcher(tracks={"Suzy (Live 2006)": [_match(title="Suzy (Live 2006)")]})

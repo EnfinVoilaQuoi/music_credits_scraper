@@ -142,6 +142,36 @@ def _credite(match: dict, exiges: list[str], en_tete=()) -> bool:
     return not en_tete or any(n and names_match_as_words(n, tete) for n in en_tete)
 
 
+#: Relations Genius qui font d'une page une VERSION d'une autre.
+_RELATIONS_DE_VERSION = ("remix_of", "version_of", "cover_of")
+
+
+def _interpretes_de_l_original(track: Track, noms=()) -> list[str]:
+    """Les interprètes de l'ORIGINAL quand la fiche en est une version que seul
+    Genius nomme : relation `remix_of` / `version_of` / `cover_of` vers une page
+    au MÊME titre (`cle`), d'un artiste qui n'est pas le nôtre. Kanye « Alors on
+    danse » (remix_of Stromae « Alors on danse ») : le titre ne porte aucun
+    descripteur, `parse_variant` n'y voit pas la version (2026-10-29)."""
+    propre = cle(track.title)
+    for rel in track.relationships or []:
+        if rel.get("type") not in _RELATIONS_DE_VERSION or cle(rel.get("title")) != propre:
+            continue
+        interpretes = _noms_du_credit(rel.get("artist"))
+        if interpretes and not any(
+            names_match_as_words(n, i) for n in noms if n for i in interpretes
+        ):
+            return interpretes
+    return []
+
+
+def _credite_l_original_seul(match: dict, interpretes: list[str]) -> bool:
+    """Le crédit de la certif ne nomme QUE les interprètes de l'original : c'est
+    la certif de l'original, pas celle de la version (« STROMAE » ; une certif
+    « STROMAE FEAT. KANYE WEST » serait celle du remix)."""
+    noms = _noms_du_credit(match.get("artist_name"))
+    return bool(noms) and all(any(names_match_as_words(i, n) for i in interpretes) for n in noms)
+
+
 def _poser_plus_haute(track: Track) -> None:
     """Champs dérivés de la plus haute certification RÉELLE (jamais un écho)."""
     reelles = track.certs.reelles
@@ -357,6 +387,11 @@ def apply_certifications(
                 matches = [
                     m for m in matches if parse_variant(m.get("title") or "").kind != Kind.NONE
                 ]
+            elif interpretes := _interpretes_de_l_original(track, (artist.name, *alias)):
+                # Même règle quand seul Genius dit la version : les 9 certifs
+                # de Stromae allaient au remix « Alors on danse » de Kanye, dont
+                # trois datées avant sa sortie (panneau `certif_date`).
+                matches = [m for m in matches if not _credite_l_original_seul(m, interpretes)]
             entries = [Certification.from_match(m).to_column_dict() for m in matches]
             # Une certification retirée À LA MAIN (panneau « À trancher ») n'est
             # plus rattachée : sans cette mémoire, le matcher la reposerait.

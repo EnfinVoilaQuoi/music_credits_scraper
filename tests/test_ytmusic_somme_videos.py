@@ -162,6 +162,10 @@ class FakeDM:
 
     def record_track_videos(self, track_id, videos):
         self.video_writes.append((track_id, sorted(v.video_id for v in videos)))
+        self.durees_videos = getattr(self, "durees_videos", {})
+        for v in videos:
+            if v.duration is not None:
+                self.durees_videos[(track_id, v.video_id)] = v.duration
         vues = self.vues.setdefault(track_id, {})
         for v in videos:
             vues[v.video_id] = v.views if v.views is not None else vues.get(v.video_id)
@@ -532,6 +536,37 @@ def test_duree_de_l_audio_topic_et_repli_hors_plateformes(sans_recherche):
 
     assert sorted(dm.durees) == [(1, 193, "youtube"), (2, 150, "youtube_video")]
     assert result["durees_youtube"] == 2
+
+
+def test_chaque_video_garde_sa_duree(sans_recherche):
+    """e62 : la durée lue de CHAQUE vidéo s'enregistre sur la vidéo — y compris
+    celle d'une vidéo partagée, qui ne donne pourtant sa durée à aucune fiche :
+    c'est elle qui départagera les pages au même titre. Une vidéo dont l'API
+    ne dit pas la durée n'en reçoit aucune."""
+    api = FakeAPI(
+        raw_tracks=[{"title": "Magot", "video_id": "audioaudioa", "views_str": None}],
+        vues={"audioaudioa": 5, "clipdouble1": 3, "sansduree11": 4},
+        details={
+            "audioaudioa": {"duration": 193, "channel": "Isha - Topic"},
+            "clipdouble1": {"duration": 400, "channel": "ISHA"},
+            "sansduree11": {"duration": None, "channel": "ISHA"},
+        },
+    )
+    tracks = [
+        _track(1, "Magot"),
+        _track(4, "A", youtube_url="https://youtu.be/clipdouble1"),
+        _track(5, "B", youtube_url="https://youtu.be/clipdouble1"),
+        _track(6, "C", youtube_url="https://youtu.be/sansduree11"),
+    ]
+
+    dm, _ = _lancer(api, tracks)
+
+    assert dm.durees_videos == {
+        (1, "audioaudioa"): 193,
+        (4, "clipdouble1"): 400,
+        (5, "clipdouble1"): 400,
+    }
+    assert (6, ["sansduree11"]) in dm.video_writes
 
 
 class TestDureeVideoPerimee:

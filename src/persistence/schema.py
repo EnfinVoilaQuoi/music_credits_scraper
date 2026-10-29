@@ -558,6 +558,10 @@ track_videos = Table(
     # `artistes`, `album` du résultat ytmusicapi), `search_auto` seulement :
     # le verdict des vues comptées rejuge le lien quand le score change.
     Column("recherche", Text),
+    # Durée de LA vidéo, en secondes (e62, `contentDetails` de YouTube Data) :
+    # celle de la fiche n'en est qu'un verdict, et une vidéo partagée par deux
+    # pages au même titre ne se départage que par la sienne. NULL = inconnue.
+    Column("duration", Integer),
     UniqueConstraint("track_id", "video_id"),
     sqlite_autoincrement=True,
 )

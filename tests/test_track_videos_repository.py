@@ -417,6 +417,83 @@ class TestTitreDeLaVideo:
         assert (lue.title, lue.views) == ("Donjon & 2h22", 5)
 
 
+class TestDureeDeLaVideo:
+    """e62 — la durée de LA vidéo, pas celle de la fiche : une vidéo partagée
+    par deux pages au même titre (« KING », « 530 ») ne se départage que par
+    elle. La vidéo est la même d'une lecture à l'autre : une durée lue remplace
+    l'ancienne, une passe qui ne la connaît pas ne la vide jamais."""
+
+    def test_aller_retour(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(
+            track.id, [TrackVideo(video_id="aaaaaaaaaaa", duration=193)]
+        )
+        (lue,) = data_manager.get_track_videos(track.id)
+        assert lue.duration == 193
+        (fiche,) = data_manager.get_artist_tracks(artist.id)
+        assert [v.duration for v in fiche.videos] == [193]
+
+    def test_une_passe_sans_duree_ne_l_efface_pas(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(
+            track.id, [TrackVideo(video_id="aaaaaaaaaaa", duration=193)]
+        )
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="aaaaaaaaaaa", views=5)])
+        (lue,) = data_manager.get_track_videos(track.id)
+        assert (lue.duration, lue.views) == (193, 5)
+
+    def test_une_duree_relue_remplace_l_ancienne(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(
+            track.id, [TrackVideo(video_id="aaaaaaaaaaa", duration=193)]
+        )
+        data_manager.record_track_videos(
+            track.id, [TrackVideo(video_id="aaaaaaaaaaa", duration=194)]
+        )
+        (lue,) = data_manager.get_track_videos(track.id)
+        assert lue.duration == 194
+
+    def test_une_duree_nulle_ne_s_ecrit_pas(self, data_manager):
+        artist = _artiste(data_manager)
+        track = _morceau(data_manager, artist)
+        data_manager.record_track_videos(track.id, [TrackVideo(video_id="aaaaaaaaaaa", duration=0)])
+        (lue,) = data_manager.get_track_videos(track.id)
+        assert lue.duration is None
+
+    def test_la_fusion_garde_la_duree_du_doublon(self, data_manager):
+        artist = _artiste(data_manager)
+        garde = _morceau(data_manager, artist, "Déluge")
+        doublon = _morceau(data_manager, artist, "Deluge")
+        data_manager.record_track_videos(garde.id, [TrackVideo(video_id="aaaaaaaaaaa")])
+        data_manager.record_track_videos(
+            doublon.id, [TrackVideo(video_id="aaaaaaaaaaa", duration=201)]
+        )
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        (lue,) = data_manager.get_track_videos(garde.id)
+        assert lue.duration == 201
+
+    def test_la_fusion_ne_remplace_pas_la_duree_gardee(self, data_manager):
+        artist = _artiste(data_manager)
+        garde = _morceau(data_manager, artist, "Déluge")
+        doublon = _morceau(data_manager, artist, "Deluge")
+        data_manager.record_track_videos(
+            garde.id, [TrackVideo(video_id="aaaaaaaaaaa", duration=200)]
+        )
+        data_manager.record_track_videos(
+            doublon.id, [TrackVideo(video_id="aaaaaaaaaaa", duration=201)]
+        )
+
+        assert data_manager.merge_tracks(garde.id, doublon.id)
+
+        (lue,) = data_manager.get_track_videos(garde.id)
+        assert lue.duration == 200
+
+
 class TestTitresInvisibles:
     """`save_track` est le point de passage UNIQUE d'un titre vers la base : le
     nettoyage y est posé, ce qui rend le doublon IMPOSSIBLE plutôt que réparable."""

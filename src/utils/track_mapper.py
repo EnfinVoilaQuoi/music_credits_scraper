@@ -50,6 +50,19 @@ def recherche_de_ligne(value) -> dict | None:
     }
 
 
+def duree_video_de_ligne(value) -> int | None:
+    """`track_videos.duration` (e62) → secondes entières > 0, ou None (absente,
+    nulle ou illisible : une durée inconnue ne se devine pas)."""
+    if _clean(value) is None:
+        return None
+    try:
+        secondes = int(value)
+    except (TypeError, ValueError):
+        logger.warning(f"track_videos.duration illisible : {value!r:.80}")
+        return None
+    return secondes if secondes > 0 else None
+
+
 def _clean_datetime(value):
     """Horodatage DB (chemin `text()` : string ISO verbatim) → `datetime`.
 

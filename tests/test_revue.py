@@ -1096,6 +1096,41 @@ class TestVideoPartagee:
             ((_, _, preuves),) = revue.video_partagee(ctx)
             assert "garder" not in preuves
 
+    def _castro(self, chaine="Yo Gotti - Topic", principal_cyhi="CyHi"):
+        """« Castro » : la vidéo de « Yo Gotti - Topic » posée par Genius sur la
+        page de Yo Gotti et sur celle de CyHi (2026-10-29)."""
+        v = TrackVideo(video_id="C", title="Castro", views=10, channel=chaine)
+        a = _t("Castro", 1, videos=[v], genius_id=11, album="White Friday (CM9)")
+        a.primary_artist_name = principal_cyhi
+        b = _t("Castro", 2, videos=[v], genius_id=12, album="White Friday (CM9)")
+        b.primary_artist_name = "Yo Gotti"
+        b.album = "Castro"
+        return _ctx(a, b)
+
+    def test_la_chaine_de_l_interprete_designe_sa_page(self):
+        ((_, _, preuves),) = revue.video_partagee(self._castro())
+        assert preuves["garder"] == 2 and preuves["track_ids"] == [1]
+        assert preuves["temoin"] == "chaîne de l'interprète : Yo Gotti - Topic"
+
+    def test_la_chaine_ne_dit_rien_quand_elle_ne_designe_pas_une_seule_page(self):
+        for ctx in (
+            self._castro(chaine="Release - Topic"),  # aucun artiste
+            self._castro(chaine="Johnny Dee"),  # un particulier
+            self._castro(principal_cyhi="Yo Gotti"),  # deux pages à lui
+        ):
+            ((_, _, preuves),) = revue.video_partagee(ctx)
+            assert "garder" not in preuves
+
+    def test_chaine_et_duree_en_desaccord_l_humain(self):
+        ctx = self._king()
+        for t in ctx.disco:
+            for v in t.videos:
+                v.channel = "Kanye West - Topic"
+        ctx.disco[0].primary_artist_name = "Kanye West"  # BULLY
+        ctx.disco[1].primary_artist_name = "¥$"  # VULTURES 1, que la durée désigne
+        ((_, _, preuves),) = revue.video_partagee(ctx)
+        assert "garder" not in preuves
+
     def test_la_recherche_dit_l_interprete_principal(self):
         vue = TrackVideo(
             video_id="B",

@@ -70,6 +70,29 @@ def _meme_chaine(video: dict, ident: str, affiche: str) -> bool:
     return bool((cid and cid == ident) or (nom and nom == normalize_name(affiche)))
 
 
+#: Chaînes « X - Topic » qui ne nomment AUCUN artiste : YouTube les génère
+#: pour une parution sans interprète unique (compilation, distributeur).
+TOPIC_SANS_ARTISTE = frozenset({"release", "various artists", "artistes divers"})
+
+
+def artiste_de_la_chaine(channel: str | None, channel_id: str | None = None) -> str | None:
+    """PUR. L'artiste qu'une chaîne NOMME, ou None : la chaîne « X - Topic »
+    que YouTube génère pour l'interprète d'une parution (2026-10-29 : « Yo
+    Gotti - Topic », « aladin 135 - Topic ») — sauf celles d'aucun artiste
+    (« Release - Topic ») —, ou une chaîne officielle déclarée (`CHAINES`).
+    Une autre chaîne (un particulier, un label) ne nomme personne."""
+    nom = (channel or "").strip()
+    if nom.endswith(" - Topic"):
+        artiste = nom[: -len(" - Topic")].strip()
+        return None if normalize_name(artiste) in TOPIC_SANS_ARTISTE else artiste or None
+    video = {"channel": channel, "channel_id": channel_id}
+    for artiste, chaines in CHAINES.items():
+        for ident, affiche, nature in chaines:
+            if nature == OFFICIELLE and _meme_chaine(video, ident, affiche):
+                return artiste
+    return None
+
+
 def nature_de(artiste: str | None, video: dict) -> str | None:
     """PUR. La nature de la chaîne de `video` (`channel_id`, `channel`, `title`)
     pour `artiste`, ou None si elle n'est pas déclarée."""

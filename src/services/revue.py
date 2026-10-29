@@ -1537,7 +1537,61 @@ def _temoins_du_proprietaire(fiches, v) -> list[tuple[str, str]]:
         temoins.append((seule, "seule page que la vidéo nomme"))
     if (par_duree := _par_la_duree(fiches, v.video_id)) is not None:
         temoins.append(par_duree)
+    if (par_chaine := _par_la_chaine(fiches, v.video_id)) is not None:
+        temoins.append(par_chaine)
     return temoins
+
+
+def _chaine_de(fiches, video_id) -> tuple[str, str] | None:
+    """`(nom de la chaîne, artiste qu'elle nomme)` de la vidéo (e63), lue sur
+    l'une quelconque des lignes qui la portent, ou None."""
+    from src.utils.chaines_youtube import artiste_de_la_chaine
+
+    for t in fiches:
+        lien = _lien_de(t, video_id)
+        if lien is not None and lien.channel:
+            artiste = artiste_de_la_chaine(lien.channel, lien.channel_id)
+            return (lien.channel, artiste) if artiste else None
+    return None
+
+
+def _place_de_l_artiste(t, artiste: str) -> str:
+    """Où `artiste` (celui d'une chaîne) se tient sur la fiche `t` :
+    « principal », « lié » (invité, ou artiste de la ligne), ou « étranger »."""
+    cible = normalize_name(artiste)
+    if not cible:
+        return "lié"  # un nom qui ne se compare pas ne prouve rien
+
+    def nomme(nom: str | None) -> bool:
+        n = normalize_name(nom or "")
+        return bool(n) and (contains_as_words(n, cible) or contains_as_words(cible, n))
+
+    if nomme(t.primary_artist_name or (t.artist.name if t.artist else "")):
+        return "principal"
+    if nomme(t.artist.name if t.artist else "") or any(nomme(a) for a in t.featured_artists_list):
+        return "lié"
+    return "étranger"
+
+
+def _par_la_chaine(fiches, video_id):
+    """`(page, témoin)` : la chaîne de la vidéo (e63, « X - Topic » ou chaîne
+    officielle déclarée) nomme l'interprète principal d'UNE page, et aucun
+    artiste — principal, invité, artiste de la ligne — des autres (2026-10-29 :
+    « Castro » de « Yo Gotti - Topic » → Yo Gotti, pas CyHi ; « Hiver » de
+    « aladin 135 - Topic » → Aladin 135, pas PLK)."""
+    chaine = _chaine_de(fiches, video_id)
+    if chaine is None:
+        return None
+    nom, artiste = chaine
+    places: dict = {}
+    for t in fiches:
+        places.setdefault(_page(t), set()).add(_place_de_l_artiste(t, artiste))
+    principales = [p for p, s in places.items() if "principal" in s]
+    if len(principales) != 1:
+        return None
+    if any(s != {"étranger"} for p, s in places.items() if p != principales[0]):
+        return None
+    return principales[0], f"chaîne de l'interprète : {nom}"
 
 
 #: Sources de durée lues par l'IDENTIFIANT d'un catalogue : jamais par la

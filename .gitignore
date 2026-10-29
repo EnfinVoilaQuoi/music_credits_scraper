@@ -145,6 +145,7 @@ scripts/*
 !scripts/audit_donnees.py
 !scripts/repair_spotify_ids.py
 !scripts/accepter_id_spotify.py
+!scripts/remplacer_isrc.py
 !scripts/exporter_decisions.py
 !scripts/importer_decisions.py
 !scripts/sauvegarder_brut.py

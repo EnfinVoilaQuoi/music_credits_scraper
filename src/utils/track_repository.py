@@ -4158,6 +4158,66 @@ class TrackRepository:
             logger.error(f"Erreur clear_track_isrc (track_id={track_id}): {e}")
             return rapport
 
+    def remplacer_isrc(self, track_id: int, isrc: str) -> list[int]:
+        """REMPLACE l'ISRC d'un enregistrement par un ISRC choisi (2026-10-29).
+
+        L'ISRC est une colonne d'identité : un verdict la remplit, ne la
+        remplace jamais (`_isrc_sans_remplacer`), et `clear_track_isrc` emporte
+        ses observations. Quand deux ISRC sont observés pour le même
+        enregistrement (« Tradition » d'Isha et PLK : Deezer l'a publié deux
+        fois), le bon se choisit à la main et se pose ICI, sur la ligne et ses
+        sœurs, sans retirer aucune observation. Seul un ISRC déjà OBSERVÉ dans
+        la famille est accepté : on ne pose que ce qu'une source a montré.
+        Rend les lignes changées ([] si refusé ou rien à faire)."""
+        cible = (isrc or "").strip().upper()
+        if not cible:
+            return []
+        changees: list[int] = []
+        try:
+            with self._ecrire() as conn:
+                genius_id = conn.execute(
+                    text("SELECT genius_id FROM tracks WHERE id = :tid"), {"tid": track_id}
+                ).scalar()
+                jumelles, _ = ids_soeurs(conn, track_id, genius_id)
+                famille = [track_id, *jumelles]
+                observes = set()
+                for tid in famille:
+                    observes |= {
+                        str(v).strip().upper()
+                        for v in conn.execute(
+                            text(
+                                "SELECT value FROM observations "
+                                "WHERE track_id = :tid AND field = 'isrc'"
+                            ),
+                            {"tid": tid},
+                        ).scalars()
+                        if v
+                    }
+                if cible not in observes:
+                    logger.warning(
+                        f"ISRC {cible} jamais observé pour le morceau {track_id} "
+                        f"(observés : {sorted(observes)}) : non posé"
+                    )
+                    return []
+                for tid in famille:
+                    actuel = conn.execute(
+                        text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": tid}
+                    ).scalar()
+                    if str(actuel or "").strip().upper() == cible:
+                        continue
+                    conn.execute(
+                        text("UPDATE tracks SET isrc = :isrc, updated_at = :now WHERE id = :tid"),
+                        {"isrc": cible, "now": datetime.now(), "tid": tid},
+                    )
+                    self._toucher(conn, tid)
+                    changees.append(tid)
+            if changees:
+                logger.info(f"🔁 ISRC {cible} posé sur {len(changees)} ligne(s) : {changees}")
+            return changees
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur remplacer_isrc (track_id={track_id}): {e}")
+            return []
+
     def clear_track_discogs_release(self, track_id: int, discogs_id: int | None = None) -> dict:
         """Rejette le DISQUE Discogs d'un morceau (2026-09-23) — pendant de
         `clear_track_deezer_id` pour ce que `DiscogsClient.enrich_track_data`

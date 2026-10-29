@@ -567,6 +567,49 @@ class TestRetraitDeezerEtIsrcChezLesSoeurs:
             assert _colonne(data_manager, t.id, "isrc") is None
 
 
+class TestRemplacerIsrc:
+    """« Tradition » (2026-10-29) : deux ISRC observés pour un enregistrement,
+    la colonne d'identité ne se remplace jamais seule — le bon se pose à la
+    main sur toute la famille, sans retirer d'observation."""
+
+    def _deux_isrc(self, dm, famille):
+        chez_swing, chez_isha = famille
+        dm.record_discography_observations(chez_isha.id, [Observation("isrc", "FRX111", "legacy")])
+        dm.save_track(chez_swing)
+        dm.record_discography_observations(chez_isha.id, [Observation("isrc", "FRX222", "deezer")])
+        dm.save_track(chez_swing)
+        for t in famille:
+            assert _colonne(dm, t.id, "isrc") == "FRX111"  # remplit, ne remplace pas
+        return chez_swing, chez_isha
+
+    def test_l_isrc_choisi_part_sur_toute_la_famille(self, data_manager, famille):
+        chez_swing, chez_isha = self._deux_isrc(data_manager, famille)
+
+        changees = data_manager.remplacer_isrc(chez_swing.id, "frx222")
+
+        assert sorted(changees) == sorted([chez_swing.id, chez_isha.id])
+        data_manager.save_track(chez_isha)
+        for t in famille:
+            assert _colonne(data_manager, t.id, "isrc") == "FRX222"
+        with data_manager.engine.connect() as conn:
+            sources = set(
+                conn.execute(
+                    text(
+                        "SELECT source FROM observations " "WHERE track_id = :t AND field = 'isrc'"
+                    ),
+                    {"t": chez_swing.id},
+                ).scalars()
+            )
+        assert sources == {"legacy", "deezer"}  # aucune observation retirée
+
+    def test_un_isrc_jamais_observe_n_est_pas_pose(self, data_manager, famille):
+        chez_swing, _ = self._deux_isrc(data_manager, famille)
+
+        assert data_manager.remplacer_isrc(chez_swing.id, "FRX999") == []
+        for t in famille:
+            assert _colonne(data_manager, t.id, "isrc") == "FRX111"
+
+
 class TestDonneesDePageLaPlusRecenteGagne:
     """Décision utilisateur 2026-10-12 : une donnée lue sur la PAGE Genius
     (anecdotes, relations, paroles) n'est plus figée à la première valeur chez

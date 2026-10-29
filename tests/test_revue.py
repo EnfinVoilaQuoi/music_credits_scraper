@@ -1069,6 +1069,33 @@ class TestVideoPartagee:
         )
         assert [c.nature for c in cas] == [revue.DECISION]
 
+    def _king(self, duree_video=157, bully=None, vultures=None):
+        """« KING » : la vidéo de ¥$ (157 s) posée par Genius sur la page de
+        *BULLY* (126 s) et sur celle de *VULTURES 1* (157 s), 2026-10-29."""
+        v = TrackVideo(video_id="K", title="KING", views=10, duration=duree_video)
+        a = _t("KING", 1, videos=[v], genius_id=11, album="BULLY")
+        a.durations_observees = bully if bully is not None else {"deezer": 126, "apple_music": 127}
+        b = _t("KING", 2, videos=[v], genius_id=12, album="VULTURES 1")
+        b.durations_observees = vultures if vultures is not None else {"deezer": 157}
+        return _ctx(a, b)
+
+    def test_la_duree_de_la_video_designe_sa_page(self):
+        ((_, motif, preuves),) = revue.video_partagee(self._king())
+        assert preuves["garder"] == 2 and preuves["track_ids"] == [1]
+        assert preuves["temoin"] == "durée de la vidéo (157 s) = ses catalogues seuls"
+
+    def test_la_duree_ne_dit_rien_quand_elle_ne_separe_pas(self):
+        # Sans durée de la vidéo, deux pages proches, une page sans catalogue,
+        # ou une durée lue par la vidéo elle-même (`youtube`) : rien.
+        for ctx in (
+            self._king(duree_video=None),
+            self._king(bully={"deezer": 154}),
+            self._king(bully={}),
+            self._king(bully={"youtube": 126}),
+        ):
+            ((_, _, preuves),) = revue.video_partagee(ctx)
+            assert "garder" not in preuves
+
     def test_la_recherche_dit_l_interprete_principal(self):
         vue = TrackVideo(
             video_id="B",

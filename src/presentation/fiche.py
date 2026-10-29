@@ -232,13 +232,22 @@ _RELATIONS = (
     ("remix_of", "Remix de", "Remix", "vinyl"),
     ("version_of", "Version de", "Versions", "vinyl"),
     ("translation_fr", "Traduction FR", "Traductions", "language"),
+    # Un medley vers chaque fiche qu'il enchaîne (`utils.contenants`).
+    ("contient", "Contient", "Contient", "disc"),
+    # Le même lien dans l'autre sens, calculé (`contenants_par_contenu`).
+    ("contenu_dans", "Contenu dans", "Contenu dans", "disc"),
 )
 
 
-def onglet_samples(track) -> Onglet:
+def onglet_samples(track, contenu_dans=()) -> Onglet:
+    """`contenu_dans` : les fiches (medleys) qui contiennent celle-ci."""
     par_type: dict[str, list] = defaultdict(list)
     for r in track.relationships or []:
         par_type[r.get("type")].append(r)
+    for c in contenu_dans:
+        par_type["contenu_dans"].append(
+            {"title": c.title, "artist": c.get_display_artist(), "url": c.genius_url}
+        )
     sections, bandeau = [], []
     for cle, titre, pluriel, icone in _RELATIONS:
         items = par_type.get(cle) or []
@@ -513,7 +522,7 @@ def onglet_technique(track) -> Onglet:
 # ── Assemblage ───────────────────────────────────────────────────────────────
 
 
-def construire(track, constat: Constat) -> Fiche:
+def construire(track, constat: Constat, contenu_dans=()) -> Fiche:
     return Fiche(
         titre=track.title or "",
         entete=entete(track),
@@ -521,7 +530,7 @@ def construire(track, constat: Constat) -> Fiche:
         onglets=(
             onglet_credits(track),
             onglet_paroles(track),
-            onglet_samples(track),
+            onglet_samples(track, contenu_dans),
             onglet_certifs(track),
             onglet_streams(track),
             onglet_technique(track),

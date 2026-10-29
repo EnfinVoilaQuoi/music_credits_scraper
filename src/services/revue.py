@@ -1360,12 +1360,19 @@ def video_etrangere(track, ctx=None):
     celle d'un autre (Kanye « Heartless - Recorded At RAK Studios » → vidéo de
     Dermot Kennedy, 918 k vues, comptées dans les streams YouTube). Une vidéo
     PORTÉE PAR PLUSIEURS FICHES se juge une fois, au niveau de l'artiste
-    (`video_partagee`) — un « album entier » faisait un cas par titre."""
+    (`video_partagee`) — un « album entier » faisait un cas par titre. La vidéo
+    du disque ENTIER (« FULL EP ») n'en est pas un : reconnue, comptée à
+    l'album (`contenants.video_de_disque`, 2026-10-29)."""
+    from src.utils.contenants import video_de_disque
+
     proprietaires = _proprietaires_des_videos(ctx) if ctx is not None else {}
     suspectes = [
         v
         for v in track.videos or []
-        if v.title and len(proprietaires.get(v.video_id, ())) < 2 and not video_nomme(track, v)
+        if v.title
+        and len(proprietaires.get(v.video_id, ())) < 2
+        and not video_nomme(track, v)
+        and not video_de_disque(v.title, track.album)
     ]
     if not suspectes:
         return None

@@ -165,7 +165,7 @@ class VueFiche(QWidget):
         self.vide.setVisible(not visible)
         if not visible:
             return
-        f: Fiche = presentation_fiche.construire(ligne.track, ligne.constat)
+        f: Fiche = presentation_fiche.construire(ligne.track, ligne.constat, ligne.contenu_dans)
         self.titre.setText(f.titre)
         self._vider(self.grille)
         moitie = (len(f.entete) + 1) // 2

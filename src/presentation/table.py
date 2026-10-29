@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from src.presentation import format as fmt
+from src.utils.contenants import contenants_par_contenu
 from src.utils.dates import completer
 from src.utils.pages_genius import titre_affiche
 from src.utils.participation import Participation, a_produit, est_version_alt, participation
@@ -121,6 +122,8 @@ class LigneMorceau:
     streams_seule: str | None = None
     #: Texte de recherche (Ctrl+F) : titre, album, artiste, crédits — normalisé.
     texte_recherche: str = ""
+    #: Les fiches (medleys) qui contiennent celle-ci (`utils.contenants`).
+    contenu_dans: tuple = ()
 
     @property
     def cochable(self) -> bool:
@@ -282,7 +285,11 @@ def construire_lignes(
     tracks = list(tracks)
     noms, formations = tuple(noms), tuple(formations)
     homonymes = Counter((t.title or "").casefold() for t in tracks)
-    return [construire_ligne(t, ctx, noms, formations, homonymes) for t in tracks]
+    contenants = contenants_par_contenu(tracks)
+    lignes = [construire_ligne(t, ctx, noms, formations, homonymes) for t in tracks]
+    for ligne in lignes:
+        ligne.contenu_dans = tuple(contenants.get(ligne.id, ()))
+    return lignes
 
 
 def cle_de_tri(colonne: str) -> Callable[[LigneMorceau], object]:

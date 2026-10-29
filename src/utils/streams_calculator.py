@@ -132,15 +132,28 @@ def clips_doubles(tracks) -> dict[str, int]:
     album (doublons, fiche de version) — sont des erreurs, pas des clips
     doubles : elles restent hors compte. Lignes sœurs et doublons d'une même
     page Genius ne font pas un clip double."""
+    from src.utils.contenants import video_de_disque
+
     porteurs: dict[str, list] = {}
     vues: dict[str, int] = {}
+    disques: dict[str, str] = {}
     for t in tracks:
         for v in t.videos or []:
             if v.video_id and v.views:
                 porteurs.setdefault(v.video_id, []).append(t)
                 vues[v.video_id] = max(vues.get(v.video_id, 0), int(v.views))
+                # Le disque ENTIER (« FULL EP », 2026-10-29) sur une fiche de
+                # l'artiste lui-même : son album, même porté par une seule
+                # fiche. Jamais par une fiche d'invité seule (l'EP de Di-Meh
+                # n'est pas le total de Népal, invité sur un titre).
+                if not t.is_featuring and video_de_disque(v.title, t.album):
+                    disques.setdefault(v.video_id, cle_album(t.album))
     par_album: dict[str, int] = {}
     for video_id, fiches in porteurs.items():
+        if video_id in disques:
+            cle = disques[video_id]
+            par_album[cle] = par_album.get(cle, 0) + vues[video_id]
+            continue
         if len({t.genius_id or ("fiche", t.id) for t in fiches}) < 2:
             continue
         if any(not t.album for t in fiches):

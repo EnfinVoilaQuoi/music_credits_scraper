@@ -98,6 +98,43 @@ class TestDurees:
         t.duration_source = "deezer"
         assert self.juger(_cas("duree_isolee", t), t, None).action == "normal"
 
+    def test_hit_ytm_dementi_par_l_audio_topic(self):
+        """Kanye « Monster » #11401 (2026-10-29) : la piste YTM (hit d'une
+        recherche de paroles) à 150 s, l'audio Topic et Apple à 379 s. L'audio,
+        de la même famille au vote, est un autre fichier : il dément le hit."""
+        t = _t(
+            "Monster",
+            duration=379,
+            durations_observees={
+                "apple_music": 379,
+                "discogs": 378,
+                "youtube": 379,
+                "ytmusic": 150,
+            },
+        )
+        t.duration_source = "apple_music"
+        arbitrage = self.juger(_cas("duree_isolee", t), t, None)
+        assert arbitrage.action == "normal"
+        assert arbitrage.raison == "ytmusic 150 s contre 379 s"
+        # Le hit qui tient la colonne reste à l'humain.
+        t.duration_source = "ytmusic"
+        assert self.juger(_cas("duree_isolee", t), t, None).action == ""
+
+    def test_hit_ytm_sans_audio_topic_reste_a_un_seul_catalogue(self):
+        """Sans audio Topic, Apple seul contre le hit ne suffit pas."""
+        t = _t("Monster", duration=379, durations_observees={"apple_music": 379, "ytmusic": 150})
+        t.duration_source = "apple_music"
+        assert self.juger(_cas("duree_isolee", t), t, None) is None
+
+    def test_hit_ytm_d_accord_avec_l_audio_n_est_pas_dementi(self):
+        """Hit et audio au même fichier : une seule voix, rien ne change."""
+        t = _t(
+            duration=240,
+            durations_observees={"deezer": 240, "youtube": 277, "ytmusic": 277},
+        )
+        t.duration_source = "deezer"
+        assert pol._dementie(t.durations_observees, "ytmusic", (), 2) is None
+
 
 class TestLiensDeezer:
     def _cas(self, t, titre, duree, isrc=None):

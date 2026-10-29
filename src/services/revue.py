@@ -27,6 +27,7 @@ Spotify — oracles réseau) n'entre ici qu'une fois enregistré : étape 3 (WIP
 
 from __future__ import annotations
 
+import collections
 import json
 import re
 import unicodedata
@@ -2169,6 +2170,129 @@ def donnee_de_la_jumelle(track, ctx):
     return None
 
 
+# ── SongBPM posé par un titre CONTENU (avant la garde `cccebc7`) ────────────
+
+
+_CHAMPS_SONGBPM = ("bpm", "key", "mode", "duration")
+
+
+def _signatures_songbpm(ctx) -> dict:
+    """`{mesures SongBPM: [fiches]}` de la discographie (BPM ou tonalité lus)."""
+
+    def fabrique():
+        groupes = collections.defaultdict(list)
+        for t in ctx.disco:
+            m = tuple(_mesures(ctx, t, c).get("songbpm") for c in _CHAMPS_SONGBPM)
+            if m[0] or m[1]:
+                groupes[m].append(t)
+        return groupes
+
+    return ctx.memo("signatures_songbpm", fabrique)
+
+
+def _juge_songbpm():
+    """Le juge de la pose SongBPM, PUR (`titre_contenu_non_corrobore` n'ouvre
+    aucun navigateur) : construit sans son `__init__`, qui journalise."""
+    from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
+
+    return SongBPMScraper.__new__(SongBPMScraper)
+
+
+def _tient_la_page(track, autre, duree_page) -> str | None:
+    """« confirme », « contraire » ou None : ce que les CATALOGUES de la fiche
+    (`TEMOINS_DE_RETRAIT`) disent de la durée de la page SongBPM. Une valeur que
+    l'autre fiche porte aussi de la même source (copiée, ou lue sur la même
+    page) n'est pas un témoin. « confirme » : toutes à ± 2 s ; « contraire » :
+    toutes au-delà de `ECART_VERSION_S` (deux éditions d'un même enregistrement
+    diffèrent encore en deçà) et aucune durée indépendante — vidéo comprise — à
+    ± 2 s. Entre les deux, ou sans catalogue : None."""
+    from src.services.politiques_revue import ECART_VERSION_S
+    from src.utils.titre_annee import EXCLUES_SONGBPM, ORDRE_DES_TEMOINS, TOLERANCE, _duree
+
+    obs, chez_l_autre = track.durations_observees or {}, autre.durations_observees or {}
+
+    def propres(sources):
+        for s in sources:
+            d = _duree(obs.get(s))
+            if d is not None and d != _duree(chez_l_autre.get(s)):
+                yield abs(d - duree_page)
+
+    ecarts = [e for s in ORDRE_DES_TEMOINS if s in TEMOINS_DE_RETRAIT for e in propres([s])]
+    if not ecarts:
+        return None
+    if all(e <= TOLERANCE for e in ecarts):
+        return "confirme"
+    independants = propres(s for s in ORDRE_DES_TEMOINS if s not in EXCLUES_SONGBPM)
+    if all(e > ECART_VERSION_S for e in ecarts) and all(e > TOLERANCE for e in independants):
+        return "contraire"
+    return None
+
+
+def songbpm_titre_contenu(track, ctx):
+    """Les mesures SongBPM posées par un titre CONTENU dans l'autre, avant la
+    garde de pose `cccebc7` (2026-10-29) : deux fiches de l'artiste aux mesures
+    SongBPM IDENTIQUES dont l'un des titres contient l'autre avec un mot en plus
+    (« Maybe » / « Maybe So », « Tree » / « That Tree ») — le juge de la pose
+    (`titre_contenu_non_corrobore`) les refuserait aujourd'hui sans durée
+    indépendante à ± 2 s.
+
+    La fiche que ses catalogues CONTREDISENT perd les mesures quand ceux de
+    l'autre les CONFIRMENT (`retirer` posé : une règle tranche ; la garde de
+    pose, rejouée au run suivant, refuse la même page faute de durée
+    concordante). Deux fiches que leurs catalogues confirment sont un même
+    enregistrement : aucun cas. Le reste (une fiche sans catalogue, une vidéo
+    pour seule contradiction, un écart d'édition) va à l'humain, une fois par
+    paire : sur la fiche que rien ne confirme, sinon au plus petit id. Sans
+    durée SongBPM, rien ne dit à qui la page revient : aucun cas (7 paires
+    « Jail » / « Jail, Pt. 2 » au BPM égal, 2026-10-29). Les jumelles « titre
+    + année » sont du ressort de `jumelle_annee`."""
+    from src.utils.titre_annee import _duree, jumelles
+
+    mesures = tuple(_mesures(ctx, track, c).get("songbpm") for c in _CHAMPS_SONGBPM)
+    duree_page = _duree(mesures[3])
+    autres = [t for t in _signatures_songbpm(ctx).get(mesures, ()) if t.id != track.id]
+    if duree_page is None or not autres:
+        return None
+    titres = ctx.memo("titres_disco", lambda: [(t.id, t.title) for t in ctx.disco])
+    des_jumelles = {jid for jid, _ in jumelles(track.id, track.title, titres)}
+    juge = ctx.memo("juge_songbpm", _juge_songbpm)
+    lues = dict(zip(_CHAMPS_SONGBPM, mesures, strict=True))
+    indecis = []
+    for autre in autres:
+        if autre.id in des_jumelles:
+            continue
+        page = {"title": autre.title, "duration": duree_page}
+        if not juge.titre_contenu_non_corrobore(page, track.title, None, None):
+            continue  # titres égaux, annotation, ou aucun ne contient l'autre
+        fiche = _tient_la_page(track, autre, duree_page)
+        cote = _tient_la_page(autre, track, duree_page)
+        preuves = {
+            "songbpm": lues,
+            "autre": autre.id,
+            "fiche": fiche or "aucune",
+            "l_autre": cote or "aucune",
+        }
+        if fiche == "contraire" and cote == "confirme":
+            return (
+                f"mesures SongBPM de « {autre.title} » (#{autre.id}, {duree_page} s, que ses "
+                f"catalogues confirment) : ceux de « {track.title} » la démentent",
+                {**preuves, "retirer": True, "track_ids": [track.id], "garder": autre.id},
+            )
+        if "confirme" == fiche == cote or (fiche == "confirme" and cote == "contraire"):
+            continue
+        if (cote == "confirme") or (fiche != "confirme" and track.id < autre.id):
+            indecis.append((autre, preuves))
+    if indecis:
+        autre, preuves = indecis[0]
+        return (
+            f"mesures SongBPM partagées avec « {autre.title} » (#{autre.id}), un titre contenu "
+            f"dans l'autre — les catalogues ne disent pas à qui elles reviennent "
+            f"(ici : {preuves['fiche']}, là : {preuves['l_autre']})",
+            preuves,
+        )
+    return None
+
+
 # ── Détecteurs d'ARTISTE ────────────────────────────────────────────────────
 
 
@@ -2213,6 +2337,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("compteur_partage", "Même compteur Spotify, deux fiches", "🧮", compteur_partage),
     Detecteur(
         "jumelle_annee", "Donnée partagée avec la jumelle à l'année", "📅", donnee_de_la_jumelle
+    ),
+    Detecteur(
+        "songbpm_titre_contenu",
+        "Mesures SongBPM d'un titre contenu",
+        "🪆",
+        songbpm_titre_contenu,
     ),
     Detecteur("id_spotify_propose", "ID Spotify proposé (SongBPM)", "🆔", id_spotify_propose),
     Detecteur(

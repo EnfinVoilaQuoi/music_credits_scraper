@@ -143,6 +143,32 @@ def test_mesures_songbpm_de_l_original_retirees_puis_retablies(data_manager, art
     assert not revue_auto.corriger(data_manager, artiste).appliquees  # marqué normal
 
 
+def test_songbpm_d_un_titre_contenu_retire_puis_retabli(data_manager, artiste):
+    """« Reste » portait les mesures SongBPM de « reste à vivre » (205 s, que
+    Deezer et Spotify confirment), ses catalogues à 186 s : elles partent par
+    règle ; « ↩ Rétablir » les rend et la règle ne les reprend plus."""
+    mesures = (("bpm", 140), ("key", 5), ("mode", 1), ("duration", 205))
+    for titre, gid, d in (("Reste", 20, 186), ("reste à vivre", 21, 204)):
+        t = Track(title=titre, artist=artiste, genius_id=gid)
+        t.observations += [Observation("duration", d, "deezer")]
+        t.observations += [Observation("duration", d, "spotify_web")]
+        t.observations += [Observation(c, v, "songbpm") for c, v in mesures]
+        data_manager.save_track(t)
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1 and "Reste" in bilan.appliquees[0]
+    fiches = _charger(data_manager, artiste)
+    assert fiches["Reste"].audio.bpm is None and fiches["Reste"].duration == 186
+    assert fiches["reste à vivre"].audio.bpm == 140  # la propriétaire garde
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:retirer_songbpm"
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert _charger(data_manager, artiste)["Reste"].audio.bpm == 140
+    assert not revue_auto.corriger(data_manager, artiste).appliquees
+
+
 # ── Règles VALIDÉES (politiques_revue.REGLES_VALIDEES, 2026-10-20) ──────────
 
 

@@ -521,6 +521,24 @@ def test_une_duree_trop_courte_pour_ses_paroles(duree, paroles, fausse):
     assert trop_courte_pour_les_paroles(duree, paroles) is fausse
 
 
+@pytest.mark.parametrize(
+    "titre, album, segment",
+    [
+        # Décision utilisateur 2026-10-29 : le segment d'un DJ mix (46 s).
+        ("Know No Better [BROHUG Remix] [Mixed]", "Nostalgix at EDC (DJ Mix)", True),
+        ("Parking Lot (Mixed)", None, True),
+        ("Goosebumps", "Today’s Hits, November 2022 (DJ Mix)", True),
+        # « Mixed » hors d'un groupe, ou un autre montage : pas un DJ mix.
+        ("Mixed Feelings", None, False),
+        ("Know No Better (BROHUG Remix)", "Know No Better (Remixes)", False),
+    ],
+)
+def test_un_segment_de_dj_mix_n_est_pas_juge_au_debit(titre, album, segment):
+    from src.utils.duree_youtube import segment_de_dj_mix
+
+    assert segment_de_dj_mix(titre, album) is segment
+
+
 def test_duree_discogs_dementie_par_deezer_et_apple_hors_critere(data_manager, isha):
     """CORRECTIFS D (2026-10-29) : 33 durées Discogs démenties par Deezer ET
     Apple (B.B. Jacques « Donjon » 170 s pour 134 s). L'erreur est dans la

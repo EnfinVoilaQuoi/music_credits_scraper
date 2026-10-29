@@ -56,6 +56,7 @@ from src.utils.duree_youtube import (
     court_par_nature,
     dementie_par_les_paroles,
     est_un_clip,
+    segment_de_dj_mix,
     trop_courte_pour_les_paroles,
 )
 from src.utils.title_matching import normalize_title
@@ -443,7 +444,11 @@ def durees(c, pistes) -> list[Cas]:
     cas += lrc_trop_longs(c, pistes)
     for t in pistes:
         ref = paroles_de_reference(t["lyrics"], t["lyrics_source"])
-        if t["duration"] and trop_courte_pour_les_paroles(t["duration"], ref):
+        if (
+            t["duration"]
+            and trop_courte_pour_les_paroles(t["duration"], ref)
+            and not segment_de_dj_mix(t["title"], t["album"])
+        ):
             mots = len(ref.split())
             cas.append(
                 Cas(

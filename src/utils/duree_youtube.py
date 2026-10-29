@@ -141,6 +141,20 @@ def trop_courte_pour_les_paroles(duree, paroles: str | None) -> bool:
     return duree > 0 and mots / duree > MOTS_PAR_SECONDE_MAX
 
 
+#: Une fiche de DJ mix : « [Mixed] » / « (Mixed) » au titre, ou un disque
+#: « … (DJ Mix) ».
+_DJ_MIX_TITRE = re.compile(r"[\(\[]\s*mixed\s*[\)\]]", re.IGNORECASE)
+_DJ_MIX_DISQUE = re.compile(r"\(\s*dj\s+mix\s*\)\s*$", re.IGNORECASE)
+
+
+def segment_de_dj_mix(titre: str | None, album: str | None) -> bool:
+    """PUR. La fiche est le SEGMENT d'un DJ mix : sa durée est celle du passage
+    retenu par le DJ, pas du morceau dont Genius transcrit les paroles — le
+    débit des paroles n'en dit rien (décision utilisateur 2026-10-29 : Travis
+    « Know No Better [BROHUG Remix] [Mixed] », 46 s ; 70 fiches « Mixed »)."""
+    return bool(_DJ_MIX_TITRE.search(titre or "") or _DJ_MIX_DISQUE.search(album or ""))
+
+
 #: Un CLIP a son propre montage (« On contrôle la zone » : clip 4:04, CD 4:48 ;
 #: décision utilisateur 2026-10-13 : « la mention Clip officiel doit bloquer
 #: la durée »).

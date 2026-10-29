@@ -67,6 +67,7 @@ from src.utils.title_matching import (
     developper_ligatures,
     names_match_as_words,
     normalize_name,
+    normalize_title,
 )
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import (
@@ -1347,44 +1348,130 @@ def _page(track):
     return track.genius_id or f"fiche:{track.id}"
 
 
-def proprietaire_de_la_video(fiches, v):
-    """La fiche à qui revient une vidéo que plusieurs PAGES portent : celle
-    dont l'interprète principal (sinon l'artiste de la ligne) est l'interprète
-    principal de la vidéo — seule de son cas — et que la vidéo nomme. Le
-    motif dominant des vidéos partagées est l'HOMONYME : « Selfish » de Slum
-    Village (feat. Kanye) posé aussi sur le « Selfish » de *DONDA 2*. None si
-    rien ne départage (deux pages du même interprète, titre sans tête), ou si
-    toutes les fiches sont sur le même disque (clip double, compté au niveau
-    de l'album). Simulé sur toute la base le 2026-10-27 : 41 des 90 vidéos
-    partagées tranchées, aucune démentie par les témoins (album vu par la
-    recherche, durées de catalogue)."""
+#: Plusieurs interprètes dans la queue d'un titre (« Moon - Kanye West, Sunday
+#: Service ») : elle ne désigne personne.
+_PLUSIEURS_INTERPRETES_RE = re.compile(r",|&|\s+x\s+|/", re.IGNORECASE)
+#: Mots d'édition d'un titre d'album (« Cruis'n USA (Deluxe) », « The
+#: Graduates EP ») : la vidéo nomme le disque sans eux.
+_EDITION_D_ALBUM_RE = re.compile(r"\s*[\(\[][^)\]]*[\)\]]|\s+(?:ep|deluxe)\s*$", re.IGNORECASE)
+
+
+def _elue(fiches, predicat):
+    """La page que `predicat` désigne SEULE parmi `fiches`, sinon None."""
+    elues = {_page(t) for t in fiches if predicat(t)}
+    return elues.pop() if len(elues) == 1 else None
+
+
+def _principal_de_la_fiche(t) -> str:
+    return normalize_name(t.primary_artist_name or (t.artist.name if t.artist else ""))
+
+
+def _par_interprete(fiches, v):
+    """L'interprète principal de la vidéo (`interprete_principal_de_la_video`)
+    désigne sa fiche. Sinon, pour un titre « Titre - Artiste » (« ON MY OWN -
+    CONSEQUENCE ft. KID CUDI », « Sky High - KiD CuDi », 2026-10-29), la
+    QUEUE, invités coupés — si elle ne nomme qu'un interprète."""
+    principal = interprete_principal_de_la_video(v)
+    if principal:
+        cible = normalize_name(principal)
+        elues = {_page(t) for t in fiches if contains_as_words(_principal_de_la_fiche(t), cible)}
+        if elues or (v.recherche and v.recherche.get("artistes")):
+            return (elues.pop(), principal) if len(elues) == 1 else None
+    m = _TETE_DE_VIDEO_RE.match(v.title or "")
+    if not m:
+        return None
+    queue = _INVITES_DE_TETE_RE.sub("", re.sub(r"[\(\[][^)\]]*[\)\]]", "", v.title[m.end() :]))
+    if not queue.strip() or _PLUSIEURS_INTERPRETES_RE.search(queue):
+        return None
+    cible = normalize_name(queue)
+    page = _elue(fiches, lambda t: contains_as_words(_principal_de_la_fiche(t), cible))
+    return (page, queue.strip()) if page else None
+
+
+def _lien_de(t, video_id):
+    return next((x for x in t.videos or [] if x.video_id == video_id), None)
+
+
+def _album_nu(album: str | None) -> str:
+    return normalize_title(_EDITION_D_ALBUM_RE.sub("", album or "")) if album else ""
+
+
+def _temoins_du_proprietaire(fiches, v) -> list[tuple[str, str]]:
+    """`[(page désignée, témoin)]` : ce qui, dans la base, désigne la page à qui
+    revient la vidéo (tri des 47 `video_partagee` du 2026-10-29)."""
+    temoins = []
+    if (par := _par_interprete(fiches, v)) is not None:
+        temoins.append((par[0], f"interprète principal de la vidéo : {par[1]}"))
+    # Un lien posé À LA MAIN sur une seule page (« Reborn » sur *KIDS SEE
+    # GHOSTS*, et non le remix de Dirty Nice que la page d'album YTM porte).
+    manuelle = _elue(
+        fiches, lambda t: (lien := _lien_de(t, v.video_id)) is not None and lien.source == "manual"
+    )
+    if manuelle:
+        temoins.append((manuelle, "lien posé à la main"))
+    # L'album nommé par le titre de la vidéo (« Low (Cruis'n Usa) »), s'il n'est
+    # pas le titre du morceau lui-même (un single éponyme se nommerait partout).
+    titre_video = normalize_title(v.title or "")
+    nomme = _elue(
+        fiches,
+        lambda t: len(a := _album_nu(t.album)) >= 4
+        and a != normalize_title(t.title or "")
+        and contains_as_words(a, titre_video),
+    )
+    if nomme:
+        temoins.append((nomme, "album nommé par la vidéo"))
+    # Ce que la recherche a vu, sur l'une quelconque des lignes qui portent la
+    # vidéo (« Double Discours - Live » : sur la ligne de *Jihad* seulement).
+    vus = {
+        (lien.recherche or {}).get("album")
+        for t in fiches
+        if (lien := _lien_de(t, v.video_id)) is not None and (lien.recherche or {}).get("album")
+    }
+    if len({_album_nu(a) for a in vus}) == 1:
+        vu = vus.pop()
+        recherche = _elue(fiches, lambda t: _album_nu(t.album) == _album_nu(vu))
+        if recherche:
+            temoins.append((recherche, f"album vu par la recherche : {vu}"))
+    seule = _elue(fiches, lambda t: video_nomme(t, v))
+    if seule:
+        temoins.append((seule, "seule page que la vidéo nomme"))
+    return temoins
+
+
+def proprietaire_et_temoin(fiches, v):
+    """`(fiche, témoin)` à qui revient une vidéo que plusieurs PAGES portent,
+    sinon `(None, None)`. Le motif dominant des vidéos partagées est
+    l'HOMONYME : « Selfish » de Slum Village (feat. Kanye) posé aussi sur le
+    « Selfish » de *DONDA 2*. Les témoins (`_temoins_du_proprietaire`) doivent
+    tous désigner la MÊME page, et la vidéo nommer la fiche gardée. Rien ne
+    départage (deux pages du même interprète, titre sans tête), des témoins
+    en désaccord, ou toutes les fiches sur le même disque (clip double, compté
+    au niveau de l'album) : None. Simulé sur toute la base le 2026-10-27
+    (interprète seul : 41 des 90 vidéos partagées tranchées, aucune démentie
+    par les témoins) ; les quatre autres témoins le 2026-10-29."""
     pages = {_page(t) for t in fiches}
     albums = {cle_album(t.album) for t in fiches if t.album}
     if len(pages) < 2 or (all(t.album for t in fiches) and len(albums) == 1):
-        return None
-    principal = interprete_principal_de_la_video(v)
-    if not principal:
-        return None
-    cible = normalize_name(principal)
-    elues = {
-        _page(t)
-        for t in fiches
-        if contains_as_words(
-            normalize_name(t.primary_artist_name or (t.artist.name if t.artist else "")), cible
-        )
-    }
-    if len(elues) != 1:
-        return None
-    gagnante = next(t for t in fiches if _page(t) in elues)
-    return gagnante if video_nomme(gagnante, v) else None
+        return None, None
+    temoins = _temoins_du_proprietaire(fiches, v)
+    if not temoins or len({page for page, _ in temoins}) != 1:
+        return None, None
+    gagnante = next(t for t in fiches if _page(t) == temoins[0][0])
+    if not video_nomme(gagnante, v):
+        return None, None
+    return gagnante, " ; ".join(temoin for _, temoin in temoins)
+
+
+def proprietaire_de_la_video(fiches, v):
+    """La fiche à qui revient la vidéo (`proprietaire_et_temoin`), sinon None."""
+    return proprietaire_et_temoin(fiches, v)[0]
 
 
 def video_partagee(ctx):
     """Une vidéo portée par PLUSIEURS fiches qui n'en nomme pas au moins une
     (album entier, EP complet, film, freestyle collectif mal rattaché) : UN
     cas, avec les fiches concernées — ses vues sont comptées sur chacune.
-    Quand l'interprète principal de la vidéo désigne SA fiche
-    (`proprietaire_de_la_video`), le cas porte la fiche à garder (`garder`)
+    Quand les témoins désignent SA fiche (`proprietaire_et_temoin`), le cas porte la fiche à garder (`garder`)
     et les autres (`track_ids`) : une règle le tranche."""
     cas = []
     for video_id, fiches in _proprietaires_des_videos(ctx).items():
@@ -1398,22 +1485,21 @@ def video_partagee(ctx):
             (x for t in fiches for x in t.videos or [] if x.video_id == video_id and x.recherche),
             v,
         )
-        gagnante = proprietaire_de_la_video(fiches, vue)
+        gagnante, temoin = proprietaire_et_temoin(fiches, vue)
         if gagnante is not None:
             autres = [t for t in fiches if _page(t) != _page(gagnante)]
             noms = ", ".join(f"« {t.title} » (#{t.id})" for t in autres)
-            principal = interprete_principal_de_la_video(vue)
             cas.append(
                 (
                     v.title,
-                    f"vidéo de {principal} : elle revient à « {gagnante.title} » "
+                    f"{temoin} : elle revient à « {gagnante.title} » "
                     f"(#{gagnante.id}), pas à {noms}",
                     {
                         "video_id": video_id,
                         "kind": video_id,
                         "track_ids": [t.id for t in autres],
                         "garder": gagnante.id,
-                        "principal": principal,
+                        "temoin": temoin,
                         "impact": v.views or 0,
                     },
                 )

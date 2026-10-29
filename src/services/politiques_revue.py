@@ -1216,16 +1216,16 @@ REGLES_ETENDUES = frozenset(
 
 
 def politique_video_partagee(cas, _track, _ctx):
-    """Une vidéo que plusieurs pages portent revient à la fiche dont
-    l'interprète principal est celui de la vidéo (`revue.proprietaire_de_la_video`,
-    qui a posé `garder`) : elle quitte les autres, par un refus de règle."""
+    """Une vidéo que plusieurs pages portent revient à la fiche que ses
+    témoins désignent (`revue.proprietaire_et_temoin`, qui a posé `garder`) :
+    elle quitte les autres, par un refus de règle."""
     preuves = cas.preuves or {}
     if cas.detecteur != "video_partagee" or not preuves.get("garder"):
         return None
     return Arbitrage(
-        "vidéo d'un autre interprète : la retirer des autres fiches",
+        "vidéo d'une autre page : la retirer des autres fiches",
         "retirer_video_partagee",
-        f"interprète principal de la vidéo : {preuves.get('principal')}",
+        preuves.get("temoin") or f"interprète principal de la vidéo : {preuves.get('principal')}",
     )
 
 

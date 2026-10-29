@@ -1002,7 +1002,8 @@ class TestVideoPartagee:
         slum.primary_artist_name = "Slum Village"
         ((_, motif, preuves),) = revue.video_partagee(_ctx(donda, slum))
         assert preuves["garder"] == 2 and preuves["track_ids"] == [1]
-        assert preuves["principal"] == "Slum Village" and "Slum Village" in motif
+        assert preuves["temoin"] == "interprète principal de la vidéo : Slum Village"
+        assert "Slum Village" in motif
         cas = revue.detecter(
             _ctx(donda, slum), detecteurs=(), detecteurs_artiste=revue.DETECTEURS_ARTISTE
         )
@@ -1031,6 +1032,80 @@ class TestVideoPartagee:
         b.primary_artist_name = "Sunday Service Choir"
         assert proprio([a, b], self._v("M", "KING - Kanye West, Sunday Service")) is None
         assert proprio([a, b], self._v("M", "Ty Dolla $ign feat. Kanye West - KING")) is None
+
+    def test_l_interprete_en_queue_du_titre(self):
+        """2026-10-29 : « Titre - Artiste » (« ON MY OWN - CONSEQUENCE ft. KID
+        CUDI ») — la queue, invités coupés, désigne la page de Consequence."""
+        jaden = _t("On My Own", 1, genius_id=11, album="ERYS")
+        jaden.primary_artist_name = "Jaden"
+        cons = _t("On My Own", 2, genius_id=12, album="Curb Certified")
+        cons.primary_artist_name = "Consequence"
+        vue = self._v("O", "ON MY OWN - CONSEQUENCE ft. KID CUDI [LYRICS]")
+        gagnante, temoin = revue.proprietaire_et_temoin([jaden, cons], vue)
+        assert gagnante is cons and "CONSEQUENCE" in temoin
+
+    def test_le_lien_pose_a_la_main(self):
+        """« Reborn » : posé à la main sur *KIDS SEE GHOSTS*, par la page
+        d'album YTM sur le remix de Dirty Nice."""
+        ksg = _t("Reborn", 1, genius_id=11, album="KIDS SEE GHOSTS")
+        ksg.videos = [TrackVideo(video_id="R", title="Reborn", source="manual")]
+        remix = _t("Reborn", 2, genius_id=12)
+        remix.primary_artist_name = "Dirty Nice"
+        remix.videos = [TrackVideo(video_id="R", title="Reborn", source="ytm_album")]
+        assert revue.proprietaire_de_la_video([ksg, remix], ksg.videos[0]) is ksg
+
+    def test_l_album_nomme_par_la_video(self):
+        """« Low (Cruis'n Usa) » : le disque, sans son « (Deluxe) »."""
+        sos = _t("Low", 1, genius_id=11, album="SOS")
+        cruisn = _t("Low", 2, genius_id=12, album="Cruis’n USA (Deluxe)")
+        vue = self._v("L", "Travis Scott, Jason Eric - Low (Cruis'n Usa)")
+        assert revue.proprietaire_de_la_video([sos, cruisn], vue) is cruisn
+
+    def test_l_album_vu_par_la_recherche(self):
+        vue = TrackVideo(
+            video_id="O", title="OUTSIDE", recherche={"titre": "OUTSIDE", "album": "JACKBOYS 2"}
+        )
+        jb = _t("OUTSIDE", 1, genius_id=11, album="JACKBOYS 2")
+        bitt = _t("outside", 2, genius_id=12, album="Birds in the Trap Sing McKnight")
+        jb.videos = bitt.videos = [vue]
+        assert revue.proprietaire_de_la_video([jb, bitt], vue) is jb
+
+    def test_la_recherche_vue_sur_une_autre_ligne(self):
+        """« Double Discours - Live » : la recherche n'a vu l'album que sur la
+        ligne de *Jihad* ; elle désigne la fiche live de la *Don't Panik Tape*."""
+        sans = TrackVideo(video_id="D", title="Double Discours - Live", recherche={"titre": "x"})
+        avec = TrackVideo(
+            video_id="D", title="Double Discours - Live", recherche={"album": "Don't Panik Tape"}
+        )
+        jihad = _t("Double discours", 1, genius_id=11, album="Jihad", videos=[avec])
+        live = _t("Double Discours - Live", 2, album="Don't Panik Tape", videos=[sans])
+        assert revue.proprietaire_de_la_video([jihad, live], sans) is live
+
+    def test_la_seule_page_nommee(self):
+        vue = self._v("D", "Diddy - Intro - Featuring Kanye West & Kendrick Lamar FRESH LEAK")
+        intro = _t("Intro (Kendrick Lamar Reference)", 1, genius_id=11, album="MMM")
+        like = _t("Like It", 2, genius_id=12)
+        for t in (intro, like):
+            t.primary_artist_name = "Diddy"
+        assert revue.proprietaire_de_la_video([intro, like], vue) is intro
+
+    def test_des_temoins_en_desaccord_ne_tranchent_pas(self):
+        """L'interprète désigne une page, le lien manuel une autre : à l'humain."""
+        a = _t("Selfish", 1, genius_id=11, album="DONDA 2")
+        b = _t("Selfish", 2, genius_id=12, album="Detroit Deli")
+        b.primary_artist_name = "Slum Village"
+        clip = TrackVideo(video_id="S", title="Slum Village - Selfish", source="manual")
+        a.videos = [clip]
+        b.videos = [TrackVideo(video_id="S", title="Slum Village - Selfish", source="genius_media")]
+        assert revue.proprietaire_et_temoin([a, b], clip) == (None, None)
+
+    def test_un_film_qui_ne_nomme_aucune_page_ne_part_nulle_part(self):
+        """Le film *New Blues Old Wine* nomme l'album d'« HARMONIE », pas le
+        morceau : la vidéo doit nommer la fiche gardée."""
+        film = self._v("F", "B.B. Jacques - NEW BLUES OLD WINE, LE FILM - Part. I")
+        h = _t("HARMONIE", 1, genius_id=11, album="NEW BLUES, OLD WINE")
+        f = _t("FIANCÉE", 2, genius_id=12)
+        assert revue.proprietaire_de_la_video([h, f], film) is None
 
     def test_un_clip_d_un_meme_disque_n_est_pas_departage(self):
         clip = self._v("C", "Kanye West - Champions")

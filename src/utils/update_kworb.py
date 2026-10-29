@@ -42,9 +42,11 @@ from src.utils.version_descriptors import (
     MOTS_DE_MEME_MORCEAU,
     Kind,
     doublons_evidents,
-    meme_famille,
+    meme_famille_de_version,
     meme_prise,
+    meme_version_stricte,
     parse_variant,
+    porte_une_version,
     reeditions_evidentes,
     titre_generique,
     titres_equivalents,
@@ -207,18 +209,6 @@ def _resolve_homonym(
 _SUFFIXE_UPLOAD = re.compile(r"(?<=[^\d\s.])\.\d{1,2}$")
 
 
-def _meme_version_stricte(a, b) -> bool:
-    """Deux titres qu'un rapprochement FLOU peut confondre : même absence de
-    descripteur (une coquille), même remix, ou même PRISE (`meme_prise` : « Live »
-    ≈ « Acoustic », mais « Live Version » ≠ « Long Version », que la famille
-    « édition » réunissait par le seul mot « Version »)."""
-    if a.kind == Kind.NONE and b.kind == Kind.NONE:
-        return True
-    if a.est_remix and b.est_remix:
-        return meme_famille(a, b)
-    return meme_prise(a, b)
-
-
 def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
     """Rapproche un titre Kworb d'UN SEUL morceau en base par similarité
     (difflib sur titre normalisé) — attrape les coquilles (« Rhythm is love »
@@ -228,7 +218,6 @@ def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
     version (Acoustic/Intro/Remix) → studio et acoustique restent distincts.
     """
     nk = _normalize_title(entry_title)
-    ventree = parse_variant(entry_title)
     if titre_generique(entry_title):
         # « Interlude 1 » ressemble à 90 % à « Interlude 2 » : chaque projet a les
         # siens, une ressemblance n'en désigne aucun (2026-10-11).
@@ -238,7 +227,7 @@ def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
     for t in tracks:
         # Une coquille, pas une AUTRE VERSION : « The New Workout Plan - Live
         # Version » ressemblait à 91 % à « (Long Version) » (2026-09-24).
-        if not _meme_version_stricte(ventree, parse_variant(t.title)):
+        if not meme_version_stricte(entry_title, t.title):
             continue
         # Ni une autre PARTIE : « Freestyle 2 » / « Freestyle 3 », « Bande
         # organisée 2 » / « Bande organisée » (63 paires en base, 2026-10-11).
@@ -334,7 +323,7 @@ def sous_titre(titre: str | None) -> tuple[str, str] | None:
     if not m:
         return None
     court, groupe = m.group(1), m.group(2).strip()
-    if parse_variant(f"x ({groupe})").kind != Kind.NONE and not est_edition_de_diffusion(groupe):
+    if porte_une_version(f"x ({groupe})") and not est_edition_de_diffusion(groupe):
         return None
     return _normalize_title(court), groupe
 
@@ -399,7 +388,7 @@ def construire_index(tracks) -> Index:
         st = sous_titre(t.title)
         if st:
             index.by_titre_court.setdefault(st[0], []).append((t, st[1]))
-        if parse_variant(t.title).kind == Kind.NONE:
+        if not porte_une_version(t.title):
             index.by_socle.setdefault(_normalize_title(t.title), []).append(t)
         editions = set()
         if getattr(t, "spotify_id", None):
@@ -566,7 +555,7 @@ def original_de(socle: str, index: Index) -> Socle:
     fiches = {
         f.id: f
         for f, _ in index.by_titre_court.get(socle, [])
-        if not f.secondary_role and parse_variant(f.title).kind == Kind.NONE
+        if not f.secondary_role and not porte_une_version(f.title)
     }
     if len(fiches) == 1:
         return Socle(fiche=next(iter(fiches.values())), par_sous_titre=True)
@@ -1426,7 +1415,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             )
         if (
             via == "id"
-            and not meme_famille(parse_variant(entry["title"]), parse_variant(track.title))
+            and not meme_famille_de_version(entry["title"], track.title)
             and not lien_tranche(entry, track, _decisions)
         ):
             # L'ID en base dit « ce morceau », son titre Spotify dit une AUTRE

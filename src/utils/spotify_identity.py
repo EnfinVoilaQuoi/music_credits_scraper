@@ -35,13 +35,13 @@ from src.utils.title_matching import (
 )
 from src.utils.track_mapper import _clean_duration
 from src.utils.version_descriptors import (
-    Kind,
-    meme_famille,
-    parse_variant,
+    est_remix_nu,
+    meme_famille_de_version,
     titre_generique,
     titre_sans_son_disque,
     titres_confondus,
     titres_equivalents,
+    version_au_qualificatif_pres,
 )
 from src.utils.version_heritage import remixeur_etranger, remixeurs_du_titre
 
@@ -376,7 +376,7 @@ def remixeur_etranger_a_la_fiche(track, titre_servi: str | None) -> str | None:
     artistes ne se lisent que pour un remix nu. Juge PARTAGÉ par toutes les
     plateformes (Spotify, Deezer, Apple, catalogue Deezer) — il vit ici parce
     que `artistes_connus` y vit."""
-    if parse_variant(track.title).kind != Kind.REMIX_BARE:
+    if not est_remix_nu(track.title):
         return None
     return remixeur_etranger(track.title, titre_servi, artistes_connus(track))
 
@@ -403,7 +403,7 @@ def remix_d_autres_artistes(track, titre_spotify: str, credites) -> tuple[list, 
     l'invité absent et la graphie tolérante (« Ma$e », « 20syl »), 3 cas, tous
     d'autres remix (Crookers, The Regime, SubLife). Détecteur du panneau, pas
     une règle de gate : trois cas ne prouvent pas une règle qui refuse."""
-    if parse_variant(track.title).kind != Kind.REMIX_BARE or remixeurs_du_titre(titre_spotify):
+    if not est_remix_nu(track.title) or remixeurs_du_titre(titre_spotify):
         return None
     credites = [c for c in credites if c]
     connus = artistes_connus(track)
@@ -619,8 +619,7 @@ def variante_etrangere(track, identite: dict | None) -> bool:
     titre_spotify = identite.get("name") or ""
     if not titre_spotify or not track.title:
         return False
-    va, vb = parse_variant(track.title), parse_variant(titre_spotify)
-    if meme_famille(va, vb):
+    if meme_famille_de_version(track.title, titre_spotify):
         # Un remix nu face à un remix nommé : le même, sauf si le remixeur
         # n'est aucun des artistes de la fiche (« In Common (Remix) » contre
         # « In Common - Black Coffee Remix », 2026-10-25).
@@ -633,7 +632,7 @@ def variante_etrangere(track, identite: dict | None) -> bool:
     # Gamberge »). Seule une durée INDÉPENDANTE à ±2 s (même fichier : 99,4 %)
     # dit que c'est la bonne prise — mesuré le 2026-10-15 : les 12 ID
     # « Version EP » de la base avaient la durée de l'EP.
-    if meme_famille(va, vb, compter_qualificatifs=False):
+    if version_au_qualificatif_pres(track.title, titre_spotify):
         temoin, duree = duree_temoin(track), identite.get("duration")
         if temoin and duree and abs(temoin - duree) <= TOLERANCE_MEME_FICHIER:
             return False
@@ -647,12 +646,7 @@ def variante_indecidable(track, identite: dict | None) -> bool:
     pas — on n'efface que ce qu'on peut montrer."""
     if not identite or not track.title or not identite.get("name"):
         return False
-    va, vb = parse_variant(track.title), parse_variant(identite["name"])
-    return (
-        not meme_famille(va, vb)
-        and meme_famille(va, vb, compter_qualificatifs=False)
-        and not duree_temoin(track)
-    )
+    return version_au_qualificatif_pres(track.title, identite["name"]) and not duree_temoin(track)
 
 
 def lire_identite_http(spotify_id: str) -> dict | None:

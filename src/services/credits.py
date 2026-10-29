@@ -15,7 +15,15 @@ from datetime import datetime, timedelta
 from src.models import Artist, Track
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES
 from src.observability import source_usage
-from src.services.runtime import Bilan, Hooks, Manque, Runtime, morceaux_a_traiter
+from src.services.runtime import (
+    ABSENCE_CREDITS_GENIUS,
+    Bilan,
+    Hooks,
+    Manque,
+    Runtime,
+    est_manquant,
+    morceaux_a_traiter,
+)
 from src.utils.credits_genius_api import SOURCE_API
 from src.utils.logger import etape_de_flux, get_logger
 from src.utils.lrc_garde import CHAMP_DUREE_AUDIO, GardeLrc, sans_lrc
@@ -118,6 +126,8 @@ class BilanCredits(Bilan):
     sauves: int = 0
     #: Pages Genius lues il y a moins de `RELECTURE_GENIUS`, non relues.
     genius_recents: int = 0
+    #: Pages Genius lues (ce run ou récemment) sans aucun crédit : constat posé.
+    genius_sans_credit: int = 0
     #: Morceaux non redemandés à Discogs : crédits déjà là, ou « rien » récent.
     discogs_ignores: int = 0
 
@@ -146,6 +156,49 @@ def pages_a_relire(tracks, *, force: bool, maintenant: datetime | None = None) -
         return list(tracks)
     seuil = (maintenant or datetime.now()) - RELECTURE_GENIUS
     return [t for t in tracks if t.last_scraped is None or t.last_scraped < seuil]
+
+
+def pages_lues_sans_credits(
+    tracks, maintenant: datetime | None = None
+) -> tuple[list[tuple[int, datetime]], list[int]]:
+    """PUR. Les constats `ABSENCE_CREDITS_GENIUS` à poser — (morceau, date de la
+    lecture) : page lue depuis moins de `RELECTURE_GENIUS` (ce run, ou un run
+    récent dont la page n'est pas relue) et toujours sans crédit Genius — et
+    les morceaux dont le constat tombe (ils ont leurs crédits Genius).
+
+    `last_scraped` date la lecture de la section crédits (posée seulement quand
+    le HTML est venu) : un échec de page ne pose rien. Daté de la LECTURE, le
+    constat expire avec elle — la page redevient « manquante » le jour où le
+    run la relit."""
+    seuil = (maintenant or datetime.now()) - RELECTURE_GENIUS
+    poser: list[tuple[int, datetime]] = []
+    retirer: list[int] = []
+    for t in tracks:
+        if not t.id or not t.genius_url:
+            continue
+        if not est_manquant(t, Manque.CREDITS_GENIUS):
+            retirer.append(t.id)
+            continue
+        lu = t.last_scraped
+        if isinstance(lu, datetime):
+            lu = lu.replace(tzinfo=None)
+            if lu >= seuil:
+                poser.append((t.id, lu))
+    return poser, retirer
+
+
+def constater_pages_sans_credits(runtime: Runtime, tracks) -> int:
+    """Pose (ou lève) les constats « page Genius lue sans crédit » des morceaux
+    qui ont une page ; rend le nombre de constats posés."""
+    # Lu sur le module au moment de l'appel : les tests le remplacent, comme
+    # `absences_recentes`.
+    from src.services import runtime as module_runtime
+
+    poser, retirer = pages_lues_sans_credits(tracks)
+    module_runtime.constater_absences(runtime, ABSENCE_CREDITS_GENIUS, poser, retirer)
+    if poser:
+        logger.info(f"Genius : {len(poser)} page(s) lue(s) sans aucun crédit (constat daté)")
+    return len(poser)
 
 
 def _genius_scraper():
@@ -464,6 +517,10 @@ def run(
             bilan.genius = scraper.scrape_multiple_tracks(
                 a_lire, progress_callback=lambda c, tot, nom: hooks.progress(c, tot, nom, "Genius")
             )
+            # Les pages lues (ce run, ou récemment et non relues) sans aucun
+            # crédit : une RÉPONSE de Genius, datée — sans ce constat, la
+            # sélection les comptait « manquantes » pour toujours (2026-10-29).
+            bilan.genius_sans_credit = constater_pages_sans_credits(runtime, avec_page)
         if hooks.should_stop():
             bilan.interrompu("arrêt demandé après les crédits Genius")
             return _sauver(runtime, artist, tracks, bilan)

@@ -8,10 +8,25 @@ le travail fait est SAUVÉ même sur arrêt demandé.
 
 from types import SimpleNamespace
 
+import pytest
+
 from src.models import Artist, Track
 from src.models.track import Credit, CreditRole
 from src.services import credits
 from src.services.runtime import Hooks, Runtime
+
+#: Constats d'absence posés par le run (`runtime.constater_absences`) : la
+#: fausse façade n'a pas de base.
+CONSTATS: list = []
+
+
+@pytest.fixture(autouse=True)
+def _constats(monkeypatch):
+    CONSTATS.clear()
+    monkeypatch.setattr(
+        "src.services.runtime.constater_absences",
+        lambda rt, cle, poser, retirer=(): CONSTATS.append((cle, list(poser), list(retirer))),
+    )
 
 
 class _Genius:
@@ -317,6 +332,73 @@ def test_le_run_ne_passe_au_scraper_que_les_pages_a_relire():
     )
     bilan = credits.run(_rt(), Artist(name="Swing"), [recente, ancienne], opts, Hooks(), cl)
     assert lues == ["Ancienne"] and bilan.genius_recents == 1
+
+
+class TestPagesLuesSansCredit:
+    """2026-10-29 : une page Genius LUE sans aucun crédit est une réponse de
+    Genius. Le run en pose le constat (`ABSENCE_CREDITS_GENIUS`), daté de la
+    lecture ; sans lui, la sélection la comptait manquante pour toujours, puis
+    le run l'écartait (`RELECTURE_GENIUS`)."""
+
+    def test_pur_pose_retire_ignore(self):
+        from datetime import datetime, timedelta
+
+        maintenant = datetime(2026, 10, 29, 12)
+        lue = _track("Lue vide", last_scraped=maintenant - timedelta(days=29))
+        vieille = _track("Lue il y a longtemps", last_scraped=maintenant - timedelta(days=31))
+        jamais = _track("Jamais lue")
+        pleine = _track("Avec crédits", last_scraped=maintenant)
+        pleine.credits = [Credit(name="G", role=CreditRole.PRODUCER, source="genius")]
+        api = _track("API seule", last_scraped=maintenant)
+        api.credits = [Credit(name="A", role=CreditRole.PRODUCER, source="genius_api")]
+        sans_page = _track("Sans page", last_scraped=maintenant, genius_url=None)
+        poser, retirer = credits.pages_lues_sans_credits(
+            [lue, vieille, jamais, pleine, api, sans_page], maintenant
+        )
+        assert poser == [(lue.id, lue.last_scraped), (api.id, api.last_scraped)]
+        assert retirer == [pleine.id]
+
+    def test_le_run_pose_le_constat_des_pages_lues_sans_credit(self):
+        from datetime import datetime
+
+        from src.services.runtime import ABSENCE_CREDITS_GENIUS
+
+        vide, pleine = _track("Vide"), _track("Pleine")
+
+        class _GeniusVide(_Genius):
+            def scrape_multiple_tracks(self, tracks, progress_callback=None):
+                for t in tracks:
+                    t.last_scraped = datetime.now()
+                    if t is pleine:
+                        t.credits.append(
+                            Credit(name="Beat", role=CreditRole.PRODUCER, source="genius")
+                        )
+                return {"success": 1, "failed": 1, "errors": []}
+
+        cl, _, _ = _clients(genius=_GeniusVide())
+        opts = credits.OptionsCredits(
+            genius=True, discogs=False, paroles_genius=False, paroles_ytm=False, sync_lrclib=False
+        )
+        bilan = credits.run(_rt(), Artist(name="Swing"), [vide, pleine], opts, Hooks(), cl)
+        ((cle, poser, retirer),) = CONSTATS
+        assert cle == ABSENCE_CREDITS_GENIUS
+        assert [tid for tid, _ in poser] == [vide.id] and retirer == [pleine.id]
+        assert bilan.genius_sans_credit == 1
+
+    def test_une_page_recente_non_relue_pose_aussi_son_constat(self):
+        """Les pages lues il y a moins de 30 j ne sont pas relues : leur
+        lecture, datée, suffit — sinon elles resteraient « manquantes »
+        jusqu'à la relecture (A2H : 37 pages lues le 30/09)."""
+        from datetime import datetime, timedelta
+
+        lue = datetime.now() - timedelta(days=10)
+        recente = _track("Récente vide", last_scraped=lue)
+        cl, genius, _ = _clients()
+        opts = credits.OptionsCredits(
+            genius=True, discogs=False, paroles_genius=False, paroles_ytm=False, sync_lrclib=False
+        )
+        credits.run(_rt(), Artist(name="Swing"), [recente], opts, Hooks(), cl)
+        assert CONSTATS[0][1] == [(recente.id, lue)]
 
 
 def test_synchro_forcee_garde_le_lrc_d_une_source_muette(data_manager):

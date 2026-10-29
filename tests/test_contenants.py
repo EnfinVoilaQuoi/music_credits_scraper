@@ -215,6 +215,7 @@ class TestEtapeCredits:
     @pytest.fixture(autouse=True)
     def _aucune_absence(self, monkeypatch):
         monkeypatch.setattr("src.services.runtime.absences_recentes", lambda rt, s: {})
+        monkeypatch.setattr("src.services.runtime.constater_absences", lambda *a: None)
 
     def test_genius_ne_lit_pas_un_contenant_sans_page(self):
         from src.services import credits
@@ -260,7 +261,8 @@ class TestSansPageGenius:
         t.genius_url = "https://genius.com/Flynt-retroduction-lyrics"
         assert est_manquant(t, Manque.CREDITS_GENIUS)
 
-    def test_le_crawl_ne_recoit_que_les_fiches_avec_page(self):
+    def test_le_crawl_ne_recoit_que_les_fiches_avec_page(self, monkeypatch):
+        monkeypatch.setattr("src.services.runtime.constater_absences", lambda *a: None)
         from src.services import credits
         from src.services.runtime import Hooks
         from tests.test_services_credits import _clients, _rt

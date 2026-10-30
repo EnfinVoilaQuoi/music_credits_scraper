@@ -615,6 +615,20 @@ def nature_d_edition(v: Variant) -> str:
     - ``alternate`` : tout autre nom — une personne (« 2 Chainz Version »), un
       numéro (« Version 2 »), une langue, un genre, un projet (« Stem Player »,
       « LP2 »), une date, ou rien d'autre que « Version ».
+
+    « <Nom> Edit » remesuré le 2026-10-30 (CORRECTIFS « Edit signé par un
+    tiers ») : 15 titres nommés en base. 11 sont l'edit d'un DJ ou d'un
+    producteur — nom crédité sur la page Genius (Twinsmatic, Martin Jensen,
+    Lucky Date, C-Salt, ISOxo, Ahmed 2.0 ; E-Smoove sur sa « Hard Mix Edit »)
+    ou page d'un mix de DJ
+    (Ravenscoon, DubVision, DJ DOUBLE CC, David Guetta) ; 3 n'en sont pas —
+    « Summer Edit » (produit par l'artiste lui-même), « Restored Skate 3
+    Edit » (le montage du jeu), « FV Edit V1 » (déjà `alternate`) ; 1 est
+    indécis (« Freaky Girl Edit »). Aucun critère de TEXTE ne sépare
+    « Summer » ou « Restored Skate 3 » de « Ravenscoon » ou « DubVision » :
+    la règle reste « edit nommé = remix » (ne prive que de la production
+    héritée), et les crédits hérités à tort sont partis (seuls des auteurs
+    restent hérités, sur 2 fiches).
     """
     mots = _tokens(_qualificatif(v))
     noms = _noms_d_edition(v)

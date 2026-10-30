@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 
 from src.utils.title_matching import names_match_as_words
-from src.utils.version_descriptors import Kind, parse_variant
+from src.utils.version_descriptors import est_un_remix
 
 #: « (Azərbaycanca Tərcümə) », « (Türkçe Çeviri) », « (Deutsche Übersetzung) »,
 #: « (Traduction Française) », « (English Translation) »… Genius nomme ses pages
@@ -107,7 +107,7 @@ def role_de_version(relationships, artiste: str, role_actuel: str | None) -> str
 
 def _dit_deja(titre: str, role: str) -> bool:
     if role == "Remix":
-        return parse_variant(titre).kind in (Kind.REMIX_NAMED, Kind.REMIX_BARE)
+        return est_un_remix(titre)
     return re.search(r"\bcover\b|\breprise\b", titre, re.IGNORECASE) is not None
 
 

@@ -300,6 +300,35 @@ def _porte_vocabulaire(texte: str) -> bool:
     return any(t in _VOCABULAIRE or _NUMERO_DE_VERSION.match(t) for t in tokens)
 
 
+#: Le contenu d'un groupe IMBRIQUÉ lisible : un texte, puis UN groupe final
+#: (« Grandtheft Remix (Clean) », « Junior Sanchez (Deep In The Sheets Remix) »).
+_CONTENU_IMBRIQUE = re.compile(r"^(?P<a>[^\(\)\[\]]*?\S)\s*[\(\[](?P<b>[^\(\)\[\]]*\S)\s*[\)\]]$")
+
+
+def _groupe_final_imbrique(titre: str) -> tuple[int, str, list[str]] | None:
+    """Le groupe final du titre quand il en CONTIENT un autre, à sa fin :
+    `(début, contenu, [texte, groupe intérieur])` — « … [Grandtheft Remix
+    (Clean)] » → `[« Grandtheft Remix », « Clean »]`. None sinon : pas de
+    groupe final, groupe simple (`_GROUPE_FINAL_RE` le lit), groupe intérieur
+    au milieu (« (GOOD (DON'T DIE) Original) ») ou sur plusieurs niveaux."""
+    t = titre.rstrip()
+    if not t or t[-1] not in ")]":
+        return None
+    profondeur = 0
+    for i in range(len(t) - 1, -1, -1):
+        if t[i] in ")]":
+            profondeur += 1
+        elif t[i] in "([":
+            profondeur -= 1
+            if profondeur == 0:
+                contenu = t[i + 1 : -1].strip()
+                m = _CONTENU_IMBRIQUE.match(contenu)
+                if not m:
+                    return None
+                return i, contenu, [m.group("a").strip(), m.group("b").strip()]
+    return None
+
+
 def _detacher_descripteur(titre: str) -> tuple[str, list[str]]:
     """Sépare le titre de ses descripteurs candidats, dans l'ordre d'apparition.
 
@@ -307,7 +336,9 @@ def _detacher_descripteur(titre: str) -> tuple[str, list[str]]:
       1. tout ce qui suit le premier ` - ` (convention Spotify — les segments
          suivants sont conservés : « Live Symphonic - Paris La Défense Aréna ») ;
       2. les groupes finaux entre parenthèses ou crochets, pelés un à un
-         (« Praise God (DANNE Remix) [Mixed] » en donne deux) ;
+         (« Praise God (DANNE Remix) [Mixed] » en donne deux) ; un groupe qui en
+         CONTIENT un à sa fin en donne deux aussi (« [Grandtheft Remix
+         (Clean)] », `_groupe_final_imbrique`) ;
       3. un dernier mot nu « Remix » / « RMX » (« 5G Remix »).
     Un segment n'est retenu comme descripteur que s'il PORTE un mot du
     vocabulaire ; sinon il reste dans le titre.
@@ -321,6 +352,23 @@ def _detacher_descripteur(titre: str) -> tuple[str, list[str]]:
     # même morceau, qui arrête la lecture sans faire de descripteur).
     while True:
         m = _GROUPE_FINAL_RE.search(titre)
+        imbrique = None if m else _groupe_final_imbrique(titre)
+        if imbrique is not None:
+            # « X [A (B)] » se lit « X (A) (B) » (2026-10-30) : « Whole Lotta
+            # Lovin' [Grandtheft Remix (Clean)] » est le remix Grandtheft en
+            # édition Clean, pas l'original.
+            debut, contenu, sous_groupes = imbrique
+            tokens = _tokens(contenu)
+            if (tokens and all(t in MOTS_DE_MEME_MORCEAU for t in tokens)) or not (
+                _porte_vocabulaire(contenu)
+            ):
+                break
+            avant = titre[:debut].strip()
+            if not avant:
+                break
+            titre = avant
+            groupes[0:0] = sous_groupes
+            continue
         if not m or not m.group(1).strip():
             break
         contenu = m.group(1).strip()
@@ -1228,6 +1276,94 @@ def edition_de_diffusion(titre: str | None) -> str | None:
     """PUR. Le libellé de l'ÉDITION de diffusion que porte le titre (« Radio
     Edit », « 2011 Remaster » : même fiche que l'original), ou None."""
     return cle_titre(titre).variant.edition
+
+
+# ── Questions du panneau, des éditions et du catalogue Deezer (2026-10-30) ─────
+# Second passage de la délégation : ces modules lisaient `parse_variant` et
+# `Kind` pour une seule réponse à la fois (le socle, le remixeur, « est-ce un
+# remix ? ») ; ils posent désormais la question. Chacune rend exactement ce
+# que la lecture directe rendait (`cle_titre(t).variant` = `parse_variant(t)`).
+
+
+def meme_titre_normalise(a: str | None, b: str | None) -> bool:
+    """PUR. Les deux titres sont ÉGAUX une fois normalisés (casse, accents,
+    ponctuation, featurings — `normalize_title`) : la question la plus étroite,
+    sans version ni graphie équivalente (`titres_equivalents` est plus large).
+    Un nom de disque se compare de même. Deux vides sont égaux."""
+    return normalize_title(a or "") == normalize_title(b or "")
+
+
+def est_un_remix(titre: str | None) -> bool:
+    """PUR. Le titre porte un descripteur de REMIX, nommé ou nu."""
+    return cle_titre(titre).variant.est_remix
+
+
+def est_une_rendition(titre: str | None) -> bool:
+    """PUR. Le titre porte un descripteur de RENDITION (live, acoustique,
+    instrumental, « Version X »…) — ni remix ni édition de diffusion."""
+    return cle_titre(titre).variant.kind == Kind.RENDITION
+
+
+def remixeur_du_titre(titre: str | None) -> str | None:
+    """PUR. Le remixeur que le titre NOMME (« Snight B » de « Dolce Camara -
+    Snight B Remix »), ou None."""
+    return cle_titre(titre).variant.remixer
+
+
+def socle_du_titre(titre: str | None) -> str:
+    """PUR. Le titre sans son descripteur de version ni ses featurings, en
+    graphie d'origine (« Dolce Camara » ; la clé normalisée est
+    `socle_normalise`)."""
+    return cle_titre(titre).variant.socle
+
+
+def descripteur_du_titre(titre: str | None) -> str | None:
+    """PUR. Le descripteur de version tel qu'écrit (« Snight B Remix »), None
+    sans version."""
+    return cle_titre(titre).variant.descriptor
+
+
+def rendition_instrumentale(titre: str | None) -> bool:
+    """PUR. Une RENDITION dont le descripteur dit « instrumental »
+    (« Boulbi (Instrumental) »)."""
+    v = cle_titre(titre).variant
+    return v.kind == Kind.RENDITION and "instrumental" in normalize_title(v.descriptor or "")
+
+
+def meme_prise_de_version(a: str | None, b: str | None) -> bool:
+    """PUR. Les descripteurs des deux titres désignent la même PRISE
+    (`meme_prise` : « Live » ≈ « Acoustic », « Live Version » ≠ « Long
+    Version ») ; le socle n'est pas jugé ici (`meme_prise_du_morceau`)."""
+    return meme_prise(cle_titre(a).variant, cle_titre(b).variant)
+
+
+#: Mentions éditoriales qui ne nomment aucune prise (« Album Version »).
+_MENTIONS_EDITORIALES = frozenset(
+    {"version", "original version", "version originale", "album version", "version album"}
+)
+
+
+def mention_editoriale(titre: str | None) -> bool:
+    """PUR. Le titre ne porte qu'une mention éditoriale, pas une nouvelle prise
+    musicale : une édition de DIFFUSION (radio edit, clean, explicit,
+    remaster : même enregistrement, même fiche, décision utilisateur
+    2026-09-24), ou une rendition « (Version) », « (Album Version) »… —
+    classement du catalogue Deezer."""
+    v = cle_titre(titre).variant
+    if v.kind == Kind.NONE and v.edition:
+        return True
+    if v.kind != Kind.RENDITION:
+        return False
+    return normalize_title(v.descriptor or "") in _MENTIONS_EDITORIALES
+
+
+def nature_de_l_edition(titre: str | None) -> str:
+    """PUR. Ce que désigne le titre quand `version_heritage.famille_de` le range
+    dans la famille « édition » : ``diffusion`` sans version (« Radio Edit »,
+    « Explicit »), sinon `nature_d_edition` (``edition``, ``montage``,
+    ``remix_named``, ``performance``, ``vitesse``, ``alternate``)."""
+    v = cle_titre(titre).variant
+    return "diffusion" if v.kind == Kind.NONE else nature_d_edition(v)
 
 
 #: Un groupe de titre de VIDÉO qui ne dit rien de la version : la nature de la

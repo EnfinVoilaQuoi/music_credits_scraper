@@ -33,6 +33,7 @@ from src.config import DATA_DIR
 from src.utils.fichiers_json import MemoireIllisible, ecrire_atomique, lire_memoire
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_name, normalize_title
+from src.utils.version_descriptors import meme_titre_normalise
 
 logger = get_logger(__name__)
 
@@ -91,7 +92,7 @@ def designe(designation: dict, *, genius_id, titre: str | None, album: str | Non
     if (designation.get("titre") or "").strip() != (titre or "").strip():
         return False
     if "album" in designation:
-        return normalize_title(designation["album"] or "") == normalize_title(album or "")
+        return meme_titre_normalise(designation["album"], album)
     return True
 
 

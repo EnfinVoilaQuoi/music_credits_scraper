@@ -27,7 +27,7 @@ from enum import StrEnum
 from src.models.track import _PRODUCER_ROLES, _WRITER_ROLES, CreditRole, Track
 from src.utils.credit_roles import map_role
 from src.utils.title_matching import names_match_as_words
-from src.utils.version_descriptors import Kind, parse_variant
+from src.utils.version_descriptors import porte_une_version
 
 
 class Participation(StrEnum):
@@ -123,7 +123,7 @@ def est_version_alt(track: Track) -> bool:
         return True
     if any(r.get("type") in _RELATIONS_DE_VERSION for r in track.relationships or []):
         return True
-    return parse_variant(track.title or "").kind != Kind.NONE
+    return porte_une_version(track.title)
 
 
 def est_inedit(track: Track) -> bool:

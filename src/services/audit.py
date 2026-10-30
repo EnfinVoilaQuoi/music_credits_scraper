@@ -63,9 +63,8 @@ from src.utils.title_matching import normalize_title
 from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
-    Kind,
     meme_socle,
-    parse_variant,
+    porte_une_version,
     titre_generique,
     titres_equivalents,
 )
@@ -294,11 +293,11 @@ def lrc(par) -> list[Cas]:
                             )
                         )
                         break
-                if parse_variant(t["title"]).kind != Kind.NONE:
+                if porte_une_version(t["title"]):
                     for o in g:
                         if (
                             o["id"] != t["id"]
-                            and parse_variant(o["title"]).kind == Kind.NONE
+                            and not porte_une_version(o["title"])
                             and meme_socle(t["title"], o["title"])
                         ):
                             cas.append(
@@ -520,7 +519,7 @@ def certifs(pistes) -> list[Cas]:
     for t in pistes:
         if not t["certifications"] or t["certifications"] in ("[]", ""):
             continue
-        version = parse_variant(t["title"]).kind != Kind.NONE
+        version = porte_une_version(t["title"])
         for e in json.loads(t["certifications"]):
             if e.get("echo"):
                 continue
@@ -537,7 +536,7 @@ def certifs(pistes) -> list[Cas]:
             mots_t, mots_c = set(_base(t["title"]).split()), set(_base(ct).split())
             if mots_c - mots_t and mots_t <= mots_c:
                 famille = "certif_plus_long"
-            elif version and parse_variant(ct).kind == Kind.NONE and meme_socle(t["title"], ct):
+            elif version and not porte_une_version(ct) and meme_socle(t["title"], ct):
                 famille = "certif_version"
             else:
                 famille = "certif_autre"

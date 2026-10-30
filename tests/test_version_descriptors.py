@@ -589,3 +589,74 @@ def test_titre_de_base_et_meme_titre_de_base():
     assert meme_titre_de_base("Illest Motherfucker Alive", "Illest Motherf**ker Alive (Clean)")
     assert not meme_titre_de_base("Bouge de là (Part. 2)", "Bouge de là (Part. 1)")
     assert not meme_titre_de_base("Blues", "Blues (Live)")
+
+
+class TestGroupeFinalImbrique:
+    """« X [A (B)] » se lit « X (A) (B) » (2026-10-30) : 10 titres de la base
+    (et 29 titres de vidéo « (Album Version (Explicit)) ») restaient l'original."""
+
+    @pytest.mark.parametrize(
+        "titre, kind, socle, remixeur, edition",
+        [
+            (
+                "Whole Lotta Lovin’ [Grandtheft Remix (Clean)]",
+                Kind.REMIX_NAMED,
+                "Whole Lotta Lovin’",
+                "Grandtheft",
+                "Clean",
+            ),
+            (
+                "WTP (Junior Sanchez (Deep In The Sheets Remix))",
+                Kind.REMIX_NAMED,
+                "WTP",
+                "Deep In The Sheets",
+                None,
+            ),
+            (
+                "Walkin’ On the Moon [Seamus Haji & Paul Emanuel Radio Edit (Bonus Track)]",
+                Kind.RENDITION,
+                "Walkin’ On the Moon",
+                None,
+                "Bonus Track",
+            ),
+            ("POWER (Album Version (Edited))", Kind.NONE, "POWER", None, "Album Version Edited"),
+            (
+                "Stronger (Andrew Dawson Remix (Explicit))",
+                Kind.REMIX_NAMED,
+                "Stronger",
+                "Andrew Dawson",
+                "Explicit",
+            ),
+        ],
+    )
+    def test_lu_comme_deux_groupes(self, titre, kind, socle, remixeur, edition):
+        v = parse_variant(titre)
+        assert (v.kind, v.socle, v.remixer, v.edition) == (kind, socle, remixeur, edition)
+
+    @pytest.mark.parametrize(
+        "titre",
+        [
+            # Pas de vocabulaire de version : un sous-titre, le titre reste entier.
+            "Intro (Akademiks (Jeanius Level Musik Vol. 2))",
+            # Le groupe intérieur au MILIEU : illisible, le titre reste entier.
+            "So Good (GOOD (DON’T DIE) Original)",
+            # Deux niveaux d'imbrication.
+            "X (A (B (Remix)))",
+        ],
+    )
+    def test_reste_le_titre(self, titre):
+        v = parse_variant(titre)
+        assert v.kind == Kind.NONE and v.socle == titre and v.edition is None
+
+    def test_deux_remix_du_meme_remixeur_restent_deux_versions(self):
+        assert not meme_famille(
+            parse_variant("WTP (Junior Sanchez (Deep In The Sheets Remix))"),
+            parse_variant("WTP (Junior Sanchez (Ballroom Banji Remix))"),
+        )
+
+    def test_l_edition_rejoint_son_morceau(self):
+        assert titre_sans_edition("Runaway (Album Version (Edited))") == "Runaway"
+        assert (
+            titre_sans_edition("Whole Lotta Lovin’ [Grandtheft Remix (Clean)]")
+            == "Whole Lotta Lovin’ (Grandtheft Remix)"
+        )

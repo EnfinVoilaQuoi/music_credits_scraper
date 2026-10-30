@@ -383,3 +383,55 @@ class TestSongbpmDementiParLAudioDeLaPage:
             videos=[_video(325, "Disiz - Topic")],
         )
         assert self._juger(t) is None
+
+
+#: Deux textes qui partagent une partie de leurs couplets (≈ 0,5 de paires).
+_REFRAIN = " ".join(f"refrain{i} commun{i}" for i in range(40))
+_COUPLET_A = " ".join(f"couplet{i} lauryn{i}" for i in range(40))
+_COUPLET_B = " ".join(f"couplet{i} kanye{i}" for i in range(40))
+
+
+def _page(titre, tid, adresse, paroles):
+    t = _t(titre, tid=tid, genius_url=f"https://genius.com/{adresse}-lyrics")
+    t.lyrics.text, t.lyrics.source = paroles, "genius"
+    return t
+
+
+class TestDoublonDeuxEnregistrements:
+    """D1 : deux pages au même titre, artistes crédités différents (adresse
+    Genius) ET paroles communes sous 0,9, sont deux enregistrements."""
+
+    def _juger(self, a, b):
+        return pol.arbitrage_etendu(_cas("doublon", a, {"autres": [b.id]}), a, _ctx(a, b))
+
+    def test_adresse_de_la_page(self):
+        t = _page("I CAN’T WAIT", 1, "Kanye-west-and-lauryn-hill-i-cant-wait", "")
+        assert pol.artistes_de_la_page(t) == "kanye-west-and-lauryn-hill"
+        assert pol.artistes_de_la_page(_page("Mr.Rager", 2, "Kid-cudi-mrrager", "")) == "kid-cudi"
+        assert pol.artistes_de_la_page(_page("Autre", 3, "Kid-cudi-mrrager", "")) is None
+
+    def test_i_cant_wait_avec_et_sans_lauryn_hill(self):
+        a = _page(
+            "I CAN’T WAIT", 5711, "Kanye-west-and-lauryn-hill-i-cant-wait", _REFRAIN + _COUPLET_A
+        )
+        b = _page("I CAN’T WAIT", 10106, "Kanye-west-i-cant-wait", _REFRAIN + _COUPLET_B)
+        arb = self._juger(a, b)
+        assert arb.action == "normal" and "kanye-west-and-lauryn-hill" in arb.raison
+
+    def test_memes_paroles_une_fusion_possible(self):
+        """« Life Of The Party » : paroles 1,00 malgré André 3000 dans l'adresse."""
+        a = _page("Life Of The Party", 1, "Kanye-west-and-andre-3000-life-of-the-party", _REFRAIN)
+        b = _page("Life Of The Party", 2, "Kanye-west-life-of-the-party", _REFRAIN)
+        assert self._juger(a, b) is None
+
+    def test_memes_artistes_une_fusion_possible(self):
+        """« Mr.Rager » / « Mr. Rager » : la même page en double."""
+        a = _page("Mr.Rager", 1, "Kid-cudi-mrrager", _REFRAIN + _COUPLET_A)
+        b = _page("Mr. Rager", 2, "Kid-cudi-mr-rager", _REFRAIN + _COUPLET_B)
+        assert self._juger(a, b) is None
+
+    def test_sans_paroles_d_un_cote(self):
+        """« OUTSIDE » : la page « Kanye West and Ye » n'a pas de paroles."""
+        a = _page("OUTSIDE", 1, "Kanye-west-outside", "")
+        b = _page("OUTSIDE", 2, "Kanye-west-and-ye-outside", _REFRAIN)
+        assert self._juger(a, b) is None

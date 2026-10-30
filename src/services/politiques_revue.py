@@ -1447,6 +1447,9 @@ REGLES_ETENDUES = frozenset(
         # 2026-10-31 (SP1) : ID Spotify confirmé par Apple ou Deezer lus par
         # leur ID ; 2 / 8 sur la copie (Take 'Em High, Ghetto).
         ("duree_spotify", "normal"),
+        # 2026-10-31 (D1) : deux pages au même titre, artistes crédités
+        # différents (adresse Genius) et paroles communes < 0,9 ; 6 / 13.
+        ("doublon", "normal"),
     }
 )
 
@@ -1657,6 +1660,60 @@ def politique_songbpm_version(cas, track, ctx):
     return _SONGBPM_PAR_LE_VOTE(cas, track, ctx)
 
 
+#: Au-delà de cette part de paires de mots communes, deux pages au même titre
+#: peuvent être la même transcription : la fusion se décide à la main (D1).
+PAROLES_DEUX_ENREGISTREMENTS_MAX = 0.9
+
+
+def artistes_de_la_page(track) -> str | None:
+    """Les artistes que la page Genius crédite, tels que son ADRESSE les écrit
+    (« kanye-west-and-lauryn-hill » dans `…/Kanye-west-and-lauryn-hill-i-
+    cant-wait-lyrics`) : Genius compose l'adresse des interprètes, puis du
+    titre. None quand l'adresse ne finit pas par le titre de la fiche."""
+    import unicodedata
+
+    m = re.search(r"genius\.com/([^/?#]+)-lyrics", track.genius_url or "", re.I)
+    if not m or not track.title:
+        return None
+    titre = unicodedata.normalize("NFKD", track.title).encode("ascii", "ignore").decode()
+    titre = re.sub(r"[^a-z0-9]+", "-", re.sub(r"['’.]", "", titre.lower())).strip("-")
+    adresse = m.group(1).lower()
+    if not titre or not adresse.endswith("-" + titre):
+        return None
+    return adresse[: -len(titre) - 1] or None
+
+
+def politique_doublon(cas, track, ctx):
+    """D1 (2026-10-31) : deux pages Genius au même titre sont deux
+    ENREGISTREMENTS quand Genius leur crédite des artistes différents (son
+    adresse) ET que leurs paroles, présentes des deux côtés, ont moins de
+    `PAROLES_DEUX_ENREGISTREMENTS_MAX` de paires de mots communes (« I CAN'T
+    WAIT » avec et sans Lauryn Hill, 0,78). ✓ Normal ; des paroles quasi
+    identiques ou les mêmes artistes : une fusion possible, l'humain."""
+    from src.utils.concordance_paroles import paroles_de_reference, recouvrement_bigrammes
+
+    if cas.detecteur != "doublon" or track is None:
+        return None
+    ids = set((cas.preuves or {}).get("autres") or ())
+    autres = [t for t in ctx.disco if t.id in ids]
+    if not autres or len(autres) != len(ids):
+        return None
+    mes_artistes = artistes_de_la_page(track)
+    mes_paroles = paroles_de_reference(track.lyrics.text, track.lyrics.source)
+    preuves = []
+    for autre in autres:
+        siens = artistes_de_la_page(autre)
+        if not mes_artistes or not siens or siens == mes_artistes:
+            return None
+        part = recouvrement_bigrammes(
+            mes_paroles, paroles_de_reference(autre.lyrics.text, autre.lyrics.source)
+        )
+        if part is None or part >= PAROLES_DEUX_ENREGISTREMENTS_MAX:
+            return None
+        preuves.append(f"« {siens} » contre « {mes_artistes} », paroles communes {part:.2f}")
+    return Arbitrage("deux enregistrements : ✓ Normal", "normal", " ; ".join(preuves))
+
+
 #: Catalogues lus par un identifiant dont l'accord avec SongBPM le protège.
 _SOUTIENS_SONGBPM = ("deezer", "spotify_web", "apple_music", "reccobeats")
 
@@ -1765,6 +1822,7 @@ def politique_video_trop_longue(cas, track, _ctx):
 
 
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "doublon": politique_doublon,
     "duree_spotify": politique_spotify_confirme,
     "video_trop_longue": politique_video_trop_longue,
     "video_autre_chaine": politique_video_autre_chaine,

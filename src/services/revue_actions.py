@@ -415,7 +415,7 @@ def actions_pour(cas: Cas) -> list[Action]:
                 "Ses vues ne seront plus comptées pour elles.",
             )
         ]
-    if d in ("video_etrangere", "recherche_perimee"):
+    if d in ("video_etrangere", "recherche_perimee", "video_trop_longue"):
         return [
             Action(
                 "rejeter_video",

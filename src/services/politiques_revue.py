@@ -1295,6 +1295,10 @@ REGLES_ETENDUES = frozenset(
         # garde de pose `cccebc7`, retirées de la fiche que ses catalogues
         # démentent quand ceux de l'autre les confirment (simulée sur la copie).
         ("songbpm_titre_contenu", "retirer_songbpm"),
+        # 2026-10-30 : vidéo Genius muette plus de 3 fois plus longue que le
+        # morceau (concert, émission, compilation) ; simulée sur la copie,
+        # 4 liens, chacun confronté à son titre (aucun n'est le morceau).
+        ("video_trop_longue", "retirer_video_recherche"),
     }
 )
 
@@ -1505,7 +1509,24 @@ def politique_video_autre_chaine(cas, track, _ctx):
     )
 
 
+def politique_video_trop_longue(cas, track, _ctx):
+    """Une vidéo Genius qui ne nomme pas le morceau et dure plus de
+    `revue.RATIO_VIDEO_MUETTE` fois sa durée (`retirer` posé par le
+    détecteur) : concert, émission, compilation — le lien part, par un refus
+    de règle. Celle qui le nomme reste à l'humain."""
+    if cas.detecteur != "video_trop_longue" or track is None:
+        return None
+    if not (cas.preuves or {}).get("retirer"):
+        return None
+    return Arbitrage(
+        "vidéo bien plus longue que le morceau, qui ne le nomme pas : retirer le lien",
+        "retirer_video_recherche",
+        cas.motif,
+    )
+
+
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "video_trop_longue": politique_video_trop_longue,
     "video_autre_chaine": politique_video_autre_chaine,
     "generique_duree": politique_generique_distincts,
     "duree_songbpm": politique_songbpm_version,

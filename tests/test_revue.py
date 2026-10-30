@@ -1350,6 +1350,76 @@ class TestVideoPartagee:
         assert not revue._vues_expliquees(a, _ctx(a, b, _t("Moon", 3, videos=[clip])))
 
 
+class TestVideoTropLongue:
+    """2026-10-30 : la vidéo Genius d'un concert, d'une émission, d'une
+    compilation, posée sur un seul de ses morceaux (CORRECTIFS, B.B. Jacques)."""
+
+    @staticmethod
+    def _fiche(titre_video, duree_video=926, durees=None, **kw):
+        v = TrackVideo(
+            video_id="V",
+            title=titre_video,
+            views=50,
+            duration=duree_video,
+            source=kw.pop("source", "genius_media"),
+        )
+        t = _t(kw.pop("titre", "Temptations (Tiny Desk Home)"), 1, videos=[v], genius_id=11, **kw)
+        t.durations_observees = durees if durees is not None else {"songbpm": 153}
+        return t
+
+    def test_le_concert_entier_qui_ne_nomme_pas_le_morceau_part(self):
+        from src.services import politiques_revue
+
+        t = self._fiche("Ty Dolla $ign: Tiny Desk (Home) Concert")
+        motif, preuves = revue.video_trop_longue(t, _ctx(t))
+        assert preuves["retirer"] and preuves["track_ids"] == [1]
+        assert "6,1 fois" in motif
+        cas = revue.Cas("video_trop_longue", 1, "M", motif, 0, preuves, "k")
+        arbitrage = politiques_revue.arbitrage_etendu(cas, t, _ctx(t))
+        assert arbitrage.action == "retirer_video_recherche"
+
+    def test_nommee_elle_va_a_l_humain(self):
+        from src.services import politiques_revue
+
+        t = self._fiche("Nina Simone - Sinnerman", 621, {"discogs": 134}, titre="Sinnerman")
+        motif, preuves = revue.video_trop_longue(t, _ctx(t))
+        assert not preuves["retirer"] and "le nomme" in motif
+        cas = revue.Cas("video_trop_longue", 1, "M", motif, 0, preuves, "k")
+        assert politiques_revue.arbitrage_etendu(cas, t, _ctx(t)) is None
+
+    def test_les_seuils(self):
+        def cas(titre_video, duree_video, titre="Elixir"):
+            t = self._fiche(titre_video, duree_video, {"deezer": 100}, titre=titre)
+            return revue.video_trop_longue(t, _ctx(t))
+
+        assert cas("1 son en 1H", 300) is None  # 3 × : pas au-delà
+        assert cas("1 son en 1H", 301) is not None
+        assert cas("Elixir (Court métrage)", 400) is None  # nommée : 4 ×
+        assert cas("Elixir (Court métrage)", 401) is not None
+
+    def test_ce_qui_n_est_pas_jugé(self):
+        def cas(**kw):
+            t = self._fiche("Ty Dolla $ign: Tiny Desk (Home) Concert", **kw)
+            return revue.video_trop_longue(t, _ctx(t))
+
+        assert cas(source="search_auto") is None  # pas un lien Genius
+        assert cas(duree_video=None) is None  # durée de la vidéo inconnue
+        assert cas(durees={}) is None  # aucune durée de la fiche
+        assert cas(durees={"youtube_video": 153, "legacy": 153}) is None  # tirées des vidéos
+        assert cas(durees={"songbpm": 153, "deezer": 400}) is None  # la plus longue juge
+        disque = self._fiche("BEN plg - Paraît que (Album entier)", album="Paraît que")
+        assert revue.video_trop_longue(disque, _ctx(disque)) is None
+        medley = self._fiche("Concert", relationships=[{"type": "contient", "track_id": 2}])
+        assert revue.video_trop_longue(medley, _ctx(medley)) is None
+
+    def test_portee_par_deux_pages_elle_est_a_video_partagee(self):
+        a = self._fiche("Ty Dolla $ign: Tiny Desk (Home) Concert")
+        b = _t("Other", 2, videos=list(a.videos), genius_id=12)
+        assert revue.video_trop_longue(a, _ctx(a, b)) is None
+        soeur = _t("Temptations (Tiny Desk Home)", 3, videos=list(a.videos), genius_id=11)
+        assert revue.video_trop_longue(a, _ctx(a, soeur)) is not None
+
+
 class TestDesaccordsExpliques:
     """2026-09-28 : un désaccord que la majorité ou la fiabilité mesurée
     explique ne demande rien (64 cas à majorité : le vote l'a TOUJOURS suivie ;

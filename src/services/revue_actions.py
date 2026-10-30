@@ -527,6 +527,23 @@ def actions_pour(cas: Cas) -> list[Action]:
         return [Action("groupes", "👥 Arbitrer…", _renvoi("groupes"), resout=False), refuser]
     if d in ("lrc_douteux", "lrc_autre_fiche", "lrc_live"):
         return [_action_retirer_lrc()]
+    if d == "paroles_autre_fiche":
+        # Les paroles de secours (et le LRC YTM qui les accompagne), ou le LRC
+        # seul : les deux gestes existants (2026-10-30).
+        textes = cas.preuves.get("textes") or []
+        actions = []
+        if any(t.startswith("paroles") for t in textes):
+            actions.append(
+                Action(
+                    "refuser_paroles",
+                    "✖️ Retirer ces paroles",
+                    lambda c, k: refuser_paroles_ytm(c.data_manager, _fiche(c, k)),
+                    "Retirer ces paroles de secours ? Elles ne seront plus reprises.",
+                )
+            )
+        if any(t.startswith("LRC") for t in textes):
+            actions.append(_action_retirer_lrc())
+        return actions
     if d in ("certif_date", "certif_autre_titre") and cas.preuves.get("certification"):
         return [
             Action(

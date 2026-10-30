@@ -223,6 +223,73 @@ class TestLrcAutreFiche:
     def test_detecteur_formel(self):
         assert "lrc_autre_fiche" in revue.CODES_FORMELS
         assert "certif_autre_titre" in revue.CODES_FORMELS
+
+
+AUTRE_TEXTE = " ".join(f"autre{i} chose{i}" for i in range(30))
+
+
+def _fiche_repli(titre, tid, paroles=None, source="Source: Musixmatch", lrc=None, **kw):
+    t = _t(titre, tid, **kw)
+    t.lyrics.text, t.lyrics.source, t.lyrics.synced = paroles, source, lrc
+    t.lyrics.synced_source = "YouTube Music" if lrc else None
+    return t
+
+
+class TestParolesAutreFiche:
+    """Une fiche SANS paroles Genius jugeables porte un texte de repli qui est
+    celui d'une autre fiche (A2H « Pardonne moi » ← « Pardonnez-moi »)."""
+
+    def test_paroles_de_repli_d_une_autre_fiche(self):
+        o = _fiche_paroles("Samuraï", 1, ORIGINAL)
+        x = _fiche_repli("Interlude", 2, paroles=ORIGINAL)
+        motif, preuves = revue.paroles_d_une_autre_fiche(x, _ctx(o, x))
+        assert "« Samuraï »" in motif and preuves["autre"] == 1
+        assert preuves["textes"] == ["paroles Source: Musixmatch"]
+
+    def test_lrc_d_une_page_vide(self):
+        """Page Genius vide : le LRC n'a aucun juge (`lrc_autre_fiche` exige
+        des paroles Genius)."""
+        o = _fiche_paroles("WAKE UP F1LTHY", 1, ORIGINAL)
+        x = _fiche_repli("00BABTUS", 2, lrc=ORIGINAL, source=None)
+        motif, preuves = revue.paroles_d_une_autre_fiche(x, _ctx(o, x))
+        assert preuves["textes"] == ["LRC YouTube Music"]
+        assert revue.lrc_d_une_autre_fiche(x, _ctx(o, x)) is None
+
+    def test_avec_paroles_genius_le_lrc_reste_a_l_autre_detecteur(self):
+        o = _fiche_paroles("Ghost Town", 1, ORIGINAL)
+        d = _fiche_paroles("Get Off Me", 2, AUTRE_TEXTE, lrc=ORIGINAL)
+        assert revue.paroles_d_une_autre_fiche(d, _ctx(o, d)) is None
+
+    def test_relations_legitimes(self):
+        """Ligne sœur, version, graphie, titre contenu, relation Genius,
+        contenant : le texte commun s'explique."""
+        cas = [
+            ("Pardonnez-moi (Remix)", {}),  # même socle
+            ("Pardonez moi", {}),  # graphie
+            ("22h31 - Pardonnez-moi", {}),  # titre contenu
+            ("PDM (Pardonnez-moi Remix)", {}),  # le socle de l'autre entre parenthèses
+            ("Autre titre", {"genius_id": 9}),  # ligne sœur
+            (
+                "Autre titre",
+                {"relationships": [{"type": "interpolates", "title": "Pardonnez-moi"}]},
+            ),
+        ]
+        for titre, kw in cas:
+            o = _fiche_paroles("Pardonnez-moi", 1, ORIGINAL, genius_id=9)
+            x = _fiche_repli(titre, 2, paroles=ORIGINAL, **kw)
+            assert revue.paroles_d_une_autre_fiche(x, _ctx(o, x)) is None, titre
+
+    def test_une_page_de_concert_n_en_est_pas_l_auteur(self):
+        """« Free Larry Hoover Benefit Concert » contient tout le concert : elle
+        explique le texte d'un morceau joué sans en être un."""
+        concert = _fiche_paroles("Benefit Concert", 1, ORIGINAL + " " + AUTRE_TEXTE * 2)
+        x = _fiche_repli("Flashing Lights", 2, paroles=" ".join(ORIGINAL.split()[:30]))
+        assert revue.paroles_d_une_autre_fiche(x, _ctx(concert, x)) is None
+
+    def test_au_panneau_mais_pas_formel(self):
+        codes = {d.code for d in revue.DETECTEURS}
+        assert "paroles_autre_fiche" in codes
+        assert "paroles_autre_fiche" not in revue.CODES_FORMELS
         assert "lrc_douteux" not in revue.CODES_FORMELS
 
 

@@ -56,6 +56,7 @@ from src.utils.track_soeurs import (
     relations_a_stocker,
     serialiser_relations,
     synchroniser_soeurs,
+    unir_editions,
     unir_observations,
 )
 from src.utils.version_descriptors import titre_generique
@@ -3380,6 +3381,10 @@ class TrackRepository:
                 # `effacer_chez_les_soeurs` — garde : `test_retraits_d_observations`.
                 if jumelles:
                     unir_observations(conn, [tid, *jumelles])
+                    # Les ÉDITIONS aussi : leur durée entre dans le verdict de
+                    # la durée (« Make Her Say » notée chez Kid Cudi, pas chez
+                    # Kanye, 2026-10-29).
+                    unir_editions(conn, [tid, *jumelles])
                 a_faire.update(jumelles)
         # Les AUTRES porteurs de leurs vidéos (même artiste) : une vidéo reçue
         # par l'union des sœurs peut devenir partagée avec une fiche hors de la
@@ -3496,14 +3501,20 @@ class TrackRepository:
         """Rejoue `synchroniser_soeurs` sur chaque famille de lignes sœurs (même
         `genius_id` chez plusieurs artistes), puis rematérialise ses membres —
         rattrapage des familles divergées avant la règle « la lecture la plus
-        récente de la page l'emporte » (2026-10-12) et du lien YouTube arbitré
-        (2026-10-26). Rend `{genius_id: lignes réécrites (données de page et
-        lien YouTube)}` pour les familles qui changent ; sans `appliquer`,
-        la transaction est annulée (passage à blanc). Aucune règle n'est
-        réimplémentée ici : c'est la synchronisation de `save_track`."""
+        récente de la page l'emporte » (2026-10-12), du lien YouTube arbitré
+        (2026-10-26) et de l'union des éditions (2026-10-29). Rend
+        `{genius_id: lignes réécrites (données de page, lien YouTube,
+        éditions)}` pour les familles qui changent ; sans `appliquer`, rien
+        n'est gardé (passage à blanc). Aucune règle n'est réimplémentée ici :
+        c'est la synchronisation de `save_track`.
+
+        UNE transaction par famille, à blanc comme pour de vrai : le verrou
+        d'écriture ne dure que le temps d'une famille (un run peut tourner à
+        côté, cf. `rematerialiser`). Le recalcul de fin de transaction suit
+        aussi les AUTRES porteurs des vidéos de la famille : une union qui
+        change le total d'une fiche hors famille est recalculée avec elle."""
         changes: dict[int, int] = {}
         with self.engine.connect() as conn:
-            transaction = conn.begin()
             try:
                 familles = conn.execute(
                     text(
@@ -3511,30 +3522,32 @@ class TrackRepository:
                         "GROUP BY genius_id HAVING COUNT(DISTINCT artist_id) > 1"
                     )
                 ).all()
-                # Deux temps : TOUTES les synchronisations, puis le recalcul (via
-                # le mécanisme du chantier A, porteurs de vidéos compris) — une
-                # union dans une famille peut changer le total d'une autre.
-                conn.info[self._A_RECALCULER] = set()
-                try:
-                    for gid, tid in familles:
+                conn.rollback()
+                for gid, tid in familles:
+                    transaction = conn.begin()
+                    conn.info[self._A_RECALCULER] = set()
+                    try:
                         rapport = synchroniser_soeurs(conn, tid, gid)
                         self._toucher(conn, tid, *rapport["jumelles"])
-                        reecrites = rapport.get("donnees_de_page", 0) + rapport.get(
-                            "lien_youtube", 0
-                        )
-                        if reecrites:
-                            changes[gid] = reecrites
-                    self._recalculer_touchees(conn)
-                finally:
-                    conn.info.pop(self._A_RECALCULER, None)
-                if appliquer:
-                    transaction.commit()
-                else:
-                    transaction.rollback()
+                        self._recalculer_touchees(conn)
+                        if appliquer:
+                            transaction.commit()
+                    finally:
+                        conn.info.pop(self._A_RECALCULER, None)
+                        if transaction.is_active:
+                            transaction.rollback()
+                    reecrites = sum(
+                        rapport.get(cle, 0)
+                        for cle in ("donnees_de_page", "lien_youtube", "editions")
+                    )
+                    if reecrites:
+                        changes[gid] = reecrites
             except SQLAlchemyError as e:
-                transaction.rollback()
-                logger.error(f"Erreur realigner_soeurs: {e}")
-                return {}
+                # Les familles déjà COMMITÉES (avec `appliquer`) le restent :
+                # chacune est cohérente seule. Le compte rendu s'arrête là.
+                logger.error(
+                    f"Erreur realigner_soeurs (arrêt après {len(changes)} famille(s)): {e}"
+                )
         return changes
 
     def rematerialiser(
@@ -6638,10 +6651,15 @@ class TrackRepository:
 
         ADDITIF, comme `record_track_videos` : une ligne par (morceau, libellé) ;
         une seconde source COMPLÈTE ce que la première n'avait pas (Kworb donne
-        l'ID Spotify, Deezer la durée et l'ISRC), jamais ne remplace."""
+        l'ID Spotify, Deezer la durée et l'ISRC), jamais ne remplace.
+
+        Par `_ecrire` (2026-10-29) : la durée d'une édition entre dans le
+        verdict de la durée (`_durees_editions`), et l'édition rejoint les
+        lignes sœurs en fin de transaction (`unir_editions`)."""
         valeurs = {k: v for k, v in champs.items() if k in self._COLONNES_EDITION and v is not None}
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 ligne = (
                     conn.execute(
                         text("SELECT * FROM track_editions WHERE track_id = :t AND label = :l"),
@@ -6691,6 +6709,20 @@ class TrackRepository:
                     {"vers": vers_track_id, "de": de_track_id, "l": label},
                 ).rowcount
                 if deplacees:
+                    # Les sœurs de la fiche quittée la portaient aussi (union
+                    # des éditions) : elle part de chez elles, sinon l'union de
+                    # fin de transaction la rendrait. Celles de la fiche visée
+                    # la reçoivent par cette union.
+                    def retirer(jumelle):
+                        if jumelle != vers_track_id:
+                            conn.execute(
+                                text(
+                                    "DELETE FROM track_editions WHERE track_id = :t AND label = :l"
+                                ),
+                                {"t": jumelle, "l": label},
+                            )
+
+                    effacer_chez_les_soeurs(conn, de_track_id, retirer)
                     self._toucher(conn, de_track_id)
                     self._toucher(conn, vers_track_id)
                 return bool(deplacees)
@@ -6703,14 +6735,20 @@ class TrackRepository:
         #12092 posées en « autre édition » sur « La Gamberge - Live 2006 »
         (#8199) par une règle du panneau, 2026-10-26. Sa durée entrait dans le
         verdict de la durée : la fiche est recalculée. Rend True si une ligne
-        est partie."""
+        est partie. L'édition part aussi de chez les lignes SŒURS : l'union des
+        éditions de fin de transaction la rendrait (2026-10-29)."""
         try:
             with self._ecrire() as conn:
-                retirees = conn.execute(
-                    text("DELETE FROM track_editions WHERE track_id = :t AND label = :l"),
-                    {"t": track_id, "l": label},
-                ).rowcount
+
+                def retirer(tid):
+                    return conn.execute(
+                        text("DELETE FROM track_editions WHERE track_id = :t AND label = :l"),
+                        {"t": tid, "l": label},
+                    ).rowcount
+
+                retirees = retirer(track_id)
                 if retirees:
+                    effacer_chez_les_soeurs(conn, track_id, retirer)
                     self._toucher(conn, track_id)
                 return bool(retirees)
         except SQLAlchemyError as e:

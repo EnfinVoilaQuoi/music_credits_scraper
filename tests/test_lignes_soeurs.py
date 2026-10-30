@@ -892,3 +892,61 @@ class TestEcrivainsHorsSaveTrack:
         )
         data_manager.clear_track_youtube_link(swing.id)
         assert _colonne(data_manager, isha.id, "youtube_url").endswith("BBBBBBBBBBB")
+
+
+class TestEditionsDesSoeurs:
+    """Une ÉDITION (`track_editions`) décrit l'enregistrement : « Make Her Say »
+    notée chez Kid Cudi #3819 et pas chez Kanye #6479, « Mon pote » chez Flynt
+    et pas chez OrelSan #4440 (2026-10-29, 25 familles sur 302)."""
+
+    @staticmethod
+    def _editions(dm, tid):
+        return {(e["label"], e["duration"]) for e in dm.get_track_editions(tid)}
+
+    def test_une_edition_notee_chez_une_soeur_arrive_chez_l_autre(self, data_manager, famille):
+        swing, isha = famille
+        data_manager.record_track_edition(swing.id, "Radio Edit", source="deezer", duration=201)
+        assert self._editions(data_manager, isha.id) == {("Radio Edit", 201)}
+
+    def test_une_colonne_vide_se_comble_sans_rien_remplacer(self, data_manager, famille):
+        swing, isha = famille
+        data_manager.record_track_edition(swing.id, "Radio Edit", source="kworb", spotify_id="S1")
+        data_manager.record_track_edition(isha.id, "Radio Edit", source="deezer", duration=201)
+        for ligne in famille:
+            (e,) = data_manager.get_track_editions(ligne.id)
+            assert (e["spotify_id"], e["duration"], e["source"]) == ("S1", 201, "kworb")
+
+    def test_le_retrait_part_de_toute_la_famille(self, data_manager, famille):
+        swing, isha = famille
+        data_manager.record_track_edition(swing.id, "Radio Edit", duration=201)
+        assert data_manager.retirer_edition(isha.id, "Radio Edit")
+        data_manager.save_track(swing)
+        for ligne in famille:
+            assert self._editions(data_manager, ligne.id) == set()
+
+    def test_le_deplacement_quitte_toute_la_famille(self, data_manager, famille):
+        swing, isha = famille
+        autre = Track(title="Grünt #34", artist=swing.artist)
+        autre.genius_id = _GENIUS + 1
+        data_manager.save_track(autre)
+        data_manager.record_track_edition(swing.id, "Radio Edit", duration=201)
+        assert data_manager.deplacer_edition(swing.id, "Radio Edit", autre.id)
+        for ligne in famille:
+            assert self._editions(data_manager, ligne.id) == set()
+        assert self._editions(data_manager, autre.id) == {("Radio Edit", 201)}
+
+    def test_realigner_a_blanc_n_ecrit_rien_puis_aligne(self, data_manager, famille):
+        swing, isha = famille
+        with data_manager.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO track_editions (track_id, label, duration) "
+                    "VALUES (:t, 'Version 3:36', 216)"
+                ),
+                {"t": isha.id},
+            )
+        assert data_manager.realigner_soeurs() == {_GENIUS: 1}
+        assert self._editions(data_manager, swing.id) == set()
+        data_manager.realigner_soeurs(appliquer=True)
+        assert self._editions(data_manager, swing.id) == {("Version 3:36", 216)}
+        assert data_manager.realigner_soeurs() == {}

@@ -15,6 +15,8 @@ Propriétés :
   observations de la famille, et chaque retrait passe chez les sœurs — sans
   quoi l'union le ressusciterait (2026-10-29 ; avant, l'alignement n'était
   attendu qu'après une sauvegarde, et « Outro » gardait 421 s chez Népal).
+  Les ÉDITIONS en sont (pose, retrait, déplacement — `unir_editions`,
+  2026-10-29 : « Make Her Say » notée chez Kid Cudi, pas chez Kanye).
 """
 
 import sqlite3
@@ -62,6 +64,16 @@ def _gestes():
         st.tuples(st.just("rejet_video"), fiche, st.sampled_from(["AAAAAAAAAAA", "BBBBBBBBBBB"])),
         st.tuples(
             st.just("lrc"), fiche, st.sampled_from(["lrclib", "ytmusic"]), st.sampled_from("ab")
+        ),
+        st.tuples(
+            st.just("edition"),
+            fiche,
+            st.sampled_from(["Radio Edit", "Clean"]),
+            st.integers(60, 400),
+        ),
+        st.tuples(st.just("retrait_edition"), fiche, st.sampled_from(["Radio Edit", "Clean"])),
+        st.tuples(
+            st.just("deplacer_edition"), fiche, st.sampled_from(["Radio Edit", "Clean"]), fiche
         ),
         st.tuples(st.just("sauver"), fiche),
         st.tuples(st.just("retrait_deezer"), fiche),
@@ -143,6 +155,14 @@ def _jouer(dm, ids, geste) -> bool:
         dm.forget_track_video(tid, geste[2])
     elif nom == "lrc":
         dm.upsert_observations(tid, [Observation("lyrics_synced", _LRC[geste[3]], geste[2])])
+    elif nom == "edition":
+        dm.record_track_edition(tid, geste[2], source="deezer", duration=geste[3])
+    elif nom == "retrait_edition":
+        dm.retirer_edition(tid, geste[2])
+    elif nom == "deplacer_edition":
+        vers = ids.get(geste[3])
+        if vers is not None and vers != tid:
+            dm.deplacer_edition(tid, geste[2], vers)
     elif nom == "retrait_deezer":
         dm.clear_track_deezer_id(tid)
     elif nom == "retrait_isrc":

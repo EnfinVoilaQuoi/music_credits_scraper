@@ -607,6 +607,86 @@ def _unir_table_additive(conn, ids: list[int], table: str, cle: str) -> int:
     return ecrites
 
 
+#: Colonnes d'une ÉDITION (`track_editions`) comblées d'une sœur à l'autre ; la
+#: clé est le libellé (`UNIQUE(track_id, label)`).
+COLONNES_D_EDITION = ("title", "source", "duration", "spotify_id", "deezer_id", "isrc", "genius_id")
+
+
+def unir_editions(conn, ids: list[int]) -> int:
+    """Chaque ligne reçoit les ÉDITIONS (`track_editions`) de ses sœurs.
+
+    Une édition (radio edit, autre page Deezer, page Genius absorbée) décrit
+    l'ENREGISTREMENT, pas la ligne d'un artiste : « Make Her Say » notée chez
+    Kid Cudi et pas chez Kanye, « Mon pote » chez Flynt et pas chez OrelSan
+    (2026-10-29, 25 familles sur 302). Sa durée entre dans le verdict de la
+    durée : sans elle, deux sœurs pouvaient juger différemment.
+
+    Comme `record_track_edition` : ADDITIF par libellé — un libellé absent est
+    copié, une colonne vide d'un libellé présent est comblée (première valeur
+    renseignée, `ids[0]` d'abord), une valeur renseignée n'est jamais
+    remplacée. Deux sœurs en désaccord sur une même édition le restent :
+    l'invariant `soeurs_divergentes` le montre. Les RETRAITS passent par
+    `effacer_chez_les_soeurs` (`retirer_edition`, `deplacer_edition`), sans
+    quoi cette union les rendrait.
+    """
+    from sqlalchemy import text
+
+    marques = ", ".join(f":i{n}" for n in range(len(ids)))
+    params = {f"i{n}": tid for n, tid in enumerate(ids)}
+    colonnes = ", ".join(COLONNES_D_EDITION)
+    lignes = (
+        conn.execute(
+            text(
+                f"SELECT id, track_id, label, created_at, {colonnes} FROM track_editions "  # noqa: S608
+                f"WHERE track_id IN ({marques}) ORDER BY id"
+            ),
+            params,
+        )
+        .mappings()
+        .all()
+    )
+    if not lignes:
+        return 0
+    rang = {tid: n for n, tid in enumerate(ids)}
+    lignes = sorted(lignes, key=lambda r: (rang[r["track_id"]], r["id"]))
+    reference: dict[str, dict] = {}
+    for ligne in lignes:
+        ref = reference.setdefault(ligne["label"], {"created_at": ligne["created_at"]})
+        for colonne in COLONNES_D_EDITION:
+            if colonne not in ref and not _est_vide(ligne[colonne]):
+                ref[colonne] = ligne[colonne]
+    existantes = {(ligne["track_id"], ligne["label"]): ligne for ligne in lignes}
+    ecrites = 0
+    for label, ref in reference.items():
+        for track_id in ids:
+            ligne = existantes.get((track_id, label))
+            if ligne is None:
+                cols = ["track_id", "label", *ref]
+                conn.execute(
+                    text(
+                        f"INSERT INTO track_editions ({', '.join(cols)}) "  # noqa: S608
+                        f"VALUES ({', '.join(':' + c for c in cols)})"
+                    ),
+                    {"track_id": track_id, "label": label, **ref},
+                )
+                ecrites += 1
+                continue
+            trous = {
+                c: v for c, v in ref.items() if c in COLONNES_D_EDITION and _est_vide(ligne[c])
+            }
+            if trous:
+                conn.execute(
+                    text(
+                        "UPDATE track_editions SET "  # noqa: S608
+                        + ", ".join(f"{c} = :{c}" for c in trous)
+                        + " WHERE id = :id"
+                    ),
+                    {"id": ligne["id"], **trous},
+                )
+                ecrites += 1
+    return ecrites
+
+
 def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
     """Aligne toutes les lignes d'un même enregistrement. IDEMPOTENT.
 
@@ -641,6 +721,7 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
         "observations": 0,
         "videos": 0,
         "spotify_ids": 0,
+        "editions": 0,
     }
     if not jumelles:
         return rapport
@@ -686,6 +767,7 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
     rapport["observations"] = unir_observations(conn, famille)
     rapport["videos"] = _unir_table_additive(conn, famille, "track_videos", "video_id")
     rapport["spotify_ids"] = _unir_table_additive(conn, famille, "track_spotify_ids", "spotify_id")
+    rapport["editions"] = unir_editions(conn, famille)
     # `is_primary` RECOPIE `tracks.spotify_id` : une colonne comblée par une
     # sœur et un ID reçu par l'union n'étaient jamais marqués principaux
     # (2026-10-11 : 82 lignes sœurs sans ID principal dans la table).

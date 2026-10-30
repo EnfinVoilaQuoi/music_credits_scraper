@@ -67,6 +67,29 @@ class TestInvariants:
         cas = [c for c in audit.cas if c.famille == "soeurs_divergentes"]
         assert len(cas) == 1 and "lyrics_synced : 2 valeurs sur 2 lignes" in cas[0].libelle
 
+    def test_soeurs_aux_editions_divergentes(self, data_manager, isha):
+        """« Make Her Say » notée en édition chez Kid Cudi, pas chez Kanye
+        (2026-10-29) : l'édition décrit l'enregistrement, l'invariant la voit."""
+        _, t = isha
+        swing = Artist(name="Swing")
+        swing.id = data_manager.save_artist(swing)
+        soeur = Track(title="Durag", artist=swing)
+        soeur.genius_id = 4242
+        data_manager.save_track(soeur)
+        # En contournant l'écrivain (qui unit les éditions des sœurs).
+        _sql(
+            data_manager,
+            "INSERT INTO track_editions (track_id, label, duration) VALUES (:t, 'Radio Edit', 200)",
+            t=t.id,
+        )
+        audit = au.auditer(data_manager, ["Isha"])
+        cas = [c for c in audit.cas if c.famille == "soeurs_divergentes"]
+        assert len(cas) == 1 and "éditions : 2 jeux sur 2 lignes" in cas[0].libelle
+
+        data_manager.realigner_soeurs(appliquer=True)
+        audit = au.auditer(data_manager, ["Isha"])
+        assert not [c for c in audit.cas if c.famille == "soeurs_divergentes"]
+
     def test_un_horodatage_different_n_est_pas_une_divergence(self, data_manager, isha):
         assert au._volatile("lyrics_scraped_at") and au._volatile("youtube_video_views")
         assert not au._volatile("lyrics_synced")

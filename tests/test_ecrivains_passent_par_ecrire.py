@@ -63,12 +63,13 @@ EXCEPTIONS: dict[str, str] = {
     "record_relation_artiste": _LIGNE + " (feat / principal / rôle de CET artiste)",
     "record_secondary_role": _LIGNE + " (rôle de CET artiste)",
     "rename_track": _LIGNE + " (titre de la ligne ; le verdict LRC ne lit pas le titre)",
-    "record_track_edition": "table `track_editions` (additive) : aucune colonne dérivée",
     # ── Recalculs ──
     "rearbitrer_duree_et_date": _RECALCUL,
     "combler_isrc_vides": _RECALCUL + " (rattrapage par lots, passage à blanc)",
     "rematerialiser": _RECALCUL + " (appelle `_rematerialiser_fiche`, passage à blanc)",
-    "realigner_soeurs": _RECALCUL + " (pilote le mécanisme à la main, passage à blanc)",
+    "realigner_soeurs": (
+        _RECALCUL + " (pilote le mécanisme à la main, une transaction par famille, passage à blanc)"
+    ),
     "recalculer_vues_ytm": (
         _RECALCUL + " — avec les exclusions de l'APPELANT (`vues_comptees`), que le "
         "recalcul générique (exclusions relues en base) défairait"

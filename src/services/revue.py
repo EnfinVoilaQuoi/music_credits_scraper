@@ -1327,6 +1327,13 @@ def _proprietaires_des_videos(ctx) -> dict[str, list]:
     return ctx.memo("proprietaires_videos", fabrique)
 
 
+def _nombre_de_pages(proprietaires: dict, video_id: str) -> int:
+    """Combien d'ENREGISTREMENTS portent la vidéo : les lignes sœurs (même
+    page Genius, chez un groupe et chez son membre, réunis par la
+    discographie) n'en font qu'un — compter les lignes en faisait un partage."""
+    return len({_page(t) for t in proprietaires.get(video_id, ())})
+
+
 def raison_du_refus_de_recherche(track, recherche: dict) -> str:
     """Pourquoi le score refuse ce que la recherche a vu : « artiste » (aucun
     artiste du résultat n'est un artiste de la fiche — « Outro » de Dimeh
@@ -1443,6 +1450,90 @@ def video_d_une_autre_chaine(track, ctx=None):
     return None
 
 
+#: Une vidéo Genius qui ne NOMME pas le morceau et dure plus de 3 fois sa
+#: durée n'est pas le morceau : concert, émission, compilation. Mesuré sur la
+#: copie du 2026-10-30 (7 877 vidéos `genius_media` à durée connue) : les
+#: vidéos muettes d'une seule page au-delà de 3,8 × sont toutes de cette sorte
+#: (Tiny Desk entier 6,1 ×, « 1 son en 1H » de Booska-P 4,3 ×, « Freshmen
+#: Adjustment Mixtape Tracks 1-5 » 3,9 ×, set de Rolling Loud 3,8 ×), puis
+#: rien jusqu'à 1,8 × (« I Luv The Hood », le morceau lui-même, que le titre
+#: nomme mal) : 3 est au milieu de l'écart.
+RATIO_VIDEO_MUETTE = 3
+#: Une vidéo qui NOMME le morceau peut être un clip long : court métrage, film
+#: (« WTP » de Teyana Taylor 3,1 ×, « Runaway (Full-length Film) » 3,8 ×,
+#: « Neverland (Short Film) » 2,4 ×). Au-delà de 4 ×, titre et durée se
+#: contredisent (version longue, original samplé — « Sinnerman » de Nina
+#: Simone sur le morceau d'une soul mix) : l'humain.
+RATIO_VIDEO_NOMMEE = 4
+#: Durées de la fiche qui ne jugent pas une vidéo : celles tirées des vidéos
+#: (l'une peut venir d'elle) et `legacy` (contredit, ne soutient pas).
+_DUREES_HORS_JUGE = _DUREES_DE_VIDEO | {"youtube", "legacy"}
+
+
+def video_trop_longue(track, ctx=None):
+    """Une vidéo posée par la page Genius (`genius_media`), qu'aucune autre
+    page ne porte, BIEN plus longue que le morceau : plus de
+    `RATIO_VIDEO_MUETTE` fois la plus longue de ses durées indépendantes
+    (catalogues, SongBPM, Discogs, hit YTM — ni vidéo, ni legacy) quand son
+    titre ne nomme pas le morceau — le concert, l'émission, la compilation où
+    il passe (« BlackBird » de Planète Rap, 58 min, sur « LEGO » de B.B.
+    Jacques) : `retirer`, une règle retire le lien. Plus de
+    `RATIO_VIDEO_NOMMEE` fois quand le titre le nomme : titre et durée se
+    contredisent, l'humain. La vidéo d'un disque ENTIER (comptée à l'album,
+    `contenants.video_de_disque`), une page qui en CONTIENT d'autres (medley,
+    album entier), une vidéo portée par plusieurs pages (`video_partagee`) ou
+    une fiche sans durée indépendante : rien."""
+    from src.utils.contenants import est_contenant, video_de_disque
+
+    if not track.videos or est_contenant(track):
+        return None
+    durees = []
+    for source, d in (track.durations_observees or {}).items():
+        if d and source not in _DUREES_HORS_JUGE:
+            try:
+                durees.append(int(float(d)))
+            except (TypeError, ValueError):
+                continue
+    reference = max(durees, default=0)
+    if reference <= 0:
+        return None
+    proprietaires = _proprietaires_des_videos(ctx) if ctx is not None else {}
+    for v in sorted(track.videos, key=lambda x: -(x.views or 0)):
+        if v.source != "genius_media" or not v.duration:
+            continue
+        if len({_page(t) for t in proprietaires.get(v.video_id, [track])}) > 1:
+            continue  # partagée : `video_partagee` la juge
+        if video_de_disque(v.title, track.album):
+            continue
+        nommee = video_nomme(track, v)
+        ratio = v.duration / reference
+        if ratio <= (RATIO_VIDEO_NOMMEE if nommee else RATIO_VIDEO_MUETTE):
+            continue
+        fois = f"{ratio:.1f}".replace(".", ",")
+        if nommee:
+            motif = (
+                f"vidéo « {v.title} » ({v.duration} s) : {fois} fois la durée du morceau "
+                f"({reference} s), mais elle le nomme — version longue, film, autre enregistrement ?"
+            )
+        else:
+            motif = (
+                f"vidéo « {v.title} » ({v.duration} s) : {fois} fois la durée du morceau "
+                f"({reference} s), et elle ne le nomme pas — concert, émission ou compilation"
+            )
+        return (
+            motif,
+            {
+                "video_id": v.video_id,
+                "track_ids": [track.id],
+                "duree_video": v.duration,
+                "duree_fiche": reference,
+                "retirer": not nommee,
+                "impact": v.views or 0,
+            },
+        )
+    return None
+
+
 def video_etrangere(track, ctx=None):
     """Une vidéo rattachée dont le titre ne nomme pas le morceau : peut-être
     celle d'un autre (Kanye « Heartless - Recorded At RAK Studios » → vidéo de
@@ -1458,7 +1549,7 @@ def video_etrangere(track, ctx=None):
         v
         for v in track.videos or []
         if v.title
-        and len(proprietaires.get(v.video_id, ())) < 2
+        and _nombre_de_pages(proprietaires, v.video_id) < 2
         and not video_nomme(track, v)
         and not video_de_disque(v.title, track.album)
     ]
@@ -1595,6 +1686,8 @@ def _temoins_du_proprietaire(fiches, v) -> list[tuple[str, str]]:
         temoins.append(par_duree)
     if (par_chaine := _par_la_chaine(fiches, v.video_id)) is not None:
         temoins.append(par_chaine)
+    if (par_album := _par_l_album_ytm(fiches, v.video_id)) is not None:
+        temoins.append(par_album)
     return temoins
 
 
@@ -1624,7 +1717,12 @@ def _place_de_l_artiste(t, artiste: str) -> str:
 
     if nomme(t.primary_artist_name or (t.artist.name if t.artist else "")):
         return "principal"
-    if nomme(t.artist.name if t.artist else "") or any(nomme(a) for a in t.featured_artists_list):
+    # Sur la REPRISE d'un tiers (`secondary_role` « Cover »), l'artiste de la
+    # ligne est l'auteur de l'original, pas un interprète : sa chaîne ne lie
+    # pas la vidéo à la reprise (« Ghost Town » de Justice Der, ligne de
+    # Kanye, portait l'audio « Kanye West - Topic » de l'original).
+    ligne = t.artist.name if t.artist and t.secondary_role != "Cover" else ""
+    if nomme(ligne) or any(nomme(a) for a in t.featured_artists_list):
         return "lié"
     return "étranger"
 
@@ -1691,6 +1789,50 @@ def _par_la_duree(fiches, video_id):
     if len(proches) != 1:
         return None
     return next(iter(proches)), f"durée de la vidéo ({duree} s) = ses catalogues seuls"
+
+
+def _par_l_album_ytm(fiches, video_id):
+    """`(page, témoin)` : la vidéo est, pour UNE page seulement, la piste de sa
+    page d'album YouTube Music (`ytm_album`), et sa durée (e62) est celle des
+    catalogues de cette page, à 2 s — les autres n'ont aucun catalogue à moins
+    de `_ECART_AUTRE_PAGE_S` (une page SANS catalogue ne dément rien : c'est
+    ce qui distingue ce témoin de `_par_la_duree`). « 530 » : l'audio
+    « ¥$ - Topic » (288 s) de *VULTURES 2* (288 s), posée aussi par Genius sur
+    « 530 (Haikou LP) », sans catalogue (2026-10-30). Un titre fait de signes
+    seuls (« * (Part. 1) ») ne se rapproche pas sûrement d'une piste d'album
+    (« * * * * * » posée sur la Part. 1, 39 s, au lieu de la Part. 3) : rien."""
+    album = {
+        _page(t)
+        for t in fiches
+        if (lien := _lien_de(t, video_id)) is not None and lien.source == "ytm_album"
+    }
+    if len(album) != 1:
+        return None
+    page = album.pop()
+    duree = next(
+        (
+            lien.duration
+            for t in fiches
+            if (lien := _lien_de(t, video_id)) is not None and lien.duration
+        ),
+        None,
+    )
+    if not duree:
+        return None
+    for t in fiches:
+        catalogues = [
+            int(d)
+            for s in _DUREES_PAR_ID
+            if (d := (t.durations_observees or {}).get(s)) is not None
+        ]
+        if _page(t) == page:
+            if not _titre_sans_parentheses(t) or not catalogues:
+                return None
+            if not all(abs(d - duree) <= 2 for d in catalogues):
+                return None
+        elif any(abs(d - duree) <= _ECART_AUTRE_PAGE_S for d in catalogues):
+            return None
+    return page, f"piste de l'album YouTube Music, durée ({duree} s) = ses catalogues"
 
 
 def partage_a_juger(fiches) -> bool:
@@ -1883,7 +2025,7 @@ def _vues_expliquees(track, ctx) -> bool:
     if not avec_vues:
         return False
     for v in avec_vues:
-        if not v.title or len(proprietaires.get(v.video_id, ())) > 1:
+        if not v.title or _nombre_de_pages(proprietaires, v.video_id) > 1:
             return False
         if not video_nomme(track, v):
             return False
@@ -2387,6 +2529,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "Vidéo d'un autre artiste (chaîne et durée)",
         "📺",
         video_d_une_autre_chaine,
+    ),
+    Detecteur(
+        "video_trop_longue",
+        "Vidéo Genius bien plus longue que le morceau",
+        "📏",
+        video_trop_longue,
     ),
     # Pour INFORMATION (décision utilisateur 2026-10-26, « la vérif manuelle,
     # c'est pour les cas que le code ne peut pas trancher ») : une page qui ne

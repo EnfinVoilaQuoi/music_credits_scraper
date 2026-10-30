@@ -252,3 +252,67 @@ class TestSpotifyConfirmeParUnAutreCatalogue:
             durations_observees={"discogs": 338, "spotify_web": 339, "youtube": 404},
         )
         assert pol.arbitrage_etendu(_cas("duree_spotify", t), t, None) is None
+
+
+class TestLiensProposesParGenius:
+    """L1 / L2 : un alias que Genius crédite comme auteur, une formation de
+    nature connue qu'il donne pour interprète, sur au moins 3 fiches."""
+
+    @staticmethod
+    def _rel(nom, kind, source="discogs", formation=None):
+        from src.models import ArtistRelation
+
+        return ArtistRelation(related_name=nom, kind=kind, source=source, formation=formation)
+
+    @staticmethod
+    def _juger(ctx, nom, kind):
+        return pol.arbitrage_etendu(
+            _cas("liens_proposes", None, {"nom": nom, "kind": kind}), None, ctx
+        )
+
+    def test_nom_civil_credite_comme_auteur(self):
+        from src.models.track import Credit, CreditRole
+
+        fiches = []
+        for i, titre in enumerate(("Caroline", "Bouge de là", "Nouveau western"), 1):
+            t = _t(titre, tid=i)
+            t.credits = [Credit(name="Claude M'Barali", role=CreditRole.WRITER)]
+            fiches.append(t)
+        ctx = _ctx(*fiches, relations=[self._rel("Claude M'Barali", "alias")])
+        arb = self._juger(ctx, "Claude M'Barali", "alias")
+        assert arb.action == "confirmer_lien" and "3 fiches" in arb.raison
+        # Deux fiches ne suffisent pas ; une autre graphie non plus (« Elie » / « Eli »).
+        ctx.disco.pop()
+        assert self._juger(ctx, "Claude M'Barali", "alias") is None
+
+    def test_autre_graphie_ne_compte_pas(self):
+        from src.models.track import Credit, CreditRole
+
+        fiches = [_t(f"T{i}", tid=i) for i in range(1, 5)]
+        for t in fiches:
+            t.credits = [Credit(name="Elie Yaffa", role=CreditRole.WRITER)]
+        ctx = _ctx(*fiches, relations=[self._rel("Eli Yaffa", "alias")])
+        assert self._juger(ctx, "Eli Yaffa", "alias") is None
+
+    def test_formation_de_nature_connue_interprete(self):
+        fiches = [_t(f"T{i}", tid=i, primary_artist_name="Hustle Gang") for i in range(1, 4)] + [
+            _t("T4", tid=4, featured_artists="T.I., Hustle Gang")
+        ]
+        rel = self._rel("Hustle Gang", "member_of", "musicbrainz", "collectif")
+        arb = self._juger(_ctx(*fiches, relations=[rel]), "Hustle Gang", "member_of")
+        assert arb.action == "confirmer_lien" and "4 fiches" in arb.raison
+
+    def test_formation_sans_nature_reste_a_la_fenetre_groupes(self):
+        """« ¥$ » : 163 fiches, mais groupe ou collectif ? L'humain."""
+        fiches = [
+            _t(f"T{i}", tid=i, primary_artist_name="¥$, Kanye West & Ty Dolla $ign")
+            for i in range(1, 6)
+        ]
+        rel = self._rel("¥$", "member_of", "musicbrainz")
+        assert self._juger(_ctx(*fiches, relations=[rel]), "¥$", "member_of") is None
+
+    def test_membres_proposes_jamais(self):
+        """Swing : « Eric Kwok » proposé MEMBRE (homonyme hongkongais)."""
+        fiches = [_t(f"T{i}", tid=i, primary_artist_name="Eric Kwok") for i in range(1, 5)]
+        rel = self._rel("Eric Kwok", "has_member", "musicbrainz", "groupe")
+        assert self._juger(_ctx(*fiches, relations=[rel]), "Eric Kwok", "has_member") is None

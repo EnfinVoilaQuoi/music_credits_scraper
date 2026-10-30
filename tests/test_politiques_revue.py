@@ -432,7 +432,9 @@ def test_kworb_ligne_rattachee_par_le_rejeu_d_aujourd_hui():
 
 def test_alias_confirme_par_deux_sources_ou_par_le_type_musicbrainz():
     def rel(nom, source, detail=None, kind="alias"):
-        return SimpleNamespace(related_name=nom, kind=kind, source=source, detail=detail)
+        return SimpleNamespace(
+            related_name=nom, kind=kind, source=source, detail=detail, formation=None
+        )
 
     ctx = revue.contexte(
         [],

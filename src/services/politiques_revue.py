@@ -724,25 +724,26 @@ def politique_kworb(cas, _track, _ctx, rejoues: dict | None = None):
 
 
 def politique_alias(cas, _track, ctx):
-    """Un ALIAS proposé (jamais une formation : sa nature groupe / collectif se
-    tranche dans la fenêtre Groupes) est confirmé quand MusicBrainz ET Discogs
-    le donnent, ou quand MusicBrainz le type « nom d'artiste ». Une page
-    d'alias Discogs sans type reste à l'humain : nom civil (« Eli Yaffa ») ou
-    nom douteux (« Global » chez Médine), rien ne les distingue. Prudence : un
-    alias confirmé devient un nom de RECHERCHE (certifications, collectifs) et
-    un profil Spotify connu."""
+    """Un ALIAS proposé est confirmé quand MusicBrainz ET Discogs le donnent,
+    quand MusicBrainz le type « nom d'artiste », ou quand Genius le crédite
+    comme auteur sur `FICHES_MIN_LIEN` fiches de l'artiste (L1, 2026-10-31).
+    Une page d'alias Discogs sans autre trace reste à l'humain : nom civil mal
+    graphié (« Eli Yaffa » ; Genius écrit « Elie Yaffa ») ou nom douteux
+    (« Global » chez Médine). Une formation n'est confirmée que si sa nature
+    est connue (L2) ; sinon elle se tranche dans la fenêtre Groupes.
+    Prudence : un alias confirmé devient un nom de RECHERCHE (certifications,
+    collectifs) et un profil Spotify connu."""
     preuves = cas.preuves or {}
-    if preuves.get("kind") != "alias":
-        return None
+    kind, nom = preuves.get("kind"), preuves.get("nom")
     rel = next(
-        (
-            r
-            for r in ctx.relations_proposees
-            if r.kind == "alias" and r.related_name == preuves.get("nom")
-        ),
+        (r for r in ctx.relations_proposees if r.kind == kind and r.related_name == nom),
         None,
     )
     if rel is None:
+        return None
+    if kind == "member_of":
+        return _formation_par_ses_morceaux(rel, ctx)
+    if kind != "alias":
         return None
     sources = set((rel.source or "").split("+"))
     if {"discogs", "musicbrainz"} <= sources:
@@ -751,7 +752,71 @@ def politique_alias(cas, _track, ctx):
         return Arbitrage(
             "confirmer l'alias", "confirmer_lien", "MusicBrainz : nom d'artiste (Artist name)"
         )
+    creditees = _fiches_ou_il_ecrit(nom, ctx)
+    if len(creditees) >= FICHES_MIN_LIEN:
+        return Arbitrage(
+            "confirmer l'alias",
+            "confirmer_lien",
+            f"Genius le crédite (auteur, compositeur, producteur) sur {len(creditees)} "
+            f"fiches de l'artiste : {', '.join(creditees[:3])}…",
+        )
     return None
+
+
+#: Fiches de l'artiste où Genius nomme un alias ou une formation proposés,
+#: au-dessous desquelles le lien reste à l'humain (L1 / L2, 2026-10-31).
+FICHES_MIN_LIEN = 3
+
+_ROLES_D_AUTEUR = frozenset({"Writer", "Composer", "Lyricist", "Producer"})
+
+
+def _fiches_ou_il_ecrit(nom: str, ctx) -> list[str]:
+    """Titres des fiches dont les crédits Genius nomment `nom` (nom normalisé
+    égal, jamais une sous-chaîne) dans un rôle d'auteur : le témoin d'un nom
+    civil ou d'un nom de producteur (« Claude M'Barali », 22 fiches de MC
+    Solaar)."""
+    from src.utils.title_matching import normalize_name
+
+    cle = normalize_name(nom)
+    return [
+        t.title
+        for t in ctx.disco
+        if any(
+            c.role.value in _ROLES_D_AUTEUR and normalize_name(c.name) == cle
+            for c in t.credits or []
+        )
+    ]
+
+
+def _interpretes(track) -> set[str]:
+    from src.utils.title_matching import normalize_name
+
+    noms = f"{track.primary_artist_name or ''},{track.featured_artists or ''}"
+    return {
+        normalize_name(n)
+        for n in re.split(r",|&|\band\b|\bx\b|\bfeat\.?", noms, flags=re.IGNORECASE)
+        if n.strip()
+    }
+
+
+def _formation_par_ses_morceaux(rel, ctx) -> Arbitrage | None:
+    """Une formation proposée dont la NATURE (groupe / collectif) est déjà
+    connue, et que Genius donne pour interprète d'au moins `FICHES_MIN_LIEN`
+    fiches de l'artiste (L2, 2026-10-31 : « Hustle Gang », collectif, 4
+    fiches de Travis Scott). Sans nature, la fenêtre « Groupes » décide."""
+    from src.utils.title_matching import normalize_name
+
+    if not rel.formation:
+        return None
+    cle = normalize_name(rel.related_name)
+    fiches = [t.title for t in ctx.disco if cle in _interpretes(t)]
+    if len(fiches) < FICHES_MIN_LIEN:
+        return None
+    return Arbitrage(
+        f"confirmer la formation ({rel.formation})",
+        "confirmer_lien",
+        f"interprète de {len(fiches)} fiches de l'artiste : {', '.join(fiches[:3])}…",
+    )
 
 
 # ── Règles VALIDÉES (décisions utilisateur 2026-10-20) ─────────────────────

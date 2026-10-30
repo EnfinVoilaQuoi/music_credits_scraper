@@ -51,13 +51,11 @@ PRIMITIVES = frozenset(
 
 #: Lectures de primitives qu'un module hors du juge fait ENCORE (cliquet).
 PLAFONDS = {
-    # Kworb : le ROUTAGE d'une ligne par sa nature (sans version, rendition,
-    # remix nommé) et le remixeur affiché au dialogue — une lecture, pas un
-    # jugement : les rapprochements passent par le juge.
-    "utils/update_kworb.py": 4,
-    # Tous les autres modules délèguent (second passage, 2026-10-30) : panneau,
+    # Plus aucune entrée (2026-10-30) : tous les modules délèguent — panneau,
     # politiques, audit, éditions, catalogue Deezer, compteurs partagés, pages
-    # Genius, participation et validation posent une question du juge.
+    # Genius, participation, validation et Kworb (routage d'une ligne par sa
+    # nature : `porte_une_version`, `est_une_rendition`, `est_remix_nomme`)
+    # posent une question du juge.
 }
 
 
@@ -276,6 +274,10 @@ def test_les_questions_des_gates_valent_les_primitives_sur_le_corpus(paires):
                 }
             ),
             "nature_de_l_edition": "diffusion" if va.kind == Kind.NONE else vd.nature_d_edition(va),
+            # Kworb et parutions (2026-10-30) : routage d'une ligne, titre de parution.
+            "est_remix_nomme": va.kind == Kind.REMIX_NAMED,
+            "nature_de_version": va.kind.value,
+            "meme_titre_normalise": normalize_title(a) == normalize_title(b),
         }
         obtenu = {
             "est_remix_nu": vd.est_remix_nu(a),
@@ -296,6 +298,9 @@ def test_les_questions_des_gates_valent_les_primitives_sur_le_corpus(paires):
             "meme_prise_de_version": vd.meme_prise_de_version(a, b),
             "mention_editoriale": vd.mention_editoriale(a),
             "nature_de_l_edition": vd.nature_de_l_edition(a),
+            "est_remix_nomme": vd.est_remix_nomme(a),
+            "nature_de_version": vd.nature_de_version(a),
+            "meme_titre_normalise": vd.meme_titre_normalise(a, b),
         }
         ecarts += [(q, a, b) for q in attendu if attendu[q] != obtenu[q]]
     assert not ecarts, ecarts[:20]

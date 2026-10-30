@@ -1304,6 +1304,20 @@ def est_une_rendition(titre: str | None) -> bool:
     return cle_titre(titre).variant.kind == Kind.RENDITION
 
 
+def est_remix_nomme(titre: str | None) -> bool:
+    """PUR. Le titre porte un descripteur de REMIX qui NOMME son remixeur
+    (« Dolce Camara - Snight B Remix »), à la différence du remix nu."""
+    return cle_titre(titre).variant.kind == Kind.REMIX_NAMED
+
+
+def nature_de_version(titre: str | None) -> str:
+    """PUR. La nature de la version que porte le titre, en clair : ``none``
+    (le morceau), ``rendition``, ``remix_named`` ou ``remix_bare``. Pour AFFICHER
+    ou stocker la nature ; pour décider, poser la question qui la tranche
+    (`porte_une_version`, `est_une_rendition`, `est_remix_nomme`…)."""
+    return cle_titre(titre).variant.kind.value
+
+
 def remixeur_du_titre(titre: str | None) -> str | None:
     """PUR. Le remixeur que le titre NOMME (« Snight B » de « Dolce Camara -
     Snight B Remix »), ou None."""

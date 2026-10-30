@@ -40,15 +40,18 @@ from src.utils.spotify_identity import (
 )
 from src.utils.version_descriptors import (
     MOTS_DE_MEME_MORCEAU,
-    Kind,
     doublons_evidents,
+    est_remix_nomme,
+    est_une_rendition,
     meme_famille_de_version,
     meme_prise_du_morceau,
     meme_version_stricte,
-    parse_variant,
+    nature_de_version,
     porte_une_version,
     reeditions_evidentes,
     remix_du_meme_morceau,
+    remixeur_du_titre,
+    socle_du_titre,
     socle_normalise,
     titre_generique,
     titres_equivalents,
@@ -589,7 +592,7 @@ def _candidats_remix_existants(titre: str, index: Index) -> list:
     return out
 
 
-def _proposition_remix(entry, v, index: Index, artist, lire_identite, motifs) -> dict:
+def _proposition_remix(entry, index: Index, artist, lire_identite, motifs) -> dict:
     """Le dict que le dialogue affiche pour un remix — jamais écrit d'office."""
     socle = socle_normalise(entry["title"])
     trouve = original_de(socle, index)
@@ -599,14 +602,15 @@ def _proposition_remix(entry, v, index: Index, artist, lire_identite, motifs) ->
         parent = parents[0] if len(parents) == 1 else None
     identite = lire_identite(entry["spotify_id"]) if entry.get("spotify_id") else None
     credited = [a for a in (identite or {}).get("artists") or [] if a]
-    proposition = "tiers" if v.kind == Kind.REMIX_NAMED else "collab"
-    if v.remixer and credited:
-        remixeur_credite = any(names_match_as_words(v.remixer, a) for a in credited)
+    remixeur = remixeur_du_titre(entry["title"])
+    proposition = "tiers" if est_remix_nomme(entry["title"]) else "collab"
+    if remixeur and credited:
+        remixeur_credite = any(names_match_as_words(remixeur, a) for a in credited)
         deja_collaborateur = parent is not None and any(
-            names_match_as_words(v.remixer, c.name) for c in parent.get_music_credits()
+            names_match_as_words(remixeur, c.name) for c in parent.get_music_credits()
         )
         if remixeur_credite and not deja_collaborateur:
-            motifs.append(f"« {v.remixer} » est crédité par Spotify et absent des crédits du socle")
+            motifs.append(f"« {remixeur} » est crédité par Spotify et absent des crédits du socle")
     if entry.get("is_feature"):
         motifs.append("Kworb : l'artiste n'est pas premier crédité (*)")
         proposition = "tiers"
@@ -621,9 +625,9 @@ def _proposition_remix(entry, v, index: Index, artist, lire_identite, motifs) ->
         "daily": entry["daily_streams"],
         "spotify_id": entry.get("spotify_id"),
         "is_feature": bool(entry.get("is_feature")),
-        "kind": v.kind.value,
-        "socle": v.socle,
-        "remixer": v.remixer,
+        "kind": nature_de_version(entry["title"]),
+        "socle": socle_du_titre(entry["title"]),
+        "remixer": remixeur,
         "parent_track_id": parent.id if parent else None,
         "parent_title": parent.title if parent else None,
         "credited": credited,
@@ -805,9 +809,8 @@ def rapprocher(
             return Rapprochement(track=cible, via="decision")
         # Décision orpheline (morceau supprimé) : on retombe sur la proposition.
 
-    v = parse_variant(entry["title"])
     rejete = norm in decisions.get("rejected", [])
-    if v.kind == Kind.NONE:
+    if not porte_une_version(entry["title"]):
         if rejete:
             return Rapprochement(motif="rejete")
         cand, score = _best_candidate(entry["title"], index.tracks)
@@ -830,7 +833,7 @@ def rapprocher(
         # un rejet n'a pas répondu à celle-ci. Reproposé UNE fois — la décision
         # prise ferme la porte.
         motifs.append("précédemment rejeté (ancienne question « même morceau ? »)")
-    if v.kind == Kind.RENDITION:
+    if est_une_rendition(entry["title"]):
         socle = socle_normalise(entry["title"])
         fiche = _fiche_de_la_version(entry["title"], index)
         if fiche is not None:
@@ -856,8 +859,8 @@ def rapprocher(
                 "daily": entry["daily_streams"],
                 "spotify_id": sid,
                 "is_feature": bool(entry.get("is_feature")),
-                "kind": v.kind.value,
-                "socle": v.socle,
+                "kind": nature_de_version(entry["title"]),
+                "socle": socle_du_titre(entry["title"]),
                 "remixer": None,
                 "parent_track_id": parent.id if parent else None,
                 "parent_title": parent.title if parent else None,
@@ -882,9 +885,7 @@ def rapprocher(
                 "score": 0.0,
             }
         )
-    return Rapprochement(
-        suggestion=_proposition_remix(entry, v, index, artist, lire_identite, motifs)
-    )
+    return Rapprochement(suggestion=_proposition_remix(entry, index, artist, lire_identite, motifs))
 
 
 def _ecrire_rendition(data_manager, parent, entry, kworb_date, result, via) -> None:

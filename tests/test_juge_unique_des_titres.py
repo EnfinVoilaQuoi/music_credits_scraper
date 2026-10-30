@@ -115,9 +115,6 @@ def test_le_crible_voit_les_deux_formes():
 #: Comparaisons `normalize_title(x) ==/!= normalize_title(y)` qu'un module hors
 #: du juge fait ENCORE (liste FERMÉE, chaque entrée commentée).
 PLAFONDS_EGALITES = {
-    # Parution reconnue par son titre (`_rattacher_parution`) : à déléguer
-    # quand la tâche « lien YouTube des lignes sœurs » aura rendu le module.
-    "utils/track_repository.py": 1,
     # Dialogue de fusion (IHM CTk, gelée hors correctifs) : titre et album.
     "gui/dialogs/merge_tracks.py": 1,
 }

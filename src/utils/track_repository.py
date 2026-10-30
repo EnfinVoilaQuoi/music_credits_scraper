@@ -59,7 +59,7 @@ from src.utils.track_soeurs import (
     unir_editions,
     unir_observations,
 )
-from src.utils.version_descriptors import titre_generique
+from src.utils.version_descriptors import meme_titre_normalise, titre_generique
 from src.utils.version_heritage import sans_heritage_couvert
 from src.utils.youtube_utils import extract_video_id
 
@@ -4604,11 +4604,12 @@ class TrackRepository:
                 .mappings()
                 .all()
             )
-            expected_artist = normalize_title(observation.credited_artist_name or "")
             for row in candidates:
-                same_artist = normalize_title(row["credited_artist_name"] or "") == expected_artist
+                same_artist = meme_titre_normalise(
+                    row["credited_artist_name"], observation.credited_artist_name
+                )
                 if (
-                    normalize_title(row["title"]) == normalize_title(title)
+                    meme_titre_normalise(row["title"], title)
                     and same_artist
                     and self._release_dates_match(row["release_date"], observation.release_date)
                 ):

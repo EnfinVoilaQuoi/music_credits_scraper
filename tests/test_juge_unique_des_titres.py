@@ -118,6 +118,39 @@ def test_le_crible_voit_les_deux_formes():
     assert _lectures(ast.parse(code)) == 3
 
 
+# ── Le disque d'un titre générique : un seul juge (2026-10-30) ─────────────────
+# Les 13 verdicts qui ont basculé sur les 105 paires réelles (disque de la
+# fiche, parution qui la porte), tous des acceptations justes.
+
+
+@pytest.mark.parametrize(
+    "fiche, servi",
+    [
+        ("OCHO", "OCHO (Deluxe)"),  # Deezer refusait
+        ("Temps mort (Réédition)", "Temps mort"),  # Deezer
+        ("M.A.N (Black Roses & Lost Feelings)", "M.A.N (Black Roses & Lost Feelings) (Bonus)"),
+        ("Paradisiaque", "Paradisiaque / Mc Solaar"),  # Deezer, YouTube, YTM
+        ("Chambre 140 (Part. 1)", "Chambre 140 (Part. 3)"),  # l'édition qui cumule
+        ("444Nuits (Version rouge)", "444 Nuits"),  # Spotify, GetSongBPM
+    ],
+)
+def test_meme_disque_reconnait_les_editions(fiche, servi):
+    from src.utils.version_descriptors import meme_disque
+
+    assert meme_disque(fiche, servi) and meme_disque(servi, fiche)
+
+
+@pytest.mark.parametrize(
+    "fiche, servi",
+    [("0.9", "Autopsie Vol. 3"), ("Memoria", "Private Club"), ("Reste Calme", "444 Nuits")],
+)
+def test_meme_disque_separe_deux_disques(fiche, servi):
+    from src.utils.version_descriptors import meme_disque
+
+    assert not meme_disque(fiche, servi)
+    assert not meme_disque(fiche, None) and not meme_disque(None, servi)
+
+
 # ── Les questions des gates répondent comme les primitives qu'elles remplacent ──
 # Preuve de la délégation SANS EFFET (2026-10-29) : sur les ~7 600 paires
 # réelles du corpus, chaque question rend exactement la combinaison de

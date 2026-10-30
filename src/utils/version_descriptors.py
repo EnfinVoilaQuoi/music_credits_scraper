@@ -1169,6 +1169,30 @@ def remix_du_meme_morceau(a: str | None, b: str | None) -> bool:
     )
 
 
+_GROUPE_DE_DISQUE = re.compile(r"\s*(?:[\(\[][^\)\]]*[\)\]]|\s[-–]\s.*$)")
+
+
+def meme_disque(a: str | None, b: str | None) -> bool:
+    """PUR. Deux noms de disque désignent-ils le même album, éditions comprises ?
+    Le juge UNIQUE du « titre générique sur son disque » (2026-10-30) : les
+    gates avaient chacun le leur — Deezer l'égalité des clés (« OCHO » ≠
+    « OCHO (Deluxe) »), YouTube et YTM `meme_album` (pas « Paradisiaque /
+    Mc Solaar »), Spotify et GetSongBPM un socle sans groupes ni segment
+    « - … » inclus par mots entiers dans l'autre (pas « 444Nuits (Version
+    rouge) » / « 444 Nuits »). Ici l'un OU l'autre. Pas de garde du numéro
+    de partie : « Chambre 140 (Part. 3) » (32 pistes) est l'édition qui
+    CUMULE les parts 1 et 2, Deezer y place à bon droit l'« Interlude *
+    (Part. 1) » (mesuré le 2026-10-30). Faux si l'un manque."""
+    from src.utils.title_matching import either_contains_as_words, meme_album
+
+    if not a or not b:
+        return False
+    if meme_album(a, b):
+        return True
+    nus = [normalize_title(_GROUPE_DE_DISQUE.sub("", x)) for x in (a, b)]
+    return bool(nus[0]) and (nus[0] == nus[1] or either_contains_as_words(nus[0], nus[1]))
+
+
 def edition_de_diffusion(titre: str | None) -> str | None:
     """PUR. Le libellé de l'ÉDITION de diffusion que porte le titre (« Radio
     Edit », « 2011 Remaster » : même fiche que l'original), ou None."""

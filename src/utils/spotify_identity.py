@@ -36,6 +36,7 @@ from src.utils.title_matching import (
 from src.utils.track_mapper import _clean_duration
 from src.utils.version_descriptors import (
     est_remix_nu,
+    meme_disque,
     meme_famille_de_version,
     titre_generique,
     titre_sans_son_disque,
@@ -693,19 +694,6 @@ def lire_album_page(spotify_id: str) -> str | None:
         return None
 
 
-_GROUPE_DE_DISQUE = re.compile(r"\s*(?:[\(\[][^\)\]]*[\)\]]|\s[-–]\s.*$)")
-
-
-def memes_disques(a: str | None, b: str | None) -> bool:
-    """PUR. Deux titres de disque désignent-ils le même album, éditions
-    comprises (« Temps mort » / « Temps mort (Réédition) », « Adamant-ium »
-    2016 / 2020) ?"""
-    if not a or not b:
-        return False
-    nus = [normalize_title(_GROUPE_DE_DISQUE.sub("", x)) for x in (a, b)]
-    return bool(nus[0]) and (nus[0] == nus[1] or either_contains_as_words(nus[0], nus[1]))
-
-
 def motif_titre_generique(track, identite: dict | None, album: str | None) -> str | None:
     """PUR. Un titre GÉNÉRIQUE (« Intro », « Interlude », « Outro ») ne désigne
     une piste que dans SON disque (2026-10-13) : Diam's « Intro » (*Premier
@@ -717,7 +705,7 @@ def motif_titre_generique(track, identite: dict | None, album: str | None) -> st
     album = (identite or {}).get("album") or album
     if not album:
         return f"titre générique : le disque Spotify est illisible, attendu « {track.album} »"
-    if not memes_disques(album, track.album):
+    if not meme_disque(album, track.album):
         return f"titre générique : piste du disque « {album} », attendu « {track.album} »"
     return None
 

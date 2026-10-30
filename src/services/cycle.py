@@ -76,6 +76,8 @@ class BilanCycle(Bilan):
     etapes: dict[str, Bilan] = field(default_factory=dict)
     #: Étapes non lancées (arrêt demandé avant elles).
     non_lancees: list[str] = field(default_factory=list)
+    #: Pages vides sans aucune trace désactivées en fin de cycle (`pages_vides`).
+    pages_desactivees: int = 0
 
 
 def manques_credits(o: credits.OptionsCredits) -> list[Manque]:
@@ -232,10 +234,38 @@ def _run(
             _rattraper_discogs(runtime, artist, bilan)
         _recharger(runtime, artist)
         bilan.corrections = revue_auto.corriger_apres_run(runtime.data_manager, artist).appliquees
+        _desactiver_pages_vides(runtime, artist, bilan)
     if any(not b.complete for b in bilan.etapes.values()) and bilan.complete:
         rates = [e for e, b in bilan.etapes.items() if not b.complete]
         bilan.interrompu(f"étape(s) incomplète(s) : {', '.join(rates)}")
     return bilan
+
+
+#: Étapes qui peuvent donner signe de vie à une page vide : la désactiver
+#: n'a de sens qu'après elles, toutes complètes (`pages_vides`).
+ETAPES_AVANT_PAGES_VIDES = ("identite", "credits", "streams")
+
+
+def _desactiver_pages_vides(runtime: Runtime, artist: Artist, bilan: BilanCycle) -> None:
+    """Pages vides sans aucune trace désactivées en fin de cycle (décision
+    utilisateur 2026-10-30) — seulement si identité, crédits et streams ont
+    tourné jusqu'au bout."""
+    etapes = bilan.etapes
+    if runtime.disabled is None or not all(
+        e in etapes and etapes[e].complete for e in ETAPES_AVANT_PAGES_VIDES
+    ):
+        return
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from src.services.pages_vides import desactiver_pages_vides
+
+    try:
+        bilan.pages_desactivees = desactiver_pages_vides(
+            runtime.disabled, runtime.data_manager, artist, artist.tracks
+        )
+    except (OSError, ValueError, SQLAlchemyError) as e:
+        logger.exception("Désactivation des pages vides en échec")
+        bilan.erreurs.append(f"pages vides (fin de cycle) : {e}")
 
 
 def _rattraper_discogs(runtime: Runtime, artist: Artist, bilan: BilanCycle) -> None:
@@ -265,6 +295,8 @@ def resume(bilan: BilanCycle, options: OptionsCycle) -> str:
         lignes.append(
             f"⚡ {len(bilan.corrections)} correction(s) automatique(s) — voir « À trancher »"
         )
+    if bilan.pages_desactivees:
+        lignes.append(f"🕳️ {bilan.pages_desactivees} page(s) vide(s) sans trace désactivée(s)")
     lignes.append("")
     lignes.append("COMPLET" if bilan.complete else f"INCOMPLET — {bilan.motif}")
     return "\n".join(lignes)

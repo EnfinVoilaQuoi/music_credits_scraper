@@ -85,3 +85,75 @@ class TestReactivation:
     def test_une_fiche_disparue_n_est_pas_reactivee(self, manager):
         self._desactiver(manager, 9)
         assert pages_vides.reactiver_pages_remplies(manager, _A, [_page(1)]) == 0
+
+
+class TestDesactivationParRegle:
+    """Décision utilisateur 2026-10-30 (CORRECTIFS) : une page vide (🕳️ / 🏷️)
+    SANS RIEN est désactivée d'office, réversible ; un signe de vie la laisse à
+    l'humain. Mesuré sur une copie : 1 page désactivée (Kid Cudi « The Chosen
+    One »), 35 restent à l'humain — les 47 autres l'avaient été le 2026-10-29."""
+
+    def _dm(self, obs=None):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(get_artist_observations=lambda _id: obs or {})
+
+    def _artiste(self):
+        a = Artist(name="Jul")
+        a.id = 3
+        return a
+
+    def test_signes_de_vie(self):
+        from src.enrichment.observation import Observation
+
+        assert pages_vides.signes_de_vie(_page(1)) == []
+        assert pages_vides.signes_de_vie(_page(1, anecdotes="Une histoire")) == ["anecdote"]
+        assert "identifiant de catalogue" in pages_vides.signes_de_vie(_page(1, discogs_id=5))
+        date = [Observation("release_date", "2023-06-02", "genius")]
+        assert pages_vides.signes_de_vie(_page(1), date) == []
+        mesure = [Observation("duration", 236, "songbpm")]
+        assert pages_vides.signes_de_vie(_page(1), mesure) == ["observation"]
+
+    def test_seule_la_page_sans_rien_est_desactivee(self, manager):
+        from src.enrichment.observation import Observation
+
+        tracks = [_page(1), _page(2, spotify_id="abc"), _page(3), _page(4)]
+        obs = {3: [Observation("apple_music_id_propose", "15", "genius")]}
+        manager.desactiver("Jul", {4}, "autre", "manuel")
+        n = pages_vides.desactiver_pages_vides(manager, self._dm(obs), self._artiste(), tracks)
+        assert n == 1 and manager.load_disabled_tracks("Jul") == {1, 4}
+        assert manager.load_motifs("Jul")[1]["origine"] == pages_vides.ORIGINE_REGLE
+        # La passe de fin de discographie ne la réactive pas : elle est toujours vide.
+        assert pages_vides.reactiver_pages_remplies(manager, _A, tracks) == 0
+
+    def test_une_page_reactivee_a_la_main_n_est_plus_desactivee(self, manager):
+        tracks = [_page(1)]
+        pages_vides.desactiver_pages_vides(manager, self._dm(), self._artiste(), tracks)
+        manager.save_disabled_tracks("Jul", set())  # l'IHM la réactive
+        assert set(manager.load_reactivees_a_la_main("Jul")) == {1}
+        assert pages_vides.desactiver_pages_vides(manager, self._dm(), self._artiste(), tracks) == 0
+        manager.save_disabled_tracks("Jul", {1})  # l'IHM la redésactive : plus « à la main »
+        assert manager.load_reactivees_a_la_main("Jul") == {}
+
+    def test_une_reactivation_par_la_regle_n_est_pas_une_decision(self, manager):
+        manager.desactiver("Jul", {1}, pages_vides.MOTIF_PAGE_VIDE, pages_vides.ORIGINE_REGLE)
+        manager.reactiver("Jul", {1})
+        assert manager.load_reactivees_a_la_main("Jul") == {}
+
+    def test_en_fin_de_cycle_seulement_apres_identite_credits_streams(self, monkeypatch):
+        from src.services import cycle
+        from src.services.runtime import Bilan
+
+        appels = []
+        monkeypatch.setattr(pages_vides, "desactiver_pages_vides", lambda *a: appels.append(a) or 2)
+        rt = type("Rt", (), {"disabled": object(), "data_manager": object()})()
+        a = self._artiste()
+        a.tracks = []
+        incomplet = cycle.BilanCycle(etapes={"identite": Bilan(), "credits": Bilan()})
+        cycle._desactiver_pages_vides(rt, a, incomplet)
+        assert appels == [] and incomplet.pages_desactivees == 0
+        complet = cycle.BilanCycle(
+            etapes={e: Bilan() for e in ("disco", "identite", "credits", "streams")}
+        )
+        cycle._desactiver_pages_vides(rt, a, complet)
+        assert len(appels) == 1 and complet.pages_desactivees == 2

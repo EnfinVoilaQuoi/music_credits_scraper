@@ -48,9 +48,21 @@ class DisabledTracksManager:
 
             # Le motif d'une page qui reste désactivée la suit ; celui d'une
             # page réactivée part avec elle (l'IHM ne connaît que les IDs).
+            # Sans `motifs` donnés, c'est l'IHM qui sauve : une page qu'une
+            # RÈGLE avait désactivée et qui sort de la liste est réactivée À
+            # LA MAIN — notée, pour que la règle ne la désactive plus.
+            a_la_main = self.load_reactivees_a_la_main(artist_name)
             if motifs is None:
                 motifs = self.load_motifs(artist_name)
+                le = datetime.now().isoformat(timespec="seconds")
+                for tid, m in motifs.items():
+                    regle = str(m.get("origine") or "").startswith("regle:")
+                    if regle and tid not in disabled_track_ids:
+                        a_la_main[tid] = {"motif": m.get("motif"), "le": le}
             gardes = {str(tid): motifs[tid] for tid in disabled_track_ids if tid in motifs}
+            reactivees = {
+                str(tid): m for tid, m in a_la_main.items() if tid not in disabled_track_ids
+            }
             # Convertir le set en liste pour la sérialisation JSON
             data = {
                 "artist_name": artist_name,
@@ -60,6 +72,8 @@ class DisabledTracksManager:
             }
             if gardes:
                 data["motifs"] = gardes
+            if reactivees:
+                data["reactivees_a_la_main"] = reactivees
 
             ecrire_atomique(file_path, data)
 
@@ -125,6 +139,15 @@ class DisabledTracksManager:
         """Pourquoi chaque page a été désactivée, quand on le sait (2026-10-29) :
         `{track_id: {"motif", "origine", "le"}}`. Une désactivation faite dans
         l'IHM n'a pas de motif : rien ne la réactive d'office."""
+        return self._lire_par_fiche(artist_name, "motifs")
+
+    def load_reactivees_a_la_main(self, artist_name: str) -> dict[int, dict]:
+        """Pages qu'une règle avait désactivées et que l'utilisateur a
+        RÉACTIVÉES dans l'IHM (2026-10-30) : `{track_id: {"motif", "le"}}`.
+        Une règle ne les désactive plus (`services.pages_vides`)."""
+        return self._lire_par_fiche(artist_name, "reactivees_a_la_main")
+
+    def _lire_par_fiche(self, artist_name: str, cle: str) -> dict[int, dict]:
         try:
             file_path = self._get_artist_file(artist_name)
             if not file_path.exists():
@@ -132,13 +155,13 @@ class DisabledTracksManager:
             with open(file_path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError) as e:
-            logger.error(f"Motifs de désactivation illisibles pour {artist_name}: {e}")
+            logger.error(f"Désactivations illisibles pour {artist_name} ({cle}): {e}")
             return {}
-        motifs = data.get("motifs") if isinstance(data, dict) else None
-        if not isinstance(motifs, dict):
+        valeurs = data.get(cle) if isinstance(data, dict) else None
+        if not isinstance(valeurs, dict):
             return {}
         return {
-            int(tid): m for tid, m in motifs.items() if str(tid).isdigit() and isinstance(m, dict)
+            int(tid): m for tid, m in valeurs.items() if str(tid).isdigit() and isinstance(m, dict)
         }
 
     def desactiver(
@@ -156,9 +179,11 @@ class DisabledTracksManager:
         return self.save_disabled_tracks(artist_name, ids, motifs)
 
     def reactiver(self, artist_name: str, track_ids: Iterable[int]) -> bool:
+        """Réactivation par une RÈGLE (`services.pages_vides`) : les motifs
+        sont passés, la page n'est donc pas notée réactivée à la main."""
         retirer = set(track_ids)
         ids = self.load_disabled_tracks(artist_name) - retirer
-        return self.save_disabled_tracks(artist_name, ids)
+        return self.save_disabled_tracks(artist_name, ids, self.load_motifs(artist_name))
 
     def cleanup_orphans(self, artist_names: Iterable[str]) -> int:
         """Supprime les fichiers dont AUCUN artiste de la base ne porte le nom.

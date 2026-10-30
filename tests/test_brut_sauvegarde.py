@@ -106,3 +106,18 @@ def test_meme_disque():
 
     assert brut_sauvegarde.meme_disque(Path("C:/a/b"), Path("c:/x"))
     assert not brut_sauvegarde.meme_disque(Path("C:/a"), Path("D:/a"))
+
+
+def test_la_copie_dit_sa_progression(source, tmp_path, monkeypatch):
+    """Une ligne par tranche de pages : le journal du run bouge pendant les
+    ~18 min de copie vers le disque externe (sinon le lot la croit figée)."""
+    with closing(sqlite3.connect(source)) as conn:
+        conn.executemany("INSERT INTO brut (corps) VALUES (?)", [(b"x" * 4000,)] * 20)
+        conn.commit()
+    monkeypatch.setattr(brut_sauvegarde, "_PAGES_PAR_TRANCHE", 2)
+    lignes = []
+
+    cible = sauvegarder(source, tmp_path / "copies", maintenant=T0, progres=lignes.append)
+
+    assert len(lignes) > 2 and lignes[-1].startswith("   … brut : ")
+    assert _lignes(cible) == _lignes(source)

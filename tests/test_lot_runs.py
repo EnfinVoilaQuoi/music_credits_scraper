@@ -133,3 +133,30 @@ def test_un_autre_ecrivain_arrete_le_lot_avant_de_lancer(tmp_path):
         ecrire=lambda _: None,
     )
     assert lot.resultats == [] and lot.code == 3
+
+
+def test_un_run_tue_qui_traine_n_est_pas_un_autre_ecrivain(tmp_path):
+    """« streams Django » (2026-10-30) : tué pendant une copie calée vers le
+    disque externe, le processus traînait encore et le lot s'arrêtait (code 3)."""
+    data = tmp_path / "data"
+    (data / "brut").mkdir(parents=True)
+    vus = []
+
+    def tuer(proc):
+        lot_runs.tuer_arbre(proc)
+        return {424242}
+
+    lot = lot_runs.executer_lot(
+        [["import time; time.sleep(60)"], ["print('suivant')"]],
+        sortie=tmp_path / "sortie",
+        data=data,
+        code=tmp_path,
+        commande=lambda a: [sys.executable, "-c", a[0]],
+        intervalle_s=0.2,
+        gel_s=1,
+        anti_veille=False,
+        processus=lambda: vus or [],
+        ecrire=lambda _: vus.append((424242, "python -m src.cli streams Django")),
+        tuer=tuer,
+    )
+    assert [r.statut for r in lot.resultats] == ["figé", "ok"] and not lot.autre_ecrivain

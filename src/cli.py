@@ -870,12 +870,19 @@ def _exporter_decisions(runtime: Runtime) -> None:
         print(ligne)
 
 
+def _progres(ligne: str) -> None:
+    """Progression des copies de fin de run, vidée tout de suite : le journal
+    du run doit bouger pendant une copie longue vers le disque externe, sinon
+    `scripts/lot_runs.py` déclare le run figé (« streams Django », 2026-10-30)."""
+    print(ligne, flush=True)
+
+
 def _sauvegarder_brut() -> None:
     """La copie hebdomadaire du brut (`BRUT_BACKUP_DIR`), après TOUT run et
     après la fermeture (le brut n'est plus écrit). Ne lève pas."""
     from src.persistence import brut_sauvegarde
 
-    ligne = brut_sauvegarde.sauvegarder_en_fin_de_run()
+    ligne = brut_sauvegarde.sauvegarder_en_fin_de_run(progres=_progres)
     if ligne:
         print(ligne)
 
@@ -885,7 +892,7 @@ def _copier_sauvegardes_hors_disque() -> None:
     (`BASE_BACKUP_EXTERNE_DIR`), après tout run. Ne lève pas."""
     from src.utils import sauvegardes_hors_disque
 
-    ligne = sauvegardes_hors_disque.synchroniser_en_fin_de_run()
+    ligne = sauvegardes_hors_disque.synchroniser_en_fin_de_run(progres=_progres)
     if ligne:
         print(ligne)
 

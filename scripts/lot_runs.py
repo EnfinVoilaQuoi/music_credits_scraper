@@ -127,8 +127,15 @@ def a_surveiller(data: Path, journal: Path) -> list[Path]:
     return [journal, *data.glob("music_credits.db*"), *(data / "brut").glob("*.db*")]
 
 
-def tuer_arbre(proc: subprocess.Popen) -> None:
-    """Le run et tout ce qu'il a lancé (navigateurs, pilote patchright)."""
+#: Secondes laissées à un arbre tué pour disparaître.
+ATTENTE_MORTS_S = 120
+
+
+def tuer_arbre(proc: subprocess.Popen) -> set[int]:
+    """Le run et tout ce qu'il a lancé (navigateurs, pilote patchright). Rend
+    les PID tués : un processus bloqué dans une écriture disque (copie vers le
+    disque externe calée, « streams Django » le 2026-10-30) ne meurt qu'au
+    retour de l'écriture, et le lot le prenait pour un AUTRE écrivain."""
     try:
         parent = psutil.Process(proc.pid)
         enfants = parent.children(recursive=True)
@@ -141,6 +148,8 @@ def tuer_arbre(proc: subprocess.Popen) -> None:
             continue
     proc.kill()
     proc.wait()
+    psutil.wait_procs(enfants, timeout=ATTENTE_MORTS_S)
+    return {proc.pid, *(p.pid for p in enfants)}
 
 
 @dataclass
@@ -187,6 +196,7 @@ def executer_lot(
     anti_veille: bool = True,
     processus: Callable[[], list[tuple[int, str]]] = _processus,
     ecrire: Callable[[str], None] = print,
+    tuer: Callable[[subprocess.Popen], set[int]] = tuer_arbre,
 ) -> Lot:
     """Les runs un par un, chacun surveillé (délai, gel). Un autre écrivain
     arrête le lot avant le run suivant ; un run figé ou hors délai est tué,
@@ -194,6 +204,7 @@ def executer_lot(
     sortie.mkdir(parents=True, exist_ok=True)
     journal_lot = sortie / "lot.log"
     lot = Lot()
+    tues: set[int] = set()  # nos runs tués : pas d'« autre écrivain » s'ils traînent
 
     def noter(texte: str) -> None:
         ligne = f"=== {datetime.now():%Y-%m-%d %H:%M:%S} {texte}"
@@ -205,7 +216,7 @@ def executer_lot(
         _anti_veille(True)
     try:
         for n, args in enumerate(runs, start=1):
-            autres = autres_ecrivains(processus(), {psutil.Process().pid})
+            autres = autres_ecrivains(processus(), {psutil.Process().pid} | tues)
             if autres:
                 lot.autre_ecrivain = autres
                 noter(f"ARRÊT : un autre écrivain tient la base (PID {autres}) — lot arrêté")
@@ -234,7 +245,7 @@ def executer_lot(
                         gel_s,
                     )
                     if statut:
-                        tuer_arbre(proc)
+                        tues |= tuer(proc)
                         break
             duree = time.time() - debut
             if statut is None:

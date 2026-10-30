@@ -84,3 +84,21 @@ def test_sans_place_rien_n_est_copie_ni_retire(tmp_path, monkeypatch):
 
 def test_fin_de_run_sans_dossier_ne_fait_rien():
     assert mod.synchroniser_en_fin_de_run() is None
+
+
+def test_une_copie_longue_dit_sa_progression(tmp_path, monkeypatch):
+    """Le journal du run bouge pendant la copie (sinon le lot la croit figée)."""
+    monkeypatch.setattr(mod, "PAS_PROGRES", 1024 * 1024)
+    src, dest = tmp_path / "backups", tmp_path / "D"
+    fichier = _sauvegarde(src, "backup_a_1.db", T0 - timedelta(hours=1))
+    fichier.write_bytes(b"x" * (3 * 1024 * 1024 + 10))
+    os.utime(fichier, (fichier.stat().st_atime, (T0 - timedelta(hours=1)).timestamp()))
+    lignes = []
+
+    synchroniser(src, dest, maintenant=T0, appliquer=True, progres=lignes.append)
+
+    assert len(lignes) == 3 and "3 / 3 Mo" in lignes[-1]
+    assert (dest / "backup_a_1.db").read_bytes() == fichier.read_bytes()
+    assert (dest / "backup_a_1.db").stat().st_mtime == pytest.approx(
+        (T0 - timedelta(hours=1)).timestamp()
+    )

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import shutil
 import sqlite3
+from collections.abc import Callable
 from contextlib import closing
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -58,11 +59,15 @@ def sauvegarder(
     maintenant: datetime | None = None,
     jours: int = 7,
     forcer: bool = False,
+    progres: Callable[[str], None] | None = None,
 ) -> Path | None:
     """Copie `source` dans `dossier` si la dernière copie a `jours` jours (ou
     `forcer`), puis ne garde que les `GARDEES` plus récentes. Rend le chemin
     écrit, ou None (rien à faire). Lève `OSError` / `sqlite3.Error` : c'est
-    l'appelant qui décide (le run le DIT et continue)."""
+    l'appelant qui décide (le run le DIT et continue). `progres` reçoit une
+    ligne par tranche de pages copiée : la copie dure ~18 min sur le disque
+    externe, plus que le gel de `scripts/lot_runs.py` si le journal du run ne
+    bouge pas (2026-10-30)."""
     maintenant = maintenant or datetime.now()
     source, dossier = Path(source), Path(dossier)
     if not source.exists():
@@ -83,7 +88,7 @@ def sauvegarder(
     # interrompue n'est jamais prise pour une copie (ni ne chasse la bonne).
     # L'API backup n'écrit pas la source.
     with closing(sqlite3.connect(source)) as src, closing(sqlite3.connect(partielle)) as dest:
-        src.backup(dest)
+        src.backup(dest, pages=_PAGES_PAR_TRANCHE, progress=_rapporteur(progres))
     partielle.replace(cible)
     for _quand, ancienne in copies(dossier)[GARDEES:]:
         ancienne.unlink()
@@ -91,12 +96,27 @@ def sauvegarder(
     return cible
 
 
+#: Pages copiées par tranche (4 Kio la page : 32 Mio par tranche).
+_PAGES_PAR_TRANCHE = 8192
+
+
+def _rapporteur(progres: Callable[[str], None] | None):
+    """Le rappel de `sqlite3.Connection.backup` : une ligne par tranche."""
+    if progres is None:
+        return None
+
+    def rapporter(_statut, restantes, total) -> None:
+        progres(f"   … brut : {total - restantes} / {total} pages")
+
+    return rapporter
+
+
 def meme_disque(a: Path, b: Path) -> bool:
     """Deux chemins sur le même volume (Windows : même lettre de lecteur)."""
     return Path(a).resolve().anchor.lower() == Path(b).resolve().anchor.lower()
 
 
-def sauvegarder_en_fin_de_run() -> str | None:
+def sauvegarder_en_fin_de_run(progres: Callable[[str], None] | None = None) -> str | None:
     """Le geste de fin de run CLI. Rend une ligne de bilan, ou None (rien à
     dire). Ne lève pas : une copie manquée ne fait pas échouer le run."""
     from src import config
@@ -109,7 +129,9 @@ def sauvegarder_en_fin_de_run() -> str | None:
         return "⚠️ brut non sauvegardé : régler BRUT_BACKUP_DIR (.env), idéalement un autre disque"
     try:
         brut.fermer()  # la connexion du run : la copie lit un état commité
-        cible = sauvegarder(brut.CHEMIN, dossier, jours=config.settings.brut_backup_jours)
+        cible = sauvegarder(
+            brut.CHEMIN, dossier, jours=config.settings.brut_backup_jours, progres=progres
+        )
     except (OSError, sqlite3.Error) as e:
         logger.warning(f"Copie du brut vers {dossier} impossible : {e}")
         return f"⚠️ copie du brut impossible : {e}"

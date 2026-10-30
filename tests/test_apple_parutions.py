@@ -137,6 +137,22 @@ def test_l_album_apple_rejoint_la_parution_et_propose_les_id(data_manager):
     assert itunes.appels == [_UPC]
 
 
+def test_oublier_parution_apple_garde_la_date(data_manager):
+    """SCH « Loup noir » (2026-10-30) : l'album Apple de « Loup noir (A COLORS
+    SHOW) » noté sur la parution du single ordinaire — retiré à la main, le
+    constat reste daté."""
+    artiste = Artist(name="OrelSan")
+    artiste.id = data_manager.save_artist(artiste)
+    shonen = _parution(data_manager, artiste, "Shonen", (2, 1))
+    (parution,) = data_manager.get_track_releases(shonen.id)
+    data_manager.noter_parution_apple(parution["id"], artiste.id, 42)
+
+    assert data_manager.oublier_parution_apple(parution["id"], 42)
+    collection, vu = data_manager.etat_parution_apple(parution["id"])
+    assert collection is None and vu is not None
+    assert not data_manager.oublier_parution_apple(parution["id"], 42)
+
+
 def test_ambigu_ou_inconnu_est_date_sans_rattacher(data_manager):
     artiste = Artist(name="OrelSan")
     artiste.id = data_manager.save_artist(artiste)

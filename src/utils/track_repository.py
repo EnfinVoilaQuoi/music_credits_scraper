@@ -3908,6 +3908,24 @@ class TrackRepository:
                     {"r": release_id, "a": artist_id, "ext": str(collection_id), "now": now},
                 )
 
+    def oublier_parution_apple(self, release_id: int, collection_id: str | int) -> bool:
+        """Défait un rattachement Apple jugé faux (geste humain) : l'album
+        Apple n'est plus un identifiant de la parution, la date du constat
+        reste (pas redemandé avant expiration). Les liens déjà posés par cet
+        identifiant se défont à part (`unlink_track_from_release`). Rend True
+        si l'identifiant était là."""
+        with self.engine.begin() as conn:
+            return (
+                conn.execute(
+                    text(
+                        "DELETE FROM release_identifiers WHERE release_id = :r "
+                        "AND source = 'apple_music' AND external_id = :ext"
+                    ),
+                    {"r": release_id, "ext": str(collection_id)},
+                ).rowcount
+                > 0
+            )
+
     def etat_parution_spotify(self, release_id: int) -> tuple[str | None, Any]:
         """`(ID d'album Spotify de la parution ou None, date de la dernière
         recherche MusicBrainz ou None)` (e57). L'album Spotify est un

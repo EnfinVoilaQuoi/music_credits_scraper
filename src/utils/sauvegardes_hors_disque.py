@@ -19,6 +19,7 @@ sélectionnée.
 from __future__ import annotations
 
 import shutil
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -77,12 +78,42 @@ def planifier(source: Path, dest: Path, maintenant: datetime) -> Plan:
     )
 
 
+#: Une ligne de progression tous les `PAS_PROGRES` octets copiés.
+PAS_PROGRES = 32 * 1024 * 1024
+_TRANCHE = 1024 * 1024
+
+
+def copier_avec_progres(
+    fichier: Path, cible: Path, progres: Callable[[str], None] | None = None
+) -> None:
+    """`shutil.copy2` par tranches, une ligne de progression tous les
+    `PAS_PROGRES` octets : le disque externe est lent (~1,3 Mo/s mesurés le
+    2026-10-30), et un run dont le journal ne bouge plus pendant la copie est
+    déclaré figé par `scripts/lot_runs.py` (« streams Django », tué à 17:54
+    avec la copie à moitié faite)."""
+    taille, fait, prochain = fichier.stat().st_size, 0, PAS_PROGRES
+    with open(fichier, "rb") as src, open(cible, "wb") as dst:
+        while tranche := src.read(_TRANCHE):
+            dst.write(tranche)
+            fait += len(tranche)
+            if progres is not None and fait >= prochain:
+                progres(f"   … {fichier.name} : {fait // 2**20} / {taille // 2**20} Mo")
+                prochain += PAS_PROGRES
+    shutil.copystat(fichier, cible)
+
+
 def synchroniser(
-    source: Path, dest: Path, *, maintenant: datetime | None = None, appliquer: bool = False
+    source: Path,
+    dest: Path,
+    *,
+    maintenant: datetime | None = None,
+    appliquer: bool = False,
+    progres: Callable[[str], None] | None = None,
 ) -> Plan:
     """Applique le plan (si `appliquer`) : copie (`.part` puis renommage, date
     de fichier conservée), PUIS retrait des copies sorties de la sélection.
-    Lève `OSError` (espace, disque absent) : c'est l'appelant qui décide."""
+    Lève `OSError` (espace, disque absent) : c'est l'appelant qui décide.
+    `progres` reçoit une ligne pendant les copies longues."""
     plan = planifier(source, dest, maintenant or datetime.now())
     if not appliquer:
         return plan
@@ -97,7 +128,7 @@ def synchroniser(
     # Copier D'ABORD : une copie qui échoue ne laisse pas le dehors appauvri.
     for fichier in plan.a_copier:
         partielle = dest / (fichier.name + ".part")
-        shutil.copy2(fichier, partielle)
+        copier_avec_progres(fichier, partielle, progres)
         if partielle.stat().st_size != fichier.stat().st_size:
             partielle.unlink()
             raise OSError(f"copie incomplète de {fichier.name}")
@@ -112,7 +143,7 @@ def synchroniser(
     return plan
 
 
-def synchroniser_en_fin_de_run() -> str | None:
+def synchroniser_en_fin_de_run(progres: Callable[[str], None] | None = None) -> str | None:
     """Le geste de fin de run CLI. Ne lève pas."""
     from src import config
     from src.utils.database_backup import _DEFAULT_BACKUP_DIR
@@ -121,7 +152,7 @@ def synchroniser_en_fin_de_run() -> str | None:
     if dest is None:
         return None
     try:
-        plan = synchroniser(Path(_DEFAULT_BACKUP_DIR), dest, appliquer=True)
+        plan = synchroniser(Path(_DEFAULT_BACKUP_DIR), dest, appliquer=True, progres=progres)
     except OSError as e:
         logger.warning(f"Copie des sauvegardes vers {dest} impossible : {e}")
         return f"⚠️ copie des sauvegardes hors disque impossible : {e}"

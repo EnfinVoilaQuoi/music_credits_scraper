@@ -1,6 +1,5 @@
 """
-Scraper Genius — VERSION 3 (Crawl4AI + Ollama/Llama 3.2)
-Remplace les sélecteurs CSS fragiles de v2 par une extraction via LLM.
+Scraper Genius — VERSION 3 (Crawl4AI pour le rendu, BeautifulSoup pour l'extraction)
 """
 
 import re
@@ -104,7 +103,7 @@ def est_relation_deguisee(nom: str | None) -> bool:
 
 class GeniusScraperV3(CrawlAIScraperBase):
     """
-    Scraper Genius v3 — Crawl4AI pour le rendu + Llama 3.2 pour le parsing.
+    Scraper Genius v3 — Crawl4AI pour le rendu, extraction déterministe du HTML.
     API publique identique à GeniusScraper (v2).
     """
 
@@ -112,7 +111,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
         super().__init__(headless)
         #: Écarts API/page du dernier morceau scrapé (None : rien à comparer).
         self.derniers_ecarts_api = None
-        logger.info("GeniusScraperV3 initialisé (Crawl4AI + Ollama)")
+        logger.info("GeniusScraperV3 initialisé (Crawl4AI)")
 
     # -------------------------------------------------------------------------
     # API publique
@@ -128,7 +127,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
             logger.warning(f"GeniusScraperV3: pas d'URL Genius pour '{track.title}'")
             return []
 
-        markdown, html = self._crawl_page(
+        html = self._crawl_page(
             url=track.genius_url,
             js_before_wait=_JS_EXPAND_CREDITS,
             wait_for="js:" + _JS_WAIT_CREDITS,
@@ -173,9 +172,6 @@ class GeniusScraperV3(CrawlAIScraperBase):
         # 1. Extraction structurée du HTML (déterministe et complète)
         if html:
             credits = self._extract_fallback_bs4(html)
-
-        # Le repli LLM sur le markdown a été RETIRÉ le 2026-10-11 : inatteignable
-        # (le markdown vaut toujours None) et non ancré — l'idée est au WIP.
 
         if not credits:
             logger.info(f"∅ GeniusScraperV3: aucun crédit trouvé pour '{track.title}'")
@@ -281,7 +277,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
         # Attend le conteneur de paroles OU le placeholder d'un instrumental :
         # sans le second, chaque interlude payait les 12 s de timeout à
         # chaque run (« This song is an instrumental » n'a pas de conteneur).
-        _, html = self._crawl_page(
+        html = self._crawl_page(
             url=track.genius_url,
             wait_for=f"css:[data-lyrics-container='true'], {_LYRICS_PLACEHOLDER_SEL}",
             wait_timeout=12_000,

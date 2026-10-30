@@ -292,7 +292,7 @@ _PAGE = """<html><body>
 def scraper(monkeypatch):
     s = GeniusScraperV3.__new__(GeniusScraperV3)
     s.derniers_ecarts_api = None
-    s._crawl_page = lambda **kw: ("", _PAGE)
+    s._crawl_page = lambda **kw: _PAGE
     monkeypatch.setattr("src.scrapers.genius_scraper_v3.time.sleep", lambda *_: None)
     return s
 
@@ -349,7 +349,7 @@ class TestScrape:
         assert ("Kid Cudi", "genius_api") in {(c.name, c.source) for c in t.credits}
 
     def test_un_scrape_vide_laisse_les_provisoires(self, scraper):
-        scraper._crawl_page = lambda **kw: ("", "<html></html>")
+        scraper._crawl_page = lambda **kw: "<html></html>"
         t = self._track(_api("Kanye West", CreditRole.PRODUCER))
         scraper.scrape_track_credits(t, include_lyrics=False)
         assert cga.sont_provisoires(t.credits)
@@ -360,7 +360,7 @@ class TestScrape:
         ok = self._track(_api("Kid Cudi", CreditRole.WRITER))
         rate = self._track(_api("Kanye West", CreditRole.PRODUCER))
         pages = iter([_PAGE, "<html></html>"])
-        scraper._crawl_page = lambda **kw: ("", next(pages))
+        scraper._crawl_page = lambda **kw: next(pages)
         scraper._apply_lyrics_from_html = lambda html, track: None
         res = scraper.scrape_multiple_tracks([ok, rate])
         assert (res["success"], res["failed"]) == (1, 1)

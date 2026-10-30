@@ -61,5 +61,5 @@ def test_crawl_page_route_par_la_boucle():
             return "<html>"
 
     stub = _Stub()
-    assert stub._crawl_page("https://exemple.test") == (None, "<html>")
+    assert stub._crawl_page("https://exemple.test") == "<html>"
     assert stub.seen_thread == "asyncio-loop"

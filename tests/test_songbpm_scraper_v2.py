@@ -1,18 +1,20 @@
 """Rapprochement et parsing du scraper SongBPM (`songbpm_scraper_v2`).
 
-389 statements à 10 %, **23 fonctions sur 23 jamais exécutées** — c'était le plus
-gros trou du dépôt. Pourtant l'essentiel n'a besoin ni de navigateur ni de
-réseau : `__init__` est PARESSEUX (driver créé au premier usage), les helpers de
-matching sont purs, et le parseur de résultats ne fait que descendre un arbre
-d'éléments — remplaçable par un faux DOM.
+L'essentiel n'a besoin ni de navigateur ni de réseau : `__init__` est PARESSEUX
+(driver créé au premier usage), les helpers de matching sont purs, et le parseur
+de résultats (dans la variante async, la seule qui navigue) ne fait que descendre
+un arbre d'éléments — remplaçable par un faux DOM.
 
 Ce qui se joue ici : `_match_track` décide si un résultat SongBPM est bien NOTRE
 morceau. Un faux positif écrit un BPM étranger en base, où plus rien ne le
 distingue d'une vraie mesure.
 """
 
+import asyncio
+
 import pytest
 
+from src.scrapers.songbpm_scraper_async import SongBPMScraperAsync
 from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
 
 
@@ -22,24 +24,30 @@ def scraper():
     return SongBPMScraper(headless=True)
 
 
+@pytest.fixture
+def scraper_async():
+    """Variante async (celle qui navigue), sans navigateur monté."""
+    return SongBPMScraperAsync(headless=True)
+
+
 # ─────────────────────────────────────────────────────────── faux DOM Playwright
 
 
 class _Element:
-    """Élément minimal : ce que `_get_search_results` appelle réellement."""
+    """Élément minimal : ce que `_get_search_results_async` appelle réellement."""
 
     def __init__(self, enfants=None, attrs=None, texte=""):
         self._enfants = enfants or {}
         self._attrs = attrs or {}
         self._texte = texte
 
-    def query_selector_all(self, selecteur):
+    async def query_selector_all(self, selecteur):
         return self._enfants.get(selecteur, [])
 
-    def get_attribute(self, nom):
+    async def get_attribute(self, nom):
         return self._attrs.get(nom)
 
-    def inner_text(self):
+    async def inner_text(self):
         return self._texte
 
 
@@ -47,7 +55,7 @@ class _Page:
     def __init__(self, conteneurs):
         self._conteneurs = conteneurs
 
-    def query_selector_all(self, selecteur):
+    async def query_selector_all(self, selecteur):
         return self._conteneurs if selecteur == "div.bg-card" else []
 
 
@@ -265,12 +273,12 @@ class TestDetailsDepuisLeTexte:
 
 
 class TestParseurDeResultats:
-    def _resultats(self, scraper, conteneurs):
-        scraper.page = _Page(conteneurs)
-        return scraper._get_search_results()
+    def _resultats(self, scraper_async, conteneurs):
+        scraper_async.page = _Page(conteneurs)
+        return asyncio.run(scraper_async._get_search_results_async())
 
-    def test_resultat_complet(self, scraper):
-        res = self._resultats(scraper, [_resultat()])
+    def test_resultat_complet(self, scraper_async):
+        res = self._resultats(scraper_async, [_resultat()])
         assert len(res) == 1
         r = res[0]
         assert r["artist"] == "Jul"
@@ -280,39 +288,39 @@ class TestParseurDeResultats:
         assert r["duration"] == "3:34"
         assert r["detail_url"].endswith("/bande-organisee")
 
-    def test_identifiant_spotify_capte(self, scraper):
+    def test_identifiant_spotify_capte(self, scraper_async):
         url = "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
-        res = self._resultats(scraper, [_resultat(spotify_url=url)])
+        res = self._resultats(scraper_async, [_resultat(spotify_url=url)])
         assert res[0]["spotify_id"] == "4cOdK2wGLETKBW3PvgPWqT"
         assert res[0]["spotify_url"] == url
 
-    def test_liens_de_plateformes_ecartes(self, scraper):
+    def test_liens_de_plateformes_ecartes(self, scraper_async):
         """La page mêle des liens vers Apple Music / Spotify aux vrais morceaux."""
         for plateforme in ("/apple-music", "/spotify", "/amazon", "/youtube"):
             href = f"https://songbpm.com/@jul/titre{plateforme}"
-            assert self._resultats(scraper, [_resultat(href=href)]) == []
+            assert self._resultats(scraper_async, [_resultat(href=href)]) == []
 
-    def test_lien_trop_court_ecarte(self, scraper):
-        assert self._resultats(scraper, [_resultat(href="/@jul")]) == []
+    def test_lien_trop_court_ecarte(self, scraper_async):
+        assert self._resultats(scraper_async, [_resultat(href="/@jul")]) == []
 
-    def test_conteneur_sans_lien(self, scraper):
-        assert self._resultats(scraper, [_Element()]) == []
+    def test_conteneur_sans_lien(self, scraper_async):
+        assert self._resultats(scraper_async, [_Element()]) == []
 
-    def test_bpm_illisible_ignore(self, scraper):
+    def test_bpm_illisible_ignore(self, scraper_async):
         """Un BPM non numérique est sauté, le reste du résultat survit."""
-        res = self._resultats(scraper, [_resultat(metriques=(("BPM", "n/a"), ("KEY", "F")))])
+        res = self._resultats(scraper_async, [_resultat(metriques=(("BPM", "n/a"), ("KEY", "F")))])
         assert "bpm" not in res[0]
         assert res[0]["key"] == "F"
 
-    def test_titre_ou_artiste_manquant(self, scraper):
+    def test_titre_ou_artiste_manquant(self, scraper_async):
         """Sans les deux, le résultat n'est pas exploitable."""
         lien = _Element(
             attrs={"href": "https://songbpm.com/@jul/titre"}, enfants={"div.flex-1": []}
         )
         conteneur = _Element(enfants={"a[href*='/@']": [lien]})
-        assert self._resultats(scraper, [conteneur]) == []
+        assert self._resultats(scraper_async, [conteneur]) == []
 
-    def test_classes_inattendues_ignorees(self, scraper):
+    def test_classes_inattendues_ignorees(self, scraper_async):
         """Le parseur s'appuie sur les classes Tailwind : si elles changent, on
         n'extrait rien plutôt que d'inventer un couple artiste/titre."""
         infos = _Element(
@@ -327,32 +335,32 @@ class TestParseurDeResultats:
             attrs={"href": "https://songbpm.com/@jul/titre"},
             enfants={"div.flex-1": [infos]},
         )
-        assert self._resultats(scraper, [_Element(enfants={"a[href*='/@']": [lien]})]) == []
+        assert self._resultats(scraper_async, [_Element(enfants={"a[href*='/@']": [lien]})]) == []
 
-    def test_plusieurs_resultats(self, scraper):
-        res = self._resultats(scraper, [_resultat(), _resultat(titre="Autre")])
+    def test_plusieurs_resultats(self, scraper_async):
+        res = self._resultats(scraper_async, [_resultat(), _resultat(titre="Autre")])
         assert [r["title"] for r in res] == ["Bande organisée", "Autre"]
 
-    def test_page_vide(self, scraper):
-        assert self._resultats(scraper, []) == []
+    def test_page_vide(self, scraper_async):
+        assert self._resultats(scraper_async, []) == []
 
-    def test_conteneur_en_erreur_saute(self, scraper):
+    def test_conteneur_en_erreur_saute(self, scraper_async):
         """Un conteneur qui lève ne doit pas faire perdre les suivants."""
 
         class _Casse(_Element):
-            def query_selector_all(self, selecteur):
+            async def query_selector_all(self, selecteur):
                 raise AttributeError("élément détaché")
 
-        res = self._resultats(scraper, [_Casse(), _resultat()])
+        res = self._resultats(scraper_async, [_Casse(), _resultat()])
         assert len(res) == 1
 
-    def test_page_en_erreur(self, scraper):
+    def test_page_en_erreur(self, scraper_async):
         class _PageCasse:
-            def query_selector_all(self, selecteur):
+            async def query_selector_all(self, selecteur):
                 raise AttributeError("page fermée")
 
-        scraper.page = _PageCasse()
-        assert scraper._get_search_results() == []
+        scraper_async.page = _PageCasse()
+        assert asyncio.run(scraper_async._get_search_results_async()) == []
 
 
 # ───────────── repli « sans parenthèses » : chercher court, juger complet (2026-09-27)
@@ -368,25 +376,7 @@ class TestRepliSansParentheses:
     comme « Blues » : la règle « même version » voyait deux titres identiques et
     posait le BPM, la tonalité et la durée de l'original sur la version live."""
 
-    def _espion(self, appels):
-        def perform(**kw):
-            appels.append(kw)
-            return None
-
-        return perform
-
-    def test_voie_sync_juge_avec_le_titre_complet(self, scraper, monkeypatch):
-        appels = []
-        monkeypatch.setattr(scraper, "_perform_search", self._espion(appels))
-        scraper._search_track_body(_Obs(), "Blues (Live at AK Studios)", "A2H", None, 5, True)
-        assert appels[1]["track_title"] == "Blues"
-        assert appels[1]["titre_juge"] == "Blues (Live at AK Studios)"
-
-    def test_voie_async_juge_avec_le_titre_complet(self, monkeypatch):
-        import asyncio
-
-        from src.scrapers.songbpm_scraper_async import SongBPMScraperAsync
-
+    def test_la_recherche_juge_avec_le_titre_complet(self, monkeypatch):
         s = SongBPMScraperAsync(headless=True)
         appels = []
 
@@ -408,31 +398,17 @@ class TestRepliSansParentheses:
 # ───────────────────────────────────────────── verdict d'usage (observabilité)
 
 
-class _PageRecherche:
-    """Page dont la navigation échoue, ou réussit sans aucun résultat."""
+class _PageAsync:
+    """Page dont la navigation échoue."""
 
-    def __init__(self, erreur=None):
-        self._erreur = erreur
+    async def goto(self, *_, **__):
+        from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
-    def goto(self, url, **_):
-        if self._erreur:
-            raise self._erreur
-        return type("R", (), {"url": url, "status": 200})()
+        raise PlaywrightTimeoutError("goto")
 
-    def wait_for_selector(self, selecteur, **_):
-        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 
-        if selecteur == "div.bg-card":
-            raise PlaywrightTimeoutError("aucun résultat")
-
-    def fill(self, *_):
-        pass
-
-    def press(self, *_):
-        pass
-
-    def query_selector(self, *_):
-        return None
+async def _rien(*_, **__):
+    return None
 
 
 class TestVerdictDUsage:
@@ -441,13 +417,13 @@ class TestVerdictDUsage:
     `_perform_search`, finissait en `absent` — une panne MUETTE."""
 
     @pytest.fixture(autouse=True)
-    def _propre(self, scraper, monkeypatch):
+    def _propre(self, scraper_async, monkeypatch):
         from src.observability import source_usage as su
 
         su.reset()
         su.set_sink(None)
-        monkeypatch.setattr(scraper, "_ensure_driver", lambda: None)
-        monkeypatch.setattr(scraper, "_reset_browser_on_error", lambda: None)
+        monkeypatch.setattr(scraper_async, "_ensure_driver_async", _rien)
+        monkeypatch.setattr(scraper_async, "_reset_browser_on_error_async", _rien)
         yield
         su.reset()
         su.set_sink(None)
@@ -458,68 +434,41 @@ class TestVerdictDUsage:
 
         return [v.issue for v in su.flush()]
 
-    def test_succes_declare_ok(self, scraper, monkeypatch):
+    def test_succes_declare_ok(self, scraper_async, monkeypatch):
         from src.observability.issues import IssueKind
-
-        scraper.page = _PageRecherche()
-        monkeypatch.setattr(scraper, "_perform_search", lambda **_: {"bpm": 140})
-        assert scraper.search_track("Titre", "Jul") == {"bpm": 140}
-        assert self._issues() == [IssueKind.OK]
-
-    def test_aucun_resultat_reste_absent(self, scraper):
-        from src.observability.issues import IssueKind
-
-        scraper.page = _PageRecherche()
-        assert scraper.search_track("Titre", "Jul") is None
-        assert self._issues() == [IssueKind.ABSENT]
-
-    def test_panne_navigateur_n_est_pas_une_absence(self, scraper):
-        from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-
-        from src.observability.issues import IssueKind
-
-        scraper.page = _PageRecherche(erreur=PlaywrightTimeoutError("goto"))
-        assert scraper.search_track("Titre", "Jul") is None
-        (issue,) = self._issues()
-        assert issue not in (IssueKind.ABSENT, IssueKind.INDETERMINATE)
-
-    def test_jumeau_async_meme_verdicts(self, monkeypatch):
-        """Le jumeau async est celui de l'app : même capteur, mêmes verdicts."""
-        import asyncio
-
-        from playwright.async_api import TimeoutError as PlaywrightTimeoutErrorAsync
-
-        from src.observability.issues import IssueKind
-        from src.scrapers.songbpm_scraper_async import SongBPMScraperAsync
-
-        class _PageAsync:
-            async def goto(self, *_, **__):
-                raise PlaywrightTimeoutErrorAsync("goto")
-
-        s = SongBPMScraperAsync(headless=True)
-        s.page = _PageAsync()
-
-        async def _rien(*_, **__):
-            return None
-
-        monkeypatch.setattr(s, "_ensure_driver_async", _rien)
-        monkeypatch.setattr(s, "_reset_browser_on_error_async", _rien)
-        assert asyncio.run(s.search_track_async("Titre", "Jul")) is None
-        (issue,) = self._issues()
-        assert issue not in (IssueKind.ABSENT, IssueKind.INDETERMINATE)
 
         async def _trouve(**_):
             return {"bpm": 140}
 
-        monkeypatch.setattr(s, "_perform_search_async", _trouve)
-        asyncio.run(s.search_track_async("Titre", "Jul"))
+        scraper_async.page = object()
+        monkeypatch.setattr(scraper_async, "_perform_search_async", _trouve)
+        assert asyncio.run(scraper_async.search_track_async("Titre", "Jul")) == {"bpm": 140}
         assert self._issues() == [IssueKind.OK]
+
+    def test_aucun_resultat_reste_absent(self, scraper_async, monkeypatch):
+        from src.observability.issues import IssueKind
+
+        async def _vide(**_):
+            return None
+
+        scraper_async.page = object()
+        monkeypatch.setattr(scraper_async, "_perform_search_async", _vide)
+        assert asyncio.run(scraper_async.search_track_async("Titre", "Jul")) is None
+        assert self._issues() == [IssueKind.ABSENT]
+
+    def test_panne_navigateur_n_est_pas_une_absence(self, scraper_async):
+        from src.observability.issues import IssueKind
+
+        scraper_async.page = _PageAsync()
+        assert asyncio.run(scraper_async.search_track_async("Titre", "Jul")) is None
+        (issue,) = self._issues()
+        assert issue not in (IssueKind.ABSENT, IssueKind.INDETERMINATE)
 
 
 class TestBrutGarde:
     """Chantier E : SongBPM se lit par le DOM — la page RENDUE va au brut."""
 
-    def test_la_page_de_detail_est_gardee(self, scraper):
+    def test_la_page_de_detail_est_gardee(self, scraper_async):
         from src.persistence import brut
 
         html = "<main>with a F key and a minor mode, time signature of 4 beats per bar</main>"
@@ -528,24 +477,27 @@ class TestBrutGarde:
             status = 200
             url = "https://songbpm.com/@jul/bande-organisee"
 
+        class _Principal:
+            async def is_visible(self):
+                return True
+
+            async def inner_text(self):
+                return html
+
         class _PageDetail:
             url = _Reponse.url
 
-            def goto(self, *a, **k):
+            async def goto(self, *a, **k):
                 return _Reponse()
 
-            def query_selector(self, selecteur):
-                return _Element(texte=html) if selecteur == "main" else None
+            async def query_selector(self, selecteur):
+                return _Principal() if selecteur == "main" else None
 
-            def content(self):
+            async def content(self):
                 return html
 
-        _Element.is_visible = lambda self: True
-        try:
-            scraper.page = _PageDetail()
-            details = scraper._extract_track_details("/@jul/bande-organisee")
-        finally:
-            del _Element.is_visible
+        scraper_async.page = _PageDetail()
+        details = asyncio.run(scraper_async._extract_track_details_async("/@jul/bande-organisee"))
         assert details["mode"] == "minor"
         (lecture,) = brut.lectures("songbpm", _Reponse.url)
         assert lecture["statut"] == 200 and lecture["corps"] == html.encode("utf-8")
@@ -575,11 +527,7 @@ class TestPagesRefusees:
         )
         assert choix is None
 
-    def test_les_deux_voies_transmettent_les_pages(self, scraper, monkeypatch):
-        import asyncio
-
-        from src.scrapers.songbpm_scraper_async import SongBPMScraperAsync
-
+    def test_la_recherche_transmet_les_pages(self, scraper_async, monkeypatch):
         class _O:
             def ok(self):
                 pass
@@ -588,15 +536,14 @@ class TestPagesRefusees:
                 pass
 
         vus = []
-        monkeypatch.setattr(scraper, "_perform_search", lambda **kw: vus.append(kw))
-        scraper._search_track_body(_O(), "Dangerous", "Kid Cudi", None, 5, True, {"/@a/b"})
-        s = SongBPMScraperAsync(headless=True)
 
         async def perform(**kw):
             vus.append(kw)
 
-        monkeypatch.setattr(s, "_perform_search_async", perform)
+        monkeypatch.setattr(scraper_async, "_perform_search_async", perform)
         asyncio.run(
-            s._search_track_async_body(_O(), "Dangerous", "Kid Cudi", None, 5, True, {"/@a/b"})
+            scraper_async._search_track_async_body(
+                _O(), "Dangerous", "Kid Cudi", None, 5, True, {"/@a/b"}
+            )
         )
-        assert [kw["pages_refusees"] for kw in vus] == [{"/@a/b"}, {"/@a/b"}]
+        assert [kw["pages_refusees"] for kw in vus] == [{"/@a/b"}]

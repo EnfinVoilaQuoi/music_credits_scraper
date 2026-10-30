@@ -115,7 +115,7 @@ class CrawlAIScraperBase:
     Base class pour tous les scrapers Crawl4AI du projet.
 
     Usage dans une sous-classe :
-        markdown, html = self._crawl_page(url, js_before_wait=JS, wait_for="js:...")
+        html = self._crawl_page(url, js_before_wait=JS, wait_for="js:...")
     """
 
     #: Clé de `source_health.SOURCES` sous laquelle l'usage est compté. La base
@@ -181,10 +181,9 @@ class CrawlAIScraperBase:
         wait_timeout: int = 15_000,
         page_timeout: int = 30_000,
         delay_before_return: float = 1.5,
-    ) -> tuple[str | None, str | None]:
+    ) -> str | None:
         """
-        Crawl synchrone d'une page. Retourne (markdown, html_brut).
-        Retourne (None, None) si le crawl échoue.
+        Crawl synchrone d'une page. Retourne le HTML brut, ou None si le crawl échoue.
 
         Pont F4 : exécute le crawl sur LA boucle applicative (bloquant).
         À appeler depuis un thread sync uniquement — une coroutine await
@@ -217,7 +216,7 @@ class CrawlAIScraperBase:
             finally:
                 passes.rejouer(self.health_key)
             self._conclure(obs, html)
-            return None, html
+            return html
 
     async def acrawl_page(
         self,
@@ -228,11 +227,11 @@ class CrawlAIScraperBase:
         wait_timeout: int = 15_000,
         page_timeout: int = 30_000,
         delay_before_return: float = 1.5,
-    ) -> tuple[str | None, str | None]:
+    ) -> str | None:
         """
         Coroutine native (F4) — même séquence que le pont sync historique :
         CDP → essai headless (profil persistant) → fenêtre VISIBLE (challenge).
-        Retourne (markdown, html_brut), (None, None) si le crawl échoue.
+        Retourne le HTML brut, ou None si le crawl échoue.
 
         Paramètres :
             js_before_wait   : JS exécuté avant la condition d'attente (ex: clic expand)
@@ -256,7 +255,7 @@ class CrawlAIScraperBase:
             finally:
                 passes.rejouer(self.health_key)
             self._conclure(obs, html)
-            return None, html
+            return html
 
     @staticmethod
     def _conclure(obs, html: str | None) -> None:

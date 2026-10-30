@@ -1,4 +1,6 @@
-"""Tests du provider SongBPM (src/enrichment/providers/songbpm) — sans réseau."""
+"""Tests du provider SongBPM (src/enrichment/providers/songbpm) — sans réseau.
+
+Une seule voie : async (le scraper Playwright vit dans la boucle)."""
 
 import asyncio
 
@@ -6,38 +8,27 @@ import pytest
 from playwright.async_api import Error as PlaywrightError
 
 from src.enrichment.context import EnrichmentContext
-from src.enrichment.providers.songbpm import SongBpmProvider
+from src.enrichment.providers.songbpm import SongBpmProvider as _SongBpmProvider
 from src.models.artist import Artist
 from src.models.track import Track
 
 
+class SongBpmProvider(_SongBpmProvider):
+    """Le vrai provider, plus un pilote : `enrich` fait tourner la voie async
+    (la seule) jusqu'au bout, pour que les tests restent des tests de données."""
+
+    def enrich(self, track, ctx):
+        return asyncio.run(self.enrich_async(track, ctx))
+
+
 class _FakeScraper:
-    def __init__(self, data):
-        self._data = data
-        self.calls = []
-
-    def search_track(
-        self,
-        title,
-        artist,
-        spotify_id=None,
-        fetch_details=False,
-        pages_refusees=frozenset(),
-        garde=None,
-        duree_fiche=None,
-    ):
-        self.calls.append((title, artist, spotify_id, fetch_details))
-        self.pages_refusees = pages_refusees
-        return self._data
-
-
-class _FakeScraperAsync(_FakeScraper):
-    """Variante async. `_data` peut être une exception (levée) ou un délai
-    (`_lent`) pour éprouver la garde `asyncio.timeout`."""
+    """Scraper async factice. `data` peut être une exception (levée) ; `lent`
+    éprouve la garde `asyncio.timeout`."""
 
     def __init__(self, data, lent=False):
-        super().__init__(data)
+        self._data = data
         self._lent = lent
+        self.calls = []
         self.ferme = False
 
     async def search_track_async(
@@ -60,14 +51,6 @@ class _FakeScraperAsync(_FakeScraper):
 
     async def aclose(self):
         self.ferme = True
-
-
-class _RunnerSync:
-    """Faux `sync_runner` : exécute le corps sync tel quel (c'est ce que fait le
-    SerialWorker du run, sur son thread dédié)."""
-
-    async def run(self, fn, *args):
-        return fn(*args)
 
 
 def _track():
@@ -229,7 +212,16 @@ def test_indisponible_renvoie_false():
     assert SongBpmProvider(None).enrich(_track(), EnrichmentContext()) is False
 
 
-class TestVoieSyncResiduelle:
+class TestDonneesDeLaPage:
+    def test_fermetures(self):
+        scraper = _FakeScraper({})
+        provider = SongBpmProvider(scraper_factory=lambda: scraper)
+        provider._resource.get()
+        provider.close()  # rien à fermer côté thread du run
+        assert scraper.ferme is False
+        asyncio.run(provider.aclose())
+        assert scraper.ferme is True
+
     def test_l_id_de_songbpm_est_declare_jamais_pose(self):
         """② de l'étape Identité (2026-09-28) : SongBPM n'écrit plus d'ID, il le
         PROPOSE (observation relue par le panneau « À trancher »)."""
@@ -259,86 +251,18 @@ class TestVoieSyncResiduelle:
         SongBpmProvider(scraper).enrich(track, ctx)
         assert not [o for o in ctx.observations if o.field == CHAMP_ID_PROPOSE]
 
-    def test_timeout_du_timer_fait_jeter_le_resultat(self, monkeypatch):
-        """Le Timer n'interrompt rien (l'API sync de Playwright n'est pas
-        thread-safe) : il marque le résultat comme trop tardif, et c'est le
-        provider qui le jette. Sans ce test, la branche restait muette."""
-        import threading
-
-        class _TimerImmediat:
-            def __init__(self, delai, fn):
-                self._fn = fn
-
-            def start(self):
-                self._fn()
-
-            def cancel(self):
-                pass
-
-        monkeypatch.setattr(threading, "Timer", _TimerImmediat)
-        provider = SongBpmProvider(_FakeScraper({"bpm": 90}))
-        ctx = EnrichmentContext()
-        assert provider.enrich(_track(), ctx) is False
-        assert ctx.bpm_ballot.candidates == []  # rien n'entre au scrutin
-
-    @pytest.mark.parametrize(
-        "exc", [TimeoutError("30s"), PlaywrightError("page morte"), KeyError("k"), ValueError("v")]
-    )
-    def test_frontieres_du_scraper_sync(self, exc):
-        class _Leve(_FakeScraper):
-            def search_track(self, *a, **k):
-                raise exc
-
-        assert SongBpmProvider(_Leve({})).enrich(_track(), EnrichmentContext()) is False
-
-    def test_fermetures(self):
-        scraper = _FakeScraperAsync({})
-        scraper.close = lambda: setattr(scraper, "ferme_sync", True)
-        provider = SongBpmProvider(scraper_factory=lambda: scraper)
-        provider._resource.get()
-        provider.close()
-        assert scraper.ferme_sync is True
-
-        provider_async = SongBpmProvider(async_scraper_factory=lambda: scraper)
-        provider_async._async_resource.get()
-        asyncio.run(provider_async.aclose())
-        assert scraper.ferme is True
-
 
 class TestVoieAsync:
-    """F3c : le scraper async remplace le `threading.Timer` par
-    `asyncio.timeout`. Différence de fond — le Timer laissait la recherche
-    finir et jetait le résultat, l'annulation asyncio l'INTERROMPT et recycle
-    le driver. Les deux voies partagent `_apply_track_data`."""
+    """F3c : la recherche est bornée par `asyncio.timeout` — l'annulation
+    INTERROMPT la recherche et recycle le driver."""
 
     def _provider(self, scraper):
-        return SongBpmProvider(async_scraper_factory=lambda: scraper)
-
-    def test_memes_donnees_que_la_voie_sync(self):
-        data = {"bpm": 90, "key": 5, "mode": 1, "duration": 200}
-        t_sync, t_async = _track(), _track()
-        ctx_sync, ctx_async = EnrichmentContext(), EnrichmentContext()
-
-        assert SongBpmProvider(_FakeScraper(data)).enrich(t_sync, ctx_sync) is True
-        assert (
-            asyncio.run(self._provider(_FakeScraperAsync(data)).enrich_async(t_async, ctx_async))
-            is True
-        )
-        assert t_sync.duration == t_async.duration
-        assert ctx_sync.bpm_ballot.candidates == ctx_async.bpm_ballot.candidates
-
-    def test_sans_variante_async_repli_sur_le_pont_sync(self):
-        """Aucune fabrique async configurée (tests, compat) : le corps SYNC est
-        exécuté sur le thread dédié du run, pas court-circuité."""
-        provider = SongBpmProvider(_FakeScraper({"bpm": 90}))
-        ctx = EnrichmentContext(sync_runner=_RunnerSync())
-        assert asyncio.run(provider.enrich_async(_track(), ctx)) is True
-        assert ("songbpm", 90) in ctx.bpm_ballot.candidates
+        return SongBpmProvider(scraper_factory=lambda: scraper)
 
     def test_timeout_annule_la_recherche_et_recycle_le_driver(self, monkeypatch):
         """Budget ramené à 0 s pour ne pas attendre 30 s : ce qui est vérifié,
         c'est que le scraper est FERMÉ (recyclé) et l'issue False."""
-        scraper = _FakeScraperAsync({}, lent=True)
+        scraper = _FakeScraper({}, lent=True)
         vrai_timeout = asyncio.timeout
         monkeypatch.setattr(asyncio, "timeout", lambda _s: vrai_timeout(0))
         assert asyncio.run(self._provider(scraper).enrich_async(_track(), EnrichmentContext())) is (
@@ -347,18 +271,18 @@ class TestVoieAsync:
         assert scraper.ferme is True
 
     def test_resultat_vide(self):
-        p = self._provider(_FakeScraperAsync(None))
+        p = self._provider(_FakeScraper(None))
         assert asyncio.run(p.enrich_async(_track(), EnrichmentContext())) is False
 
     @pytest.mark.parametrize(
         "exc", [PlaywrightError("page morte"), KeyError("k"), TypeError("t"), ValueError("v")]
     )
     def test_frontiere_scraper_journalisee(self, exc):
-        p = self._provider(_FakeScraperAsync(exc))
+        p = self._provider(_FakeScraper(exc))
         assert asyncio.run(p.enrich_async(_track(), EnrichmentContext())) is False
 
     def test_artiste_principal_et_spotify_id_valide_transmis(self):
-        scraper = _FakeScraperAsync({"bpm": 90})
+        scraper = _FakeScraper({"bpm": 90})
         track = _track()
         track.is_featuring = True
         track.primary_artist_name = "Principal"
@@ -368,9 +292,9 @@ class TestVoieAsync:
         assert (artiste, spotify_id, details) == ("Principal", "SP1", True)
 
     def test_spotify_id_duplicata_non_transmis_a_la_recherche(self):
-        """Même règle que la voie sync : un ID déjà porté par un autre morceau
+        """Un ID déjà porté par un autre morceau
         n'est pas une clé de recherche fiable."""
-        scraper = _FakeScraperAsync({"bpm": 90})
+        scraper = _FakeScraper({"bpm": 90})
         track = _track()
         track.spotify_id = "SP1"
         ctx = EnrichmentContext(
@@ -461,21 +385,13 @@ class TestPageRefusee:
         pages = [(o.value, o.source) for o in ctx.observations if o.field == CHAMP_PAGE_SONGBPM]
         assert pages == [("/@kid-cudi/dangerous", "songbpm")]
 
-    def test_la_voie_sync_passe_les_pages_refusees_au_scraper(self, monkeypatch):
+    def test_les_pages_refusees_sont_passees_au_scraper(self, monkeypatch):
         from src.enrichment.providers import songbpm as mod
 
         monkeypatch.setattr(mod, "pages_songbpm_refusees", lambda t: {"/@kid-cudi/dangerous"})
         scraper = _FakeScraper({})
-        SongBpmProvider(scraper).enrich(_track(), EnrichmentContext(artist_tracks=[_track()]))
-        assert scraper.pages_refusees == {"/@kid-cudi/dangerous"}
-
-    def test_la_voie_async_passe_les_pages_refusees_au_scraper(self, monkeypatch):
-        from src.enrichment.providers import songbpm as mod
-
-        monkeypatch.setattr(mod, "pages_songbpm_refusees", lambda t: {"/@kid-cudi/dangerous"})
-        scraper = _FakeScraperAsync({})
-        provider = SongBpmProvider(None, async_scraper_factory=lambda: scraper)
-        ctx = EnrichmentContext(artist_tracks=[_track()], sync_runner=_RunnerSync())
+        provider = SongBpmProvider(scraper_factory=lambda: scraper)
+        ctx = EnrichmentContext(artist_tracks=[_track()])
         asyncio.run(provider.enrich_async(_track(), ctx))
         assert scraper.pages_refusees == {"/@kid-cudi/dangerous"}
 

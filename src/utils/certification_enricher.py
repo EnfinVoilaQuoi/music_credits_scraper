@@ -19,7 +19,11 @@ from src.utils.dates import parse_flexible
 from src.utils.logger import get_logger
 from src.utils.participation import Participation, participation
 from src.utils.title_matching import names_match_as_words
-from src.utils.version_descriptors import Kind, meme_prise, parse_variant, socle_normalise
+from src.utils.version_descriptors import (
+    meme_version_certifiee,
+    porte_une_version,
+    socle_normalise,
+)
 
 logger = get_logger(__name__)
 
@@ -232,9 +236,9 @@ def echos_de_versions(tracks: list[Track]) -> int:
     # tiers (reprise, remix) ; l'ordre de la liste départage le reste.
     socles: dict[str, Track] = {}
     for t in sorted(tracks, key=_rang_de_socle):
-        if parse_variant(t.title).kind == Kind.NONE:
+        if not porte_une_version(t.title):
             socles.setdefault(socle_normalise(t.title), t)
-    versions = [t for t in tracks if parse_variant(t.title).kind != Kind.NONE]
+    versions = [t for t in tracks if porte_une_version(t.title)]
     # Repartir de zéro : les échos se recalculent à chaque application.
     for t in tracks:
         if t.certs.echos:
@@ -244,12 +248,10 @@ def echos_de_versions(tracks: list[Track]) -> int:
         socle = _socle_de(version, socles, par_id)
         if socle is None or socle is version:
             continue
-        v = parse_variant(version.title)
         # Ce que le matcher a posé sur le socle et qui est de CETTE version.
         propres = []
         for e in socle.certs.reelles:
-            ev = parse_variant(e.get("title") or "")
-            if ev.kind != Kind.NONE and (ev.kind == v.kind and (v.est_remix or meme_prise(ev, v))):
+            if meme_version_certifiee(e.get("title"), version.title):
                 continue
             propres.append(e)
         socle.certs.entries = propres + socle.certs.echos
@@ -379,14 +381,12 @@ def apply_certifications(
                 for m in matches
                 if m.get("category") != "album" and certif_du_morceau(track.title, m.get("title"))
             ]
-            if parse_variant(track.title).kind != Kind.NONE:
+            if porte_une_version(track.title):
                 # Une VERSION ne prend pas les certifs de l'original : le
                 # rapprochement par titre tronqué donnait « DOUBLE PONEY » à
                 # « Double Poney (Instrumental) » (315 fiches, 1 023 entrées,
                 # 2026-09-26) — puis l'écho les renvoyait sur l'original.
-                matches = [
-                    m for m in matches if parse_variant(m.get("title") or "").kind != Kind.NONE
-                ]
+                matches = [m for m in matches if porte_une_version(m.get("title"))]
             elif interpretes := _interpretes_de_l_original(track, (artist.name, *alias)):
                 # Même règle quand seul Genius dit la version : les 9 certifs
                 # de Stromae allaient au remix « Alors on danse » de Kanye, dont

@@ -259,6 +259,42 @@ class TestApresChaqueEcrivain:
         )
         assert _invariants(data_manager) == {}
 
+    def test_renommage_le_titre_entre_dans_le_verdict_de_la_duree(self, data_manager, base):
+        """Une vidéo ordinaire de 20 s ne fait la durée que d'un titre court
+        (« Intro ») : renommer la fiche change le verdict. `rename_track` était
+        une exception du chantier A (« le verdict LRC ne lit pas le titre ») —
+        la durée, si (2026-10-29)."""
+        tid = base["doublon"].id
+        data_manager.record_discography_observations(
+            tid, [Observation("duration", 20, "youtube_video")]
+        )
+        from sqlalchemy import text
+
+        def duree():
+            with data_manager.engine.connect() as conn:
+                return conn.execute(
+                    text("SELECT duration FROM tracks WHERE id = :t"), {"t": tid}
+                ).scalar()
+
+        assert duree() is None
+        assert data_manager.rename_track(tid, "Intro")
+        assert duree() == 20
+        assert _invariants(data_manager) == {}
+
+    def test_relation_album_et_isrc_comble_restent_alignes(self, data_manager, base):
+        """Les écrivains de titre, d'album repère et d'interprète principal
+        passent par `_ecrire` (total YTM : le score lit titre, album et
+        principal ; streams : le refus de compteur désigne la fiche par titre
+        et album)."""
+        data_manager.record_relation_artiste(
+            base["isha"].id, is_featuring=False, primary_artist_name=None, secondary_role=None
+        )
+        data_manager.clear_track_album(base["durag"].id)
+        data_manager.renommer_album(base["durag"].artist.id, "X", "Y")
+        data_manager.rearbitrer_duree_et_date(base["durag"].id)
+        data_manager.combler_isrc_vides(appliquer=True)
+        assert _invariants(data_manager) == {}
+
     def test_rematerialiser_ne_change_rien_sur_une_base_saine(self, data_manager, base):
         assert data_manager.rematerialiser() == {}
 

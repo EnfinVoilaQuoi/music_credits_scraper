@@ -1325,6 +1325,154 @@ class TestVideoPartagee:
         assert "2 fiche(s)" in action.executer(ctx, cas)
         assert [tid for tid, _ in retraits] == [1, 2]
 
+    def test_deux_lignes_soeurs_ne_sont_pas_un_partage(self):
+        """« Moon » (2026-10-29) : la discographie réunie d'un membre porte la
+        ligne du groupe ET la sienne, sœurs d'une même page Genius. Une vidéo
+        qu'elles portent toutes deux n'est pas partagée : aucun cas
+        `video_partagee`, et la vidéo muette reste jugée par 🎬 et 📺 comme
+        celle d'UNE fiche."""
+        clip = self._v("M", "Concert entier", 500)
+        cudi = _t("Moon", 1, videos=[clip], genius_id=11, album="Donda")
+        ye = _t("Moon", 2, videos=[clip], genius_id=11, album="Donda")
+        ye.artist = Artist(name="Kanye West")
+        ctx = _ctx(cudi, ye)
+        assert revue.video_partagee(ctx) == []
+        assert revue.video_etrangere(cudi, ctx) is not None
+        # Deux PAGES, elles, partagent.
+        autre = _t("Moon", 3, videos=[clip], genius_id=12)
+        assert revue.video_etrangere(cudi, _ctx(cudi, ye, autre)) is None
+
+    def test_les_vues_d_une_video_portee_par_deux_soeurs_s_expliquent(self):
+        clip = TrackVideo(video_id="M", title="Moon", views=100)
+        a = _t("Moon", 1, videos=[clip], genius_id=11)
+        b = _t("Moon", 2, videos=[clip], genius_id=11)
+        assert revue._vues_expliquees(a, _ctx(a, b))
+        assert not revue._vues_expliquees(a, _ctx(a, b, _t("Moon", 3, videos=[clip])))
+
+    def _530(self, catalogues=None, source="ytm_album", titre="530"):
+        """« 530 » : l'audio « ¥$ - Topic » (288 s) que la page d'album YTM de
+        *VULTURES 2* pose sur « 530 » (288 s), et que Genius pose aussi sur
+        « 530 (Haikou LP) », sans catalogue (2026-10-30)."""
+
+        def audio(provenance):
+            return TrackVideo(
+                video_id="H",
+                title="530",
+                views=10,
+                duration=288,
+                channel="¥$ - Topic",
+                source=provenance,
+            )
+
+        a = _t(titre, 1, videos=[audio(source)], genius_id=11, album="VULTURES 2")
+        a.durations_observees = catalogues if catalogues is not None else {"deezer": 288}
+        a.primary_artist_name = "¥$"
+        b = _t("530 (Haikou LP)", 2, videos=[audio("genius_media")], genius_id=12)
+        b.primary_artist_name = "¥$"
+        return _ctx(a, b)
+
+    def test_la_piste_de_l_album_ytm_designe_sa_page(self):
+        ((_, _, preuves),) = revue.video_partagee(self._530())
+        assert preuves["garder"] == 1 and preuves["track_ids"] == [2]
+        assert preuves["temoin"].startswith("piste de l'album YouTube Music")
+
+    def test_l_album_ytm_ne_dit_rien_sans_l_accord_des_catalogues(self):
+        for ctx in (
+            self._530(catalogues={}),  # rien à comparer
+            self._530(catalogues={"deezer": 163}),  # une autre durée
+            self._530(source="genius_media"),  # aucune piste d'album
+            self._530(titre="* (Part. 1)"),  # titre fait de signes
+        ):
+            assert all("garder" not in p for _, _, p in revue.video_partagee(ctx))
+
+    def test_un_cover_ne_garde_pas_l_audio_de_l_original(self):
+        """« Ghost Town » : la reprise de Justice Der (ligne de Kanye, l'auteur)
+        portait l'audio « Kanye West - Topic » de l'original. L'artiste de la
+        ligne d'une reprise n'est pas un interprète : la chaîne désigne
+        l'original."""
+        audio = TrackVideo(video_id="G", title="Ghost Town", views=10, channel="Kanye West - Topic")
+        ye = _t("Ghost Town", 1, videos=[audio], genius_id=11, album="ye")
+        ye.artist = Artist(name="Kanye West")
+        cover = _t("Ghost Town", 2, videos=[audio], genius_id=12, album="Covers")
+        cover.artist = Artist(name="Kanye West")
+        cover.primary_artist_name = "Justice Der"
+        cover.secondary_role = "Cover"
+        ((_, _, preuves),) = revue.video_partagee(_ctx(ye, cover))
+        assert preuves["garder"] == 1 and preuves["track_ids"] == [2]
+        cover.secondary_role = "Writer"  # un crédit d'écriture lie, lui
+        ((_, _, preuves),) = revue.video_partagee(_ctx(ye, cover))
+        assert "garder" not in preuves
+
+
+class TestVideoTropLongue:
+    """2026-10-30 : la vidéo Genius d'un concert, d'une émission, d'une
+    compilation, posée sur un seul de ses morceaux (CORRECTIFS, B.B. Jacques)."""
+
+    @staticmethod
+    def _fiche(titre_video, duree_video=926, durees=None, **kw):
+        v = TrackVideo(
+            video_id="V",
+            title=titre_video,
+            views=50,
+            duration=duree_video,
+            source=kw.pop("source", "genius_media"),
+        )
+        t = _t(kw.pop("titre", "Temptations (Tiny Desk Home)"), 1, videos=[v], genius_id=11, **kw)
+        t.durations_observees = durees if durees is not None else {"songbpm": 153}
+        return t
+
+    def test_le_concert_entier_qui_ne_nomme_pas_le_morceau_part(self):
+        from src.services import politiques_revue
+
+        t = self._fiche("Ty Dolla $ign: Tiny Desk (Home) Concert")
+        motif, preuves = revue.video_trop_longue(t, _ctx(t))
+        assert preuves["retirer"] and preuves["track_ids"] == [1]
+        assert "6,1 fois" in motif
+        cas = revue.Cas("video_trop_longue", 1, "M", motif, 0, preuves, "k")
+        arbitrage = politiques_revue.arbitrage_etendu(cas, t, _ctx(t))
+        assert arbitrage.action == "retirer_video_recherche"
+
+    def test_nommee_elle_va_a_l_humain(self):
+        from src.services import politiques_revue
+
+        t = self._fiche("Nina Simone - Sinnerman", 621, {"discogs": 134}, titre="Sinnerman")
+        motif, preuves = revue.video_trop_longue(t, _ctx(t))
+        assert not preuves["retirer"] and "le nomme" in motif
+        cas = revue.Cas("video_trop_longue", 1, "M", motif, 0, preuves, "k")
+        assert politiques_revue.arbitrage_etendu(cas, t, _ctx(t)) is None
+
+    def test_les_seuils(self):
+        def cas(titre_video, duree_video, titre="Elixir"):
+            t = self._fiche(titre_video, duree_video, {"deezer": 100}, titre=titre)
+            return revue.video_trop_longue(t, _ctx(t))
+
+        assert cas("1 son en 1H", 300) is None  # 3 × : pas au-delà
+        assert cas("1 son en 1H", 301) is not None
+        assert cas("Elixir (Court métrage)", 400) is None  # nommée : 4 ×
+        assert cas("Elixir (Court métrage)", 401) is not None
+
+    def test_ce_qui_n_est_pas_jugé(self):
+        def cas(**kw):
+            t = self._fiche("Ty Dolla $ign: Tiny Desk (Home) Concert", **kw)
+            return revue.video_trop_longue(t, _ctx(t))
+
+        assert cas(source="search_auto") is None  # pas un lien Genius
+        assert cas(duree_video=None) is None  # durée de la vidéo inconnue
+        assert cas(durees={}) is None  # aucune durée de la fiche
+        assert cas(durees={"youtube_video": 153, "legacy": 153}) is None  # tirées des vidéos
+        assert cas(durees={"songbpm": 153, "deezer": 400}) is None  # la plus longue juge
+        disque = self._fiche("BEN plg - Paraît que (Album entier)", album="Paraît que")
+        assert revue.video_trop_longue(disque, _ctx(disque)) is None
+        medley = self._fiche("Concert", relationships=[{"type": "contient", "track_id": 2}])
+        assert revue.video_trop_longue(medley, _ctx(medley)) is None
+
+    def test_portee_par_deux_pages_elle_est_a_video_partagee(self):
+        a = self._fiche("Ty Dolla $ign: Tiny Desk (Home) Concert")
+        b = _t("Other", 2, videos=list(a.videos), genius_id=12)
+        assert revue.video_trop_longue(a, _ctx(a, b)) is None
+        soeur = _t("Temptations (Tiny Desk Home)", 3, videos=list(a.videos), genius_id=11)
+        assert revue.video_trop_longue(a, _ctx(a, soeur)) is not None
+
 
 class TestDesaccordsExpliques:
     """2026-09-28 : un désaccord que la majorité ou la fiabilité mesurée

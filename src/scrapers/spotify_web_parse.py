@@ -49,11 +49,19 @@ _ALBUM_ID_RE = re.compile(r"/album/([A-Za-z0-9]{22})")
 _DIGITS_RE = re.compile(r"^[0-9]+$")
 _DURATION_RE = re.compile(r"^\d{1,2}:\d{2}$")
 
-#: Auditeurs mensuels : « 387 860 auditeurs mensuels » (U+202F dans le nombre,
-#: U+00A0 devant le libellé). Le libellé est FRANÇAIS — la locale du contexte
-#: navigateur doit être épinglée, sinon ce motif ne mord plus.
+#: Auditeurs mensuels. Deux libellés FRANÇAIS observés :
+#:   - jusqu'en septembre 2026 : « 387 860 auditeurs mensuels » ;
+#:   - depuis octobre 2026 (brut du 2026-10-29, pages artiste Travis Scott et Josman) :
+#:     « 61 194 827 auditeur·rice·s par mois » (écriture inclusive, point médian
+#:     U+00B7). La page porte AUSSI « 61,2 M auditeur·rice·s par mois » (aria-hidden),
+#:     abrégé : le « M » entre le nombre et le libellé l'écarte, seul le texte complet
+#:     (visually-hidden) est lu.
+#: U+202F dans le nombre, U+00A0 devant le libellé. La désinence inclusive se lit avec
+#: souplesse (« auditeur·rice·s », « auditeur·rice », « auditeurs·rices »). Pas de libellé
+#: anglais : aucune page anglaise n'a été vue (l'épinglage `fr-FR` tient).
+_MONTHLY_LABEL = r"(?:auditeurs?\s+mensuels?|auditeur[\w\u00b7\u2022\u2027.\-]{0,16}\s+par\s+mois)"
 _MONTHLY_RE = re.compile(
-    r"([0-9][0-9" + _THOUSAND_SPACES + r"]*)[" + _THOUSAND_SPACES + r"]*auditeurs?\s+mensuels?",
+    r"([0-9][0-9" + _THOUSAND_SPACES + r"]*)[" + _THOUSAND_SPACES + r"]*" + _MONTHLY_LABEL,
     re.IGNORECASE,
 )
 

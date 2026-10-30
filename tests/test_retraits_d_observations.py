@@ -43,7 +43,17 @@ AIDES = {
 }
 
 
-def _fonctions():
+#: ÉDITIONS (`track_editions`) : unies entre sœurs en fin de transaction depuis
+#: le 2026-10-29 (`unir_editions`) — même revers, même exigence. Un DÉPLACEMENT
+#: (`UPDATE … SET track_id`) est un retrait pour la fiche quittée.
+MOTIFS_EDITIONS = ("DELETE FROM track_editions", "UPDATE track_editions SET track_id")
+EXCEPTIONS_EDITIONS = {
+    "delete_track": "ligne supprimée",
+    "merge_tracks": "ligne absorbée par une autre",
+}
+
+
+def _fonctions(motifs=("DELETE FROM observations",)):
     """(nom, texte SQL qui retire, appels) de chaque fonction du module."""
     arbre = ast.parse(FICHIER.read_text(encoding="utf-8"))
     for noeud in ast.walk(arbre):
@@ -61,19 +71,19 @@ def _fonctions():
             for n in ast.walk(noeud)
             if isinstance(n, ast.Call) and isinstance(n.func, ast.Name | ast.Attribute)
         }
-        yield noeud.name, any("DELETE FROM observations" in t for t in textes), appels
+        yield noeud.name, any(m in t for t in textes for m in motifs), appels
 
 
-def _fonctions_qui_retirent():
+def _fonctions_qui_retirent(motifs=("DELETE FROM observations",), aides=AIDES):
     """Celles qui retirent elles-mêmes ou par une aide, et si elles passent
     chez les sœurs. Une aide qui en appelle une autre est suivie elle aussi."""
-    fonctions = list(_fonctions())
+    fonctions = list(_fonctions(motifs))
     retirent = {nom for nom, supprime, _ in fonctions if supprime}
     while True:
         par_aide = {
             nom
             for nom, _, appels in fonctions
-            if nom not in retirent and appels & (AIDES & retirent)
+            if nom not in retirent and appels & (aides & retirent)
         }
         if not par_aide:
             break
@@ -109,4 +119,22 @@ def test_un_retrait_d_observation_passe_par_les_soeurs():
 def test_les_exceptions_servent_encore():
     sans_soeurs = {nom for nom, propage in _fonctions_qui_retirent() if not propage}
     perimees = sorted((set(EXCEPTIONS) | AIDES) - sans_soeurs)
+    assert not perimees, f"exceptions sans objet, à retirer de la liste : {perimees}"
+
+
+def test_un_retrait_d_edition_passe_par_les_soeurs():
+    premier_niveau = _de_premier_niveau()
+    retraits = dict(_fonctions_qui_retirent(MOTIFS_EDITIONS, frozenset()))
+    fautives = sorted(
+        nom
+        for nom, propage in retraits.items()
+        if nom in premier_niveau and not propage and nom not in EXCEPTIONS_EDITIONS
+    )
+    assert not fautives, (
+        "retrait d'édition sur UNE ligne : l'union de fin de transaction le "
+        f"rendrait — passer par `effacer_chez_les_soeurs` : {fautives}"
+    )
+    # Le crible voit bien les écrivains de retrait (sinon il passerait en silence).
+    assert {"retirer_edition", "deplacer_edition"} <= set(retraits)
+    perimees = sorted(set(EXCEPTIONS_EDITIONS) - {n for n, p in retraits.items() if not p})
     assert not perimees, f"exceptions sans objet, à retirer de la liste : {perimees}"

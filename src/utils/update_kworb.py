@@ -42,10 +42,14 @@ from src.utils.version_descriptors import (
     MOTS_DE_MEME_MORCEAU,
     Kind,
     doublons_evidents,
-    meme_famille,
-    meme_prise,
+    meme_famille_de_version,
+    meme_prise_du_morceau,
+    meme_version_stricte,
     parse_variant,
+    porte_une_version,
     reeditions_evidentes,
+    remix_du_meme_morceau,
+    socle_normalise,
     titre_generique,
     titres_equivalents,
 )
@@ -207,18 +211,6 @@ def _resolve_homonym(
 _SUFFIXE_UPLOAD = re.compile(r"(?<=[^\d\s.])\.\d{1,2}$")
 
 
-def _meme_version_stricte(a, b) -> bool:
-    """Deux titres qu'un rapprochement FLOU peut confondre : même absence de
-    descripteur (une coquille), même remix, ou même PRISE (`meme_prise` : « Live »
-    ≈ « Acoustic », mais « Live Version » ≠ « Long Version », que la famille
-    « édition » réunissait par le seul mot « Version »)."""
-    if a.kind == Kind.NONE and b.kind == Kind.NONE:
-        return True
-    if a.est_remix and b.est_remix:
-        return meme_famille(a, b)
-    return meme_prise(a, b)
-
-
 def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
     """Rapproche un titre Kworb d'UN SEUL morceau en base par similarité
     (difflib sur titre normalisé) — attrape les coquilles (« Rhythm is love »
@@ -228,7 +220,6 @@ def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
     version (Acoustic/Intro/Remix) → studio et acoustique restent distincts.
     """
     nk = _normalize_title(entry_title)
-    ventree = parse_variant(entry_title)
     if titre_generique(entry_title):
         # « Interlude 1 » ressemble à 90 % à « Interlude 2 » : chaque projet a les
         # siens, une ressemblance n'en désigne aucun (2026-10-11).
@@ -238,7 +229,7 @@ def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
     for t in tracks:
         # Une coquille, pas une AUTRE VERSION : « The New Workout Plan - Live
         # Version » ressemblait à 91 % à « (Long Version) » (2026-09-24).
-        if not _meme_version_stricte(ventree, parse_variant(t.title)):
+        if not meme_version_stricte(entry_title, t.title):
             continue
         # Ni une autre PARTIE : « Freestyle 2 » / « Freestyle 3 », « Bande
         # organisée 2 » / « Bande organisée » (63 paires en base, 2026-10-11).
@@ -334,7 +325,7 @@ def sous_titre(titre: str | None) -> tuple[str, str] | None:
     if not m:
         return None
     court, groupe = m.group(1), m.group(2).strip()
-    if parse_variant(f"x ({groupe})").kind != Kind.NONE and not est_edition_de_diffusion(groupe):
+    if porte_une_version(f"x ({groupe})") and not est_edition_de_diffusion(groupe):
         return None
     return _normalize_title(court), groupe
 
@@ -399,7 +390,7 @@ def construire_index(tracks) -> Index:
         st = sous_titre(t.title)
         if st:
             index.by_titre_court.setdefault(st[0], []).append((t, st[1]))
-        if parse_variant(t.title).kind == Kind.NONE:
+        if not porte_une_version(t.title):
             index.by_socle.setdefault(_normalize_title(t.title), []).append(t)
         editions = set()
         if getattr(t, "spotify_id", None):
@@ -566,39 +557,29 @@ def original_de(socle: str, index: Index) -> Socle:
     fiches = {
         f.id: f
         for f, _ in index.by_titre_court.get(socle, [])
-        if not f.secondary_role and parse_variant(f.title).kind == Kind.NONE
+        if not f.secondary_role and not porte_une_version(f.title)
     }
     if len(fiches) == 1:
         return Socle(fiche=next(iter(fiches.values())), par_sous_titre=True)
     return Socle(candidats=list(fiches.values()) or parents)
 
 
-def _fiche_de_la_version(v, index: Index):
+def _fiche_de_la_version(titre: str, index: Index):
     """Une FICHE de cette version existe-t-elle déjà (« Nudes (Live at AK
     Studios) » chez Genius pour « Nudes - Acoustic » chez Spotify) ? Alors la
     ligne est À ELLE — un morceau, pas une variante du souche. Unique, sinon rien."""
-    if v.kind != Kind.RENDITION:
-        return None
-    socle = _normalize_title(v.socle)
-    fiches = [
-        t
-        for t in index.tracks
-        if (tv := parse_variant(t.title)).kind == Kind.RENDITION
-        and _normalize_title(tv.socle) == socle
-        and meme_prise(tv, v)
-    ]
+    fiches = [t for t in index.tracks if meme_prise_du_morceau(t.title, titre)]
     return fiches[0] if len(fiches) == 1 else None
 
 
-def _candidats_remix_existants(v, index: Index) -> list:
+def _candidats_remix_existants(titre: str, index: Index) -> list:
     """Lignes de base qui SONT déjà ce remix : par relation `remix_of` vers le
     socle (Genius : « DCR (Dolce Camara Remix) » → Dolce Camara), ou par leur
     propre titre (« X (Remix) »)."""
-    socle = _normalize_title(v.socle)
+    socle = socle_normalise(titre)
     out = []
     for t in index.tracks:
-        tv = parse_variant(t.title)
-        if tv.est_remix and _normalize_title(tv.socle) == socle:
+        if remix_du_meme_morceau(t.title, titre):
             out.append(t)
             continue
         for rel in getattr(t, "relationships", None) or []:
@@ -610,7 +591,7 @@ def _candidats_remix_existants(v, index: Index) -> list:
 
 def _proposition_remix(entry, v, index: Index, artist, lire_identite, motifs) -> dict:
     """Le dict que le dialogue affiche pour un remix — jamais écrit d'office."""
-    socle = _normalize_title(v.socle)
+    socle = socle_normalise(entry["title"])
     trouve = original_de(socle, index)
     parent = trouve.fiche
     if parent is None and not trouve.candidats:
@@ -629,7 +610,7 @@ def _proposition_remix(entry, v, index: Index, artist, lire_identite, motifs) ->
     if entry.get("is_feature"):
         motifs.append("Kworb : l'artiste n'est pas premier crédité (*)")
         proposition = "tiers"
-    existants = _candidats_remix_existants(v, index)
+    existants = _candidats_remix_existants(entry["title"], index)
     if existants:
         motifs.append(
             "un morceau en base est déjà ce remix : " + " | ".join(t.title for t in existants)
@@ -763,7 +744,7 @@ def rapprocher(
         devenue = index.by_title.get(norm) or []
         if len(devenue) == 1:
             return Rapprochement(track=devenue[0], via="id")
-        fiche = _fiche_de_la_version(parse_variant(entry["title"]), index)
+        fiche = _fiche_de_la_version(entry["title"], index)
         if fiche is not None:
             return Rapprochement(track=fiche, via="fiche")
         return Rapprochement(track=index.by_rendition_id[sid], via="rendition_id")
@@ -850,8 +831,8 @@ def rapprocher(
         # prise ferme la porte.
         motifs.append("précédemment rejeté (ancienne question « même morceau ? »)")
     if v.kind == Kind.RENDITION:
-        socle = _normalize_title(v.socle)
-        fiche = _fiche_de_la_version(v, index)
+        socle = socle_normalise(entry["title"])
+        fiche = _fiche_de_la_version(entry["title"], index)
         if fiche is not None:
             return Rapprochement(track=fiche, via="fiche")
         trouve = original_de(socle, index)
@@ -1374,7 +1355,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             # La version a sa propre fiche : ses streams sont à elle. Le SOUCHE
             # garde quand même l'indication (décision utilisateur), avec le
             # pointeur vers la fiche — affichée sans compter.
-            socle = _normalize_title(parse_variant(entry["title"]).socle)
+            socle = socle_normalise(entry["title"])
             trouve = original_de(socle, index)
             parent = index.by_rendition_id.get(entry["spotify_id"]) or (
                 None if trouve.par_sous_titre else trouve.fiche
@@ -1426,7 +1407,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             )
         if (
             via == "id"
-            and not meme_famille(parse_variant(entry["title"]), parse_variant(track.title))
+            and not meme_famille_de_version(entry["title"], track.title)
             and not lien_tranche(entry, track, _decisions)
         ):
             # L'ID en base dit « ce morceau », son titre Spotify dit une AUTRE

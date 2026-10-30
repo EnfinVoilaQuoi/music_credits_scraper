@@ -5813,6 +5813,11 @@ class TrackRepository:
         sans catégorie ne l'efface pas ; « unknown » (le classement n'a rien
         reconnu) ne remplace pas une nature connue — ce n'est pas un constat.
         Les sœurs suivent en fin de transaction (`aligner_lien_youtube_des_soeurs`).
+
+        Ces colonnes décrivent la vidéo du LIEN `youtube_url` : sans lien, rien
+        n'est écrit. Une nature posée sur une ligne sans lien échappait à
+        l'alignement des sœurs, qui ne regarde que les lignes à lien (propriété
+        hypothesis, 2026-10-30 : « audio » chez Swing, « clip » chez Isha).
         """
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
@@ -5824,7 +5829,8 @@ class TrackRepository:
                         "AND COALESCE(youtube_video_kind, '') NOT IN ('', 'unknown')) "
                         "THEN youtube_video_kind ELSE :kind END, "
                         "youtube_video_views_updated = CURRENT_TIMESTAMP, "
-                        "updated_at = :now WHERE id = :tid"
+                        "updated_at = :now WHERE id = :tid "
+                        "AND youtube_url IS NOT NULL AND youtube_url != ''"
                     ),
                     {"views": views, "kind": kind, "now": datetime.now(), "tid": track_id},
                 )
@@ -6113,10 +6119,17 @@ class TrackRepository:
                         if not video or not sien or extract_video_id(sien) != video:
                             return
                     conn.execute(
-                        update(tracks)
-                        .where(tracks.c.id == tid)
+                        update(tracks).where(tracks.c.id == tid)
+                        # La nature et les vues décrivaient la vidéo du lien :
+                        # elles partent avec lui (sans lien, l'alignement des
+                        # sœurs ne les voit plus).
                         .values(
-                            youtube_url=None, youtube_url_source=None, updated_at=datetime.now()
+                            youtube_url=None,
+                            youtube_url_source=None,
+                            youtube_video_kind=None,
+                            youtube_video_views=None,
+                            youtube_video_views_updated=None,
+                            updated_at=datetime.now(),
                         )
                     )
 

@@ -141,8 +141,17 @@ class TestStreamsEtVues:
         assert _colonne(data_manager, morceau.id, "ytm_streams") == (2_000,)
 
     def test_vues_de_clip(self, data_manager, morceau):
+        data_manager.update_track_youtube_url(
+            morceau.id, "https://www.youtube.com/watch?v=AAAAAAAAAAA", "genius_media"
+        )
         assert data_manager.update_track_video_views(morceau.id, 500, kind="clip") is True
         assert _colonne(data_manager, morceau.id, "youtube_video_views") == (500,)
+
+    def test_sans_lien_les_vues_ne_decrivent_rien(self, data_manager, morceau):
+        """Les colonnes `youtube_video_*` décrivent la vidéo du LIEN : sans lien,
+        rien n'est écrit (hors de portée de l'alignement des sœurs)."""
+        assert data_manager.update_track_video_views(morceau.id, 500, kind="clip") is True
+        assert _colonne(data_manager, morceau.id, "youtube_video_views") == (None,)
 
     def test_replis_si_la_base_est_indisponible(self, data_manager, morceau, moteur_casse):
         moteur_casse(data_manager)

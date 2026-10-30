@@ -26,6 +26,37 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
+def src_d_ailleurs(fichier_src: str | None, racine: Path) -> str | None:
+    """PUR. Pourquoi le paquet `src` importé (`src.__file__`) n'est pas celui
+    de `racine` (le dossier où tourne pytest), ou None s'il l'est."""
+    if not fichier_src:
+        return "le paquet `src` importé n'a pas de fichier (paquet d'espace de noms ?)"
+    dossier = Path(fichier_src).resolve().parent
+    attendu = (racine / "src").resolve()
+    if os.path.normcase(str(dossier)) == os.path.normcase(str(attendu)):
+        return None
+    return f"`src` importé depuis {dossier}, et non {attendu}"
+
+
+def pytest_configure(config):
+    """Les tests jugent le code du dossier où tourne pytest, ou ne tournent pas.
+
+    Cas d'origine (2026-10-30) : un agent lancé dans un worktree importait le
+    `src` du checkout principal (installation `pip install -e .`), et ses mesures
+    portaient sur le mauvais code sans que rien ne le dise. → arrêt immédiat.
+    """
+    import src
+
+    raison = src_d_ailleurs(getattr(src, "__file__", None), Path(config.rootpath))
+    if raison:
+        pytest.exit(
+            f"Mauvais code sous test : {raison}. Mettre le dossier testé en tête de "
+            f'PYTHONPATH (PowerShell : $env:PYTHONPATH = "{config.rootpath}") puis '
+            'relancer ; vérifier par `python -c "import src; print(src.__file__)"`.',
+            returncode=pytest.ExitCode.USAGE_ERROR,
+        )
+
+
 def load_fixture(relpath: str) -> str:
     """Contenu texte d'une fixture enregistrée (skip si absente)."""
     path = FIXTURES_DIR / relpath

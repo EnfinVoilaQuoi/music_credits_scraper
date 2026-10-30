@@ -6314,6 +6314,46 @@ class TrackRepository:
                 self._toucher(conn, c["track_id"])
         return ecrites
 
+    def vues_sans_lien(self) -> list[dict[str, Any]]:
+        """Fiches SANS lien YouTube qui gardent les vues ou la nature d'une
+        vidéo (`youtube_video_*`) : posées avant `444a8a8`, qui ne les écrit
+        plus sans lien (407 fiches mesurées le 2026-10-30). Lecture seule."""
+        with self.engine.connect() as conn:
+            return [
+                dict(r)
+                for r in conn.execute(
+                    text(
+                        "SELECT t.id AS track_id, t.title AS titre, a.name AS artiste, "
+                        "t.youtube_video_views AS vues, t.youtube_video_kind AS nature "
+                        "FROM tracks t JOIN artists a ON a.id = t.artist_id "
+                        "WHERE (t.youtube_url IS NULL OR t.youtube_url = '') "
+                        "AND (t.youtube_video_views IS NOT NULL "
+                        "OR t.youtube_video_kind IS NOT NULL) ORDER BY a.name, t.id"
+                    )
+                ).mappings()
+            ]
+
+    def vider_vues_sans_lien(self, track_ids: list[int]) -> int:
+        """Vide vues, relevé et nature des fiches données, si elles n'ont
+        toujours pas de lien (décision utilisateur 2026-10-30). Passe par
+        `_ecrire`. Rend le nombre de fiches écrites."""
+        ecrites = 0
+        with self._ecrire() as conn:
+            for tid in track_ids:
+                ecrites += conn.execute(
+                    update(tracks)
+                    .where(tracks.c.id == tid)
+                    .where(or_(tracks.c.youtube_url.is_(None), tracks.c.youtube_url == ""))
+                    .values(
+                        youtube_video_views=None,
+                        youtube_video_views_updated=None,
+                        youtube_video_kind=None,
+                        updated_at=datetime.now(),
+                    )
+                ).rowcount
+                self._toucher(conn, tid)
+        return ecrites
+
     # ──────────────────────────────────────────────────────────────────────────
     # Vidéos YouTube d'un morceau (table `track_videos`, e20)
     # ──────────────────────────────────────────────────────────────────────────

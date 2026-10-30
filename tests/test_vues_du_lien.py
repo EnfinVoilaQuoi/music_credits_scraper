@@ -124,3 +124,21 @@ def test_les_soeurs_videes_ensemble_ne_se_rendent_rien(data_manager):
     t.title = "Allume la lumière"
     data_manager.save_track(t)  # synchronisation des sœurs : rien ne revient
     assert _colonnes(data_manager, t.id) == _colonnes(data_manager, s.id) == (None, None, None)
+
+
+def test_sans_lien_les_vues_et_la_nature_se_vident(data_manager):
+    """407 fiches sans lien gardaient les vues d'une vidéo (2026-10-30) ; une
+    fiche qui a retrouvé un lien entre-temps n'est pas touchée."""
+    sans = _fiche(data_manager, titre="Sans lien")
+    avec = _fiche(data_manager, nom="Diam’s", titre="Avec lien")
+    with data_manager.engine.begin() as conn:
+        conn.execute(text("UPDATE tracks SET youtube_url = NULL WHERE id = :t"), {"t": sans.id})
+    _poser_vues_de_l_autre(data_manager, sans.id)
+    _poser_vues_de_l_autre(data_manager, avec.id)
+
+    (cas,) = data_manager.vues_sans_lien()
+    assert (cas["track_id"], cas["vues"], cas["nature"]) == (sans.id, 35495, "audio")
+    assert data_manager.vider_vues_sans_lien([sans.id, avec.id]) == 1
+    assert _colonnes(data_manager, sans.id) == (None, None, None)
+    assert _colonnes(data_manager, avec.id)[0] == 35495
+    assert not data_manager.vues_sans_lien()

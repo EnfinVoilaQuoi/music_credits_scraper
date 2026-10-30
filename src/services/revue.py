@@ -76,10 +76,13 @@ from src.utils.version_descriptors import (
     Kind,
     meme_version,
     meme_version_publiee,
+    memes_parties,
     parse_variant,
     reeditions_evidentes,
     socle_normalise,
     titre_generique,
+    titre_sans_sous_titre,
+    titres_confondus,
 )
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
 from src.utils.vote_durees import (
@@ -1281,6 +1284,105 @@ def meme_place(track, ctx):
     return None
 
 
+def _a_la_meme_place(a, b, ctx) -> bool:
+    """Les deux fiches partagent un emplacement : c'est un 📀 `meme_place`."""
+    from src.utils.positions_disque import cle_d_emplacement
+
+    cles = {cle_d_emplacement(p) for p in ctx.positions.get(a.id) or []} - {None}
+    return any(cle_d_emplacement(p) in cles for p in ctx.positions.get(b.id) or [])
+
+
+def _titre_de_base(titre: str | None) -> str | None:
+    """Le titre sans sous-titre ni édition de diffusion (« Make Her Say (I Poke
+    Her Face) », « Dans la tête (Bonus Track) »), None s'il porte une VERSION
+    (live, remix, acoustique…) : deux versions ne sont pas la forme cherchée."""
+    v = parse_variant(titre_sans_sous_titre(titre) or titre)
+    return v.socle if v.kind == Kind.NONE and normalize_title(v.socle) else None
+
+
+def _ids_de_catalogue(t) -> set:
+    return {x for x in (t.spotify_id, t.deezer_id, t.isrc) if x}
+
+
+def _premier_mot(titre: str) -> str:
+    mots = normalize_title(titre).split()
+    return mots[0] if mots else ""
+
+
+def _index_pages_genius(ctx) -> dict[str, list]:
+    """`{premier mot du titre de base: [(page, titre de base)]}` : un tri
+    grossier, `titres_confondus` juge ensuite (graphies, lettres masquées)."""
+    index: dict[str, list] = {}
+    for t in ctx.disco:
+        base = _titre_de_base(t.title) if t.genius_id else None
+        if base:
+            index.setdefault(_premier_mot(base), []).append((t, base))
+    return index
+
+
+def verdict_page_et_plateforme(page, fiche) -> str:
+    """Ce que les durées disent d'une fiche Genius et d'une fiche sans page au
+    même titre de base (`page_et_fiche_plateforme`)."""
+    if not _ids_de_catalogue(page):
+        if page.duration and fiche.duration and abs(page.duration - fiche.duration) <= MEME_PRISE_S:
+            return (
+                f"même durée ({fiche.duration} s), la page n'a aucun identifiant : la fiche "
+                "sans page porte sans doute les siens — doublon, à fusionner vers la page"
+            )
+        return "la page n'a aucun identifiant de catalogue : doublon ou autre prise ?"
+    if not (page.duration and fiche.duration):
+        return "deux identifiants de catalogue, durée inconnue"
+    if abs(page.duration - fiche.duration) <= MEME_PRISE_S:
+        return (
+            f"même durée ({fiche.duration} s), deux identifiants : deux parutions du même "
+            "enregistrement (édition) ou un doublon"
+        )
+    return (
+        f"durées {page.duration} s (page) / {fiche.duration} s (sans page) : une édition — "
+        "laquelle est l'original, celle de la page ou l'autre (forme « Make Her Say ») ?"
+    )
+
+
+def page_et_fiche_plateforme(track, ctx):
+    """Forme « Make Her Say » (WIP, demande utilisateur 2026-10-26) : une fiche
+    SANS page Genius (créée depuis une plateforme) et une fiche Genius de
+    l'artiste au même titre de base — même version, aux sous-titres et
+    éditions de diffusion près, mêmes parties, même interprète principal —,
+    sans identifiant de catalogue commun (`id_catalogue_partage` les juge).
+    La fiche sans page peut porter l'ORIGINAL pendant que la page porte une
+    édition (« Make Her Say », 2026-10-25), ou être un simple doublon de la
+    page. Un titre générique n'est rapproché que sur le même disque ; une paire
+    à la même place d'un disque est au 📀. Mesuré le 2026-10-30 : 5 cas (4
+    doublons dont la page n'a aucun identifiant, 1 session Deezer « Mr. Ocho
+    (Enregistré à Paris) »), plus 3 au 📀 ; tous à l'humain : la fusion n'est
+    pas réversible."""
+    if track.genius_id or track.genius_url or not _ids_de_catalogue(track):
+        return None
+    base = _titre_de_base(track.title)
+    if not base:
+        return None
+    index = ctx.memo("pages_par_titre_de_base", lambda: _index_pages_genius(ctx))
+    for page, base_page in index.get(_premier_mot(base), []):
+        if (
+            page is track
+            or not titres_confondus(base_page, base)
+            or _interprete(page) != _interprete(track)
+            or not memes_parties(page.title, track.title)
+            or _ids_de_catalogue(page) & _ids_de_catalogue(track)
+            or (titre_generique(base) and cle_album(page.album) != cle_album(track.album))
+            or _a_la_meme_place(page, track, ctx)
+        ):
+            continue
+        return (
+            f"fiche sans page Genius, même titre que la page « {page.title} »"
+            + (f" ({page.album})" if page.album else "")
+            + " — "
+            + verdict_page_et_plateforme(page, track),
+            {"autres": [page.id], "empreinte": f"g{page.genius_id}"},
+        )
+    return None
+
+
 # ── Vidéos, streams, dates ──────────────────────────────────────────────────
 
 
@@ -2461,6 +2563,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("doublon_lrc", "Même morceau ? (LRC d'une version sœur)", "👯", doublon_par_lrc),
     Detecteur("doublon_inedit", "Inédit en double", "👻", doublon_inedit),
     Detecteur("meme_place", "Deux fiches à la même place d'un disque", "📀", meme_place),
+    Detecteur(
+        "page_et_plateforme",
+        "Fiche sans page au titre d'une page Genius",
+        "🪞",
+        page_et_fiche_plateforme,
+    ),
     Detecteur(
         "credits_api",
         "Crédits 🎫 non confirmés",

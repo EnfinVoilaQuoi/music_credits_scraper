@@ -29,7 +29,14 @@ _CODES_ID_SPOTIFY = (
     "id_catalogue_partage",
 )
 _CODES_SONGBPM = ("songbpm_copie", "duree_songbpm", "songbpm_original")
-_CODES_DOUBLON = ("doublon", "doublon_inedit", "doublon_lrc", "id_spotify_partage", "meme_place")
+_CODES_DOUBLON = (
+    "doublon",
+    "doublon_inedit",
+    "doublon_lrc",
+    "id_spotify_partage",
+    "meme_place",
+    "page_et_plateforme",
+)
 
 
 @dataclass

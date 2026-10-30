@@ -1437,3 +1437,68 @@ def test_le_temoin_d_une_edition_connue_n_est_pas_accuse():
     assert revue.duree_isolee(t)
     t.durees_editions = (232,)
     assert revue.duree_isolee(t) is None
+
+
+class TestPageEtFichePlateforme:
+    """🪞 forme « Make Her Say » (2026-10-30) : une fiche sans page Genius au
+    titre de base d'une page Genius. Mesuré sur toute la base : 5 cas (4
+    doublons dont la page n'a aucun identifiant, 1 session Deezer), plus 3 au
+    📀 (même place d'un disque)."""
+
+    @staticmethod
+    def _f(titre, tid, duree, genius_id=None, **kw):
+        t = _t(titre, tid, duration=duree, genius_id=genius_id, **kw)
+        if genius_id:
+            t.genius_url = f"https://genius.com/{tid}"
+        return t
+
+    def test_page_sans_identifiant_et_fiche_plateforme_meme_duree(self):
+        page = self._f("Sous influence", 1, 307, genius_id=11)
+        fiche = self._f("Sous influence (bonus track)", 2, 307, spotify_id="SP")
+        ctx = _ctx(page, fiche)
+        motif, preuves = revue.page_et_fiche_plateforme(fiche, ctx)
+        assert "à fusionner vers la page" in motif and preuves["autres"] == [1]
+        assert revue.page_et_fiche_plateforme(page, ctx) is None
+
+    def test_make_her_say_durees_ecartees(self):
+        page = self._f("Make Her Say (I Poke Her Face)", 1, 216, genius_id=11, spotify_id="A")
+        fiche = self._f("Make Her Say", 2, 237, spotify_id="B")
+        motif, _ = revue.page_et_fiche_plateforme(fiche, _ctx(page, fiche))
+        assert "Make Her Say" in motif and "original" in motif
+
+    def test_lettres_masquees_meme_titre(self):
+        page = self._f("Illest Motherfucker Alive", 1, 323, genius_id=11, spotify_id="A")
+        fiche = self._f("Illest Motherf**ker Alive (Album Version Edited)", 2, 503, spotify_id="B")
+        assert revue.page_et_fiche_plateforme(fiche, _ctx(page, fiche))
+
+    def test_ce_qui_n_est_pas_la_forme(self):
+        page = self._f("Blues", 1, 175, genius_id=11, spotify_id="A")
+        live = self._f("Blues (Acoustic)", 2, 189, spotify_id="B")  # une autre version
+        partie = self._f("Blues (Part. 2)", 3, 175, spotify_id="C")  # une autre partie
+        meme_id = self._f("Blues", 4, 175, spotify_id="A")  # `id_catalogue_partage`
+        sans_id = self._f("Blues", 5, 175)
+        ctx = _ctx(page, live, partie, meme_id, sans_id)
+        for t in (live, partie, meme_id, sans_id):
+            assert revue.page_et_fiche_plateforme(t, ctx) is None
+
+    def test_autre_interprete_et_generique_d_un_autre_disque(self):
+        page = self._f("Forever", 1, 251, genius_id=11, is_featuring=True)
+        page.primary_artist_name = "Dom Dolla"
+        fiche = self._f("Forever", 2, 251, spotify_id="B")
+        intro = self._f("Intro", 3, 60, genius_id=12, album="0.9")
+        autre = self._f("Intro", 4, 60, spotify_id="C", album="Lunatic")
+        ctx = _ctx(page, fiche, intro, autre)
+        assert revue.page_et_fiche_plateforme(fiche, ctx) is None
+        assert revue.page_et_fiche_plateforme(autre, ctx) is None
+
+    def test_meme_place_laissee_au_disque(self):
+        page = self._f("Save My Soul (The CuDi Confession)", 1, 123, genius_id=11, spotify_id="A")
+        fiche = self._f("Save My Soul", 2, 123, deezer_id=8)
+        place = {"release_id": 9, "title": "X", "disc_number": 1, "track_number": 12}
+        ctx = _ctx(page, fiche)
+        ctx.positions = {
+            1: [{**place, "position_source": "apple_music"}],
+            2: [{**place, "position_source": "deezer"}],
+        }
+        assert revue.page_et_fiche_plateforme(fiche, ctx) is None
+        assert revue.meme_place(page, ctx)

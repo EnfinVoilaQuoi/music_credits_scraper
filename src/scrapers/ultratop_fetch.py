@@ -84,7 +84,7 @@ def fetch_ultratop_html(year, category: str) -> str | None:
     url = f"{ULTRATOP_BASE}/{year}/{category}"
     scraper = _get_scraper()
     try:
-        _, html = scraper._crawl_page(
+        html = scraper._crawl_page(
             url,
             wait_for="css:.chart_title",  # attend les entrées de certif
             wait_timeout=15_000,

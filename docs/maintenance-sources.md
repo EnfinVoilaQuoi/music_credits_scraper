@@ -80,7 +80,6 @@ consigner dans `JOURNAL.md`.
 | `deezer`        | —           | —                                   | ✅ (parse)     | durée canonique |
 | `genius_api`    | —           | —                                   | ✅ (parse)     | `GENIUS_API_KEY` requise |
 | `songbpm`       | —           | —                                   | rapide seule   | dernier recours BPM ; CF possible |
-| `bpmfinder`     | —           | —                                   | manuelle       | **login requis** (`BPMFINDER_*`) |
 
 > La capture d'Ultratop (BRMA) exige la route CDP : au premier lancement, une
 > fenêtre Chrome visible s'ouvre pour résoudre le challenge Cloudflare **une

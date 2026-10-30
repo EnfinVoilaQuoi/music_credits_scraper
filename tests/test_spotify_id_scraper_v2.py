@@ -3,7 +3,7 @@
 371 statements à 24 %. Complète `test_spotify_id_extraction.py` (extraction d'ID
 depuis une URL) et `test_spotify_embed_fixtures.py` (parseur `__NEXT_DATA__` sur
 page réelle) en couvrant ce qui restait : le cache disque, le score de
-pertinence, le nettoyage de titre de page et surtout `get_artist_id_from_track`
+pertinence et surtout `get_artist_id_from_track`
 — le vote NAME-AWARE qui empêche le bug historique Isha × Limsa d'Aulnay.
 
 Aucun navigateur : `__init__` est paresseux (driver au premier usage). Attention
@@ -223,26 +223,3 @@ class TestVoteIdentiteArtiste:
     def test_nom_credite_vide_ignore(self, tmp_path):
         s = self._scraper(tmp_path, [{"name": "", "id": "VIDE"}, {"name": "Isha", "id": "ISHA"}])
         assert s.get_artist_id_from_track("T1", expected_name="Isha") == "ISHA"
-
-
-class TestTitreDePage:
-    def test_suffixe_spotify_retire(self):
-        assert (
-            SpotifyIDScraper._clean_page_title("Bande organisée • Jul | Spotify")
-            == "Bande organisée • Jul"
-        )
-
-    @pytest.mark.parametrize(
-        "generique",
-        ["", "Spotify", "spotify – Web Player", "Spotify - Web Player", "Web Player"],
-    )
-    def test_titres_generiques_normalises_en_none(self, generique):
-        """Spotify sert parfois une coquille sans « Titre • Artiste » : la garder
-        polluerait la base d'une valeur qui ne vérifie rien."""
-        assert SpotifyIDScraper._clean_page_title(generique) is None
-
-    def test_titre_absent(self):
-        assert SpotifyIDScraper._clean_page_title(None) is None
-
-    def test_titre_utile_conserve(self):
-        assert SpotifyIDScraper._clean_page_title("  Titre • Artiste  ") == "Titre • Artiste"

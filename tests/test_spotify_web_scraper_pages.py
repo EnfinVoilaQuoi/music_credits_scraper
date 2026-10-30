@@ -126,3 +126,27 @@ class TestTitre:
 
     def test_identite_page_sans_entete(self, scraper):
         assert _lancer(scraper.afetch_track_identity(_Session("<html></html>"), "T")) is None
+
+
+class TestAuditeursMensuels:
+    """Brut du 2026-10-29 : le libellé est devenu « … auditeur·rice·s par mois »."""
+
+    def test_libelle_inclusif_lu_sans_avertissement(self, scraper, caplog):
+        nouveau = "auditeur\u00b7rice\u00b7s par mois"
+        html = _page("artist.html").replace("auditeurs mensuels", nouveau)
+        with caplog.at_level(logging.WARNING):
+            data = _lancer(scraper.afetch_artist(_Session(html), "A"))
+        assert data["monthly_listeners"] == 387_860
+        assert "introuvables" not in caplog.text
+
+    def test_libelle_d_avant_octobre_toujours_lu(self, scraper):
+        data = _lancer(scraper.afetch_artist(_Session(_page("artist.html")), "A"))
+        assert data["monthly_listeners"] == 387_860
+
+    def test_libelle_inconnu_reste_un_avertissement(self, scraper, caplog):
+        """Un libellé qu'on ne connaît pas se signale : on répare le parseur."""
+        html = _page("artist.html").replace("auditeurs mensuels", "oyentes al mes")
+        with caplog.at_level(logging.WARNING):
+            data = _lancer(scraper.afetch_artist(_Session(html), "A"))
+        assert data["monthly_listeners"] is None
+        assert "auditeurs mensuels introuvables" in caplog.text

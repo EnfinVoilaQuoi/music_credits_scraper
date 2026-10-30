@@ -529,7 +529,8 @@ class TestTitreGeneriqueEtDisque:
         )
 
     def test_le_meme_disque_passe_editions_comprises(self):
-        from src.utils.spotify_identity import memes_disques, valider_identite
+        from src.utils.spotify_identity import valider_identite
+        from src.utils.version_descriptors import meme_disque as memes_disques
 
         assert valider_identite(
             self._fiche(),

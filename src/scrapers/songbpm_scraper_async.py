@@ -1,15 +1,13 @@
-"""Scraper SongBPM — variante ASYNC (Phase F3c), vivant dans la boucle asyncio.
+"""Scraper SongBPM — ASYNC (Phase F3c), vivant dans la boucle asyncio.
 
 Sous-classe de `SongBPMScraper` : la logique PURE est héritée (matching
-artiste/titre, normalisations, extraction regex+LLM des détails) ; les méthodes
-touchant Playwright sont réécrites en async (mêmes sélecteurs, mêmes timeouts,
-même séquence de recherche : accueil → champ query → résultats → détails).
-Le fallback LLM (Ollama, bloquant) passe par `asyncio.to_thread`. Le browser
-naît, travaille et meurt DANS la boucle, fermé par `aclose()` en fin de batch.
-Le timeout de garde de 30 s vit chez le PROVIDER (`asyncio.timeout`, F3c).
+artiste/titre, normalisations, lecture du texte des détails par regex) ; ce
+module porte le transport Playwright async (mêmes sélecteurs, mêmes timeouts,
+même séquence de recherche : accueil → champ query → résultats → détails). Le
+browser naît, travaille et meurt DANS la boucle, fermé par `aclose()` en fin de
+batch. Le timeout de garde de 30 s vit chez le PROVIDER (`asyncio.timeout`, F3c).
 """
 
-import asyncio
 import logging
 import re
 from typing import Any
@@ -36,18 +34,7 @@ class SongBPMScraperAsync(SongBPMScraper):
         super().__init__(headless=headless)
         logger.info(f"SongBPMScraperAsync initialisé (headless={headless}, driver lazy)")
 
-    # ── Garde-fous : pas d'API sync sur l'instance async ────────────────────
-
-    def _ensure_driver(self):
-        raise RuntimeError("Instance async : utiliser les méthodes *_async")
-
-    def search_track(self, *args, **kwargs):
-        raise RuntimeError("Instance async : utiliser search_track_async")
-
-    def close(self):
-        raise RuntimeError("Instance async : utiliser aclose()")
-
-    # ── Init / cleanup (miroirs async) ──────────────────────────────────────
+    # ── Init / cleanup ──────────────────────────────────────
 
     async def _ensure_driver_async(self):
         if self.page is not None:
@@ -130,7 +117,7 @@ class SongBPMScraperAsync(SongBPMScraper):
         except PlaywrightError as e:
             logger.debug(f"Gestion cookies (non bloquant): {e}")
 
-    # ── Détails (miroir async ; texte → détails = logique pure héritée) ─────
+    # ── Détails (texte → détails = logique pure héritée) ────────────────────
 
     async def _extract_track_details_async(self, detail_url: str, timeout: int = 30) -> dict:
         details: dict[str, Any] = {}
@@ -165,8 +152,7 @@ class SongBPMScraperAsync(SongBPMScraper):
                 full_text = await body.inner_text() if body else ""
 
             clean_text = re.sub(r"\s+", " ", full_text).replace("\xa0", " ")
-            # Regex rapides + éventuel LLM bloquant (Ollama) → hors boucle
-            details = await asyncio.to_thread(self._details_from_text, clean_text)
+            details = self._details_from_text(clean_text)
             logger.info(f"✅ Détails extraits: {details}")
         except PlaywrightTimeoutError:
             logger.warning(f"⏰ Timeout ({timeout}s) lors de la récupération des détails")
@@ -174,7 +160,7 @@ class SongBPMScraperAsync(SongBPMScraper):
             logger.error(f"❌ Erreur extraction détails: {e}")
         return details
 
-    # ── Résultats de recherche (miroir async du DOM-walking) ────────────────
+    # ── Résultats de recherche (DOM-walking) ────────────────────────────────
 
     async def _get_search_results_async(self) -> list[dict[str, Any]]:
         results = []
@@ -271,7 +257,7 @@ class SongBPMScraperAsync(SongBPMScraper):
             logger.error(f"❌ Erreur extraction résultats: {e}")
         return results
 
-    # ── Recherche (miroirs async) ───────────────────────────────────────────
+    # ── Recherche ───────────────────────────────────────────────────────────
 
     async def _perform_search_async(
         self,

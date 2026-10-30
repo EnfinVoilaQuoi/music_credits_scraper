@@ -37,7 +37,7 @@ VALID_CATEGORIES = {"singles", "albums"}
 #: portait sa propre copie du découpage « Nx » — la quatrième du projet.
 VALID_LEVELS = NIVEAUX_BRMA
 
-#: Rendue PUBLIQUE le 2026-09-07 pour que le repli LLM d'`update_brma` valide ses
+#: Rendue PUBLIQUE le 2026-09-07 pour que les autres modules valident leurs
 #: paliers contre CE référentiel et non contre une seconde liste. Un verdict ne
 #: se calcule qu'à un endroit : le validateur RIAA avait sa propre liste de
 #: niveaux, restée au vocabulaire américain, et déclarait « anomalies » sur des

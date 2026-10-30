@@ -209,6 +209,20 @@ def test_un_titre_generique_exige_le_meme_disque():
     assert hit_concorde(hit, artist_name="Booba", title="Tallac", album="Autopsie Vol. 3")[0]
 
 
+def test_un_titre_generique_reconnait_une_edition_de_son_disque():
+    """2026-10-30, juge unique `meme_disque` : l'égalité des clés refusait
+    l'« Intro » d'*OCHO* servie sur *OCHO (Deluxe)* (fiche #9216 de la base)."""
+    from src.utils.deezer_identity import hit_concorde
+
+    hit = {
+        "title": "Intro",
+        "duration": 90,
+        "artist": {"id": 1, "name": "Isha"},
+        "album": {"title": "OCHO (Deluxe)"},
+    }
+    assert hit_concorde(hit, artist_name="Isha", title="Intro", album="OCHO")[0]
+
+
 def test_la_piste_du_disque_d_une_autre_fiche_est_la_sienne():
     """Kanye, 2026-10-13 : « GONE » (VULTURES 3) portait la « Gone » de *Late
     Registration*, « KING » (VULTURES 1) celle de *BULLY* — une autre fiche au

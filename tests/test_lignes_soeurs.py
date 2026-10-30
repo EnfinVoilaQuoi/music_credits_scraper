@@ -882,6 +882,32 @@ class TestEcrivainsHorsSaveTrack:
         data_manager.save_track(swing)
         assert _colonne(data_manager, swing.id, "youtube_url") is None
 
+    def test_la_nature_relevee_sur_une_ligne_arrive_chez_la_soeur(self, data_manager, famille):
+        """« In Common (Remix) » (2026-10-30) : le relevé des vues de Travis
+        posait la nature sur SA ligne seulement ; l'invariant
+        `soeurs_divergentes` l'a vue (`youtube_video_kind`, 2 valeurs)."""
+        swing, isha = famille
+        for ligne in famille:
+            data_manager.update_track_youtube_url(
+                ligne.id, "https://www.youtube.com/watch?v=AAAAAAAAAAA", "genius_media"
+            )
+        data_manager.update_track_video_views(swing.id, 100, "audio")
+        data_manager.update_track_video_views(isha.id, 120, "clip")
+        for ligne in famille:
+            assert _colonne(data_manager, ligne.id, "youtube_video_kind") == "clip"
+
+    def test_unknown_ne_remplace_pas_une_nature_connue(self, data_manager, famille):
+        swing, isha = famille
+        for ligne in famille:
+            data_manager.update_track_youtube_url(
+                ligne.id, "https://www.youtube.com/watch?v=AAAAAAAAAAA", "genius_media"
+            )
+        data_manager.update_track_video_views(swing.id, 100, "audio")
+        data_manager.update_track_video_views(isha.id, 120, "unknown")
+        for ligne in famille:
+            assert _colonne(data_manager, ligne.id, "youtube_video_kind") == "audio"
+        assert _colonne(data_manager, isha.id, "youtube_video_views") == 120
+
     def test_la_soeur_a_l_autre_video_garde_son_lien(self, data_manager, famille):
         swing, isha = famille
         data_manager.update_track_youtube_url(
@@ -892,3 +918,115 @@ class TestEcrivainsHorsSaveTrack:
         )
         data_manager.clear_track_youtube_link(swing.id)
         assert _colonne(data_manager, isha.id, "youtube_url").endswith("BBBBBBBBBBB")
+
+
+class TestEditionsDesSoeurs:
+    """Une ÉDITION (`track_editions`) décrit l'enregistrement : « Make Her Say »
+    notée chez Kid Cudi #3819 et pas chez Kanye #6479, « Mon pote » chez Flynt
+    et pas chez OrelSan #4440 (2026-10-29, 25 familles sur 302)."""
+
+    @staticmethod
+    def _editions(dm, tid):
+        return {(e["label"], e["duration"]) for e in dm.get_track_editions(tid)}
+
+    def test_une_edition_notee_chez_une_soeur_arrive_chez_l_autre(self, data_manager, famille):
+        swing, isha = famille
+        data_manager.record_track_edition(swing.id, "Radio Edit", source="deezer", duration=201)
+        assert self._editions(data_manager, isha.id) == {("Radio Edit", 201)}
+
+    def test_une_colonne_vide_se_comble_sans_rien_remplacer(self, data_manager, famille):
+        swing, isha = famille
+        data_manager.record_track_edition(swing.id, "Radio Edit", source="kworb", spotify_id="S1")
+        data_manager.record_track_edition(isha.id, "Radio Edit", source="deezer", duration=201)
+        for ligne in famille:
+            (e,) = data_manager.get_track_editions(ligne.id)
+            assert (e["spotify_id"], e["duration"], e["source"]) == ("S1", 201, "kworb")
+
+    def test_le_retrait_part_de_toute_la_famille(self, data_manager, famille):
+        swing, isha = famille
+        data_manager.record_track_edition(swing.id, "Radio Edit", duration=201)
+        assert data_manager.retirer_edition(isha.id, "Radio Edit")
+        data_manager.save_track(swing)
+        for ligne in famille:
+            assert self._editions(data_manager, ligne.id) == set()
+
+    def test_le_deplacement_quitte_toute_la_famille(self, data_manager, famille):
+        swing, isha = famille
+        autre = Track(title="Grünt #34", artist=swing.artist)
+        autre.genius_id = _GENIUS + 1
+        data_manager.save_track(autre)
+        data_manager.record_track_edition(swing.id, "Radio Edit", duration=201)
+        assert data_manager.deplacer_edition(swing.id, "Radio Edit", autre.id)
+        for ligne in famille:
+            assert self._editions(data_manager, ligne.id) == set()
+        assert self._editions(data_manager, autre.id) == {("Radio Edit", 201)}
+
+    def test_realigner_a_blanc_n_ecrit_rien_puis_aligne(self, data_manager, famille):
+        swing, isha = famille
+        with data_manager.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO track_editions (track_id, label, duration) "
+                    "VALUES (:t, 'Version 3:36', 216)"
+                ),
+                {"t": isha.id},
+            )
+        assert data_manager.realigner_soeurs() == {_GENIUS: 1}
+        assert self._editions(data_manager, swing.id) == set()
+        data_manager.realigner_soeurs(appliquer=True)
+        assert self._editions(data_manager, swing.id) == {("Version 3:36", 216)}
+        assert data_manager.realigner_soeurs() == {}
+
+
+class TestObservationLaPlusFraiche:
+    """`unir_observations` : par (champ, source), l'observation la plus FRAÎCHE
+    gagne chez toutes les sœurs, quelle que soit la ligne touchée — 290 conflits
+    au 2026-10-11 (AUDIT §9.3), 0 sur la copie du 2026-10-29."""
+
+    @staticmethod
+    def _poser(dm, tid, valeur, vue):
+        with dm.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO observations (track_id, field, value, source, seen_at) "
+                    "VALUES (:t, 'duration', :v, 'deezer', :s)"
+                ),
+                {"t": tid, "v": valeur, "s": vue},
+            )
+
+    @staticmethod
+    def _valeurs(dm, tid):
+        with dm.engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT value, seen_at FROM observations WHERE track_id = :t "
+                    "AND field = 'duration' AND source = 'deezer'"
+                ),
+                {"t": tid},
+            ).all()
+
+    @pytest.mark.parametrize("touchee", [0, 1])
+    def test_la_plus_fraiche_gagne_quelle_que_soit_la_ligne_touchee(
+        self, data_manager, famille, touchee
+    ):
+        from src.utils.track_soeurs import unir_observations
+
+        swing, isha = famille
+        self._poser(data_manager, swing.id, "200", "2026-10-01 10:00:00")
+        self._poser(data_manager, isha.id, "201", "2026-10-20 10:00:00")
+        ids = [swing.id, isha.id] if touchee == 0 else [isha.id, swing.id]
+        with data_manager.engine.begin() as conn:
+            unir_observations(conn, ids)
+        for ligne in famille:
+            assert self._valeurs(data_manager, ligne.id) == [("201", "2026-10-20 10:00:00")]
+
+    def test_a_fraicheur_egale_la_ligne_touchee_l_emporte(self, data_manager, famille):
+        from src.utils.track_soeurs import unir_observations
+
+        swing, isha = famille
+        self._poser(data_manager, swing.id, "200", "2026-10-20 10:00:00")
+        self._poser(data_manager, isha.id, "201", "2026-10-20 10:00:00")
+        with data_manager.engine.begin() as conn:
+            unir_observations(conn, [isha.id, swing.id])
+        for ligne in famille:
+            assert self._valeurs(data_manager, ligne.id)[0][0] == "201"

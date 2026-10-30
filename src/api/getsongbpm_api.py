@@ -29,7 +29,7 @@ from src.utils.fichiers_json import ecrire_atomique, lire_cache
 # Import logger
 from src.utils.logger import get_logger
 from src.utils.title_matching import either_contains_as_words, normalize_name
-from src.utils.version_descriptors import meme_version_mesuree, titre_generique
+from src.utils.version_descriptors import meme_disque, meme_version_mesuree, titre_generique
 
 logger = get_logger(__name__)
 
@@ -193,8 +193,6 @@ class GetSongBPMFetcher:
         chanson REFUSÉE pour la fiche (`refusees`, ID GetSongBPM retirés) non
         plus : la suivante la remplace.
         """
-        from src.utils.spotify_identity import memes_disques
-
         generique = titre_generique(title)
         na, nt = self._norm(artist), self._norm(title)
         best = None
@@ -226,7 +224,7 @@ class GetSongBPMFetcher:
             if generique:
                 disque = h.get("album")
                 disque = disque.get("title") if isinstance(disque, dict) else None
-                if not memes_disques(disque, album):
+                if not meme_disque(disque, album):
                     continue
             ht = self._norm(h.get("title", ""))
             if ht == nt:

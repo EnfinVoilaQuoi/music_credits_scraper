@@ -267,125 +267,12 @@ class SpotifyIDScraper:
                 continue
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Recherche principale
+    # Recherche d'un ID : voir `SpotifyIDScraperAsync.get_spotify_id_async`
     # ──────────────────────────────────────────────────────────────────────────
 
-    def get_spotify_id(self, artist: str, title: str) -> str | None:
-        logger.info(f"🔍 Recherche ID Spotify pour: '{artist}' - '{title}'")
-
-        cache_key = self._get_cache_key(artist, title)
-        if cache_key in self.cache:
-            cached = self.cache[cache_key]
-            if cached and cached != "not_found":
-                logger.info(f"✅ ID trouvé en cache: {cached}")
-                return cached
-            # 'not_found' n'est PAS définitif (a pu être causé par une erreur
-            # passagère, ex: driver mort) → on retente la recherche
-
-        # L'observation s'ouvre APRÈS le cache : un morceau servi de mémoire ne
-        # sollicite pas la source et ne doit pas peser dans ses compteurs.
-        with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            sid = self._get_spotify_id_body(obs, artist, title, cache_key)
-        if sid is None:
-            # `None` = absence CONSTATÉE seulement si Spotify a répondu ; sinon
-            # `SansReponse`, que l'appelant ne doit pas dater (2026-09-28).
-            source_usage.exiger_reponse(obs)
-        return sid
-
-    def _get_spotify_id_body(self, obs, artist: str, title: str, cache_key: str) -> str | None:
-        """Corps de `get_spotify_id`, sous l'observation ouverte par elle."""
-        try:
-            self._ensure_driver()
-        except PlaywrightError as e:
-            obs.fail(IssueKind.CRASH, f"browser indisponible : {e}")
-            logger.error("❌ Browser non disponible")
-            return None
-
-        # Apostrophes droites dans les requêtes (la recherche Spotify gère mal ')
-        artist_q = self._normalize_apostrophes(artist)
-        title_q = self._normalize_apostrophes(title)
-        search_queries = [
-            f"{artist_q} {title_q}",
-            f'"{artist_q}" "{title_q}"',
-            f"{title_q} {artist_q}",
-        ]
-
-        found_tracks = []
-        had_errors = False
-        timeouts = 0
-
-        for query_idx, query in enumerate(search_queries):
-            logger.info(f"📝 Essai {query_idx + 1}/{len(search_queries)}: '{query}'")
-            try:
-                spotify_url = f"https://open.spotify.com/search/{urllib.parse.quote(query)}"
-                self.page.goto(spotify_url, wait_until="domcontentloaded", timeout=30_000)
-                self._handle_cookies()
-
-                # Attendre qu'un lien track apparaisse
-                try:
-                    self.page.wait_for_selector("a[href*='/track/']", timeout=self._timeout)
-                except PlaywrightTimeoutError:
-                    logger.warning(f"⏰ Timeout pour: {query}")
-                    timeouts += 1
-                    continue
-
-                track_selectors = [
-                    "a[href*='/track/'][data-testid]",
-                    "div[data-testid*='track'] a[href*='/track/']",
-                    "[role='row'] a[href*='/track/']",
-                    "a[href*='/track/']",
-                ]
-
-                for selector in track_selectors:
-                    links = self.page.query_selector_all(selector)
-                    for link in links[:10]:
-                        try:
-                            href = link.get_attribute("href") or ""
-                            if "/track/" not in href:
-                                continue
-                            sid = self.extract_spotify_id_from_url(href)
-                            if not sid or sid in [t["id"] for t in found_tracks]:
-                                continue
-                            try:
-                                link_text = link.inner_text().lower()
-                                parent = link.query_selector("..")
-                                parent_text = parent.inner_text().lower() if parent else ""
-                                combined = f"{link_text} {parent_text}"
-                                relevance = self._calculate_relevance(artist, title, combined)
-                            except (PlaywrightError, AttributeError, TypeError, ValueError):
-                                combined, relevance = "", 0.5
-                            found_tracks.append(
-                                {"id": sid, "text": combined, "relevance": relevance, "href": href}
-                            )
-                        except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError):
-                            continue
-
-                if found_tracks:
-                    break
-
-            except (PlaywrightError, RuntimeError) as e:
-                had_errors = True
-                logger.error(f"❌ Erreur requête '{query}': {e}")
-                # Driver mort (thread/greenlet/page fermée) → re-création et on continue
-                err_str = str(e).lower()
-                if any(s in err_str for s in ("thread", "greenlet", "closed", "crashed")):
-                    try:
-                        self._cleanup_resources()
-                        self._init_driver()
-                    except PlaywrightError:
-                        logger.error("❌ Impossible de réinitialiser le driver SpotifyID")
-                        break
-                continue
-
-        if not found_tracks:
-            return self._rien_trouve(obs, title, had_errors, timeouts)
-        found_tracks.sort(key=lambda x: x["relevance"], reverse=True)
-        return self._retenir(obs, title, cache_key, found_tracks[0])
-
-    # ── Fin de recherche : PARTAGÉE par les jumeaux sync et async ────────────
-    # (2026-09-28 : le jumeau async, celui que l'app emprunte, n'avait ni le
-    # plancher de pertinence ni le filtre du choix LLM — posés sur la seule
-    # voie sync par c0fbd50. La logique ne vit plus qu'ici.)
+    # ── Fin de la recherche d'ID : utilisée par `SpotifyIDScraperAsync` ───────
+    # (la recherche elle-même, avec son navigateur, vit dans la sous-classe ;
+    # le plancher de pertinence et le constat d'absence sont ici.)
 
     def _retenir(self, obs, title: str, cache_key: str, best: dict) -> str | None:
         """Le candidat retenu, ou un refus MOTIVÉ (absence constatée).
@@ -618,64 +505,6 @@ class SpotifyIDScraper:
 
         logger.info(f"✅ ID artiste (1er crédité '{artists[0]['name']}'): {artists[0]['id']}")
         return artists[0]["id"]
-
-    # Titres génériques servis par Spotify quand la page track ne rend plus
-    # « Titre • Artiste » (drift observé) : ne portent AUCUNE info de vérif →
-    # normalisés en None pour ne pas polluer la base / l'affichage.
-    _GENERIC_PAGE_TITLES = frozenset(
-        {"", "spotify", "spotify – web player", "spotify - web player", "web player"}
-    )
-
-    @classmethod
-    def _clean_page_title(cls, raw: str | None) -> str | None:
-        """Nettoie le titre de page (« … | Spotify » retiré) ; renvoie None si le
-        titre est générique (aucune info « Titre • Artiste »). Partagé par les
-        voies sync et async (héritage)."""
-        if not raw:
-            return None
-        cleaned = raw.replace(" | Spotify", "").strip()
-        if cleaned.lower() in cls._GENERIC_PAGE_TITLES:
-            return None
-        return cleaned
-
-    def get_track_identity(self, spotify_id: str) -> dict | None:
-        """Ce que Spotify dit du morceau derrière un ID : titre, artistes, durée.
-
-        Passe par `/embed/track/{id}`, **server-rendered**, en `requests` NU :
-        aucun navigateur n'est nécessaire (mêmes deux voies que
-        `get_track_artists`, dont la seconde n'existe que pour le jour où
-        l'embed exigerait du JS).
-
-        ⚠️ La page `/track/{id}` ne convient PAS : c'est une application JS dont
-        le `<title>` vaut « Spotify » tant que le rendu n'a pas eu lieu. C'est
-        exactement ce que faisait `get_spotify_page_title` avec un
-        `wait_until="domcontentloaded"` — il rendait donc **toujours** `None`
-        (`_clean_page_title` écarte les titres génériques), et `spotify_page_title`
-        était vide sur 2 116 morceaux sur 2 116 pour DEUX raisons indépendantes :
-        celle-ci, et la colonne absente de l'UPDATE de `save_track` (e23).
-        """
-        url = self._url_embed(spotify_id)
-        try:
-            resp = requests.get(url, timeout=15, headers={"User-Agent": _UA})
-            if resp.ok:
-                resp.encoding = "utf-8"  # titres et noms accentués (anti-mojibake)
-                identite = self._identite_depuis_embed(resp.text)
-                if identite:
-                    return identite
-        except requests.RequestException as e:
-            logger.debug(f"Embed via requests échoué ({spotify_id}): {e}")
-
-        try:
-            self._ensure_driver()
-            self.page.goto(url, wait_until="domcontentloaded", timeout=30_000)
-            return self._identite_depuis_embed(self.page.content())
-        except (PlaywrightError, AttributeError, TypeError, ValueError) as e:
-            logger.error(f"❌ Identité embed via Playwright échouée ({spotify_id}): {e}")
-            return None
-
-    def get_spotify_page_title(self, spotify_id: str) -> str | None:
-        """Titre lisible de la page Spotify d'un ID, pour VÉRIFICATION humaine."""
-        return self._titre_de_page(self.get_track_identity(spotify_id))
 
     def get_artist_spotify_id(self, artist_name: str) -> str | None:
         """Récupère l'ID Spotify (22 chars) d'un artiste depuis la page de recherche Spotify."""

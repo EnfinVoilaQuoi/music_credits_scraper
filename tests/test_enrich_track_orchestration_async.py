@@ -103,8 +103,9 @@ class _FakeRecco(_FakeEnrich, ReccoBeatsProvider):
         return self.try_by_isrc(track, ctx)
 
 
-class _JournalSyncSongBpm(SongBpmProvider):
-    """SANS override d'enrich_async : exerce le PONT réel via ctx.sync_runner."""
+class _JournalSyncDiscogs(DiscogsProvider):
+    """SANS override d'enrich_async : exerce le PONT réel via ctx.sync_runner
+    (Discogs est la seule source qui garde un corps sync, sans jumeau async)."""
 
     def __init__(self):
         super().__init__()
@@ -292,15 +293,15 @@ def test_observations_du_run_par_source():
 
 
 def test_pont_sync_execute_sur_le_thread_dedie():
-    """Le pont réel `enrich_async` des providers scrapers doit exécuter le corps
-    sync sur le thread SerialWorker du run (affinité Playwright)."""
-    songbpm = _JournalSyncSongBpm()
-    enricher, _, _ = _enricher(songbpm=songbpm)
+    """Le pont réel `enrich_async` d'un provider à corps sync doit l'exécuter sur
+    le thread SerialWorker du run."""
+    discogs = _JournalSyncDiscogs()
+    enricher, _, _ = _enricher(discogs=discogs)
 
-    results = _run(enricher, _track(), sources=["songbpm"])
+    results = _run(enricher, _track(), sources=["discogs"])
 
-    assert results["songbpm"] is True
-    assert songbpm.seen_thread == SYNC_THREAD
+    assert results["discogs"] is True
+    assert discogs.seen_thread == SYNC_THREAD
 
 
 def test_ce_que_la_passe_genius_declare_survit_au_run():

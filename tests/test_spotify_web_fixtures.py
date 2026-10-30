@@ -252,3 +252,39 @@ def test_page_album_ne_dit_pas_le_disque(page_album):
     titres = [t for _, t in parse.parse_album_tracks(page_album)]
     assert titres[0].startswith("CP_001") and titres[10] == "Shonen"
     assert "Disque 2" not in page_album and "Disc 2" not in page_album
+
+
+# ── Auditeurs mensuels : le libellé a changé (brut du 2026-10-29) ────────────
+#: Extraits (en-tête seul) des pages artiste gardées dans `data/brut/brut.db` par
+#: les runs du 29/10 : « 61 194 827 auditeur·rice·s par mois » au lieu de
+#: « 387 860 auditeurs mensuels ». Le parseur ne les lisait plus : WARNING
+#: « auditeurs mensuels introuvables » sur Travis Scott et Josman.
+@pytest.mark.parametrize(
+    ("nom", "attendu"),
+    [
+        ("artiste_entete_inclusif_travis.html", 61_194_827),
+        ("artiste_entete_inclusif_josman.html", 2_817_629),
+    ],
+)
+def test_auditeurs_mensuels_libelle_inclusif(nom, attendu):
+    """Le texte COMPLET (visually-hidden) est lu, jamais l'abrégé « 61,2 M »."""
+    assert parse.parse_monthly_listeners(_fixture(nom)) == attendu
+
+
+@pytest.mark.parametrize(
+    ("texte", "attendu"),
+    [
+        ("387\u202f860\u00a0auditeurs mensuels", 387_860),  # libellé d'avant octobre
+        ("1\u00a0auditeur mensuel", 1),
+        ("61\u202f194\u202f827\u00a0auditeur\u00b7rice\u00b7s par mois", 61_194_827),
+        ("1\u00a0auditeur\u00b7rice par mois", 1),
+        ("12\u202f345\u00a0auditeurs\u00b7rices par mois", 12_345),
+        ("12\u202f345 AUDITEURS PAR MOIS", 12_345),
+        # Abrégé : un faux précis vaut moins qu'une absence.
+        ("61,2\u00a0M\u00a0auditeur\u00b7rice\u00b7s par mois", None),
+        ("2,8 M auditeurs mensuels", None),
+        ("aucun auditeur", None),
+    ],
+)
+def test_auditeurs_mensuels_tous_les_libelles_connus(texte, attendu):
+    assert parse.parse_monthly_listeners(f"<div><span>{texte}</span></div>") == attendu

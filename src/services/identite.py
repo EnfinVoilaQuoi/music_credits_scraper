@@ -15,7 +15,7 @@ les fonctions EXISTANTES dans l'ordre de la force de la preuve, et rien d'autre
        déménagé du run Streams le 2026-09-28, qui ne fait plus que compter)
     2d Spotify par la parution (album par MusicBrainz, garde Deezer ; ID par la
        PLACE sur l'album, gate `valider_identite`) — 2026-10-15
-    3b Spotify par morceau (scraper + LLM, gate `valider_identite`, pour ce que
+    3b Spotify par morceau (scraper, gate `valider_identite`, pour ce que
        Kworb n'a pas relié) — APRÈS 3a, pour qu'une durée INDÉPENDANTE existe au
        moment du jugement (73 variantes avaient hérité de l'ID de l'original
        quand la durée « suivait » l'ID)

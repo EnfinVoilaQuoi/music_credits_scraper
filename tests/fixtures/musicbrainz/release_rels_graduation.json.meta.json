@@ -1,0 +1,7 @@
+{
+  "name": "musicbrainz_release_rels",
+  "url": "https://musicbrainz.org/ws/2/release/ccd5625e-f49d-4b8a-a2f2-fecf7009f011?fmt=json&inc=url-rels",
+  "method": "musicbrainz",
+  "captured_at": "2026-10-17T00:25:00",
+  "size_bytes": 3237
+}

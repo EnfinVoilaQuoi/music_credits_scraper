@@ -5,9 +5,13 @@ de *Civilisation Édition Ultime* rend aussi *Civilisation* 2021 — seul l'albu
 au bon nombre de pistes est rattaché.
 """
 
+from src.api.itunes_api import album_du_code_barres
+from src.api.musicbrainz_api import albums_lies
 from src.models import Artist, ReleaseObservation, Track
 from src.services.apple_parutions import (
     SOURCE_PROPOSITION,
+    album_designe_par_musicbrainz,
+    explicite_concorde,
     propositions_par_place,
     rattacher_parutions_apple,
 )
@@ -25,6 +29,22 @@ class _ITunes:
     def lookup_code_barres(self, upc, boutique="fr"):
         self.appels.append(upc)
         return self.resultats
+
+
+class _MB:
+    def __init__(self, parutions, panne=None):
+        self.parutions, self.panne, self.appels = parutions, panne, []
+
+    def parutions_par_code_barres(self, upc):
+        self.appels.append(upc)
+        if self.panne:
+            raise self.panne
+        return self.parutions
+
+
+def _parutions_mb(*noms):
+    """`parutions_par_code_barres` rejoué depuis les url-rels RÉELLES."""
+    return [{"albums": albums_lies(load_fixture_json(f"musicbrainz/{n}"))} for n in noms]
 
 
 def _piste(tid, disque, numero, nom, ms):
@@ -127,15 +147,18 @@ def test_ambigu_ou_inconnu_est_date_sans_rattacher(data_manager):
     resultats = load_fixture_json("itunes/lookup_upc_civilisation.json")["results"]
     itunes = _ITunes(resultats)
 
-    bilan = rattacher_parutions_apple(data_manager, artiste, [album], client=itunes)
+    mb = _MB([])  # MusicBrainz ne connaît pas le code-barres : rien ne départage
+
+    bilan = rattacher_parutions_apple(data_manager, artiste, [album], client=itunes, mb=mb)
 
     assert (bilan.rattaches, bilan.ambigus, bilan.propositions) == (0, 1, 0)
+    assert mb.appels == [_UPC]
     (parution,) = data_manager.get_track_releases(shonen.id)
     collection, vu = data_manager.etat_parution_apple(parution["id"])
     assert collection is None and vu is not None
     # Daté : pas redemandé avant expiration.
-    rattacher_parutions_apple(data_manager, artiste, [album], client=itunes)
-    assert itunes.appels == [_UPC]
+    rattacher_parutions_apple(data_manager, artiste, [album], client=itunes, mb=mb)
+    assert itunes.appels == [_UPC] and mb.appels == [_UPC]
 
 
 def test_la_chaine_complete_jusqu_a_3c(data_manager):
@@ -172,3 +195,117 @@ def test_la_chaine_complete_jusqu_a_3c(data_manager):
     (relu,) = data_manager.get_artist_tracks(artiste.id)
     assert str(relu.apple_music_id) == str(fiche["trackId"])
     assert len(data_manager.get_track_releases(shonen.id)) == 1
+
+
+class TestDepartageMusicBrainz:
+    """iTunes ambigu, MusicBrainz départage (2026-10-30). Réponses RÉELLES du
+    brut : *Graduation* (explicite et clean, 14 pistes chacun) et *VULTURES 2*
+    (MusicBrainz lie l'édition clean à l'album Deezer explicite)."""
+
+    GRADUATION_EXPLICITE = "1451901307"
+    VULTURES_CLEAN = "1761882317"
+
+    def _graduation(self):
+        resultats = load_fixture_json("itunes/lookup_upc_graduation.json")["results"]
+        album = AlbumDeezer.depuis(load_fixture_json("deezer/album_graduation.json"), [])
+        return resultats, album
+
+    def test_itunes_seul_est_ambigu(self):
+        resultats, album = self._graduation()
+        assert album_du_code_barres(resultats, album.nb_tracks) is None
+
+    def test_musicbrainz_designe_l_edition_explicite(self):
+        resultats, album = self._graduation()
+        assert album.explicit_lyrics is True
+        trouve = album_designe_par_musicbrainz(
+            resultats, _parutions_mb("release_rels_graduation.json"), album.id, True
+        )
+        assert str(trouve["collection"]["collectionId"]) == self.GRADUATION_EXPLICITE
+        assert len(trouve["pistes"]) == 14
+        assert trouve["pistes"][0]["trackName"] == "Good Morning"
+
+    def test_parution_qui_ne_lie_pas_notre_album_deezer(self):
+        resultats, album = self._graduation()
+        parutions = _parutions_mb("release_rels_graduation.json")
+        assert album_designe_par_musicbrainz(resultats, parutions, 1, True) is None
+
+    def test_album_apple_absent_des_resultats_itunes(self):
+        resultats, album = self._graduation()
+        parutions = [{"albums": {"deezer": [str(album.id)], "apple_music": ["999"]}}]
+        assert album_designe_par_musicbrainz(resultats, parutions, album.id, True) is None
+
+    def test_deux_albums_apple_ne_departagent_rien(self):
+        resultats, album = self._graduation()
+        parutions = [
+            {"albums": {"deezer": [str(album.id)], "apple_music": ["1451901307", "1442845779"]}}
+        ]
+        assert album_designe_par_musicbrainz(resultats, parutions, album.id, True) is None
+
+    def test_edition_clean_pour_un_album_deezer_explicite_refusee(self):
+        resultats = load_fixture_json("itunes/lookup_upc_vultures2.json")["results"]
+        album = AlbumDeezer.depuis(load_fixture_json("deezer/album_vultures2.json"), [])
+        parutions = _parutions_mb("release_rels_vultures2_a.json", "release_rels_vultures2_b.json")
+        assert album.explicit_lyrics is True
+        assert album_designe_par_musicbrainz(resultats, parutions, album.id, True) is None
+        # Sans le témoin explicite, c'est bien l'édition clean que MusicBrainz lie.
+        trouve = album_designe_par_musicbrainz(resultats, parutions, album.id, None)
+        assert str(trouve["collection"]["collectionId"]) == self.VULTURES_CLEAN
+
+    def test_explicite_concorde(self):
+        assert explicite_concorde("explicit", True)
+        assert explicite_concorde("cleaned", False)
+        assert explicite_concorde("notExplicit", False)
+        assert not explicite_concorde("cleaned", True)
+        assert not explicite_concorde("notExplicit", True)
+        assert not explicite_concorde("explicit", False)
+        assert explicite_concorde(None, True) and explicite_concorde("explicit", None)
+
+    def _scenario(self, dm):
+        resultats, album = self._graduation()
+        artiste = Artist(name="Kanye West")
+        artiste.id = dm.save_artist(artiste)
+        t = Track(title="Good Morning", artist=artiste)
+        t.id = dm.save_track(t)
+        dm.record_release_observations(
+            t.id,
+            [
+                ReleaseObservation(
+                    title="Graduation",
+                    source="deezer",
+                    external_release_id=album.id,
+                    upc=album.upc,
+                    disc_number=1,
+                    track_number=1,
+                )
+            ],
+        )
+        artiste.tracks = dm.get_artist_tracks(artiste.id)
+        return artiste, t, resultats, album
+
+    def test_rattache_et_propose_par_la_place(self, data_manager):
+        artiste, t, resultats, album = self._scenario(data_manager)
+        mb = _MB(_parutions_mb("release_rels_graduation.json"))
+
+        bilan = rattacher_parutions_apple(
+            data_manager, artiste, [album], client=_ITunes(resultats), mb=mb
+        )
+
+        assert (bilan.rattaches, bilan.departages_mb, bilan.ambigus) == (1, 1, 0)
+        assert bilan.propositions == 1 and mb.appels == [album.upc]
+        (parution,) = data_manager.get_track_releases(t.id)
+        assert data_manager.etat_parution_apple(parution["id"])[0] == self.GRADUATION_EXPLICITE
+        obs = data_manager.get_artist_observations(artiste.id)[t.id]
+        (prop,) = [o for o in obs if o.field == CHAMP_APPLE_PROPOSE]
+        assert prop.value == "1451901848"  # « Good Morning » de l'édition explicite
+
+    def test_panne_musicbrainz_ne_date_rien(self, data_manager):
+        artiste, t, resultats, album = self._scenario(data_manager)
+        mb = _MB([], panne=ConnectionError("MusicBrainz saturé"))
+
+        bilan = rattacher_parutions_apple(
+            data_manager, artiste, [album], client=_ITunes(resultats), mb=mb
+        )
+
+        assert (bilan.rattaches, bilan.ambigus) == (0, 0) and len(bilan.erreurs) == 1
+        (parution,) = data_manager.get_track_releases(t.id)
+        assert data_manager.etat_parution_apple(parution["id"]) == (None, None)

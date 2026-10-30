@@ -19,6 +19,18 @@ Deux gestes, aucun ID écrit sans contrôle :
 Une recherche répondue est datée (`releases.apple_checked_at`, e56) et n'est
 refaite qu'à expiration (`runtime.constat_perime`) : ~3 s par album au premier
 passage, puis seulement les nouveaux.
+
+Quand iTunes laisse le code-barres AMBIGU (plusieurs albums au bon nombre de
+pistes : l'édition explicite et la « clean », deux livraisons d'un single),
+MusicBrainz départage (2026-10-30, `album_designe_par_musicbrainz`) : l'album
+Apple que lie la parution MusicBrainz du code-barres qui lie EXACTEMENT notre
+album Deezer (même garde que `spotify_parutions`), s'il est l'un des albums
+qu'iTunes a rendus et que son contenu explicite est celui de l'album Deezer.
+Mesuré hors ligne sur le brut (1 165 codes-barres lus par iTunes) : là où
+iTunes est sûr, MusicBrainz désigne le même album 177 fois sur 179 ; sur 74
+ambigus, il en départage 39, chaque fois l'album aux durées de Deezer, et
+l'explicite concorde 38 fois (*VULTURES 2* : MusicBrainz lie l'édition clean
+à l'album Deezer explicite — refusé).
 """
 
 from __future__ import annotations
@@ -47,8 +59,59 @@ class BilanApple:
     rattaches: int = 0
     absents: int = 0
     ambigus: int = 0
+    #: Ambigus pour iTunes, départagés par MusicBrainz (comptés aussi dans
+    #: `rattaches`).
+    departages_mb: int = 0
     propositions: int = 0
     erreurs: list[str] = field(default_factory=list)
+
+
+def explicite_concorde(explicitness: str | None, explicite_deezer: bool | None) -> bool:
+    """PUR. Le contenu explicite d'un album Apple (`collectionExplicitness` :
+    explicit | cleaned | notExplicit) ne dément pas celui de l'album Deezer
+    (`explicit_lyrics`). Une valeur inconnue d'un côté ne dément rien."""
+    if explicite_deezer is None or explicitness not in ("explicit", "cleaned", "notExplicit"):
+        return True
+    return (explicitness == "explicit") == bool(explicite_deezer)
+
+
+def album_designe_par_musicbrainz(
+    resultats: list[dict],
+    parutions_mb: list[dict],
+    deezer_album_id,
+    explicite_deezer: bool | None = None,
+) -> dict | None:
+    """PUR. L'album Apple d'un code-barres qu'iTunes laisse ambigu, désigné par
+    MusicBrainz, au format d'`album_du_code_barres` — ou None.
+
+    Trois preuves d'accord : la parution MusicBrainz lie EXACTEMENT notre album
+    Deezer et un seul album Apple ; cet album est l'un de ceux qu'iTunes rend
+    pour le code-barres ; son contenu explicite est celui de l'album Deezer."""
+    from src.api.itunes_api import album_et_pistes
+
+    cible = str(deezer_album_id)
+    apple = {
+        aid
+        for p in parutions_mb or ()
+        if cible in (p.get("albums") or {}).get("deezer", [])
+        for aid in (p.get("albums") or {}).get("apple_music", [])
+    }
+    if len(apple) != 1:
+        return None
+    aid = apple.pop()
+    album = next(
+        (
+            r
+            for r in resultats or []
+            if r.get("wrapperType") == "collection" and str(r.get("collectionId")) == aid
+        ),
+        None,
+    )
+    if album is None or not explicite_concorde(
+        album.get("collectionExplicitness"), explicite_deezer
+    ):
+        return None
+    return album_et_pistes(resultats, album)
 
 
 def propositions_par_place(places: dict, pistes_apple: list[dict], fiches: dict) -> dict[int, str]:
@@ -86,10 +149,12 @@ def propositions_par_place(places: dict, pistes_apple: list[dict], fiches: dict)
 
 
 def rattacher_parutions_apple(
-    dm, artist, albums, *, client=None, force: bool = False, should_stop=lambda: False
+    dm, artist, albums, *, client=None, mb=None, force: bool = False, should_stop=lambda: False
 ) -> BilanApple:
     """Pour chaque album Deezer de ce run (`BilanEcarts.albums`) : l'album Apple
-    de son code-barres, puis les propositions d'ID par la place."""
+    de son code-barres (départagé par MusicBrainz quand iTunes est ambigu),
+    puis les propositions d'ID par la place. `mb` : client MusicBrainz
+    (`parutions_par_code_barres`), créé seulement si un ambigu le demande."""
     from src.api.itunes_api import ITunesAPI, album_du_code_barres
     from src.services.runtime import constat_perime
     from src.utils.apple_identity import CHAMP_APPLE_PROPOSE
@@ -123,8 +188,23 @@ def rattacher_parutions_apple(
         bilan.albums_lus += 1
         nb = album.nb_tracks or len(album.pistes) or None
         trouve = album_du_code_barres(resultats, nb)
+        ambigu = trouve is None and any(r.get("wrapperType") == "collection" for r in resultats)
+        if ambigu:
+            if mb is None:
+                from src.api.musicbrainz_api import MusicBrainzAPI
+
+                mb = MusicBrainzAPI()
+            try:
+                parutions = mb.parutions_par_code_barres(album.upc)
+            except Exception as e:  # noqa: BLE001 — une panne ne date rien, l'album sera redemandé
+                bilan.erreurs.append(f"MusicBrainz {album.title} : {e}")
+                continue
+            trouve = album_designe_par_musicbrainz(
+                resultats, parutions, album.id, album.explicit_lyrics
+            )
+            bilan.departages_mb += trouve is not None
         if trouve is None:
-            if any(r.get("wrapperType") == "collection" for r in resultats):
+            if ambigu:
                 bilan.ambigus += 1
             else:
                 bilan.absents += 1
@@ -151,6 +231,7 @@ def rattacher_parutions_apple(
         logger.info(
             f"🍎 Apple par code-barres : {bilan.rattaches} album(s) rattaché(s), "
             f"{bilan.absents} inconnu(s), {bilan.ambigus} ambigu(s), "
+            f"{bilan.departages_mb} départagé(s) par MusicBrainz, "
             f"{bilan.propositions} ID proposé(s) à 3c"
         )
     return bilan

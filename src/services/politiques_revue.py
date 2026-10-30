@@ -1292,7 +1292,11 @@ REGLES_ETENDUES = frozenset(
         # 2026-10-29 : mesures SongBPM posées par un titre CONTENU avant la
         # garde de pose `cccebc7`, retirées de la fiche que ses catalogues
         # démentent quand ceux de l'autre les confirment (simulée sur la copie).
-        ("songbpm_titre_contenu", "retirer_songbpm"),
+        # 2026-10-30, décision utilisateur : selon la relation des deux titres,
+        # toute la mesure (autre morceau) ou la durée seule (coupe), refusée
+        # champ par champ (`mesure_songbpm`) ; simulée sur une copie, chaque
+        # décision confrontée aux paroles Genius et aux catalogues.
+        ("songbpm_titre_contenu", "retirer_champs_songbpm"),
         # 2026-10-30 : vidéo Genius muette plus de 3 fois plus longue que le
         # morceau (concert, émission, compilation) ; simulée sur la copie,
         # 4 liens, chacun confronté à son titre (aucun n'est le morceau).
@@ -1319,16 +1323,27 @@ def politique_jumelle_annee(cas, track, _ctx):
 
 def politique_songbpm_titre_contenu(cas, track, _ctx):
     """Les mesures SongBPM qu'une fiche partage avec une autre par un titre
-    CONTENU (`revue.songbpm_titre_contenu`) partent quand les catalogues de la
-    fiche les démentent et ceux de l'autre les confirment (`retirer` posé). Le
-    reste — une fiche sans catalogue, une vidéo pour seule contradiction —
-    reste à l'humain (décision utilisateur : au moindre doute, le code ne
+    CONTENU (`revue.songbpm_titre_contenu`) partent quand la page est à
+    l'autre (`retirer` posé) : toutes (un autre morceau) ou la durée seule
+    (une coupe du même morceau), selon `champs` (décision utilisateur
+    2026-10-30). Une version (démo, remix), une relation indécise ou une page
+    que rien n'attribue restent à l'humain (au moindre doute, le code ne
     tranche pas)."""
     preuves = cas.preuves or {}
     if cas.detecteur != "songbpm_titre_contenu" or track is None or not preuves.get("retirer"):
         return None
+    if preuves.get("champs") == ["duration"]:
+        # Une COUPE du même morceau (décision utilisateur 2026-10-30) : le
+        # tempo est le même, la durée non.
+        return Arbitrage(
+            "durée SongBPM de l'autre titre (une coupe du même morceau) : la retirer",
+            "retirer_champs_songbpm",
+            cas.motif,
+        )
     return Arbitrage(
-        "mesures SongBPM de l'autre titre : les retirer de la fiche", "retirer_songbpm", cas.motif
+        "mesures SongBPM de l'autre titre : les retirer de la fiche",
+        "retirer_champs_songbpm",
+        cas.motif,
     )
 
 

@@ -6,7 +6,13 @@ import pytest
 from src.enrichment.observation import Observation
 from src.models import Artist, Track
 from src.services import revue, revue_auto
-from src.utils.corrections_fiches import certifs_refusees, cle_certif, empreinte_lrc, lrc_refuses
+from src.utils.corrections_fiches import (
+    certifs_refusees,
+    cle_certif,
+    empreinte_lrc,
+    lrc_refuses,
+    mesures_songbpm_refusees,
+)
 
 ORIGINAL = " ".join(f"ligne{i} mot{i}" for i in range(30))
 #: Le LRC de l'original : un vrai LRC horodaté (l'arbitrage n'en retient pas d'autre).
@@ -163,9 +169,48 @@ def test_songbpm_d_un_titre_contenu_retire_puis_retabli(data_manager, artiste):
     assert fiches["reste à vivre"].audio.bpm == 140  # la propriétaire garde
 
     (correction,) = data_manager.corrections_revue(artiste.id)
-    assert correction["action"] == "regle:retirer_songbpm"
+    assert correction["action"] == "regle:retirer_champs_songbpm"
+    reste = fiches["Reste"]
+    assert mesures_songbpm_refusees(reste) == [
+        {"bpm": "140", "duration": "205", "key": "5", "mode": "1"}
+    ]
     revue_auto.retablir(data_manager, artiste, correction)
     assert _charger(data_manager, artiste)["Reste"].audio.bpm == 140
+    assert mesures_songbpm_refusees(reste) == []
+    assert not revue_auto.corriger(data_manager, artiste).appliquees
+
+
+def test_coupe_du_meme_morceau_perd_sa_duree_seule_puis_retablie(data_manager, artiste):
+    """Décision utilisateur 2026-10-30 : « Jesus Walks Snippet » portait les
+    mesures de « Jesus Walks (Intro) » (194 s, que Discogs confirme) — même
+    morceau, même tempo : la DURÉE seule part, refusée champ par champ ; BPM et
+    tonalité restent. « ↩ Rétablir » rend la durée et lève le refus."""
+    mesures = (("bpm", 87), ("key", 3), ("mode", 0), ("duration", 194))
+    snippet = Track(title="Jesus Walks Snippet", artist=artiste, genius_id=30)
+    snippet.observations += [Observation(c, v, "songbpm") for c, v in mesures]
+    data_manager.save_track(snippet)
+    intro = Track(title="Jesus Walks (Intro)", artist=artiste, genius_id=31)
+    intro.observations += [Observation("duration", 193, "discogs")]
+    intro.observations += [Observation(c, v, "songbpm") for c, v in mesures]
+    data_manager.save_track(intro)
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1 and "Snippet" in bilan.appliquees[0]
+    fiches = _charger(data_manager, artiste)
+    s = fiches["Jesus Walks Snippet"]
+    # Le tempo reste, celui de la propriétaire de la page.
+    assert s.audio.bpm and s.audio.bpm == fiches["Jesus Walks (Intro)"].audio.bpm
+    assert s.audio.key == 3
+    assert not s.duration  # la durée part, colonne comprise
+    assert fiches["Jesus Walks (Intro)"].duration in (193, 194)
+    assert mesures_songbpm_refusees(s) == [{"duration": "194"}]
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:retirer_champs_songbpm"
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert _charger(data_manager, artiste)["Jesus Walks Snippet"].duration == 194
+    assert mesures_songbpm_refusees(s) == []
     assert not revue_auto.corriger(data_manager, artiste).appliquees
 
 

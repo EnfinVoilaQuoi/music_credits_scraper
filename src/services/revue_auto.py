@@ -265,6 +265,44 @@ def _corriger_songbpm(dm, track, cas: Cas) -> tuple[str, dict]:
     )
 
 
+def _corriger_champs_songbpm(dm, track, cas: Cas) -> tuple[str, dict]:
+    """Les champs SongBPM que désigne le cas (`preuves["champs"]` : toute la
+    mesure, ou la DURÉE seule d'une coupe du même morceau — décision
+    utilisateur 2026-10-30) partent de la fiche (lignes sœurs comprises), et
+    leurs VALEURS sont refusées (`mesure_songbpm`) : aucune page n'était gardée
+    avant le 2026-10-27, refuser la page ne tenait pas. Toute la mesure
+    emporte aussi le refus de sa page, quand elle est connue."""
+    from src.utils.corrections_fiches import (
+        CHAMPS_MESURE_SONGBPM,
+        memoriser_mesure_songbpm_refusee,
+        pages_des_observations,
+        refuser_pages_retirees,
+    )
+
+    champs = tuple(c for c in cas.preuves.get("champs") or () if c in CHAMPS_MESURE_SONGBPM)
+    if not champs:
+        raise LookupError("aucun champ SongBPM désigné")
+    origine = f"{PREFIXE_REGLE}{cas.detecteur}"
+    retirees: list[dict] = []
+    tout = set(champs) == set(CHAMPS_MESURE_SONGBPM)
+    n = dm.retirer_mesures_songbpm(track.id, retirees=retirees, champs=None if tout else champs)
+    if not n:
+        raise LookupError("plus aucune mesure SongBPM à retirer sur la fiche")
+    propres = [o for o in retirees if o["track_id"] == track.id]
+    mesure = {o["field"]: o["value"] for o in propres if o["field"] in champs}
+    pages = pages_des_observations(propres)
+    memoriser_mesure_songbpm_refusee(
+        track, mesure, origine=origine, page=pages[0] if pages else None
+    )
+    if tout:
+        refuser_pages_retirees(track, retirees, origine=origine)
+    quoi = "mesure(s) SongBPM" if tout else f"{', '.join(champs)} SongBPM"
+    return (
+        f"{n} {quoi} retirée(s) de « {track.title} » — {cas.motif}",
+        {"type": "observations", "observations": retirees, "mesure_songbpm": mesure},
+    )
+
+
 def _corriger_getsongbpm(dm, track, cas: Cas) -> tuple[str, dict]:
     """Les mesures GetSongBPM de la fiche partent (lignes sœurs comprises), et
     la chanson GetSongBPM d'où elles venaient est refusée — quand elle est
@@ -592,6 +630,7 @@ _CORRECTEURS_DE_REGLE = {
     "deezer_appliquer": _deezer_appliquer,
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,
     "retirer_songbpm": _corriger_songbpm,
+    "retirer_champs_songbpm": _corriger_champs_songbpm,
     "retirer_getsongbpm": _corriger_getsongbpm,
     "retirer_spotify": _corriger_spotify,
     "partager_compteur": _partager_compteur,
@@ -765,6 +804,10 @@ def retablir(dm, artiste, correction: dict) -> str:
             oublier_page_songbpm_refusee(track, page)
         for page in pages_getsongbpm_des_observations(annulation.get("observations")):
             oublier_page_getsongbpm_refusee(track, page)
+        if annulation.get("mesure_songbpm"):
+            from src.utils.corrections_fiches import oublier_mesure_songbpm_refusee
+
+            oublier_mesure_songbpm_refusee(track, annulation["mesure_songbpm"])
         n = dm.restaurer_observations(annulation.get("observations") or [])
         compte_rendu = f"{n} mesure(s) rétablie(s) sur « {track.title} »"
     elif annulation.get("type") == "spotify":

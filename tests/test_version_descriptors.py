@@ -18,6 +18,7 @@ from src.utils.version_descriptors import (
     parse_variant,
     parties_du_morceau,
     reeditions_evidentes,
+    relation_des_titres,
     socle_normalise,
     titre_sans_edition,
     titres_equivalents,
@@ -660,3 +661,37 @@ class TestGroupeFinalImbrique:
             titre_sans_edition("Whole Lotta Lovin’ [Grandtheft Remix (Clean)]")
             == "Whole Lotta Lovin’ (Grandtheft Remix)"
         )
+
+
+# ── Relation de deux titres dont l'un contient l'autre (2026-10-30) ──────────
+
+
+@pytest.mark.parametrize(
+    "a, b, attendu",
+    [
+        # Décision utilisateur : deux morceaux, toute la mesure SongBPM part.
+        ("Tree", "That Tree", "autre_morceau"),
+        ("Love", "NO LOVE", "autre_morceau"),
+        ("Brothers", "SISTERS AND BROTHERS", "autre_morceau"),
+        ("Night", "through the late night", "autre_morceau"),
+        ("Maybe", "Maybe So", "autre_morceau"),
+        # Une coupe du même morceau : la durée seule.
+        ("Extrait ULTRA", "Ultra", "coupe"),
+        ("Jesus Walks Snippet", "Jesus Walks (Intro)", "coupe"),
+        ("Jesus Walks (Snippet)", "Jesus Walks", "coupe"),
+        # Partie d'un tout ou suite : le titre ne le dit pas.
+        ("Civilisé, partie 1", "Civilisé", "partie"),
+        ("Argent noir", "Argent noir part. 3", "partie"),
+        ("HIGHS AND LOWS 2", "HIGHS AND LOWS", "partie"),
+        ("X pt. 1", "X pt. 2", "autre_morceau"),
+        # Une version : le tempo peut différer.
+        ("Bad Mood (Demo)", "Bad Mood / Shit on You", "version"),
+        ("My Way Home [Mixed]", "Home (Windy)", "version"),
+        ("BULLY V1", "BULLY", "version"),
+        ("Ultra", "Ultra", None),
+        ("", "Ultra", None),
+    ],
+)
+def test_relation_des_titres(a, b, attendu):
+    assert relation_des_titres(a, b) == attendu
+    assert relation_des_titres(b, a) == attendu

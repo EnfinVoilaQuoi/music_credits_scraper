@@ -18,7 +18,9 @@ from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
 from src.utils.corrections_fiches import (
     CHAMP_PAGE_SONGBPM,
+    champs_songbpm_refuses,
     cle_page_songbpm,
+    mesures_songbpm_refusees,
     pages_songbpm_refusees,
 )
 from src.utils.logger import get_logger
@@ -180,6 +182,22 @@ class SongBpmProvider:
             logger.warning(f"⚠️ SongBPM : page écartée pour '{track.title}' — {motif}")
             return False
 
+        # La mesure, normalisée comme ses observations, et ce qu'un refus de
+        # MESURE en écarte (`mesure_songbpm`, décision utilisateur 2026-10-30 :
+        # la durée seule d'une coupe du morceau, ou toute la mesure d'un autre).
+        sbpm = sanitize_bpm(track_data.get("bpm"))
+        key_value = track_data.get("key")
+        mode_value = track_data.get("mode")
+        key_mode = key_mode_observations("songbpm", key=key_value, mode=mode_value)
+        duree = _clean_duration(track_data.get("duration"))
+        lues = {"bpm": sbpm, "duration": duree, **{o.field: o.value for o in key_mode}}
+        ecartes = champs_songbpm_refuses(mesures_songbpm_refusees(track), lues)
+        if ecartes:
+            if ecartes >= {c for c, v in lues.items() if v is not None}:
+                logger.info(f"⏭️ SongBPM : mesure refusée pour '{track.title}' — écartée")
+                return False
+            logger.info(f"⏭️ SongBPM : {', '.join(sorted(ecartes))} refusé(s) pour '{track.title}'")
+
         # La page lue est DÉCLARÉE : un retrait des mesures sait ainsi laquelle
         # refuser (sinon le run suivant la reposerait).
         if page:
@@ -189,21 +207,17 @@ class SongBpmProvider:
         # apply_resolutions pose track.audio.bpm en fin de run. Un candidat valide au
         # vote = SongBPM a contribué (même 2ᵉ vote concordant) → succès, sinon
         # faux « ÉCHEC » → nettoyage.
-        sbpm = sanitize_bpm(track_data.get("bpm"))
-        if sbpm is not None:
+        if sbpm is not None and "bpm" not in ecartes:
             ctx.bpm_ballot.add("songbpm", sbpm)
             logger.info(f"📊 BPM SongBPM (candidat): {sbpm} pour {track.title}")
             updated = True
 
-        # Key et Mode
-        key_value = track_data.get("key")
-        mode_value = track_data.get("mode")
-
         # Observations key/mode PAR SOURCE (normalisées : "minor"→0, lettre→pc) —
         # corrige le bug WIP mode="minor". apply_resolutions repose key/mode/
         # key_mode_source en fin de run (plus de pose legacy directe, E7).
-        ctx.observations.extend(key_mode_observations("songbpm", key=key_value, mode=mode_value))
-        if key_value or mode_value:
+        key_mode = [o for o in key_mode if o.field not in ecartes]
+        ctx.observations.extend(key_mode)
+        if key_mode or ((key_value or mode_value) and not ecartes & {"key", "mode"}):
             logger.info(f"🎵 Key/Mode SongBPM: {key_value}/{mode_value} pour {track.title}")
             updated = True
 
@@ -232,8 +246,7 @@ class SongBpmProvider:
         # en colonne sans la moindre observation, toutes écrites ici). C'est la
         # troisième fois de ce chantier qu'un champ rendu arbitrable oblige à
         # vérifier que TOUTES ses voies d'écriture émettent une observation.
-        duree = _clean_duration(track_data.get("duration"))
-        if duree and (force_update or not track.duration):
+        if duree and "duration" not in ecartes and (force_update or not track.duration):
             ctx.observations.append(Observation("duration", duree, self.name))
             track.duration = duree
             logger.info(f"⏱️ Duration ajoutée depuis SongBPM: {duree}s pour {track.title}")

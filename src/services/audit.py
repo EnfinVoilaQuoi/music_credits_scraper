@@ -825,8 +825,10 @@ def refus_vivants(c, pistes) -> list[Cas]:
     from src.utils.corrections_fiches import (
         CHAMP_PAGE_GETSONGBPM,
         CHAMP_PAGE_SONGBPM,
+        champs_songbpm_refuses,
         designe,
         empreinte_lrc,
+        mesure_de_cle,
     )
 
     tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
@@ -850,6 +852,12 @@ def refus_vivants(c, pistes) -> list[Cas]:
         (CHAMP_PAGE_SONGBPM,),
     ):
         pages_songbpm[r["track_id"]].add(r["value"])
+    mesures_songbpm = collections.defaultdict(dict)
+    for r in c.execute(
+        "SELECT track_id, field, value FROM observations WHERE source = 'songbpm' "
+        "AND field IN ('bpm', 'key', 'mode', 'duration')"
+    ):
+        mesures_songbpm[r["track_id"]][r["field"]] = r["value"]
     pages_getsongbpm = collections.defaultdict(set)
     for r in c.execute(
         "SELECT track_id, value FROM observations WHERE field = ? AND source = 'getsongbpm'",
@@ -872,13 +880,15 @@ def refus_vivants(c, pistes) -> list[Cas]:
             return valeur in pages_songbpm[t["id"]]
         if nature == "page_getsongbpm":
             return valeur in pages_getsongbpm[t["id"]]
+        if nature == "mesure_songbpm":
+            return bool(champs_songbpm_refuses([mesure_de_cle(valeur)], mesures_songbpm[t["id"]]))
         return False
 
     cas = []
     for r in c.execute(
         "SELECT genius_id, artiste, titre, album, nature, valeur FROM refus "
         "WHERE nature IN ('id_spotify', 'id_deezer', 'video', 'lrc', 'paroles', 'page_songbpm', "
-        "'page_getsongbpm')"
+        "'page_getsongbpm', 'mesure_songbpm')"
     ):
         if r["genius_id"] is not None:
             visees = par_genius.get(int(r["genius_id"]), [])

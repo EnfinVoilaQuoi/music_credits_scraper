@@ -2626,6 +2626,20 @@ def donnee_de_la_jumelle(track, ctx):
 
 _CHAMPS_SONGBPM = ("bpm", "key", "mode", "duration")
 
+#: Ce que la fiche perd selon sa relation à la propriétaire de la page
+#: (décision utilisateur 2026-10-30) : un AUTRE morceau, toute la mesure ; une
+#: COUPE du même morceau (extrait, snippet, partie d'un tout, contenu), sa
+#: durée seule — le tempo est le même. Une version (démo, remix) : l'humain.
+_CHAMPS_RETIRES = {"autre_morceau": _CHAMPS_SONGBPM, "coupe": ("duration",)}
+
+_LIBELLES_RELATION = {
+    "autre_morceau": "un autre morceau",
+    "coupe": "une coupe du même morceau",
+    "version": "une autre version",
+    "partie": "partie ou suite",
+    None: "relation indécise",
+}
+
 
 def _signatures_songbpm(ctx) -> dict:
     """`{mesures SongBPM: [fiches]}` de la discographie (BPM ou tonalité lus)."""
@@ -2679,6 +2693,129 @@ def _tient_la_page(track, autre, duree_page) -> str | None:
     return None
 
 
+def _durees_propres(track, autre) -> list[int]:
+    """Les durées de la fiche que l'autre ne porte pas de la même source
+    (copiées, ou lues sur la même page), SongBPM exclu — catalogues et vidéos."""
+    from src.utils.titre_annee import EXCLUES_SONGBPM, ORDRE_DES_TEMOINS, _duree
+
+    obs, chez_l_autre = track.durations_observees or {}, autre.durations_observees or {}
+    return [
+        d
+        for s in ORDRE_DES_TEMOINS
+        if s not in EXCLUES_SONGBPM
+        and (d := _duree(obs.get(s))) is not None
+        and d != _duree(chez_l_autre.get(s))
+    ]
+
+
+def _sans_catalogue(track, autre) -> bool:
+    """Aucun catalogue (`TEMOINS_DE_RETRAIT`) de la fiche ne dit sa durée."""
+    from src.utils.titre_annee import _duree
+
+    obs, chez_l_autre = track.durations_observees or {}, autre.durations_observees or {}
+    return not any(
+        (d := _duree(obs.get(s))) is not None and d != _duree(chez_l_autre.get(s))
+        for s in TEMOINS_DE_RETRAIT
+    )
+
+
+#: Liens Genius qui font de deux pages deux VERSIONS d'un même morceau.
+_LIENS_DE_VERSION = frozenset({"remix_of", "version_of", "cover_of", "translation_of"})
+
+
+def _paroles_comparees(track, autre) -> str | None:
+    """« démenties » (paroles Genius d'un autre morceau : mots < 0,4 ou
+    bigrammes < 0,1), « communes » (mots et bigrammes ≥ 0,6), sinon None —
+    paroles absentes, trop courtes, ou entre les deux."""
+    from src.utils.concordance_paroles import (
+        SEUIL_JUSTE,
+        SEUIL_JUSTE_BIGRAMMES,
+        lrc_dementi,
+        paroles_de_reference,
+        recouvrement,
+        recouvrement_bigrammes,
+    )
+
+    pa = paroles_de_reference(track.lyrics.text, track.lyrics.source)
+    pb = paroles_de_reference(autre.lyrics.text, autre.lyrics.source)
+    mots = recouvrement(pa, pb)
+    if mots is None:
+        return None
+    if lrc_dementi(pa, pb):
+        return "démenties"
+    paires = recouvrement_bigrammes(pa, pb)
+    if mots >= SEUIL_JUSTE and paires is not None and paires >= SEUIL_JUSTE_BIGRAMMES:
+        return "communes"
+    return None
+
+
+def _partie_d_un_tout(track, autre, duree_page) -> bool:
+    """La fiche NUMÉROTÉE est plus courte que la fiche nue (au-delà d'un écart
+    d'édition) : une partie du tout, pas une suite. La page est à l'autre."""
+    from src.services.politiques_revue import ECART_VERSION_S
+    from src.utils.version_descriptors import titre_numerote
+
+    propres = _durees_propres(track, autre)
+    if not propres:
+        return False
+    if titre_numerote(track.title):
+        return all(d < duree_page - ECART_VERSION_S for d in propres)
+    return all(d > duree_page + ECART_VERSION_S for d in propres)
+
+
+def relation_des_fiches(track, autre, duree_page) -> str | None:
+    """Ce que sont deux fiches aux mesures SongBPM partagées, l'un des titres
+    contenant l'autre (décision utilisateur 2026-10-30) : le juge des titres
+    (`version_descriptors.relation_des_titres`), précisé par ce que Genius et
+    les fiches en disent.
+
+    - une relation `contient` entre elles : `COUPE` (« BULLY V1 », page du
+      disque entier) ;
+    - un autre lien Genius entre les deux pages : `VERSION` (remix_of…), ou
+      None (un sample, une interpolation : le titre ne suffit plus) ;
+    - un titre JOINT dont une partie est l'autre (« Bad Mood / Shit on You ») :
+      None ;
+    - `PARTIE` (« Civilisé, partie 1 » / « Civilisé ») : des paroles Genius
+      démenties font une suite, `AUTRE_MORCEAU` (« Argent noir » / « Argent
+      noir part. 3 ») ; des paroles communes et une partie plus courte que le
+      tout, une `COUPE` ; sinon None ;
+    - `AUTRE_MORCEAU` aux paroles communes : None (le titre trompe)."""
+    from src.utils.contenants import ids_contenus, parties_du_titre
+    from src.utils.version_descriptors import (
+        AUTRE_MORCEAU,
+        COUPE,
+        PARTIE,
+        VERSION,
+        relation_des_titres,
+        titres_equivalents,
+    )
+
+    if autre.id in ids_contenus(track) or track.id in ids_contenus(autre):
+        return COUPE
+    liens = {
+        r.get("type")
+        for x, y in ((track, autre), (autre, track))
+        for r in (x.relationships or [])
+        if isinstance(r, dict) and y.genius_url and r.get("url") == y.genius_url
+    }
+    if liens:
+        return VERSION if liens & _LIENS_DE_VERSION else None
+    for x, y in ((track, autre), (autre, track)):
+        if any(titres_equivalents(p, y.title) for p in parties_du_titre(x.title)):
+            return None
+    relation = relation_des_titres(track.title, autre.title)
+    paroles = _paroles_comparees(track, autre)
+    if relation == PARTIE:
+        if paroles == "démenties":
+            return AUTRE_MORCEAU
+        if paroles == "communes" and _partie_d_un_tout(track, autre, duree_page):
+            return COUPE
+        return None
+    if relation == AUTRE_MORCEAU and paroles == "communes":
+        return None
+    return relation
+
+
 def songbpm_titre_contenu(track, ctx):
     """Les mesures SongBPM posées par un titre CONTENU dans l'autre, avant la
     garde de pose `cccebc7` (2026-10-29) : deux fiches de l'artiste aux mesures
@@ -2687,17 +2824,23 @@ def songbpm_titre_contenu(track, ctx):
     (`titre_contenu_non_corrobore`) les refuserait aujourd'hui sans durée
     indépendante à ± 2 s.
 
-    La fiche que ses catalogues CONTREDISENT perd les mesures quand ceux de
-    l'autre les CONFIRMENT (`retirer` posé : une règle tranche ; la garde de
-    pose, rejouée au run suivant, refuse la même page faute de durée
-    concordante). Deux fiches que leurs catalogues confirment sont un même
-    enregistrement : aucun cas. Le reste (une fiche sans catalogue, une vidéo
-    pour seule contradiction, un écart d'édition) va à l'humain, une fois par
-    paire : sur la fiche que rien ne confirme, sinon au plus petit id. Sans
-    durée SongBPM, rien ne dit à qui la page revient : aucun cas (7 paires
-    « Jail » / « Jail, Pt. 2 » au BPM égal, 2026-10-29). Les jumelles « titre
-    + année » sont du ressort de `jumelle_annee`."""
-    from src.utils.titre_annee import _duree, jumelles
+    La page est à l'autre quand ses catalogues la CONFIRMENT et que ceux de la
+    fiche la CONTREDISENT — ou que la fiche n'a aucun catalogue et aucune durée
+    (vidéo comprise) à celle de la page. La fiche perd alors, selon la relation
+    des deux (`relation_des_fiches`, décision utilisateur 2026-10-30), toute la
+    mesure (un autre morceau : « Tree » / « That Tree ») ou sa durée seule (une
+    coupe du même morceau : « Extrait ULTRA », « Jesus Walks Snippet »,
+    « Civilisé, partie 1 ») — `retirer` et `champs` posés, une règle tranche.
+    Une version (démo, remix) ou une relation indécise va à l'humain ; avec des
+    catalogues qui démentent, une relation indécise garde la règle du
+    2026-10-29 (toute la mesure). Deux fiches que leurs catalogues confirment
+    sont un même enregistrement : aucun cas. Le reste (rien ne confirme, un
+    écart d'édition) va à l'humain, une fois par paire : sur la fiche que rien
+    ne confirme, sinon au plus petit id. Sans durée SongBPM, rien ne dit à qui
+    la page revient : aucun cas (7 paires « Jail » / « Jail, Pt. 2 » au BPM
+    égal, 2026-10-29). Les jumelles « titre + année » sont du ressort de
+    `jumelle_annee`."""
+    from src.utils.titre_annee import TOLERANCE, _duree, jumelles
 
     mesures = tuple(_mesures(ctx, track, c).get("songbpm") for c in _CHAMPS_SONGBPM)
     duree_page = _duree(mesures[3])
@@ -2723,22 +2866,53 @@ def songbpm_titre_contenu(track, ctx):
             "fiche": fiche or "aucune",
             "l_autre": cote or "aucune",
         }
-        if fiche == "contraire" and cote == "confirme":
-            return (
-                f"mesures SongBPM de « {autre.title} » (#{autre.id}, {duree_page} s, que ses "
-                f"catalogues confirment) : ceux de « {track.title} » la démentent",
-                {**preuves, "retirer": True, "track_ids": [track.id], "garder": autre.id},
-            )
         if "confirme" == fiche == cote or (fiche == "confirme" and cote == "contraire"):
             continue
+        if cote == "confirme":
+            relation = relation_des_fiches(track, autre, duree_page)
+            preuves["relation"] = relation or "indécise"
+            champs = _CHAMPS_RETIRES.get(relation)
+            # La page est à l'autre : ses catalogues la confirment, ceux de la
+            # fiche la démentent — ou la fiche n'en a aucun, et aucune de ses
+            # durées (vidéo comprise) n'est celle de la page.
+            a_l_autre = fiche == "contraire" or (
+                _sans_catalogue(track, autre)
+                and all(abs(d - duree_page) > TOLERANCE for d in _durees_propres(track, autre))
+            )
+            if fiche == "contraire" and relation is None:
+                champs = _CHAMPS_SONGBPM  # la règle du 2026-10-29 : le titre ne dit rien
+            if a_l_autre and champs:
+                quoi = "la durée SongBPM" if champs == ("duration",) else "les mesures SongBPM"
+                return (
+                    f"{quoi} de « {autre.title} » (#{autre.id}, {duree_page} s, que ses "
+                    f"catalogues confirment) : « {track.title} » "
+                    + (
+                        "la dément"
+                        if fiche == "contraire"
+                        else "n'a aucun catalogue qui la soutienne"
+                    )
+                    + f" ({_LIBELLES_RELATION[relation]})",
+                    {
+                        **preuves,
+                        "retirer": True,
+                        "champs": list(champs),
+                        "track_ids": [track.id],
+                        "garder": autre.id,
+                    },
+                )
         if (cote == "confirme") or (fiche != "confirme" and track.id < autre.id):
             indecis.append((autre, preuves))
     if indecis:
         autre, preuves = indecis[0]
         return (
             f"mesures SongBPM partagées avec « {autre.title} » (#{autre.id}), un titre contenu "
-            f"dans l'autre — les catalogues ne disent pas à qui elles reviennent "
-            f"(ici : {preuves['fiche']}, là : {preuves['l_autre']})",
+            f"dans l'autre — les catalogues ne disent pas à qui elles reviennent, ou "
+            f"le tempo peut différer (ici : {preuves['fiche']}, là : {preuves['l_autre']}"
+            + (
+                f", {_LIBELLES_RELATION.get(preuves['relation'], preuves['relation'])})"
+                if "relation" in preuves
+                else ")"
+            ),
             preuves,
         )
     return None

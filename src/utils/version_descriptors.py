@@ -1248,6 +1248,77 @@ def remix_du_meme_morceau(a: str | None, b: str | None) -> bool:
     )
 
 
+#: Mots qui font d'un titre une COUPE du morceau qu'il nomme : le même morceau,
+#: donc le même tempo, une autre durée (« Extrait ULTRA », « Jesus Walks
+#: Snippet » — décision utilisateur 2026-10-30).
+MOTS_DE_COUPE = frozenset({"extrait", "extraits", "extract", "excerpt", "snippet", "preview"})
+
+#: Relations de deux titres dont l'un contient l'autre (`relation_des_titres`).
+COUPE, PARTIE, VERSION, AUTRE_MORCEAU = "coupe", "partie", "version", "autre_morceau"
+
+#: « BULLY V1 » : une prise numérotée hors parenthèses (« [V2] » est déjà un
+#: descripteur de `parse_variant`).
+_NUMERO_DE_VERSION_NU = re.compile(r"(?:^|\s)v\d{1,2}(?:\s|$)")
+
+
+def titre_numerote(titre: str | None) -> bool:
+    """PUR. Le titre porte un numéro de PARTIE (« Civilisé, partie 1 »,
+    « HIGHS AND LOWS 2 ») — le côté numéroté d'une relation `PARTIE`."""
+    return bool(cle_titre(titre).parties)
+
+
+def _socle_sans_numero(k: CleTitre) -> str:
+    """Le socle sans le nombre FINAL qui en fait une partie (« highs and lows2 »
+    — la normalisation colle le chiffre au mot)."""
+    return re.sub(r"\s*\d{1,3}$", "", k.socle).strip() if k.parties else k.socle
+
+
+def _reste_hors_coupe(k: CleTitre) -> str | None:
+    """Le titre normalisé sans ses mots de COUPE, s'il en porte ; sinon None."""
+    mots = k.norme.split()
+    if not any(m in MOTS_DE_COUPE for m in mots):
+        return None
+    return " ".join(m for m in mots if m not in MOTS_DE_COUPE)
+
+
+def relation_des_titres(a: str | None, b: str | None) -> str | None:
+    """PUR. Ce que les TITRES disent de deux fiches d'un artiste dont l'un
+    contient l'autre (mesures SongBPM partagées, décision utilisateur
+    2026-10-30) :
+
+    - `COUPE` — l'un est une coupe de l'autre, qu'il nomme : « Extrait ULTRA » /
+      « Ultra », « Jesus Walks Snippet » / « Jesus Walks (Intro) » (un mot de
+      même morceau entre parenthèses ne compte pas) ;
+    - `VERSION` — l'un porte une version (« Bad Mood (Demo) », « [Mixed] »,
+      « BULLY V1 »), ou une édition de diffusion : le tempo peut différer ;
+    - `PARTIE` — même socle, un seul des deux numéroté (« Civilisé, partie 1 » /
+      « Civilisé », « Argent noir » / « Argent noir part. 3 ») : partie d'un
+      tout ou suite, le titre ne le dit pas — les paroles et les durées, si ;
+    - `AUTRE_MORCEAU` — deux socles différents sans marqueur (« Tree » / « That
+      Tree », « Night » / « through the late night »), ou deux parties
+      différentes ;
+    - None — titres vides ou égaux."""
+    ka, kb = cle_titre(a), cle_titre(b)
+    if not ka.norme or not kb.norme or ka.norme == kb.norme:
+        return None
+    for x, y in ((ka, kb), (kb, ka)):
+        reste = _reste_hors_coupe(x)
+        if reste and _reste_hors_coupe(y) is None:
+            entier = {y.norme, y.socle, normalize_title(_sans_parentheses(y.titre))}
+            if reste in entier or normalize_title(x.variant.socle) in entier:
+                return COUPE
+    for k in (ka, kb):
+        if (
+            k.variant.kind != Kind.NONE
+            or k.variant.edition
+            or _NUMERO_DE_VERSION_NU.search(k.norme)
+        ):
+            return VERSION
+    if ka.parties != kb.parties and _socle_sans_numero(ka) == _socle_sans_numero(kb):
+        return PARTIE if not (ka.parties and kb.parties) else AUTRE_MORCEAU
+    return AUTRE_MORCEAU
+
+
 _GROUPE_DE_DISQUE = re.compile(r"\s*(?:[\(\[][^\)\]]*[\)\]]|\s[-–]\s.*$)")
 
 

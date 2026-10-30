@@ -135,9 +135,11 @@ NATURES = {
 #: Le compteur partagé (règle 2a) vit dans le verdict des streams, que les sœurs
 #: ré-arbitrent chacune : son refus vaut pour toutes, sinon elles divergeraient.
 #: La page SongBPM (nature `page_songbpm`) en est aussi : ses mesures sont des
-#: observations que les sœurs partagent, et c'est le même enregistrement.
+#: observations que les sœurs partagent, et c'est le même enregistrement. De
+#: même la mesure SongBPM refusée champ par champ (`mesure_songbpm`).
 PAR_ENREGISTREMENT = frozenset(
-    set(NATURES.values()) - {"certif"} | {"compteur_spotify", "page_songbpm", "contenu"}
+    set(NATURES.values()) - {"certif"}
+    | {"compteur_spotify", "page_songbpm", "mesure_songbpm", "contenu"}
 )
 
 #: Champ d'observation (source `songbpm`, DÉCLARÉ, jamais arbitré) qui garde la
@@ -727,6 +729,77 @@ def memoriser_page_songbpm_refusee(track, page: str, origine: str | None = None)
 
 def oublier_page_songbpm_refusee(track, page: str) -> bool:
     return _oublier(track, "page_songbpm", cle_page_songbpm(page))
+
+
+# ── La MESURE SongBPM refusée champ par champ (nature `mesure_songbpm`) ─────
+#
+# Refuser la page ne suffit pas : aucune page SongBPM n'était gardée avant le
+# 2026-10-27 (`CHAMP_PAGE_SONGBPM`), et une COUPE du morceau (« Extrait ULTRA »,
+# « Jesus Walks Snippet ») a le tempo de la page mais pas sa durée — décision
+# utilisateur 2026-10-30. Le refus désigne donc les VALEURS : `{champ: valeur}`
+# (« duration=167 », ou toute la mesure « bpm=84;duration=155;key=10;mode=0 »).
+# Une page qui sert TOUTES ces valeurs les perd ; une autre page, ou une autre
+# mesure, passe. Lu par le fournisseur SongBPM (`SongBpmProvider`), seul
+# producteur de la source.
+
+#: Champs de mesure SongBPM qu'un refus peut viser.
+CHAMPS_MESURE_SONGBPM = ("bpm", "key", "mode", "duration")
+
+
+def _valeur_de_mesure(valeur) -> str:
+    """PUR. Une valeur de mesure comparable, d'où qu'elle vienne (« 84 », 84,
+    84.0 → « 84 » ; 84.5 → « 84.5 »)."""
+    texte = str(valeur).strip()
+    try:
+        nombre = float(texte)
+    except ValueError:
+        return texte
+    return str(int(nombre)) if nombre.is_integer() else str(round(nombre, 2))
+
+
+def cle_mesure_songbpm(mesures: dict) -> str:
+    """PUR. La clé d'un refus de mesure : « champ=valeur » triés, joints par
+    « ; », les champs vides omis. Vide si rien n'est refusable."""
+    return ";".join(
+        f"{c}={_valeur_de_mesure(mesures[c])}"
+        for c in sorted(mesures)
+        if c in CHAMPS_MESURE_SONGBPM and mesures[c] not in (None, "")
+    )
+
+
+def mesure_de_cle(cle: str) -> dict[str, str]:
+    paires = (p.split("=", 1) for p in (cle or "").split(";") if "=" in p)
+    return {c: v for c, v in paires}
+
+
+def mesures_songbpm_refusees(track) -> list[dict[str, str]]:
+    """Les mesures SongBPM refusées pour la fiche (et ses sœurs), chacune
+    `{champ: valeur}`."""
+    return [m for r in _lignes(track, "mesure_songbpm") if (m := mesure_de_cle(r["valeur"]))]
+
+
+def champs_songbpm_refuses(refusees, mesures: dict) -> set[str]:
+    """PUR. Les champs de `mesures` (ce que sert une page) qu'un refus écarte :
+    ceux d'un refus dont la page sert TOUTES les valeurs."""
+    lues = {c: _valeur_de_mesure(v) for c, v in mesures.items() if v not in (None, "")}
+    ecartes: set[str] = set()
+    for refus in refusees or ():
+        if refus and all(lues.get(c) == v for c, v in refus.items()):
+            ecartes |= set(refus)
+    return ecartes
+
+
+def memoriser_mesure_songbpm_refusee(
+    track, mesures: dict, origine: str | None = None, page: str | None = None
+) -> bool:
+    detail = {"page": cle_page_songbpm(page)} if page and cle_page_songbpm(page) else None
+    return _memoriser(
+        track, "mesure_songbpm", cle_mesure_songbpm(mesures), origine=origine, detail=detail
+    )
+
+
+def oublier_mesure_songbpm_refusee(track, mesures: dict) -> bool:
+    return _oublier(track, "mesure_songbpm", cle_mesure_songbpm(mesures))
 
 
 #: Champ d'observation (source `getsongbpm`, DÉCLARÉ, jamais arbitré) : l'ID de

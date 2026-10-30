@@ -2326,7 +2326,11 @@ class TrackRepository:
             return False
 
     def retirer_mesures_songbpm(
-        self, track_id: int, retirees: list | None = None, source: str = "songbpm"
+        self,
+        track_id: int,
+        retirees: list | None = None,
+        source: str = "songbpm",
+        champs: tuple[str, ...] | None = None,
     ) -> int:
         """Retire tout ce que SongBPM a dit d'une fiche (BPM, tonalité, durée…)
         et ré-arbitre la durée — quand la page SongBPM était celle d'une AUTRE
@@ -2336,9 +2340,19 @@ class TrackRepository:
         lignes SŒURS (observations partagées). Rend le nombre retiré ;
         `retirees` reçoit les lignes (correction rétablissable, comme
         `retirer_lrc`). `source` : `getsongbpm` pour les mesures GetSongBPM
-        (2026-10-29 : mêmes lignes sœurs, même ré-arbitrage)."""
+        (2026-10-29 : mêmes lignes sœurs, même ré-arbitrage). `champs` : ces
+        seuls champs (la DURÉE d'une coupe du morceau — « Extrait ULTRA » a le
+        tempo de la page, pas sa durée, décision utilisateur 2026-10-30)."""
         if source not in ("songbpm", "getsongbpm"):
             raise ValueError(f"source de mesures inconnue : {source!r}")
+        if champs is not None and (not champs or not all(c.isidentifier() for c in champs)):
+            raise ValueError(f"champs de mesures invalides : {champs!r}")
+        # Liste FERMÉE de champs (identifiants vérifiés) : liés un par un.
+        filtre = ""
+        params_champs: dict = {}
+        if champs is not None:
+            params_champs = {f"c{i}": c for i, c in enumerate(champs)}
+            filtre = f" AND field IN ({', '.join(':' + k for k in params_champs)})"
         total = [0]
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
@@ -2358,14 +2372,16 @@ class TrackRepository:
                             for o in conn.execute(
                                 text(
                                     "SELECT field, value, confidence, seen_at FROM observations "
-                                    "WHERE track_id = :id AND source = :s"
+                                    "WHERE track_id = :id AND source = :s" + filtre
                                 ),
-                                {"id": tid, "s": source},
+                                {"id": tid, "s": source, **params_champs},
                             ).all()
                         )
                     total[0] += conn.execute(
-                        text("DELETE FROM observations WHERE track_id = :id AND source = :s"),
-                        {"id": tid, "s": source},
+                        text(
+                            "DELETE FROM observations WHERE track_id = :id AND source = :s" + filtre
+                        ),
+                        {"id": tid, "s": source, **params_champs},
                     ).rowcount
                     self._ecrire_colonnes_discographie(
                         conn, tid, self._arbitrer_discographie(conn, tid, ["duration"])

@@ -766,19 +766,126 @@ class TestSongbpmTitreContenu:
         motif, preuves = revue.songbpm_titre_contenu(a, ctx)
         assert preuves["retirer"] and preuves["garder"] == 11 and preuves["track_ids"] == [10]
         assert revue.songbpm_titre_contenu(b, ctx) is None  # la propriétaire garde
+        assert preuves["relation"] == "autre_morceau" and preuves["champs"] == [
+            "bpm",
+            "key",
+            "mode",
+            "duration",
+        ]
         arb = pol.arbitrage_etendu(_cas("songbpm_titre_contenu", a, preuves), a, ctx)
-        assert arb is not None and arb.action == "retirer_songbpm"
+        assert arb is not None and arb.action == "retirer_champs_songbpm"
 
-    def test_une_video_pour_seule_contradiction_l_humain(self):
-        """« Maybe » n'a que sa vidéo (173 s) : trop fragile pour retirer."""
+    def test_un_autre_morceau_sans_catalogue_perd_toute_la_mesure(self):
+        """Décision utilisateur 2026-10-30 : « Maybe » n'a que sa vidéo (173 s),
+        « Maybe So » est confirmé — deux morceaux, toute la mesure part."""
         a, b, ctx = self._paire(
             {"youtube_video": 173}, {"deezer": 205, "spotify_web": 205}, ("Maybe", "Maybe So")
         )
         motif, preuves = revue.songbpm_titre_contenu(a, ctx)
-        assert not preuves.get("retirer") and preuves["fiche"] == "aucune"
-        assert preuves["l_autre"] == "confirme"
+        assert preuves["retirer"] and preuves["fiche"] == "aucune"
+        assert preuves["relation"] == "autre_morceau" and len(preuves["champs"]) == 4
+        arb = pol.arbitrage_etendu(_cas("songbpm_titre_contenu", a, preuves), a, ctx)
+        assert arb is not None and arb.action == "retirer_champs_songbpm"
+        assert revue.songbpm_titre_contenu(b, ctx) is None  # la propriétaire garde
+
+    def test_sans_catalogue_une_video_a_la_duree_de_la_page_retient(self):
+        a, b, ctx = self._paire(
+            {"youtube_video": 204}, {"deezer": 205, "spotify_web": 205}, ("Maybe", "Maybe So")
+        )
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer")
+
+    @pytest.mark.parametrize(
+        "court, long",
+        [
+            ("Extrait ULTRA", "Ultra"),
+            ("Jesus Walks Snippet", "Jesus Walks (Intro)"),
+        ],
+    )
+    def test_une_coupe_du_meme_morceau_ne_perd_que_sa_duree(self, court, long):
+        """Booba « Extrait ULTRA », Kanye « Jesus Walks Snippet » (cas réels) :
+        même morceau, même tempo — la durée seule part."""
+        a, b, ctx = self._paire({}, {"discogs": 204}, (court, long))
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert preuves["retirer"] and preuves["relation"] == "coupe"
+        assert preuves["champs"] == ["duration"] and "la durée SongBPM" in motif
+        arb = pol.arbitrage_etendu(_cas("songbpm_titre_contenu", a, preuves), a, ctx)
+        assert arb is not None and arb.action == "retirer_champs_songbpm"
+        assert "coupe" in arb.sens
+
+    def _paroles(self, t, texte):
+        t.lyrics.text, t.lyrics.source = texte, "genius"
+
+    COUPLET = (
+        "je marche seul dans la ville froide les lumieres brillent encore "
+        "personne ne voit ce que je porte le silence parle plus fort que nous"
+    )
+
+    def test_une_partie_d_un_tout_ne_perd_que_sa_duree(self):
+        """Booba « Civilisé, partie 1 » (vidéo 184 s) / « Civilisé » (286 s) :
+        paroles communes, la partie plus courte que le tout — une coupe."""
+        a, b, ctx = self._paire(
+            {"youtube_video": 150}, {"deezer": 205}, ("Civilisé, partie 1", "Civilisé")
+        )
+        self._paroles(a, self.COUPLET)
+        self._paroles(b, self.COUPLET + " et le refrain revient encore une fois")
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert preuves["retirer"] and preuves["relation"] == "coupe"
+        assert preuves["champs"] == ["duration"]
+
+    def test_une_suite_aux_paroles_dementies_perd_toute_la_mesure(self):
+        """Freeze Corleone « Argent noir » / « Argent noir part. 3 » : une suite,
+        pas une partie (paroles d'un autre morceau)."""
+        a, b, ctx = self._paire({}, {"deezer": 205}, ("Argent noir", "Argent noir part. 3"))
+        self._paroles(a, self.COUPLET)
+        self._paroles(
+            b, "money cash flow gang dans le bloc toujours les memes freres sur la route du succes"
+        )
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert preuves["retirer"] and preuves["relation"] == "autre_morceau"
+        assert len(preuves["champs"]) == 4
+
+    def test_une_partie_sans_preuve_va_a_l_humain(self):
+        a, b, ctx = self._paire({}, {"deezer": 205}, ("Argent noir", "Argent noir part. 3"))
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer") and preuves["relation"] == "indécise"
+
+    @pytest.mark.parametrize(
+        "court, long",
+        [
+            ("Bad Mood (Demo)", "Bad Mood / Shit on You"),  # démo, titre joint
+            ("My Way Home [Mixed]", "Home (Windy)"),
+        ],
+    )
+    def test_une_version_va_a_l_humain(self, court, long):
+        """Travis Scott « Bad Mood (Demo) » : le tempo peut différer."""
+        a, b, ctx = self._paire({}, {"deezer": 205}, (court, long))
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer")
         assert pol.arbitrage_etendu(_cas("songbpm_titre_contenu", a, preuves), a, ctx) is None
-        assert revue.songbpm_titre_contenu(b, ctx) is None  # une fois par paire
+
+    def test_un_lien_genius_de_remix_va_a_l_humain(self):
+        """Kanye « HIGHS AND LOWS 2 », `remix_of` « HIGHS AND LOWS »."""
+        a, b, ctx = self._paire({}, {"deezer": 205}, ("HIGHS AND LOWS 2", "HIGHS AND LOWS"))
+        b.genius_url = "https://genius.com/Kanye-west-highs-and-lows-lyrics"
+        a.relationships = [{"type": "remix_of", "title": b.title, "url": b.genius_url}]
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer") and preuves["relation"] == "version"
+
+    def test_un_contenant_ne_perd_que_sa_duree(self):
+        """« BULLY V1 », page du disque entier, CONTIENT « BULLY » (relation
+        `contient`) : une coupe, la durée seule part."""
+        a, b, ctx = self._paire({}, {"deezer": 205}, ("BULLY V1", "BULLY"))
+        a.relationships = [{"type": "contient", "title": "BULLY", "track_id": 11}]
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert preuves["retirer"] and preuves["champs"] == ["duration"]
+
+    def test_un_autre_morceau_aux_paroles_communes_va_a_l_humain(self):
+        a, b, ctx = self._paire({}, {"deezer": 205}, ("Tree", "That Tree"))
+        self._paroles(a, self.COUPLET)
+        self._paroles(b, self.COUPLET)
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer") and preuves["relation"] == "indécise"
 
     def test_ecart_d_edition_l_humain(self):
         """À moins de `ECART_VERSION_S` : deux éditions d'un même enregistrement."""

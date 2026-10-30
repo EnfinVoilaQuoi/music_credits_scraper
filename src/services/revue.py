@@ -1686,6 +1686,8 @@ def _temoins_du_proprietaire(fiches, v) -> list[tuple[str, str]]:
         temoins.append(par_duree)
     if (par_chaine := _par_la_chaine(fiches, v.video_id)) is not None:
         temoins.append(par_chaine)
+    if (par_album := _par_l_album_ytm(fiches, v.video_id)) is not None:
+        temoins.append(par_album)
     return temoins
 
 
@@ -1715,7 +1717,12 @@ def _place_de_l_artiste(t, artiste: str) -> str:
 
     if nomme(t.primary_artist_name or (t.artist.name if t.artist else "")):
         return "principal"
-    if nomme(t.artist.name if t.artist else "") or any(nomme(a) for a in t.featured_artists_list):
+    # Sur la REPRISE d'un tiers (`secondary_role` « Cover »), l'artiste de la
+    # ligne est l'auteur de l'original, pas un interprète : sa chaîne ne lie
+    # pas la vidéo à la reprise (« Ghost Town » de Justice Der, ligne de
+    # Kanye, portait l'audio « Kanye West - Topic » de l'original).
+    ligne = t.artist.name if t.artist and t.secondary_role != "Cover" else ""
+    if nomme(ligne) or any(nomme(a) for a in t.featured_artists_list):
         return "lié"
     return "étranger"
 
@@ -1782,6 +1789,50 @@ def _par_la_duree(fiches, video_id):
     if len(proches) != 1:
         return None
     return next(iter(proches)), f"durée de la vidéo ({duree} s) = ses catalogues seuls"
+
+
+def _par_l_album_ytm(fiches, video_id):
+    """`(page, témoin)` : la vidéo est, pour UNE page seulement, la piste de sa
+    page d'album YouTube Music (`ytm_album`), et sa durée (e62) est celle des
+    catalogues de cette page, à 2 s — les autres n'ont aucun catalogue à moins
+    de `_ECART_AUTRE_PAGE_S` (une page SANS catalogue ne dément rien : c'est
+    ce qui distingue ce témoin de `_par_la_duree`). « 530 » : l'audio
+    « ¥$ - Topic » (288 s) de *VULTURES 2* (288 s), posée aussi par Genius sur
+    « 530 (Haikou LP) », sans catalogue (2026-10-30). Un titre fait de signes
+    seuls (« * (Part. 1) ») ne se rapproche pas sûrement d'une piste d'album
+    (« * * * * * » posée sur la Part. 1, 39 s, au lieu de la Part. 3) : rien."""
+    album = {
+        _page(t)
+        for t in fiches
+        if (lien := _lien_de(t, video_id)) is not None and lien.source == "ytm_album"
+    }
+    if len(album) != 1:
+        return None
+    page = album.pop()
+    duree = next(
+        (
+            lien.duration
+            for t in fiches
+            if (lien := _lien_de(t, video_id)) is not None and lien.duration
+        ),
+        None,
+    )
+    if not duree:
+        return None
+    for t in fiches:
+        catalogues = [
+            int(d)
+            for s in _DUREES_PAR_ID
+            if (d := (t.durations_observees or {}).get(s)) is not None
+        ]
+        if _page(t) == page:
+            if not _titre_sans_parentheses(t) or not catalogues:
+                return None
+            if not all(abs(d - duree) <= 2 for d in catalogues):
+                return None
+        elif any(abs(d - duree) <= _ECART_AUTRE_PAGE_S for d in catalogues):
+            return None
+    return page, f"piste de l'album YouTube Music, durée ({duree} s) = ses catalogues"
 
 
 def partage_a_juger(fiches) -> bool:

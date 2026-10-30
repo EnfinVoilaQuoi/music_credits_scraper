@@ -1349,6 +1349,60 @@ class TestVideoPartagee:
         assert revue._vues_expliquees(a, _ctx(a, b))
         assert not revue._vues_expliquees(a, _ctx(a, b, _t("Moon", 3, videos=[clip])))
 
+    def _530(self, catalogues=None, source="ytm_album", titre="530"):
+        """« 530 » : l'audio « ¥$ - Topic » (288 s) que la page d'album YTM de
+        *VULTURES 2* pose sur « 530 » (288 s), et que Genius pose aussi sur
+        « 530 (Haikou LP) », sans catalogue (2026-10-30)."""
+
+        def audio(provenance):
+            return TrackVideo(
+                video_id="H",
+                title="530",
+                views=10,
+                duration=288,
+                channel="¥$ - Topic",
+                source=provenance,
+            )
+
+        a = _t(titre, 1, videos=[audio(source)], genius_id=11, album="VULTURES 2")
+        a.durations_observees = catalogues if catalogues is not None else {"deezer": 288}
+        a.primary_artist_name = "¥$"
+        b = _t("530 (Haikou LP)", 2, videos=[audio("genius_media")], genius_id=12)
+        b.primary_artist_name = "¥$"
+        return _ctx(a, b)
+
+    def test_la_piste_de_l_album_ytm_designe_sa_page(self):
+        ((_, _, preuves),) = revue.video_partagee(self._530())
+        assert preuves["garder"] == 1 and preuves["track_ids"] == [2]
+        assert preuves["temoin"].startswith("piste de l'album YouTube Music")
+
+    def test_l_album_ytm_ne_dit_rien_sans_l_accord_des_catalogues(self):
+        for ctx in (
+            self._530(catalogues={}),  # rien à comparer
+            self._530(catalogues={"deezer": 163}),  # une autre durée
+            self._530(source="genius_media"),  # aucune piste d'album
+            self._530(titre="* (Part. 1)"),  # titre fait de signes
+        ):
+            assert all("garder" not in p for _, _, p in revue.video_partagee(ctx))
+
+    def test_un_cover_ne_garde_pas_l_audio_de_l_original(self):
+        """« Ghost Town » : la reprise de Justice Der (ligne de Kanye, l'auteur)
+        portait l'audio « Kanye West - Topic » de l'original. L'artiste de la
+        ligne d'une reprise n'est pas un interprète : la chaîne désigne
+        l'original."""
+        audio = TrackVideo(video_id="G", title="Ghost Town", views=10, channel="Kanye West - Topic")
+        ye = _t("Ghost Town", 1, videos=[audio], genius_id=11, album="ye")
+        ye.artist = Artist(name="Kanye West")
+        cover = _t("Ghost Town", 2, videos=[audio], genius_id=12, album="Covers")
+        cover.artist = Artist(name="Kanye West")
+        cover.primary_artist_name = "Justice Der"
+        cover.secondary_role = "Cover"
+        ((_, _, preuves),) = revue.video_partagee(_ctx(ye, cover))
+        assert preuves["garder"] == 1 and preuves["track_ids"] == [2]
+        cover.secondary_role = "Writer"  # un crédit d'écriture lie, lui
+        ((_, _, preuves),) = revue.video_partagee(_ctx(ye, cover))
+        assert "garder" not in preuves
+
 
 class TestVideoTropLongue:
     """2026-10-30 : la vidéo Genius d'un concert, d'une émission, d'une

@@ -1,0 +1,8 @@
+{
+  "name": "spotify_web_artist_entete_inclusif_travis",
+  "url": "https://open.spotify.com/intl-fr/artist/0Y5tJX1MQlPlqiwlOH1tJY",
+  "method": "spotify_web",
+  "captured_at": "2026-10-29T04:16:58",
+  "extrait": "en-tete de la page artiste (brut.db id 99421), le reste est omis",
+  "size_bytes": 910
+}

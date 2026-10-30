@@ -896,6 +896,27 @@ class TestEcrivainsHorsSaveTrack:
         for ligne in famille:
             assert _colonne(data_manager, ligne.id, "youtube_video_kind") == "clip"
 
+    def test_deux_releves_sans_lien_ne_divergent_pas(self, data_manager, famille):
+        """Exemple minimal de la propriété hypothesis (2026-10-30) :
+        `[('vues', 'swing', 'audio', 0), ('vues', 'isha', 'clip', 0)]` laissait
+        deux natures — l'alignement ne regarde que les lignes à lien."""
+        swing, isha = famille
+        data_manager.update_track_video_views(swing.id, 0, "audio")
+        data_manager.update_track_video_views(isha.id, 0, "clip")
+        natures = {_colonne(data_manager, ligne.id, "youtube_video_kind") for ligne in famille}
+        assert natures == {None}
+
+    def test_le_lien_retire_emporte_sa_nature(self, data_manager, famille):
+        swing, isha = famille
+        for ligne in famille:
+            data_manager.update_track_youtube_url(
+                ligne.id, "https://www.youtube.com/watch?v=AAAAAAAAAAA", "genius_media"
+            )
+        data_manager.update_track_video_views(swing.id, 100, "audio")
+        data_manager.clear_track_youtube_link(isha.id)
+        for ligne in famille:
+            assert _colonne(data_manager, ligne.id, "youtube_video_kind") is None
+
     def test_unknown_ne_remplace_pas_une_nature_connue(self, data_manager, famille):
         swing, isha = famille
         for ligne in famille:

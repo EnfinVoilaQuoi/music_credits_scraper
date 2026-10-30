@@ -110,6 +110,31 @@
       "artist": "FONKY FAMILY",
       "title": "HORS SERIE, VOL.1",
       "avant": "FONKY FAMILY — HORS SERIE ? VOL.1"
+    },
+    "MULTI INTERPRETES|AGE TENDRE? LA TOURNEE DES IDOLES VOL.2": {
+      "artist": "MULTI INTERPRETES",
+      "title": "AGE TENDRE... LA TOURNEE DES IDOLES VOL.2",
+      "avant": "MULTI INTERPRETES — AGE TENDRE? LA TOURNEE DES IDOLES VOL.2"
+    },
+    "PHIL COLLINS|FINALLY? THE FAREWELL TOUR": {
+      "artist": "PHIL COLLINS",
+      "title": "FINALLY... THE FAREWELL TOUR",
+      "avant": "PHIL COLLINS — FINALLY? THE FAREWELL TOUR"
+    },
+    "ASSASSIN|LE FUTUR? QUE NOUS RESERVE-T-IL?": {
+      "artist": "ASSASSIN",
+      "title": "LE FUTUR QUE NOUS RESERVE-T-IL ?",
+      "avant": "ASSASSIN — LE FUTUR? QUE NOUS RESERVE-T-il?"
+    },
+    "WILLY DENZEY|N? 1 NUMBER ONE": {
+      "artist": "WILLY DENZEY",
+      "title": "N°1 NUMBER ONE",
+      "avant": "WILLY DENZEY — N? 1 NUMBER ONE"
+    },
+    "ALIZEE|MOI? LOLITA": {
+      "artist": "ALIZEE",
+      "title": "MOI... LOLITA",
+      "avant": "ALIZEE — MOI? LOLITA"
     }
   },
   "acceptes": [

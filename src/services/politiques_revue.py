@@ -1657,6 +1657,60 @@ def politique_songbpm_version(cas, track, ctx):
     return _SONGBPM_PAR_LE_VOTE(cas, track, ctx)
 
 
+#: Catalogues lus par un identifiant dont l'accord avec SongBPM le protège.
+_SOUTIENS_SONGBPM = ("deezer", "spotify_web", "apple_music", "reccobeats")
+
+
+def _audios_de_la_page(track) -> list:
+    """Les vidéos AUDIO que la page Genius lie elle-même, publiées par une
+    chaîne « X - Topic » (le fichier du distributeur) et de durée connue."""
+    return [
+        v
+        for v in track.videos or []
+        if v.source == "genius_media"
+        and v.kind == "audio"
+        and v.duration
+        and (v.channel or "").endswith(" - Topic")
+    ]
+
+
+def politique_songbpm_audio_de_la_page(cas, track, _ctx):
+    """SB1 (2026-10-31) : la durée SongBPM d'un ORIGINAL est démentie, de plus
+    de `ECART_VERSION_S`, par l'audio Topic que la page Genius lie elle-même,
+    et aucun catalogue lu par ID ne la soutient à `ECART_FICHIER_S` : la page
+    SongBPM est celle d'une autre version, ses mesures partent (« Cash
+    Money » 161 s contre l'audio de la page 138 s). Versions et medleys
+    restent à l'humain (décision du 2026-10-20)."""
+    if cas.detecteur != "duree_songbpm" or track is None:
+        return None
+    if not titre_d_original(track.title) or re.search(r"\bmedley\b", track.title, re.I):
+        return None
+    durees = _durees(track)
+    sb = durees.get("songbpm")
+    audios = _audios_de_la_page(track)
+    if not sb or not audios or any(abs(v.duration - sb) <= ECART_VERSION_S for v in audios):
+        return None
+    if any(
+        durees.get(s) and abs(int(durees[s]) - int(sb)) <= ECART_FICHIER_S
+        for s in _SOUTIENS_SONGBPM
+    ):
+        return None
+    a = audios[0]
+    return Arbitrage(
+        "SongBPM d'une autre version : retirer ses mesures",
+        "retirer_songbpm",
+        f"SongBPM {sb} s ; audio de la page Genius ({a.channel}) {a.duration} s",
+    )
+
+
+def politique_duree_songbpm(cas, track, ctx):
+    """Une version démentie par 3 catalogues, ou un original démenti par
+    l'audio de sa page."""
+    return politique_songbpm_version(cas, track, ctx) or politique_songbpm_audio_de_la_page(
+        cas, track, ctx
+    )
+
+
 def politique_spotify_confirme(cas, track, _ctx):
     """La durée de l'ID Spotify, démentie par un témoin, est CONFIRMÉE par un
     autre catalogue lu par SON identifiant (Apple, Deezer) à `ECART_FICHIER_S`
@@ -1715,7 +1769,7 @@ _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "video_trop_longue": politique_video_trop_longue,
     "video_autre_chaine": politique_video_autre_chaine,
     "generique_duree": politique_generique_distincts,
-    "duree_songbpm": politique_songbpm_version,
+    "duree_songbpm": politique_duree_songbpm,
     "id_spotify_version": politique_id_spotify_version,
     "bpm": politique_bpm,
     "tonalite": politique_tonalite,

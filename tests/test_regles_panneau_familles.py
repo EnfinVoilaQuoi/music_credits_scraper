@@ -316,3 +316,70 @@ class TestLiensProposesParGenius:
         fiches = [_t(f"T{i}", tid=i, primary_artist_name="Eric Kwok") for i in range(1, 5)]
         rel = self._rel("Eric Kwok", "has_member", "musicbrainz", "groupe")
         assert self._juger(_ctx(*fiches, relations=[rel]), "Eric Kwok", "has_member") is None
+
+
+def _video(duree, chaine, kind="audio", source="genius_media", vid="v1"):
+    from src.models.track import TrackVideo
+
+    return TrackVideo(video_id=vid, kind=kind, source=source, duration=duree, channel=chaine)
+
+
+class TestSongbpmDementiParLAudioDeLaPage:
+    """SB1 : SongBPM d'un original démenti par l'audio Topic que la page
+    Genius lie, sans catalogue lu par ID qui le soutienne."""
+
+    def _juger(self, t):
+        return pol.arbitrage_etendu(_cas("duree_songbpm", t), t, None)
+
+    def test_cash_money(self):
+        t = _t(
+            "Cash Money",
+            durations_observees={"songbpm": 161, "youtube": 138, "ytmusic": 138},
+            videos=[_video(138, "Alpha Wann - Topic")],
+        )
+        arb = self._juger(t)
+        assert arb.action == "retirer_songbpm" and "138" in arb.raison
+
+    def test_spotify_le_soutient(self):
+        """« Blocka » : Spotify 206 = SongBPM 207 contre l'audio 215."""
+        t = _t(
+            "Blocka",
+            durations_observees={"songbpm": 207, "spotify_web": 206, "youtube": 215},
+            videos=[_video(215, "Pusha T - Topic")],
+        )
+        assert self._juger(t) is None
+
+    def test_versions_et_medleys_restent_a_l_humain(self):
+        for titre in ("E.T. (Remix)", "Material Girls Medley"):
+            t = _t(
+                titre,
+                durations_observees={"songbpm": 279, "youtube": 238},
+                videos=[_video(238, "The Puppini Sisters - Topic")],
+            )
+            assert self._juger(t) is None, titre
+
+    def test_une_video_de_la_recherche_ne_suffit_pas(self):
+        """« Welcome To The World » : l'audio vient de la recherche, pas de la page."""
+        t = _t(
+            "Welcome To The World",
+            durations_observees={"songbpm": 254, "youtube": 184, "discogs": 185},
+            videos=[_video(184, "Kevin Rudolf - Topic", source="search_auto")],
+        )
+        assert self._juger(t) is None
+
+    def test_un_clip_ou_une_autre_chaine_ne_suffit_pas(self):
+        t = _t(
+            "Cash Money",
+            durations_observees={"songbpm": 161},
+            videos=[_video(138, "Freeze Corleone", kind="clip")],
+        )
+        assert self._juger(t) is None
+
+    def test_un_petit_ecart_reste_a_l_humain(self):
+        """« Jeune de banlieue » : 7 s d'écart."""
+        t = _t(
+            "Jeune de banlieue",
+            durations_observees={"songbpm": 332, "youtube": 325},
+            videos=[_video(325, "Disiz - Topic")],
+        )
+        assert self._juger(t) is None

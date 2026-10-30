@@ -98,6 +98,43 @@ class TestDurees:
         t.duration_source = "deezer"
         assert self.juger(_cas("duree_isolee", t), t, None).action == "normal"
 
+    def test_hit_ytm_dementi_par_l_audio_topic(self):
+        """Kanye « Monster » #11401 (2026-10-29) : la piste YTM (hit d'une
+        recherche de paroles) à 150 s, l'audio Topic et Apple à 379 s. L'audio,
+        de la même famille au vote, est un autre fichier : il dément le hit."""
+        t = _t(
+            "Monster",
+            duration=379,
+            durations_observees={
+                "apple_music": 379,
+                "discogs": 378,
+                "youtube": 379,
+                "ytmusic": 150,
+            },
+        )
+        t.duration_source = "apple_music"
+        arbitrage = self.juger(_cas("duree_isolee", t), t, None)
+        assert arbitrage.action == "normal"
+        assert arbitrage.raison == "ytmusic 150 s contre 379 s"
+        # Le hit qui tient la colonne reste à l'humain.
+        t.duration_source = "ytmusic"
+        assert self.juger(_cas("duree_isolee", t), t, None).action == ""
+
+    def test_hit_ytm_sans_audio_topic_reste_a_un_seul_catalogue(self):
+        """Sans audio Topic, Apple seul contre le hit ne suffit pas."""
+        t = _t("Monster", duration=379, durations_observees={"apple_music": 379, "ytmusic": 150})
+        t.duration_source = "apple_music"
+        assert self.juger(_cas("duree_isolee", t), t, None) is None
+
+    def test_hit_ytm_d_accord_avec_l_audio_n_est_pas_dementi(self):
+        """Hit et audio au même fichier : une seule voix, rien ne change."""
+        t = _t(
+            duration=240,
+            durations_observees={"deezer": 240, "youtube": 277, "ytmusic": 277},
+        )
+        t.duration_source = "deezer"
+        assert pol._dementie(t.durations_observees, "ytmusic", (), 2) is None
+
 
 class TestLiensDeezer:
     def _cas(self, t, titre, duree, isrc=None):
@@ -520,6 +557,77 @@ def test_lien_deezer_dementi_par_des_sources_fragiles_seules_est_garde():
     assert pol.arbitrage_liens_deezer(cas, t, None).action == "delier_deezer"
 
 
+@pytest.mark.parametrize(
+    "titre, piste, durees, editions",
+    [
+        # MC Solaar, « Le tour de la question » (live) : la page du studio.
+        ("Onzieme commandement", 176, {"apple_music": 202, "spotify_web": 202, "youtube": 203}, ()),
+        # Kid Cudi, « A Kid Named Cudi ».
+        ("The Prayer", 200, {"apple_music": 219, "spotify_web": 219, "youtube": 220}, ()),
+    ],
+)
+def test_liens_a_revoir_delies_a_la_simulation(titre, piste, durees, editions):
+    """Passage à blanc du 2026-10-29 : les liens que la famille délie, le run
+    les a depuis remplacés par une page à la durée des catalogues (témoin)."""
+    t = _t(titre, durations_observees=durees)
+    t.durees_editions = editions
+    ecart = {"piste": {"title": titre, "duration": piste}}
+    cas = _cas("deezer_link_review", t, {"ecart": ecart, "piste_deezer": 5})
+    assert pol.arbitrage_liens_deezer(cas, t, None).action == "delier_deezer"
+
+
+@pytest.mark.parametrize(
+    "titre, durees, editions",
+    [
+        # Kanye « Ghetto » : 3 contre 3 (Deezer, l'audio et YTM d'un côté).
+        (
+            "Ghetto",
+            {
+                "deezer": 204,
+                "youtube": 205,
+                "ytmusic": 205,
+                "apple_music": 220,
+                "spotify_web": 219,
+                "songbpm": 220,
+            },
+            (),
+        ),
+        # Kid Cudi « Take 'Em High » : YTM soutient Deezer.
+        (
+            "Take ’Em High",
+            {"deezer": 207, "ytmusic": 208, "apple_music": 179, "spotify_web": 179, "songbpm": 179},
+            (),
+        ),
+        # Flynt « Rap théorie » : l'édition Deezer (mixtape, 198 s) explique les
+        # témoins ; deux catalogues solides seulement.
+        (
+            "Rap théorie",
+            {
+                "deezer": 262,
+                "legacy": 262,
+                "discogs": 198,
+                "spotify_web": 197,
+                "youtube": 198,
+                "ytmusic": 198,
+            },
+            (198,),
+        ),
+        # Kanye « Plentiful » : la métadonnée Deezer est fausse, la lecture va
+        # au bout (verdict humain 2026-10-29) — 7 s, sous le seuil d'un retrait,
+        # même devant trois catalogues.
+        ("Plentiful", {"deezer": 181, "spotify_web": 188, "youtube": 189, "apple_music": 188}, ()),
+    ],
+)
+def test_durees_deezer_laissees_a_l_humain_a_la_simulation(titre, durees, editions):
+    """Passage à blanc du 2026-10-29 : les cas `duree_deezer` actifs de la base,
+    aucun n'est délié — pas trois catalogues solides d'accord contre Deezer à
+    plus de 10 s."""
+    t = _t(titre, durations_observees=durees)
+    t.durees_editions = editions
+    cas = _cas("duree_deezer", t, {"deezer_id": 5})
+    assert pol.arbitrage_liens_deezer(cas, t, None) is None
+
+
 class TestIdSpotifyVersion:
     """« ID Spotify d'une autre version » (2026-10-29) : la version que la page
     nomme a sa propre fiche, à une autre durée, et Deezer confirme celle de
@@ -632,3 +740,93 @@ class TestSongbpmVersion:
         durees = {"songbpm": 207, "deezer": 252, "spotify_web": 252, "youtube": 253}
         t = _t("Niagara Falls", durations_observees=durees)
         assert pol.politique_songbpm_version(_cas("duree_songbpm", t), t, None) is None
+
+
+class TestSongbpmTitreContenu:
+    """2026-10-29 : mesures SongBPM posées par un titre CONTENU avant la garde
+    de pose `cccebc7` (« Maybe » / « Maybe So » de Kid Cudi, « Reste » /
+    « reste à vivre »). Retirées de la fiche que ses catalogues démentent quand
+    ceux de l'autre les confirment ; le reste à l'humain, une fois par paire."""
+
+    MESURES = (("bpm", 140), ("key", 5), ("mode", 1), ("duration", 205))
+
+    def _paire(self, court, long, titres=("Reste", "reste à vivre")):
+        from src.enrichment.observation import Observation
+
+        a = _t(titres[0], 10, durations_observees={**court, "songbpm": 205})
+        b = _t(titres[1], 11, durations_observees={**long, "songbpm": 205})
+        obs = {t.id: [Observation(c, v, "songbpm") for c, v in self.MESURES] for t in (a, b)}
+        return a, b, revue.contexte([a, b], obs)
+
+    def test_dementie_ici_confirmee_la_retiree(self):
+        a, b, ctx = self._paire(
+            {"spotify_web": 186, "deezer": 186, "apple_music": 186},
+            {"spotify_web": 204, "deezer": 204},
+        )
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert preuves["retirer"] and preuves["garder"] == 11 and preuves["track_ids"] == [10]
+        assert revue.songbpm_titre_contenu(b, ctx) is None  # la propriétaire garde
+        arb = pol.arbitrage_etendu(_cas("songbpm_titre_contenu", a, preuves), a, ctx)
+        assert arb is not None and arb.action == "retirer_songbpm"
+
+    def test_une_video_pour_seule_contradiction_l_humain(self):
+        """« Maybe » n'a que sa vidéo (173 s) : trop fragile pour retirer."""
+        a, b, ctx = self._paire(
+            {"youtube_video": 173}, {"deezer": 205, "spotify_web": 205}, ("Maybe", "Maybe So")
+        )
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer") and preuves["fiche"] == "aucune"
+        assert preuves["l_autre"] == "confirme"
+        assert pol.arbitrage_etendu(_cas("songbpm_titre_contenu", a, preuves), a, ctx) is None
+        assert revue.songbpm_titre_contenu(b, ctx) is None  # une fois par paire
+
+    def test_ecart_d_edition_l_humain(self):
+        """À moins de `ECART_VERSION_S` : deux éditions d'un même enregistrement."""
+        a, b, ctx = self._paire({"deezer": 199}, {"deezer": 205})
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer")
+
+    def test_une_duree_independante_concordante_retient(self):
+        """Un catalogue contre, mais l'audio Topic à la durée de la page : l'humain."""
+        a, b, ctx = self._paire({"deezer": 186, "youtube": 205}, {"deezer": 204})
+        assert not revue.songbpm_titre_contenu(a, ctx)[1].get("retirer")
+
+    def test_une_valeur_copiee_de_l_autre_n_est_pas_un_temoin(self):
+        a, b, ctx = self._paire({"deezer": 186, "spotify_web": 204}, {"spotify_web": 204})
+        # Sans la copie, « Reste » n'a que Deezer contre ; l'autre n'a plus rien.
+        motif, preuves = revue.songbpm_titre_contenu(a, ctx)
+        assert not preuves.get("retirer") and preuves["l_autre"] == "aucune"
+
+    def test_deux_fiches_confirmees_sans_cas(self):
+        """« La Récolte » et le medley qui la porte : même audio, rien à trancher."""
+        a, b, ctx = self._paire({"youtube": 205, "ytmusic": 205}, {"spotify_web": 204})
+        assert revue.songbpm_titre_contenu(a, ctx) is None
+        assert revue.songbpm_titre_contenu(b, ctx) is None
+
+    def test_sans_duree_songbpm_aucun_cas(self):
+        """« Jail » / « Jail, Pt. 2 » : même BPM, aucune durée de page."""
+        a, b, ctx = self._paire({"deezer": 186}, {"deezer": 204})
+        for t in (a, b):
+            ctx.obs[t.id] = [o for o in ctx.obs[t.id] if o.field != "duration"]
+        assert revue.songbpm_titre_contenu(a, ctx) is None
+        assert revue.songbpm_titre_contenu(b, ctx) is None
+
+    def test_titres_sans_inclusion_ou_jumelles_hors_champ(self):
+        a, b, ctx = self._paire({"deezer": 186}, {"deezer": 204}, ("Reste", "Partir"))
+        assert revue.songbpm_titre_contenu(a, ctx) is None
+        a, b, ctx = self._paire({"deezer": 186}, {"deezer": 204}, ("Suzy", "Suzy 2003"))
+        assert revue.songbpm_titre_contenu(a, ctx) is None  # `jumelle_annee`
+
+    def test_la_garde_de_pose_refuse_ensuite_la_meme_page(self):
+        """Le refus qui tient : aucune page SongBPM n'est gardée en base, mais la
+        garde `cccebc7` refuse à la fiche retirée la page de l'autre."""
+        from src.utils.titre_annee import EXCLUES_SONGBPM, duree_independante
+
+        a, b, ctx = self._paire(
+            {"spotify_web": 186, "deezer": 186}, {"spotify_web": 204, "deezer": 204}
+        )
+        assert revue.songbpm_titre_contenu(a, ctx)[1]["retirer"]
+        duree = duree_independante(a.durations_observees, sources_exclues=EXCLUES_SONGBPM)
+        page = {"title": b.title, "artist": "A2H", "duration": "3:25"}
+        juge = revue._juge_songbpm()
+        assert juge.choisir_resultat([page], a.title, "A2H", duree_fiche=duree) is None

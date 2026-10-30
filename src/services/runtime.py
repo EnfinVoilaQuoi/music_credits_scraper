@@ -16,6 +16,7 @@ from enum import StrEnum
 from src.api.genius_api import GeniusAPI
 from src.concurrency import lifecycle
 from src.models import Artist, Track
+from src.observability.repository import cle_absence
 from src.utils import logger as journal
 from src.utils.data_enricher import DataEnricher
 from src.utils.data_manager import DataManager
@@ -230,6 +231,13 @@ def est_manquant(track: Track, kind: Manque) -> bool:
     raise ValueError(kind)
 
 
+#: Page Genius LUE sans aucun crédit : constat daté de la lecture
+#: (`credits.constater_pages_sans_credits`). Sans lui, 0 constat sur 15 217
+#: lectures : la sélection comptait ces pages « manquantes » pour toujours,
+#: puis le run les écartait (`RELECTURE_GENIUS`) — 37 fiches d'A2H.
+ABSENCE_CREDITS_GENIUS = cle_absence("genius_scrape", "credits")
+
+
 #: Sources (clés d'observabilité) dont une RÉPONSE « rien » couvre la donnée
 #: d'un flux. Une donnée manquante n'est plus redemandée (hors mode forcé) quand
 #: une de ces sources a constaté l'absence depuis moins de
@@ -237,8 +245,13 @@ def est_manquant(track: Track, kind: Manque) -> bool:
 #: qui n'a pas été appelée (ReccoBeats sans ID Spotify) ne laisse aucun constat,
 #: et le morceau resterait redemandé à vie. Les sources en ÉCHEC, elles, sont
 #: reprises par la sélection « échecs ».
+#:
+#: Une clé `source:donnée` (`cle_absence`) est un constat PAR DONNÉE : la page
+#: Genius LUE sans crédit (`ABSENCE_CREDITS_GENIUS`, posé par l'étape crédits,
+#: 2026-10-29) ne dit rien de ses paroles — sous la clé nue `genius_scrape`, il
+#: ferait taire aussi la recherche de paroles (YTM compris).
 SOURCES_DU_MANQUE: dict[Manque, tuple[str, ...]] = {
-    Manque.CREDITS_GENIUS: ("genius_scrape",),
+    Manque.CREDITS_GENIUS: ("genius_scrape", ABSENCE_CREDITS_GENIUS),
     Manque.CREDITS_DISCOGS: ("discogs",),
     Manque.PAROLES: ("genius_scrape", "ytmusic"),
     Manque.TIMESTAMPS: ("lrclib", "ytmusic", "musixmatch"),
@@ -255,6 +268,16 @@ def absences_recentes(runtime: Runtime, sources: Iterable[str]) -> dict[int, set
 
     depuis = datetime.now() - timedelta(days=settings.delai_absence_jours)
     return SourceUsageRepository(runtime.data_manager.engine).absences_recentes(sources, depuis)
+
+
+def constater_absences(
+    runtime: Runtime, cle: str, poser: Iterable[tuple[int, datetime]], retirer: Iterable[int] = ()
+) -> None:
+    """Pose (morceau, date de la lecture) ou lève des constats d'absence PAR
+    DONNÉE (`cle_absence`), lus par `absences_recentes` comme les autres."""
+    from src.observability.repository import SourceUsageRepository
+
+    SourceUsageRepository(runtime.data_manager.engine).constater_absences(cle, poser, retirer)
 
 
 def morceaux_en_echec(runtime: Runtime, sources: Iterable[str]) -> set[int]:

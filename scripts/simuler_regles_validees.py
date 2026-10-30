@@ -34,7 +34,7 @@ from src.config import DATA_DIR
 BASE = Path(DATA_DIR) / "music_credits.db"
 
 #: Familles validées par l'utilisateur (leur interrupteur est levé dans `revue_auto`).
-FAMILLES_VALIDEES = ("durees", "id_spotify_propose", "deezer")
+FAMILLES_VALIDEES = ("durees", "id_spotify_propose", "deezer", "liens_deezer")
 
 
 def copier_la_base(copie: Path) -> None:

@@ -236,11 +236,11 @@ def test_les_pages_genius_sont_gardees_puis_rejouees():
 
     url = "https://genius.com/Booba-ratpi-world-lyrics"
     stub = _Stub()
-    assert stub._crawl_page(url) == (None, "<html>Ratpi World</html>")
+    assert stub._crawl_page(url) == "<html>Ratpi World</html>"
     assert brut.lectures("genius_scrape", url)[0]["corps"] == b"<html>Ratpi World</html>"
     with brut.rejeu() as compte:
-        assert stub._crawl_page(url) == (None, "<html>Ratpi World</html>")
-        assert stub._crawl_page(url + "-absente") == (None, None)
+        assert stub._crawl_page(url) == "<html>Ratpi World</html>"
+        assert stub._crawl_page(url + "-absente") is None
     assert stub.crawls == 1
     assert compte["servies"] == 1 and len(compte["absentes"]) == 1
 

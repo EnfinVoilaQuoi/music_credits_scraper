@@ -79,8 +79,12 @@ REGLES_ID_PROPOSE_BRANCHEES = True
 REGLES_DEEZER_BRANCHEES = True
 
 #: Famille « liens Deezer » (délier, `politiques_revue.REGLES_LIENS_DEEZER`) :
-#: BAISSÉ tant que l'utilisateur n'a pas validé son passage à blanc.
-REGLES_LIENS_DEEZER_BRANCHEES = False
+#: levé le 2026-10-29, famille validée par l'utilisateur, resimulée sur une
+#: copie de toute la base : aucun retrait (4 cas actifs, tous à l'humain :
+#: deux catalogues solides contre au plus) ; les 3 « liens à revoir » qu'elle
+#: aurait déliés, le run les a depuis remplacés par une page à la durée des
+#: catalogues ; elle ne touche à aucun des 2 verdicts « ✓ Normal » humains.
+REGLES_LIENS_DEEZER_BRANCHEES = True
 
 #: Famille « ID Spotify porté par deux fiches » (`politiques_revue.REGLES_ID_PARTAGE`) :
 #: levé le 2026-10-26 — simulée sur toute la base (2 cas, tranchés comme

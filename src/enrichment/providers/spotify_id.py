@@ -1,9 +1,10 @@
 """Provider Spotify ID — récupère le Track ID Spotify (destiné à ReccoBeats).
 
-Corps historique de `DataEnricher.get_unique_spotify_id` + le bloc « scraper
-Spotify ID » d'`enrich_track`, déplacé sans changement de logique. Spotify n'est
-utilisé QUE pour l'ID (jamais les audio-features). L'unicité d'ID passe par le
-contexte (logique partagée avec ReccoBeats/SongBPM).
+Une seule voie : ASYNC (scraper Playwright dans la boucle). La voie sync n'avait
+plus d'appelant en production depuis que `DataEnricher` fournit toujours la
+variante async : retirée. Spotify n'est utilisé QUE pour l'ID (jamais les
+audio-features). L'unicité d'ID passe par le contexte (logique partagée avec
+ReccoBeats/SongBPM).
 """
 
 from datetime import datetime
@@ -15,12 +16,9 @@ from src.enrichment.context import EnrichmentContext
 from src.models import Track
 from src.observability.issues import SansReponse
 from src.utils.logger import get_logger
-from src.utils.spotify_identity import valider_identite, valider_identite_async
+from src.utils.spotify_identity import valider_identite_async
 
 logger = get_logger(__name__)
-
-# playwright sync et async partagent les mêmes classes d'erreur (Error, TimeoutError) ;
-# TimeoutError ⊂ Error → un seul except couvre les deux voies. (patchright = classes DISTINCTES.)
 
 
 class SpotifyIdProvider:
@@ -30,36 +28,20 @@ class SpotifyIdProvider:
     capabilities = {Capability.BPM}  # E7b structurel (non consommé)
     error_result = False
 
-    def __init__(self, scraper=None, scraper_factory=None, async_scraper_factory=None):
-        # PROPRIÉTAIRE du scraper Spotify (créé lazy, fermé par close()).
+    def __init__(self, scraper=None, scraper_factory=None):
+        # PROPRIÉTAIRE de son scraper ASYNC (créé lazy dans la boucle, fermé par aclose()).
         self._resource = LazyResource(scraper, scraper_factory, label="scraper Spotify ID")
-        # Variante ASYNC (F3b) : vit dans la boucle, fermée par aclose().
-        self._async_resource = LazyResource(
-            None, async_scraper_factory, label="scraper Spotify ID async"
-        )
-
-    @property
-    def scraper(self):
-        """Point d'EMPRUNT du scraper partagé (créé à la demande) : ReccoBeats
-        l'utilise pour son fallback, sans jamais le posséder ni le fermer."""
-        return self._resource.get()
-
-    @property
-    def async_scraper(self):
-        """Point d'EMPRUNT de la variante async (F3b) — même règle : ReccoBeats
-        l'utilise pour son fallback, jamais possédée ni fermée par l'emprunteur."""
-        return self._async_resource.get()
 
     def is_available(self) -> bool:
         return self._resource.available()
 
     def close(self) -> None:
-        """Ferme le scraper si ce provider l'a créé (recréé au run suivant)."""
-        self._resource.close()
+        """Rien à fermer ici : le scraper vit dans la boucle asyncio, fermé par
+        `aclose()` (le browser meurt là où il est né)."""
 
     async def aclose(self) -> None:
-        """Ferme le scraper ASYNC s'il l'a créé (browsers de la boucle, F3b)."""
-        await self._async_resource.aclose()
+        """Ferme le scraper s'il l'a créé (browsers de la boucle, F3b)."""
+        await self._resource.aclose()
 
     def gate(self, track: Track, ctx: EnrichmentContext) -> str | None:
         """Skip si un ID valide existe déjà (hors force_update) ou si la voie
@@ -89,42 +71,12 @@ class SpotifyIdProvider:
             )
         return "not_needed"
 
-    def get_unique_spotify_id(
-        self, track: Track, ctx: EnrichmentContext, force_scraper: bool = False
-    ) -> str | None:
-        """Récupère un Spotify ID unique (scrape + validation d'unicité)."""
-        scraper = self._resource.get()
-        if not scraper:
-            logger.warning("❌ Spotify ID scraper non disponible")
-            return None
-
-        artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
-        validate = ctx.validate_spotify_id_unique
-
-        # Si le track a déjà un Spotify ID et qu'on ne force pas, le vérifier
-        if not force_scraper and track.spotify_id:
-            if validate and validate(track.spotify_id, track, ctx.artist_tracks):
-                logger.info(f"✅ Spotify ID existant validé: {track.spotify_id}")
-                return track.spotify_id
-            else:
-                logger.warning(
-                    "⚠️ Spotify ID existant invalide (dupliqué), recherche d'un nouveau..."
-                )
-
-        # Utiliser le scraper Spotify_ID pour obtenir le bon ID
-        logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")
-        try:
-            spotify_id = scraper.get_spotify_id(artist_name, track.title)
-        except SansReponse as e:
-            return self._sans_reponse(track, e)
-        return self._dater_et_valider(track, ctx, spotify_id, scraper.get_track_identity)
-
     @staticmethod
     def _sans_reponse(track: Track, e: SansReponse) -> None:
         """Spotify n'a pas répondu : AUCUN constat daté (`spotify_id_checked_at`
         reste tel quel) — « jamais cherché » reste vrai, la prochaine passe
         recherchera. Dater ici faisait d'un navigateur mort un « pas sur
-        Spotify » permanent (2026-09-28). Partagé par les deux voies."""
+        Spotify » permanent (2026-09-28)."""
         logger.warning(f"⚠️ Spotify sans réponse pour '{track.title}' ({e.kind}) — rien daté")
         return None
 
@@ -132,20 +84,11 @@ class SpotifyIdProvider:
     def _dater_et_prevalider(
         track: Track, ctx: EnrichmentContext, spotify_id: str | None
     ) -> str | None:
-        """Suite COMMUNE aux deux voies, une fois le scrape rendu : dater le
-        constat puis valider l'unicité.
+        """Une fois le scrape rendu : dater le constat puis valider l'unicité.
 
-        Factorisée le 2026-09-05 parce que les deux voies avaient DIVERGÉ ici :
-        seule la voie sync datait `spotify_id_checked_at`, alors que la voie
-        async est celle que l'app emprunte (`data_enricher` fournit une
-        `async_scraper_factory`). La colonne e17, ajoutée la veille pour séparer
-        « absent de Spotify » de « jamais cherché », n'était donc jamais
-        renseignée en production, et `gui/helpers` affichait « jamais cherché »
-        pour des morceaux bel et bien résolus.
-
-        La leçon du jumeau Musixmatch était que la logique PURE était bien
-        partagée et que seuls les GARDES-FOUS ne l'étaient pas : on partage donc
-        le garde-fou lui-même, plutôt que de recopier une ligne dans l'autre voie.
+        La colonne e17 (`spotify_id_checked_at`) sépare « absent de Spotify » de
+        « jamais cherché » : sans cette date, `gui/helpers` affichait « jamais
+        cherché » pour des morceaux bel et bien résolus.
         """
         # La recherche a été MENÉE À TERME : on date le constat, trouvé ou non.
         # Sans cette date, un morceau jamais résolu passerait pour absent, et
@@ -168,8 +111,8 @@ class SpotifyIdProvider:
         return spotify_id
 
     @staticmethod
-    def _dater_et_valider(
-        track: Track, ctx: EnrichmentContext, spotify_id: str | None, lire_identite=None
+    async def _dater_et_valider_async(
+        track: Track, ctx: EnrichmentContext, spotify_id: str | None, lire_identite
     ) -> str | None:
         """Unicité PUIS justesse — deux questions distinctes.
 
@@ -185,49 +128,14 @@ class SpotifyIdProvider:
         valide = SpotifyIdProvider._dater_et_prevalider(track, ctx, spotify_id)
         if valide is None:
             return None
-        return valide if valider_identite(track, valide, lire_identite) else None
-
-    @staticmethod
-    async def _dater_et_valider_async(
-        track: Track, ctx: EnrichmentContext, spotify_id: str | None, lire_identite
-    ) -> str | None:
-        """Miroir async : MÊME décision, seul le transport de l'oracle diffère."""
-        valide = SpotifyIdProvider._dater_et_prevalider(track, ctx, spotify_id)
-        if valide is None:
-            return None
         return valide if await valider_identite_async(track, valide, lire_identite) else None
 
-    def enrich(self, track: Track, ctx: EnrichmentContext) -> bool:
-        """Scrape un Spotify ID unique et le pose (+ titre de page pour vérif)."""
-        spotify_id = self.get_unique_spotify_id(track, ctx, force_scraper=True)
-        if not spotify_id:
-            logger.info("∅ Aucun Spotify ID retenu par le scraper")
-            return False
-
-        track.spotify_id = spotify_id
-        track.add_spotify_id(spotify_id, source="scraper")
-        logger.info(f"✅ Spotify ID attribué via scraper: {spotify_id}")
-
-        # Récupérer le titre de la page Spotify pour vérification
-        try:
-            page_title = self._resource.get().get_spotify_page_title(spotify_id)
-            if page_title:
-                track.spotify_page_title = page_title
-                logger.info(f"📄 Titre de page Spotify: {page_title[:50]}...")
-        except PlaywrightError as e:
-            logger.debug(f"Impossible de récupérer le titre de page: {e}")
-
-        return True
-
     async def enrich_async(self, track: Track, ctx: EnrichmentContext) -> bool:
-        """Voie async (F3b) : scraper Playwright ASYNC natif dans la boucle.
-
-        Sans variante async configurée (tests, compat), repli sur le pont sync
-        F2 (corps sync sur le thread dédié du run).
-        """
-        scraper = self._async_resource.get()
+        """Scraper Playwright ASYNC natif dans la boucle."""
+        scraper = self._resource.get()
         if scraper is None:
-            return await ctx.sync_runner.run(self.enrich, track, ctx)
+            logger.warning("❌ Spotify ID scraper non disponible")
+            return False
 
         spotify_id = await self._get_unique_spotify_id_async(track, ctx, scraper)
         if not spotify_id:
@@ -252,9 +160,8 @@ class SpotifyIdProvider:
     async def _get_unique_spotify_id_async(
         self, track: Track, ctx: EnrichmentContext, scraper
     ) -> str | None:
-        """Miroir async de `get_unique_spotify_id(force_scraper=True)` : scrape
-        + suite commune (datation du constat, validation d'unicité) — l'existant
-        a déjà été jugé par le gate."""
+        """Scrape + suite commune (datation du constat, validation d'unicité) —
+        l'existant a déjà été jugé par le gate."""
         artist_name = track.artist.name if hasattr(track.artist, "name") else str(track.artist)
 
         logger.info(f"🔍 Recherche Spotify ID via scraper pour: '{artist_name}' - '{track.title}'")

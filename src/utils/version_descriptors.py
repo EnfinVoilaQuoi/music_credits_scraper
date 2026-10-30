@@ -1094,6 +1094,111 @@ def meme_version_mesuree(a: str | None, b: str | None) -> bool:
     return memes_parties(a, b) and meme_version(a, b)
 
 
+# ── Questions des GATES (chantier D, délégation, 2026-10-29) ───────────────────
+#
+# Les gates (Spotify, Deezer, Apple, Kworb, SongBPM, YouTube, LRC…) ne lisent
+# plus les primitives (`parse_variant`, `meme_famille`, `meme_prise`, `Kind`) :
+# ils posent l'une de ces questions, sur des TITRES, et le juge répond par la
+# clé (`cle_titre`, en cache). Crible : `tests/test_juge_unique_des_titres.py`.
+
+
+def est_remix_nu(titre: str | None) -> bool:
+    """PUR. « X (Remix) » : un remix dont le titre ne nomme pas le remixeur."""
+    return cle_titre(titre).variant.kind == Kind.REMIX_BARE
+
+
+def porte_une_version(titre: str | None) -> bool:
+    """PUR. Le titre porte un descripteur de VERSION (remix, live, acoustique…) —
+    une édition de diffusion (« Radio Edit ») n'en est pas une."""
+    return cle_titre(titre).variant.kind != Kind.NONE
+
+
+def meme_famille_de_version(a: str | None, b: str | None) -> bool:
+    """PUR. Les DESCRIPTEURS des deux titres désignent la même version
+    (`meme_famille`) ; le reste du titre n'est pas jugé ici."""
+    return meme_famille(cle_titre(a).variant, cle_titre(b).variant)
+
+
+def version_au_qualificatif_pres(a: str | None, b: str | None) -> bool:
+    """PUR. Deux descripteurs de la même famille de PRISE qui ne diffèrent que
+    par un qualificatif de plus d'un seul côté (« Live 2006; Version EP » /
+    « Live 2006 ») : le titre ne départage pas (gate Spotify, 2026-10-15)."""
+    va, vb = cle_titre(a).variant, cle_titre(b).variant
+    return not meme_famille(va, vb) and meme_famille(va, vb, compter_qualificatifs=False)
+
+
+def meme_version_stricte(a: str | None, b: str | None) -> bool:
+    """PUR. Deux titres qu'un rapprochement FLOU peut confondre : même absence
+    de descripteur (une coquille), même remix, ou même PRISE (`meme_prise` :
+    « Live » ≈ « Acoustic », mais « Live Version » ≠ « Long Version », que la
+    famille « édition » réunissait par le seul mot « Version ») — flou Kworb."""
+    va, vb = cle_titre(a).variant, cle_titre(b).variant
+    if va.kind == Kind.NONE and vb.kind == Kind.NONE:
+        return True
+    if va.est_remix and vb.est_remix:
+        return meme_famille(va, vb)
+    return meme_prise(va, vb)
+
+
+def meme_version_certifiee(titre_certif: str | None, titre_version: str | None) -> bool:
+    """PUR. La certif `titre_certif` est-elle celle de la VERSION `titre_version`
+    (même nature ; deux remix, ou la même PRISE : `meme_prise`) ? Un titre sans
+    descripteur n'est la version de rien (échos des certifs, 2026-09-26)."""
+    ec, ev = cle_titre(titre_certif).variant, cle_titre(titre_version).variant
+    if ec.kind == Kind.NONE or ec.kind != ev.kind:
+        return False
+    return ev.est_remix or meme_prise(ec, ev)
+
+
+def meme_prise_du_morceau(a: str | None, b: str | None) -> bool:
+    """PUR. Deux renditions du MÊME morceau (même socle normalisé) dans la même
+    PRISE (`meme_prise`) — une ligne Kworb « Nudes - Acoustic » est à la fiche
+    « Nudes (Live at AK Studios) » si elle existe."""
+    ka, kb = cle_titre(a), cle_titre(b)
+    return normalize_title(ka.variant.socle) == normalize_title(kb.variant.socle) and meme_prise(
+        ka.variant, kb.variant
+    )
+
+
+def remix_du_meme_morceau(a: str | None, b: str | None) -> bool:
+    """PUR. `a` est un remix (nu ou nommé) du morceau dont `b` a le socle — une
+    fiche « X (Remix) » est candidate pour la ligne Kworb « X - Y Remix »."""
+    ka, kb = cle_titre(a), cle_titre(b)
+    return ka.variant.est_remix and normalize_title(ka.variant.socle) == normalize_title(
+        kb.variant.socle
+    )
+
+
+_GROUPE_DE_DISQUE = re.compile(r"\s*(?:[\(\[][^\)\]]*[\)\]]|\s[-–]\s.*$)")
+
+
+def meme_disque(a: str | None, b: str | None) -> bool:
+    """PUR. Deux noms de disque désignent-ils le même album, éditions comprises ?
+    Le juge UNIQUE du « titre générique sur son disque » (2026-10-30) : les
+    gates avaient chacun le leur — Deezer l'égalité des clés (« OCHO » ≠
+    « OCHO (Deluxe) »), YouTube et YTM `meme_album` (pas « Paradisiaque /
+    Mc Solaar »), Spotify et GetSongBPM un socle sans groupes ni segment
+    « - … » inclus par mots entiers dans l'autre (pas « 444Nuits (Version
+    rouge) » / « 444 Nuits »). Ici l'un OU l'autre. Pas de garde du numéro
+    de partie : « Chambre 140 (Part. 3) » (32 pistes) est l'édition qui
+    CUMULE les parts 1 et 2, Deezer y place à bon droit l'« Interlude *
+    (Part. 1) » (mesuré le 2026-10-30). Faux si l'un manque."""
+    from src.utils.title_matching import either_contains_as_words, meme_album
+
+    if not a or not b:
+        return False
+    if meme_album(a, b):
+        return True
+    nus = [normalize_title(_GROUPE_DE_DISQUE.sub("", x)) for x in (a, b)]
+    return bool(nus[0]) and (nus[0] == nus[1] or either_contains_as_words(nus[0], nus[1]))
+
+
+def edition_de_diffusion(titre: str | None) -> str | None:
+    """PUR. Le libellé de l'ÉDITION de diffusion que porte le titre (« Radio
+    Edit », « 2011 Remaster » : même fiche que l'original), ou None."""
+    return cle_titre(titre).variant.edition
+
+
 #: Un groupe de titre de VIDÉO qui ne dit rien de la version : la nature de la
 #: vidéo, sa qualité, son album, son producteur (« (Clip Officiel) », « [4K
 #: Remastered] », « (Réédition album "L'AMOUR") », « (prod. klm) »).

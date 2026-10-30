@@ -8,9 +8,9 @@ meurt DANS la boucle (`get_playwright_async`), fermé par `aclose()` en fin de
 batch.
 
 Le périmètre couvre le flux d'enrichissement (get_spotify_id + page title) ;
-les méthodes de vote d'ID artiste (streams/Kworb) restent sync et migreront
-avec leurs workers (F5). Les méthodes sync héritées touchant Playwright sont
-neutralisées (RuntimeError) pour éviter tout usage accidentel.
+les méthodes de vote d'ID artiste (streams/Kworb) restent sync dans la classe
+mère. Les méthodes sync héritées touchant Playwright sont neutralisées
+(RuntimeError) pour éviter tout usage accidentel.
 """
 
 import urllib.parse
@@ -42,16 +42,10 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
     def _ensure_driver(self):
         raise RuntimeError("Instance async : utiliser les méthodes *_async")
 
-    def get_spotify_id(self, artist: str, title: str) -> str | None:
-        raise RuntimeError("Instance async : utiliser get_spotify_id_async")
-
-    def get_spotify_page_title(self, spotify_id: str) -> str | None:
-        raise RuntimeError("Instance async : utiliser get_spotify_page_title_async")
-
     def close(self):
         raise RuntimeError("Instance async : utiliser aclose()")
 
-    # ── Init / cleanup (miroirs async de la voie sync) ──────────────────────
+    # ── Init / cleanup ──────────────────────────────────────────────────────
 
     async def _ensure_driver_async(self):
         if self.page is not None:
@@ -120,7 +114,7 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
             except PlaywrightError:
                 continue
 
-    # ── Recherche principale (miroir async de get_spotify_id) ───────────────
+    # ── Recherche principale ────────────────────────────────────────────────
 
     async def get_spotify_id_async(self, artist: str, title: str) -> str | None:
         logger.info(f"🔍 Recherche ID Spotify pour: '{artist}' - '{title}'")
@@ -238,7 +232,7 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
     # ── Titre de page (miroir async) ────────────────────────────────────────
 
     async def get_track_identity_async(self, spotify_id: str) -> dict | None:
-        """Miroir async de `get_track_identity` : l'embed, jamais la SPA.
+        """Ce que Spotify dit du morceau derrière un ID : l'embed, jamais la SPA.
 
         La logique PURE (`_identite_depuis_embed`, `_titre_de_page`) est héritée
         et partagée — seul le TRANSPORT diffère.

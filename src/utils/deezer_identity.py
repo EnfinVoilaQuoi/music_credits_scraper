@@ -26,7 +26,7 @@ from __future__ import annotations
 from src.utils.logger import get_logger
 from src.utils.title_matching import cle_album, names_match_as_words
 from src.utils.track_mapper import _clean_duration
-from src.utils.version_descriptors import titre_generique, titres_equivalents
+from src.utils.version_descriptors import meme_disque, titre_generique, titres_equivalents
 from src.utils.version_heritage import remixeur_etranger
 
 logger = get_logger(__name__)
@@ -176,7 +176,7 @@ def hit_concorde(
     # l'« Intro » de *0.9* allait sur celle d'*Autopsie Vol. 3* (Booba,
     # 2026-10-10 — même titre, même durée de 18 s).
     disque = ((hit.get("album") or {}).get("title")) or ""
-    if album and disque and titre_generique(title) and cle_album(disque) != cle_album(album):
+    if album and disque and titre_generique(title) and not meme_disque(disque, album):
         return False, f"titre générique : piste du disque « {disque} », attendu « {album} »"
     # La piste d'un disque où une AUTRE fiche au titre équivalent a sa place
     # est la sienne : Kanye « GONE » (VULTURES 3) portait la « Gone » de *Late

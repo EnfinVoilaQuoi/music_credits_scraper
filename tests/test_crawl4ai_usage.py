@@ -39,7 +39,7 @@ def _scraper(passes, health_key="genius_scrape"):
 
 
 def _jouer(scraper, url="https://genius.com/x"):
-    html = asyncio.run(scraper.acrawl_page(url))[1]
+    html = asyncio.run(scraper.acrawl_page(url))
     return html, su.flush()
 
 
@@ -105,7 +105,7 @@ def test_le_pont_sync_rejoue_les_passes_dans_l_observation_de_l_appelant():
 
     scraper._patchright_fetch = faux_fetch
     with su.observe("brma", label="page") as obs:
-        _, html = scraper._crawl_page("https://www.ultratop.be/x")
+        html = scraper._crawl_page("https://www.ultratop.be/x")
         obs.ok()  # le verdict de parse de l'appelant
     assert html == "<html>ok</html>"
     assert vu["thread"] == "asyncio-loop", "le rendu doit bien changer de thread"

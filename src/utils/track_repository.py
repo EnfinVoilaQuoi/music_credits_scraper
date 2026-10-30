@@ -56,6 +56,7 @@ from src.utils.track_soeurs import (
     relations_a_stocker,
     serialiser_relations,
     synchroniser_soeurs,
+    unir_editions,
     unir_observations,
 )
 from src.utils.version_descriptors import titre_generique
@@ -2216,9 +2217,13 @@ class TrackRepository:
     ) -> bool:
         """Réécrit VERBATIM la relation de la fiche à son artiste (principal / feat
         / rôle secondaire), `None` compris — `save_track` passe ces champs en
-        COALESCE et ne sait pas les remplacer (corrections à la main, étape 3)."""
+        COALESCE et ne sait pas les remplacer (corrections à la main, étape 3).
+
+        Par `_ecrire` (2026-10-29) : l'interprète principal entre dans le score
+        de la recherche YouTube, donc dans le total YTM (`_videos_exclues`)."""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 conn.execute(
                     update(tracks)
                     .where(tracks.c.id == track_id)
@@ -2768,6 +2773,59 @@ class TrackRepository:
             logger.error(f"Erreur record_relationships({track_id}): {e}")
             return False
 
+    def retirer_contenus(self, track_id: int, contenu_ids) -> int:
+        """Retire la relation `contient` du medley vers `contenu_ids`, sur la
+        ligne ET ses jumelles d'une même transaction : `record_relationships`
+        rendrait une relation hors page gardée chez une sœur. Le refus qui
+        l'empêche de revenir est consigné par l'appelant
+        (`liens_contenus.delier`). Rend le nombre de lignes modifiées."""
+        from src.utils.contenants import TYPE
+
+        cibles = {int(i) for i in contenu_ids}
+        faites = 0
+        try:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                gid = conn.execute(
+                    text("SELECT genius_id FROM tracks WHERE id = :id"), {"id": track_id}
+                ).scalar()
+                jumelles, _ = ids_soeurs(conn, track_id, gid)
+                # Chez une jumelle, la relation vise la ligne contenue de SON
+                # artiste : on la reconnaît à la page Genius du contenu.
+                urls = {
+                    u
+                    for (u,) in conn.execute(
+                        text("SELECT genius_url FROM tracks WHERE id IN :ids").bindparams(
+                            bindparam("ids", expanding=True)
+                        ),
+                        {"ids": sorted(cibles)},
+                    )
+                    if u
+                }
+
+                def visee(r) -> bool:
+                    return r.get("type") == TYPE and (
+                        r.get("track_id") in cibles or (r.get("url") or None) in urls
+                    )
+
+                for tid in [track_id, *jumelles]:
+                    brut = conn.execute(
+                        text("SELECT relationships FROM tracks WHERE id = :id"), {"id": tid}
+                    ).scalar()
+                    relations = json.loads(brut) if brut else []
+                    gardees = [r for r in relations if not visee(r)]
+                    if len(gardees) == len(relations):
+                        continue
+                    self._toucher(conn, tid)
+                    conn.execute(
+                        text("UPDATE tracks SET relationships = :rels WHERE id = :id"),
+                        {"rels": serialiser_relations(gardees), "id": tid},
+                    )
+                    faites += 1
+            return faites
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_contenus({track_id}): {e}")
+            return 0
+
     def retirer_cles_locales_des_relations(self, *, appliquer: bool = False) -> list[int]:
         """Réparation : retire des `relationships` stockées les clés locales à
         la machine (`CLES_LOCALES_DES_RELATIONS`, le `cover_path` des samples
@@ -3106,10 +3164,13 @@ class TrackRepository:
 
     def rearbitrer_duree_et_date(self, track_id: int) -> bool:
         """Écrivain PUBLIC de `_rearbitrer_duree_et_date` — réparation des
-        colonnes restées en retard sur leurs observations (CORRECTIFS 2.2)."""
+        colonnes restées en retard sur leurs observations (CORRECTIFS 2.2).
+        Par `_ecrire` (2026-10-29) : la fiche ET ses sœurs sont recalculées en
+        entier (observations unies d'abord), plus seulement la durée et la date
+        de la seule ligne — une réparation qui laissait la sœur en retard."""
         try:
-            with self.engine.begin() as conn:
-                self._rearbitrer_duree_et_date(conn, track_id)
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur rearbitrer_duree_et_date({track_id}): {e}")
@@ -3327,6 +3388,14 @@ class TrackRepository:
                 # `effacer_chez_les_soeurs` — garde : `test_retraits_d_observations`.
                 if jumelles:
                     unir_observations(conn, [tid, *jumelles])
+                    # Les ÉDITIONS aussi : leur durée entre dans le verdict de
+                    # la durée (« Make Her Say » notée chez Kid Cudi, pas chez
+                    # Kanye, 2026-10-29).
+                    unir_editions(conn, [tid, *jumelles])
+                    # Le lien YouTube principal et sa NATURE : un relevé des
+                    # vues ne la posait que sur SA ligne (« In Common (Remix) »,
+                    # « audio » chez Kanye, « unknown » chez Travis, 2026-10-30).
+                    aligner_lien_youtube_des_soeurs(conn, tid)
                 a_faire.update(jumelles)
         # Les AUTRES porteurs de leurs vidéos (même artiste) : une vidéo reçue
         # par l'union des sœurs peut devenir partagée avec une fiche hors de la
@@ -3443,14 +3512,20 @@ class TrackRepository:
         """Rejoue `synchroniser_soeurs` sur chaque famille de lignes sœurs (même
         `genius_id` chez plusieurs artistes), puis rematérialise ses membres —
         rattrapage des familles divergées avant la règle « la lecture la plus
-        récente de la page l'emporte » (2026-10-12) et du lien YouTube arbitré
-        (2026-10-26). Rend `{genius_id: lignes réécrites (données de page et
-        lien YouTube)}` pour les familles qui changent ; sans `appliquer`,
-        la transaction est annulée (passage à blanc). Aucune règle n'est
-        réimplémentée ici : c'est la synchronisation de `save_track`."""
+        récente de la page l'emporte » (2026-10-12), du lien YouTube arbitré
+        (2026-10-26) et de l'union des éditions (2026-10-29). Rend
+        `{genius_id: lignes réécrites (données de page, lien YouTube,
+        éditions)}` pour les familles qui changent ; sans `appliquer`, rien
+        n'est gardé (passage à blanc). Aucune règle n'est réimplémentée ici :
+        c'est la synchronisation de `save_track`.
+
+        UNE transaction par famille, à blanc comme pour de vrai : le verrou
+        d'écriture ne dure que le temps d'une famille (un run peut tourner à
+        côté, cf. `rematerialiser`). Le recalcul de fin de transaction suit
+        aussi les AUTRES porteurs des vidéos de la famille : une union qui
+        change le total d'une fiche hors famille est recalculée avec elle."""
         changes: dict[int, int] = {}
         with self.engine.connect() as conn:
-            transaction = conn.begin()
             try:
                 familles = conn.execute(
                     text(
@@ -3458,30 +3533,32 @@ class TrackRepository:
                         "GROUP BY genius_id HAVING COUNT(DISTINCT artist_id) > 1"
                     )
                 ).all()
-                # Deux temps : TOUTES les synchronisations, puis le recalcul (via
-                # le mécanisme du chantier A, porteurs de vidéos compris) — une
-                # union dans une famille peut changer le total d'une autre.
-                conn.info[self._A_RECALCULER] = set()
-                try:
-                    for gid, tid in familles:
+                conn.rollback()
+                for gid, tid in familles:
+                    transaction = conn.begin()
+                    conn.info[self._A_RECALCULER] = set()
+                    try:
                         rapport = synchroniser_soeurs(conn, tid, gid)
                         self._toucher(conn, tid, *rapport["jumelles"])
-                        reecrites = rapport.get("donnees_de_page", 0) + rapport.get(
-                            "lien_youtube", 0
-                        )
-                        if reecrites:
-                            changes[gid] = reecrites
-                    self._recalculer_touchees(conn)
-                finally:
-                    conn.info.pop(self._A_RECALCULER, None)
-                if appliquer:
-                    transaction.commit()
-                else:
-                    transaction.rollback()
+                        self._recalculer_touchees(conn)
+                        if appliquer:
+                            transaction.commit()
+                    finally:
+                        conn.info.pop(self._A_RECALCULER, None)
+                        if transaction.is_active:
+                            transaction.rollback()
+                    reecrites = sum(
+                        rapport.get(cle, 0)
+                        for cle in ("donnees_de_page", "lien_youtube", "editions")
+                    )
+                    if reecrites:
+                        changes[gid] = reecrites
             except SQLAlchemyError as e:
-                transaction.rollback()
-                logger.error(f"Erreur realigner_soeurs: {e}")
-                return {}
+                # Les familles déjà COMMITÉES (avec `appliquer`) le restent :
+                # chacune est cohérente seule. Le compte rendu s'arrête là.
+                logger.error(
+                    f"Erreur realigner_soeurs (arrêt après {len(changes)} famille(s)): {e}"
+                )
         return changes
 
     def rematerialiser(
@@ -3548,10 +3625,15 @@ class TrackRepository:
         """Fiches à ISRC VIDE alors qu'une observation en donne un : rend
         `[(track_id, titre, isrc_du_verdict)]`, et l'écrit si `appliquer`.
         Rattrapage des colonnes laissées vides avant la règle « remplir sans
-        remplacer » (2026-10-11)."""
+        remplacer » (2026-10-11).
+
+        Le passage à blanc ne fait que LIRE. L'application passe par `_ecrire` :
+        les fiches trouvées (et leurs sœurs) sont recalculées en entier —
+        `_rematerialiser_fiche` remplit l'ISRC vide par le même verdict
+        (`_isrc_sans_remplacer`), et rien n'est laissé en retard à côté."""
         trouvees = []
         try:
-            with self.engine.begin() as conn:
+            with self.engine.connect() as conn:
                 lignes = conn.execute(
                     text(
                         "SELECT DISTINCT t.id, t.title FROM tracks t JOIN observations o "
@@ -3563,8 +3645,9 @@ class TrackRepository:
                     valeurs = self._arbitrer_discographie(conn, tid, {"isrc"})
                     if valeurs.get("isrc"):
                         trouvees.append((tid, titre, valeurs["isrc"]))
-                        if appliquer:
-                            self._ecrire_colonnes_discographie(conn, tid, {"isrc": valeurs["isrc"]})
+            if appliquer and trouvees:
+                with self._ecrire() as conn:
+                    self._toucher(conn, *(tid for tid, _, _ in trouvees))
         except SQLAlchemyError as e:
             logger.error(f"Erreur combler_isrc_vides : {e}")
             return []
@@ -4366,14 +4449,17 @@ class TrackRepository:
 
     def clear_track_album(self, track_id: int) -> bool:
         """Détache un morceau de son album (édition MANUELLE : album_override=1
-        empêche l'API de re-remplir le champ au prochain prefill)."""
+        empêche l'API de re-remplir le champ au prochain prefill). Par `_ecrire`
+        (2026-10-29) : l'album entre dans le score de la recherche YouTube, donc
+        dans le total YTM (`_videos_exclues`)."""
         try:
             stmt = (
                 update(tracks)
                 .where(tracks.c.id == track_id)
                 .values(album=None, album_override=1, updated_at=datetime.now())
             )
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 conn.execute(stmt)
             return True
         except SQLAlchemyError as e:
@@ -5055,9 +5141,11 @@ class TrackRepository:
             self._persist_release_observations(conn, track_id, int(row["artist_id"]), observations)
 
     def set_track_reference_release(self, track_id: int, release_id: int) -> bool:
-        """Choisit explicitement l'album repère, sans toucher aux autres liens."""
+        """Choisit explicitement l'album repère, sans toucher aux autres liens.
+        Par `_ecrire` : l'album entre dans le total YTM (`_videos_exclues`)."""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 row = (
                     conn.execute(
                         text(
@@ -5277,9 +5365,11 @@ class TrackRepository:
         Retourne `removed`, `needs_replacement` ou `missing`. L'appelant doit
         confirmer explicitement un remplacement : ne jamais laisser une simple
         suppression de compilation réécrire silencieusement `tracks.album`.
+        Par `_ecrire` : l'album repère entre dans le total YTM (`_videos_exclues`).
         """
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 current = (
                     conn.execute(
                         text(
@@ -5720,7 +5810,9 @@ class TrackRepository:
         réponse au « différencier un clip d'un morceau classique ». Écriture en
         `text()` non typé + `CURRENT_TIMESTAMP` (pas de bind date typé →
         contourne le piège TIMESTAMP double-face). `kind` en COALESCE : un appel
-        sans catégorie ne l'efface pas.
+        sans catégorie ne l'efface pas ; « unknown » (le classement n'a rien
+        reconnu) ne remplace pas une nature connue — ce n'est pas un constat.
+        Les sœurs suivent en fin de transaction (`aligner_lien_youtube_des_soeurs`).
         """
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
@@ -5728,7 +5820,9 @@ class TrackRepository:
                 conn.execute(
                     text(
                         "UPDATE tracks SET youtube_video_views = :views, "
-                        "youtube_video_kind = COALESCE(:kind, youtube_video_kind), "
+                        "youtube_video_kind = CASE WHEN :kind IS NULL OR (:kind = 'unknown' "
+                        "AND COALESCE(youtube_video_kind, '') NOT IN ('', 'unknown')) "
+                        "THEN youtube_video_kind ELSE :kind END, "
                         "youtube_video_views_updated = CURRENT_TIMESTAMP, "
                         "updated_at = :now WHERE id = :tid"
                     ),
@@ -5786,11 +5880,27 @@ class TrackRepository:
         `album_override` n'est PAS posé : ce n'est pas une saisie humaine mais
         le nettoyage d'une convention de Genius, et le marquer en manuel
         empêcherait toute correction ultérieure par la source.
+
+        Par `_ecrire` (2026-10-29) : l'album entre dans le total YTM (score de
+        la recherche, `_videos_exclues`) — les morceaux du disque (quelques
+        dizaines au plus) sont recalculés.
         """
         if not ancien or not nouveau or ancien == nouveau:
             return 0, 0
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(
+                    conn,
+                    *(
+                        r[0]
+                        for r in conn.execute(
+                            text(
+                                "SELECT id FROM tracks WHERE artist_id = :aid AND album = :ancien"
+                            ),
+                            {"aid": artist_id, "ancien": ancien},
+                        )
+                    ),
+                )
                 morceaux = conn.execute(
                     text(
                         "UPDATE tracks SET album = :nouveau, updated_at = :now "
@@ -5942,10 +6052,15 @@ class TrackRepository:
 
         Même nettoyage qu'à l'enregistrement : un titre collé depuis Genius
         emporte volontiers un caractère invisible avec lui.
+
+        Par `_ecrire` (2026-10-29) : le titre entre dans deux verdicts — la
+        durée (`resoudre_duree` : titre court, intro, skit) et le total YTM
+        (score de la recherche, `_videos_exclues`).
         """
         titre = clean_stored_title(new_title)
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 # Depuis e36 le titre n'est plus UNIQUE en base (homonymes de
                 # genius_id différents) : le refus qu'assurait la contrainte est
                 # explicite ici. Seul le retrait du marqueur d'inédit
@@ -6585,10 +6700,15 @@ class TrackRepository:
 
         ADDITIF, comme `record_track_videos` : une ligne par (morceau, libellé) ;
         une seconde source COMPLÈTE ce que la première n'avait pas (Kworb donne
-        l'ID Spotify, Deezer la durée et l'ISRC), jamais ne remplace."""
+        l'ID Spotify, Deezer la durée et l'ISRC), jamais ne remplace.
+
+        Par `_ecrire` (2026-10-29) : la durée d'une édition entre dans le
+        verdict de la durée (`_durees_editions`), et l'édition rejoint les
+        lignes sœurs en fin de transaction (`unir_editions`)."""
         valeurs = {k: v for k, v in champs.items() if k in self._COLONNES_EDITION and v is not None}
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 ligne = (
                     conn.execute(
                         text("SELECT * FROM track_editions WHERE track_id = :t AND label = :l"),
@@ -6638,6 +6758,20 @@ class TrackRepository:
                     {"vers": vers_track_id, "de": de_track_id, "l": label},
                 ).rowcount
                 if deplacees:
+                    # Les sœurs de la fiche quittée la portaient aussi (union
+                    # des éditions) : elle part de chez elles, sinon l'union de
+                    # fin de transaction la rendrait. Celles de la fiche visée
+                    # la reçoivent par cette union.
+                    def retirer(jumelle):
+                        if jumelle != vers_track_id:
+                            conn.execute(
+                                text(
+                                    "DELETE FROM track_editions WHERE track_id = :t AND label = :l"
+                                ),
+                                {"t": jumelle, "l": label},
+                            )
+
+                    effacer_chez_les_soeurs(conn, de_track_id, retirer)
                     self._toucher(conn, de_track_id)
                     self._toucher(conn, vers_track_id)
                 return bool(deplacees)
@@ -6650,14 +6784,20 @@ class TrackRepository:
         #12092 posées en « autre édition » sur « La Gamberge - Live 2006 »
         (#8199) par une règle du panneau, 2026-10-26. Sa durée entrait dans le
         verdict de la durée : la fiche est recalculée. Rend True si une ligne
-        est partie."""
+        est partie. L'édition part aussi de chez les lignes SŒURS : l'union des
+        éditions de fin de transaction la rendrait (2026-10-29)."""
         try:
             with self._ecrire() as conn:
-                retirees = conn.execute(
-                    text("DELETE FROM track_editions WHERE track_id = :t AND label = :l"),
-                    {"t": track_id, "l": label},
-                ).rowcount
+
+                def retirer(tid):
+                    return conn.execute(
+                        text("DELETE FROM track_editions WHERE track_id = :t AND label = :l"),
+                        {"t": tid, "l": label},
+                    ).rowcount
+
+                retirees = retirer(track_id)
                 if retirees:
+                    effacer_chez_les_soeurs(conn, track_id, retirer)
                     self._toucher(conn, track_id)
                 return bool(retirees)
         except SQLAlchemyError as e:

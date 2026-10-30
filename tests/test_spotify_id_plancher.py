@@ -11,7 +11,7 @@ CALIBRÉ sur données le 2026-09-09, 36 requêtes réelles confrontées à l'ora
 embed — **36 identifiants rendus, 19 faux (53 %)** :
 
     score ≥ 0,80  →  15 identifiants, 0 faux
-    score = 0,60  →   1 juste, 3 faux      (zone grise → LLM)
+    score = 0,60  →   1 juste, 3 faux      (zone grise)
     score ≤ 0,50  →   0 juste, 16 faux
 
 0,60 est le seul plancher qui écarte les faux SANS perdre un identifiant juste :

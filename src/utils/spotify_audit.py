@@ -52,14 +52,20 @@ def lignes_a_verifier(
         params.update({f"track_id_{n}": track_id for n, track_id in enumerate(track_ids)})
     filtre = f"AND {' AND '.join(filtres)}" if filtres else ""
     requete = f"""
-        SELECT t.id, t.title, t.duration, t.is_featuring, t.primary_artist_name,
+        SELECT t.id, t.title, COALESCE(e.duration, t.duration) AS duration, t.is_featuring,
+               t.primary_artist_name,
                a.name AS artiste, t.spotify_id AS sid, 1 AS principal,
                a.id AS artist_id, a.spotify_id AS artiste_spotify_id,
-               t.genius_id, t.album, 0 AS duree_d_edition
+               t.genius_id, t.album, e.duration IS NOT NULL AS duree_d_edition
           FROM tracks t JOIN artists a ON a.id = t.artist_id
+          -- L'ID PRINCIPAL peut être celui d'une édition notée à la main (Lunatic
+          -- « Le crime paie » : seule la version de 4:40 est sur Spotify,
+          -- 2026-10-29) : il se juge alors lui aussi sur la durée de l'édition.
+          LEFT JOIN track_editions e
+                 ON e.track_id = t.id AND e.spotify_id = t.spotify_id
          WHERE t.spotify_id IS NOT NULL AND t.spotify_id != '' {filtre}
          UNION
-        SELECT t.id, t.title, COALESCE(e.duration, t.duration), t.is_featuring,
+        SELECT t.id, t.title, COALESCE(e.duration, t.duration) AS duration, t.is_featuring,
                t.primary_artist_name, a.name, s.spotify_id, 0, a.id, a.spotify_id,
                t.genius_id, t.album, e.duration IS NOT NULL
           FROM track_spotify_ids s

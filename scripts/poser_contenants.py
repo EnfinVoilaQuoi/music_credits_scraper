@@ -13,6 +13,7 @@ existera.
 
     python scripts/poser_contenants.py --artiste Flynt --contenant 9716 --contenus 1250 1251
     python scripts/poser_contenants.py --regle [--artiste Flynt ...]   # règle des titres joints
+    python scripts/poser_contenants.py --artiste Ye --contenant 7207 --contenus 7090 --delier
     python scripts/poser_contenants.py ... --apply                      # backup + écriture
 
 `--regle` : les titres « A + B » / « A / B » dont chaque partie a UNE fiche chez
@@ -71,6 +72,37 @@ def a_la_main(dm, artiste: str, contenant_id: int, contenus_ids: list[int], appl
     return 0
 
 
+def delier(dm, artiste: str, contenant_id: int, contenus_ids: list[int], apply: bool) -> int:
+    """Retire le lien et le refuse (la règle des titres joints ne le repose plus)."""
+    artist = dm.get_artist_by_name(artiste)
+    if artist is None:
+        print(f"❌ Artiste inconnu : {artiste}")
+        return 1
+    fiches = {t.id: t for t in dm.get_artist_tracks(artist.id)}
+    contenant = fiches.get(contenant_id)
+    inconnus = [i for i in contenus_ids if i not in fiches]
+    if contenant is None or inconnus:
+        print(
+            f"❌ Pas des fiches de {artiste} : {[contenant_id] if contenant is None else inconnus}"
+        )
+        return 1
+    contenus = [fiches[i] for i in contenus_ids]
+    print(f"{artiste} — {_decrire(contenant)} ne contient PAS :")
+    for c in contenus:
+        print(f"   · {_decrire(c)}")
+    if not apply:
+        lies = liens_contenus.delier(dm, contenant, contenus, apply=False)
+        print(f"   {len(lies)} lien(s) à retirer, {len(contenus)} refus à consigner")
+        print("\n(à blanc — relancer avec --apply pour écrire)")
+        return 0
+    from src.utils.database_backup import get_backup_manager
+
+    print(f"💾 Backup : {get_backup_manager().create_backup('before_delier_contenants')}")
+    lies = liens_contenus.delier(dm, contenant, contenus, apply=True)
+    print(f"✅ {len(lies)} lien(s) retiré(s), refus consigné(s)")
+    return 0
+
+
 def par_la_regle(dm, artistes: list[str], apply: bool) -> int:
     noms = artistes or dm.get_artist_names()
     lots = []
@@ -80,7 +112,10 @@ def par_la_regle(dm, artistes: list[str], apply: bool) -> int:
             print(f"⚠️ Artiste inconnu : {nom}")
             continue
         lots += [
-            (nom, t, c) for t, c in liens_contenus.propositions(dm.get_artist_tracks(artist.id))
+            (nom, t, c)
+            for t, c in liens_contenus.propositions(
+                dm.get_artist_tracks(artist.id), cf.contenus_refuses
+            )
         ]
     for nom, t, contenus in lots:
         print(f"{nom} — {_decrire(t)}")
@@ -106,6 +141,9 @@ def main() -> int:
     parser.add_argument("--contenant", type=int, help="track_id du medley")
     parser.add_argument("--contenus", type=int, nargs="+", help="track_id des fiches contenues")
     parser.add_argument("--regle", action="store_true", help="règle des titres joints")
+    parser.add_argument(
+        "--delier", action="store_true", help="retirer le lien et le refuser (au lieu de poser)"
+    )
     parser.add_argument("--apply", action="store_true", help="écrit (backup automatique avant)")
     args = parser.parse_args()
 
@@ -116,6 +154,8 @@ def main() -> int:
         return par_la_regle(dm, args.artiste, args.apply)
     if not (args.contenant and args.contenus and len(args.artiste) == 1):
         parser.error("à la main : --artiste NOM --contenant ID --contenus ID [ID …]")
+    if args.delier:
+        return delier(dm, args.artiste[0], args.contenant, args.contenus, args.apply)
     return a_la_main(dm, args.artiste[0], args.contenant, args.contenus, args.apply)
 
 

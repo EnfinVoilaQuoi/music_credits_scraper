@@ -101,6 +101,9 @@ def test_un_id_retire_est_refuse():
 
 
 def test_les_exceptions_servent_encore():
-    """Une exception qui ne couvre plus rien se retire : la liste reste fermée."""
-    perimees = set(EXCEPTIONS) - set(_retraits_sans_refus())
+    """Une exception qui ne couvre plus rien se retire : la liste reste fermée.
+    Celle d'un script ignoré par git (`scripts/ponctuels/`) ne se juge que là
+    où il existe : absent d'un clone neuf ou d'un worktree, il n'est pas périmé."""
+    presentes = {(f, n) for f, n in EXCEPTIONS if (_RACINE / f).exists()}
+    perimees = presentes - set(_retraits_sans_refus())
     assert not perimees, f"Exceptions qui ne servent plus : {sorted(perimees)}"

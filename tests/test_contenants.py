@@ -64,6 +64,22 @@ class TestPartiesDuTitre:
         assert contenants.parties_du_titre("24/7") == []
         assert contenants.parties_du_titre("C+C") == []
 
+    def test_barre_oblique_sans_espaces_hors_chiffres(self):
+        """Kanye « Chakras/We Free », Médine « Le Mal Qu'on a Fait/… » ; une
+        date ou une fraction n'est pas une jointure."""
+        assert contenants.parties_du_titre("Chakras/We Free") == ["Chakras", "We Free"]
+        assert contenants.parties_du_titre("Houston We Got A Problem/ Me Too") == [
+            "Houston We Got A Problem",
+            "Me Too",
+        ]
+        assert contenants.parties_du_titre("La Récolte/Fils de Colonisé/Internationale") == [
+            "La Récolte",
+            "Fils de Colonisé",
+            "Internationale",
+        ]
+        for titre in ("11/09", "68 3/4", "Freestyle 02/02/21", "7/7"):
+            assert contenants.parties_du_titre(titre) == [], titre
+
     def test_dans_une_parenthese_c_est_un_seul_morceau(self):
         """Kanye « LAST BREATH (First Pressing / Single Version) »."""
         assert contenants.parties_du_titre("LAST BREATH (First Pressing / Single Version)") == []
@@ -199,6 +215,7 @@ class TestEtapeCredits:
     @pytest.fixture(autouse=True)
     def _aucune_absence(self, monkeypatch):
         monkeypatch.setattr("src.services.runtime.absences_recentes", lambda rt, s: {})
+        monkeypatch.setattr("src.services.runtime.constater_absences", lambda *a: None)
 
     def test_genius_ne_lit_pas_un_contenant_sans_page(self):
         from src.services import credits
@@ -244,7 +261,8 @@ class TestSansPageGenius:
         t.genius_url = "https://genius.com/Flynt-retroduction-lyrics"
         assert est_manquant(t, Manque.CREDITS_GENIUS)
 
-    def test_le_crawl_ne_recoit_que_les_fiches_avec_page(self):
+    def test_le_crawl_ne_recoit_que_les_fiches_avec_page(self, monkeypatch):
+        monkeypatch.setattr("src.services.runtime.constater_absences", lambda *a: None)
         from src.services import credits
         from src.services.runtime import Hooks
         from tests.test_services_credits import _clients, _rt
@@ -358,6 +376,76 @@ class TestPoseEnBase:
         relu = _par_id(data_manager, a)[medley.id]
         assert contenants.ids_contenus(relu) == [c.id for c in contenus]
         assert contenants.contenant_sans_page(relu)
+
+    def test_la_regle_de_l_etape_discographie_pose_une_fois(self, data_manager, flynt_en_base):
+        """`lier_par_la_regle` (fin de l'étape discographie) pose la relation
+        d'origine « regle:titres_joints » ; relancée, elle ne fait rien."""
+        a, ids = flynt_en_base
+        fiches = list(_par_id(data_manager, a).values())
+        faits = liens_contenus.lier_par_la_regle(data_manager, "Flynt", fiches)
+        assert faits == [
+            "Compte à rebours + Vieux avant l'âge ⊃ Compte à rebours + Vieux avant l’âge"
+        ]
+        relu = _par_id(data_manager, a)
+        medley = relu[ids["Compte à rebours + Vieux avant l'âge"]]
+        assert contenants.ids_contenus(medley) == [
+            ids["Compte à rebours"],
+            ids["Vieux avant l’âge"],
+        ]
+        assert {r.get("origine") for r in contenants.relations_contient(medley)} == {
+            contenants.ORIGINE_REGLE
+        }
+        assert liens_contenus.lier_par_la_regle(data_manager, "Flynt", list(relu.values())) == []
+
+    def test_un_lien_delie_est_refuse_et_la_regle_ne_le_repose_pas(
+        self, data_manager, flynt_en_base
+    ):
+        a, ids = flynt_en_base
+        liens_contenus.lier_par_la_regle(
+            data_manager, "Flynt", list(_par_id(data_manager, a).values())
+        )
+        fiches = _par_id(data_manager, a)
+        medley = fiches[ids["Compte à rebours + Vieux avant l'âge"]]
+        vieux = fiches[ids["Vieux avant l’âge"]]
+        assert liens_contenus.delier(data_manager, medley, [vieux], apply=False) == [vieux]
+        assert contenants.ids_contenus(_par_id(data_manager, a)[medley.id]) != []
+        liens_contenus.delier(data_manager, medley, [vieux], apply=True)
+        relu = _par_id(data_manager, a)
+        assert contenants.ids_contenus(relu[medley.id]) == [ids["Compte à rebours"]]
+        assert cf.contenus_refuses(relu[medley.id]) == {cf.cle_contenu(vieux)}
+        # La règle ne repropose pas le lien refusé (ni l'autre, déjà posé).
+        assert liens_contenus.lier_par_la_regle(data_manager, "Flynt", list(relu.values())) == []
+        assert contenants.ids_contenus(_par_id(data_manager, a)[medley.id]) == [
+            ids["Compte à rebours"]
+        ]
+
+    def test_delier_retire_aussi_chez_la_soeur(self, data_manager):
+        """Un medley à page Genius porté par deux artistes : la relation gardée
+        chez la sœur reviendrait par `record_relationships` (relation hors page)."""
+        lignes = {}
+        for nom in ("Kanye West", "Kid Cudi"):
+            art = Artist(name=nom)
+            art.id = data_manager.save_artist(art)
+            for titre, gid in (("Bad Night / Rap Tarantino", 99), ("Bad Night", 1)):
+                t = Track(title=titre, artist=art)
+                t.genius_id, t.genius_url = gid, f"https://genius.com/x-{gid}"
+                lignes[(nom, titre)] = data_manager.save_track(t)
+        for nom in ("Kanye West", "Kid Cudi"):
+            art = data_manager.get_artist_by_name(nom)
+            fiches = _par_id(data_manager, art)
+            medley = fiches[lignes[(nom, "Bad Night / Rap Tarantino")]]
+            contenu = fiches[lignes[(nom, "Bad Night")]]
+            liens_contenus.lier(data_manager, medley, [contenu], nom, "manuel", apply=True)
+        kanye = data_manager.get_artist_by_name("Kanye West")
+        fiches = _par_id(data_manager, kanye)
+        medley = fiches[lignes[("Kanye West", "Bad Night / Rap Tarantino")]]
+        liens_contenus.delier(
+            data_manager, medley, [fiches[lignes[("Kanye West", "Bad Night")]]], apply=True
+        )
+        for nom in ("Kanye West", "Kid Cudi"):
+            art = data_manager.get_artist_by_name(nom)
+            relu = _par_id(data_manager, art)[lignes[(nom, "Bad Night / Rap Tarantino")]]
+            assert contenants.ids_contenus(relu) == [], nom
 
     def test_la_decision_consignee_est_une_union(self, data_manager):
         medley = {"titre": "Crazy + 6G", "album": "Rétrographie (Mixtape)"}

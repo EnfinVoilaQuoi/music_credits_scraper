@@ -56,6 +56,7 @@ from src.utils.duree_youtube import (
     court_par_nature,
     dementie_par_les_paroles,
     est_un_clip,
+    segment_de_dj_mix,
     trop_courte_pour_les_paroles,
 )
 from src.utils.title_matching import normalize_title
@@ -443,7 +444,11 @@ def durees(c, pistes) -> list[Cas]:
     cas += lrc_trop_longs(c, pistes)
     for t in pistes:
         ref = paroles_de_reference(t["lyrics"], t["lyrics_source"])
-        if t["duration"] and trop_courte_pour_les_paroles(t["duration"], ref):
+        if (
+            t["duration"]
+            and trop_courte_pour_les_paroles(t["duration"], ref)
+            and not segment_de_dj_mix(t["title"], t["album"])
+        ):
             mots = len(ref.split())
             cas.append(
                 Cas(
@@ -728,6 +733,7 @@ def soeurs_divergentes(c, pistes) -> list[Cas]:
     ):
         if r["genius_id"] in gids:
             familles[r["genius_id"]].append(r)
+    editions = _editions_par_ligne(c, [r["id"] for lignes in familles.values() for r in lignes])
     cas = []
     for lignes in familles.values():
         for col in colonnes:
@@ -742,7 +748,41 @@ def soeurs_divergentes(c, pistes) -> list[Cas]:
                         f"{_lib(t)} {col} : {len(valeurs)} valeurs sur {len(lignes)} lignes",
                     )
                 )
+        # Les ÉDITIONS décrivent l'enregistrement (`unir_editions`, 2026-10-29) :
+        # même jeu chez chaque sœur, libellés et identifiants compris.
+        jeux = {editions.get(r["id"], frozenset()) for r in lignes}
+        if len(jeux) > 1:
+            t = lignes[0]
+            cas.append(
+                Cas(
+                    "soeurs_divergentes",
+                    t["artiste"],
+                    [r["id"] for r in lignes],
+                    f"{_lib(t)} éditions : {len(jeux)} jeux sur {len(lignes)} lignes",
+                )
+            )
     return cas
+
+
+def _editions_par_ligne(c, ids) -> dict[int, frozenset]:
+    """`{track_id: jeu de ses éditions}` (libellé + colonnes renseignées)."""
+    from src.utils.track_soeurs import COLONNES_D_EDITION
+
+    if (
+        not ids
+        or not c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'track_editions'"
+        ).fetchone()
+    ):
+        return {}
+    voulus = set(ids)
+    jeux: dict[int, set] = collections.defaultdict(set)
+    for r in c.execute(
+        "SELECT track_id, label, " + ", ".join(COLONNES_D_EDITION) + " FROM track_editions"
+    ):
+        if r[0] in voulus:
+            jeux[r[0]].add(tuple(str(v) if v not in (None, "") else None for v in tuple(r)[1:]))
+    return {tid: frozenset(jeu) for tid, jeu in jeux.items()}
 
 
 #: Tables liées à une fiche (aucune cascade : `PRAGMA foreign_keys` est éteint).

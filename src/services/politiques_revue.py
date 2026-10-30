@@ -62,11 +62,31 @@ class Politique:
 # ── Durées ──────────────────────────────────────────────────────────────────
 
 
+#: Source lue par une RECHERCHE de paroles (titre + artiste), sans identifiant ;
+#: `_HIT` la renomme hors de la famille `youtube` du vote quand elle est jugée.
+_HIT_DE_RECHERCHE = "ytmusic"
+_HIT = "ytmusic_recherche"
+
+
 def _dementie(durees: dict, source: str, editions, minimum: int):
     """La valeur de `source` est démentie FORMELLEMENT : au moins `minimum`
     catalogues SOLIDES d'autres familles la contredisent, ils s'accordent entre
     eux (à la tolérance du vote), aucun autre catalogue ne la soutient. Rend la
     durée commune des contradicteurs, sinon None."""
+    audio = durees.get(revue.SOURCE_AUDIO)
+    if (
+        source == _HIT_DE_RECHERCHE
+        and durees.get(source)
+        and audio
+        and abs(int(audio) - int(durees[source])) > TOLERANCE_S
+    ):
+        # La piste YTM est le HIT d'une recherche de paroles par titre, l'audio
+        # Topic une vidéo lue par son ID : en désaccord, ce sont deux fichiers,
+        # et l'audio dément le hit malgré leur famille commune (Kanye
+        # « Monster » #11401, 2026-10-29 : YTM 150 s, Topic et Apple 379 s —
+        # sans lui, Apple restait seul et le cas allait à l'humain).
+        durees = {**{s: d for s, d in durees.items() if s != source}, _HIT: durees[source]}
+        source = _HIT
     valeur = durees.get(source)
     vote = voter(durees, valeur, editions=editions) if valeur else None
     if vote is None or vote.nature != ISOLEE or "manual" in durees:
@@ -897,7 +917,7 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     return None
 
 
-# ── Famille « liens Deezer » (délier) — PAS ENCORE validée ─────────────────
+# ── Famille « liens Deezer » (délier) — branchée le 2026-10-29 ─────────────
 
 #: Délier un lien Deezer que la durée dément, au seuil des RETRAITS validés
 #: (3 catalogues indépendants d'accord, plus de 10 s) ; garder (✓ Normal) un
@@ -1271,6 +1291,14 @@ REGLES_ETENDUES = frozenset(
         # 2026-10-29, décision utilisateur : la chaîne d'un autre artiste ET une
         # durée que toutes celles de la fiche démentent (e62, e63).
         ("video_autre_chaine", "retirer_video_recherche"),
+        # 2026-10-29 : mesures SongBPM posées par un titre CONTENU avant la
+        # garde de pose `cccebc7`, retirées de la fiche que ses catalogues
+        # démentent quand ceux de l'autre les confirment (simulée sur la copie).
+        ("songbpm_titre_contenu", "retirer_songbpm"),
+        # 2026-10-30 : vidéo Genius muette plus de 3 fois plus longue que le
+        # morceau (concert, émission, compilation) ; simulée sur la copie,
+        # 4 liens, chacun confronté à son titre (aucun n'est le morceau).
+        ("video_trop_longue", "retirer_video_recherche"),
     }
 )
 
@@ -1289,6 +1317,21 @@ def politique_jumelle_annee(cas, track, _ctx):
     if action is None:
         return None
     return Arbitrage("donnée de la jumelle : la retirer de la fiche", action, cas.motif)
+
+
+def politique_songbpm_titre_contenu(cas, track, _ctx):
+    """Les mesures SongBPM qu'une fiche partage avec une autre par un titre
+    CONTENU (`revue.songbpm_titre_contenu`) partent quand les catalogues de la
+    fiche les démentent et ceux de l'autre les confirment (`retirer` posé). Le
+    reste — une fiche sans catalogue, une vidéo pour seule contradiction —
+    reste à l'humain (décision utilisateur : au moindre doute, le code ne
+    tranche pas)."""
+    preuves = cas.preuves or {}
+    if cas.detecteur != "songbpm_titre_contenu" or track is None or not preuves.get("retirer"):
+        return None
+    return Arbitrage(
+        "mesures SongBPM de l'autre titre : les retirer de la fiche", "retirer_songbpm", cas.motif
+    )
 
 
 def politique_recherche_perimee(cas, track, _ctx):
@@ -1466,7 +1509,24 @@ def politique_video_autre_chaine(cas, track, _ctx):
     )
 
 
+def politique_video_trop_longue(cas, track, _ctx):
+    """Une vidéo Genius qui ne nomme pas le morceau et dure plus de
+    `revue.RATIO_VIDEO_MUETTE` fois sa durée (`retirer` posé par le
+    détecteur) : concert, émission, compilation — le lien part, par un refus
+    de règle. Celle qui le nomme reste à l'humain."""
+    if cas.detecteur != "video_trop_longue" or track is None:
+        return None
+    if not (cas.preuves or {}).get("retirer"):
+        return None
+    return Arbitrage(
+        "vidéo bien plus longue que le morceau, qui ne le nomme pas : retirer le lien",
+        "retirer_video_recherche",
+        cas.motif,
+    )
+
+
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "video_trop_longue": politique_video_trop_longue,
     "video_autre_chaine": politique_video_autre_chaine,
     "generique_duree": politique_generique_distincts,
     "duree_songbpm": politique_songbpm_version,
@@ -1482,6 +1542,7 @@ _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "video_partagee": politique_video_partagee,
     "recherche_perimee": politique_recherche_perimee,
     "jumelle_annee": politique_jumelle_annee,
+    "songbpm_titre_contenu": politique_songbpm_titre_contenu,
 }
 
 

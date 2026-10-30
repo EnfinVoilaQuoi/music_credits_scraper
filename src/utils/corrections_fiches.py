@@ -136,7 +136,7 @@ NATURES = {
 #: La page SongBPM (nature `page_songbpm`) en est aussi : ses mesures sont des
 #: observations que les sœurs partagent, et c'est le même enregistrement.
 PAR_ENREGISTREMENT = frozenset(
-    set(NATURES.values()) - {"certif"} | {"compteur_spotify", "page_songbpm"}
+    set(NATURES.values()) - {"certif"} | {"compteur_spotify", "page_songbpm", "contenu"}
 )
 
 #: Champ d'observation (source `songbpm`, DÉCLARÉ, jamais arbitré) qui garde la
@@ -545,6 +545,26 @@ def memoriser_contenus(artiste: str, contenant: dict, contenus: list[dict]) -> l
                 datetime.now().isoformat(timespec="seconds"),
             )
     return liste
+
+
+def cle_contenu(contenu) -> str:
+    """La valeur d'un refus `contenu` : la fiche contenue, désignée sans clé
+    locale (page Genius, sinon titre + album)."""
+    return _cle_fiche(designation_de(contenu))
+
+
+def contenus_refuses(track) -> set[str]:
+    """Fiches (`cle_contenu`) que le medley `track` ne contient PAS, décidé à la
+    main : la règle des titres joints ne repose plus le lien retiré."""
+    return {r["valeur"] for r in _lignes(track, "contenu")}
+
+
+def memoriser_contenu_refuse(track, contenu, origine: str | None = None) -> bool:
+    return _memoriser(track, "contenu", cle_contenu(contenu), origine=origine)
+
+
+def oublier_contenu_refuse(track, contenu) -> bool:
+    return _oublier(track, "contenu", cle_contenu(contenu))
 
 
 def memoriser_id_refuse(track, spotify_id: str, origine: str | None = None) -> None:

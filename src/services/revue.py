@@ -27,6 +27,7 @@ Spotify — oracles réseau) n'entre ici qu'une fois enregistré : étape 3 (WIP
 
 from __future__ import annotations
 
+import collections
 import json
 import re
 import unicodedata
@@ -1326,6 +1327,13 @@ def _proprietaires_des_videos(ctx) -> dict[str, list]:
     return ctx.memo("proprietaires_videos", fabrique)
 
 
+def _nombre_de_pages(proprietaires: dict, video_id: str) -> int:
+    """Combien d'ENREGISTREMENTS portent la vidéo : les lignes sœurs (même
+    page Genius, chez un groupe et chez son membre, réunis par la
+    discographie) n'en font qu'un — compter les lignes en faisait un partage."""
+    return len({_page(t) for t in proprietaires.get(video_id, ())})
+
+
 def raison_du_refus_de_recherche(track, recherche: dict) -> str:
     """Pourquoi le score refuse ce que la recherche a vu : « artiste » (aucun
     artiste du résultat n'est un artiste de la fiche — « Outro » de Dimeh
@@ -1442,6 +1450,90 @@ def video_d_une_autre_chaine(track, ctx=None):
     return None
 
 
+#: Une vidéo Genius qui ne NOMME pas le morceau et dure plus de 3 fois sa
+#: durée n'est pas le morceau : concert, émission, compilation. Mesuré sur la
+#: copie du 2026-10-30 (7 877 vidéos `genius_media` à durée connue) : les
+#: vidéos muettes d'une seule page au-delà de 3,8 × sont toutes de cette sorte
+#: (Tiny Desk entier 6,1 ×, « 1 son en 1H » de Booska-P 4,3 ×, « Freshmen
+#: Adjustment Mixtape Tracks 1-5 » 3,9 ×, set de Rolling Loud 3,8 ×), puis
+#: rien jusqu'à 1,8 × (« I Luv The Hood », le morceau lui-même, que le titre
+#: nomme mal) : 3 est au milieu de l'écart.
+RATIO_VIDEO_MUETTE = 3
+#: Une vidéo qui NOMME le morceau peut être un clip long : court métrage, film
+#: (« WTP » de Teyana Taylor 3,1 ×, « Runaway (Full-length Film) » 3,8 ×,
+#: « Neverland (Short Film) » 2,4 ×). Au-delà de 4 ×, titre et durée se
+#: contredisent (version longue, original samplé — « Sinnerman » de Nina
+#: Simone sur le morceau d'une soul mix) : l'humain.
+RATIO_VIDEO_NOMMEE = 4
+#: Durées de la fiche qui ne jugent pas une vidéo : celles tirées des vidéos
+#: (l'une peut venir d'elle) et `legacy` (contredit, ne soutient pas).
+_DUREES_HORS_JUGE = _DUREES_DE_VIDEO | {"youtube", "legacy"}
+
+
+def video_trop_longue(track, ctx=None):
+    """Une vidéo posée par la page Genius (`genius_media`), qu'aucune autre
+    page ne porte, BIEN plus longue que le morceau : plus de
+    `RATIO_VIDEO_MUETTE` fois la plus longue de ses durées indépendantes
+    (catalogues, SongBPM, Discogs, hit YTM — ni vidéo, ni legacy) quand son
+    titre ne nomme pas le morceau — le concert, l'émission, la compilation où
+    il passe (« BlackBird » de Planète Rap, 58 min, sur « LEGO » de B.B.
+    Jacques) : `retirer`, une règle retire le lien. Plus de
+    `RATIO_VIDEO_NOMMEE` fois quand le titre le nomme : titre et durée se
+    contredisent, l'humain. La vidéo d'un disque ENTIER (comptée à l'album,
+    `contenants.video_de_disque`), une page qui en CONTIENT d'autres (medley,
+    album entier), une vidéo portée par plusieurs pages (`video_partagee`) ou
+    une fiche sans durée indépendante : rien."""
+    from src.utils.contenants import est_contenant, video_de_disque
+
+    if not track.videos or est_contenant(track):
+        return None
+    durees = []
+    for source, d in (track.durations_observees or {}).items():
+        if d and source not in _DUREES_HORS_JUGE:
+            try:
+                durees.append(int(float(d)))
+            except (TypeError, ValueError):
+                continue
+    reference = max(durees, default=0)
+    if reference <= 0:
+        return None
+    proprietaires = _proprietaires_des_videos(ctx) if ctx is not None else {}
+    for v in sorted(track.videos, key=lambda x: -(x.views or 0)):
+        if v.source != "genius_media" or not v.duration:
+            continue
+        if len({_page(t) for t in proprietaires.get(v.video_id, [track])}) > 1:
+            continue  # partagée : `video_partagee` la juge
+        if video_de_disque(v.title, track.album):
+            continue
+        nommee = video_nomme(track, v)
+        ratio = v.duration / reference
+        if ratio <= (RATIO_VIDEO_NOMMEE if nommee else RATIO_VIDEO_MUETTE):
+            continue
+        fois = f"{ratio:.1f}".replace(".", ",")
+        if nommee:
+            motif = (
+                f"vidéo « {v.title} » ({v.duration} s) : {fois} fois la durée du morceau "
+                f"({reference} s), mais elle le nomme — version longue, film, autre enregistrement ?"
+            )
+        else:
+            motif = (
+                f"vidéo « {v.title} » ({v.duration} s) : {fois} fois la durée du morceau "
+                f"({reference} s), et elle ne le nomme pas — concert, émission ou compilation"
+            )
+        return (
+            motif,
+            {
+                "video_id": v.video_id,
+                "track_ids": [track.id],
+                "duree_video": v.duration,
+                "duree_fiche": reference,
+                "retirer": not nommee,
+                "impact": v.views or 0,
+            },
+        )
+    return None
+
+
 def video_etrangere(track, ctx=None):
     """Une vidéo rattachée dont le titre ne nomme pas le morceau : peut-être
     celle d'un autre (Kanye « Heartless - Recorded At RAK Studios » → vidéo de
@@ -1457,7 +1549,7 @@ def video_etrangere(track, ctx=None):
         v
         for v in track.videos or []
         if v.title
-        and len(proprietaires.get(v.video_id, ())) < 2
+        and _nombre_de_pages(proprietaires, v.video_id) < 2
         and not video_nomme(track, v)
         and not video_de_disque(v.title, track.album)
     ]
@@ -1594,6 +1686,8 @@ def _temoins_du_proprietaire(fiches, v) -> list[tuple[str, str]]:
         temoins.append(par_duree)
     if (par_chaine := _par_la_chaine(fiches, v.video_id)) is not None:
         temoins.append(par_chaine)
+    if (par_album := _par_l_album_ytm(fiches, v.video_id)) is not None:
+        temoins.append(par_album)
     return temoins
 
 
@@ -1623,7 +1717,12 @@ def _place_de_l_artiste(t, artiste: str) -> str:
 
     if nomme(t.primary_artist_name or (t.artist.name if t.artist else "")):
         return "principal"
-    if nomme(t.artist.name if t.artist else "") or any(nomme(a) for a in t.featured_artists_list):
+    # Sur la REPRISE d'un tiers (`secondary_role` « Cover »), l'artiste de la
+    # ligne est l'auteur de l'original, pas un interprète : sa chaîne ne lie
+    # pas la vidéo à la reprise (« Ghost Town » de Justice Der, ligne de
+    # Kanye, portait l'audio « Kanye West - Topic » de l'original).
+    ligne = t.artist.name if t.artist and t.secondary_role != "Cover" else ""
+    if nomme(ligne) or any(nomme(a) for a in t.featured_artists_list):
         return "lié"
     return "étranger"
 
@@ -1690,6 +1789,50 @@ def _par_la_duree(fiches, video_id):
     if len(proches) != 1:
         return None
     return next(iter(proches)), f"durée de la vidéo ({duree} s) = ses catalogues seuls"
+
+
+def _par_l_album_ytm(fiches, video_id):
+    """`(page, témoin)` : la vidéo est, pour UNE page seulement, la piste de sa
+    page d'album YouTube Music (`ytm_album`), et sa durée (e62) est celle des
+    catalogues de cette page, à 2 s — les autres n'ont aucun catalogue à moins
+    de `_ECART_AUTRE_PAGE_S` (une page SANS catalogue ne dément rien : c'est
+    ce qui distingue ce témoin de `_par_la_duree`). « 530 » : l'audio
+    « ¥$ - Topic » (288 s) de *VULTURES 2* (288 s), posée aussi par Genius sur
+    « 530 (Haikou LP) », sans catalogue (2026-10-30). Un titre fait de signes
+    seuls (« * (Part. 1) ») ne se rapproche pas sûrement d'une piste d'album
+    (« * * * * * » posée sur la Part. 1, 39 s, au lieu de la Part. 3) : rien."""
+    album = {
+        _page(t)
+        for t in fiches
+        if (lien := _lien_de(t, video_id)) is not None and lien.source == "ytm_album"
+    }
+    if len(album) != 1:
+        return None
+    page = album.pop()
+    duree = next(
+        (
+            lien.duration
+            for t in fiches
+            if (lien := _lien_de(t, video_id)) is not None and lien.duration
+        ),
+        None,
+    )
+    if not duree:
+        return None
+    for t in fiches:
+        catalogues = [
+            int(d)
+            for s in _DUREES_PAR_ID
+            if (d := (t.durations_observees or {}).get(s)) is not None
+        ]
+        if _page(t) == page:
+            if not _titre_sans_parentheses(t) or not catalogues:
+                return None
+            if not all(abs(d - duree) <= 2 for d in catalogues):
+                return None
+        elif any(abs(d - duree) <= _ECART_AUTRE_PAGE_S for d in catalogues):
+            return None
+    return page, f"piste de l'album YouTube Music, durée ({duree} s) = ses catalogues"
 
 
 def partage_a_juger(fiches) -> bool:
@@ -1882,7 +2025,7 @@ def _vues_expliquees(track, ctx) -> bool:
     if not avec_vues:
         return False
     for v in avec_vues:
-        if not v.title or len(proprietaires.get(v.video_id, ())) > 1:
+        if not v.title or _nombre_de_pages(proprietaires, v.video_id) > 1:
             return False
         if not video_nomme(track, v):
             return False
@@ -2169,6 +2312,129 @@ def donnee_de_la_jumelle(track, ctx):
     return None
 
 
+# ── SongBPM posé par un titre CONTENU (avant la garde `cccebc7`) ────────────
+
+
+_CHAMPS_SONGBPM = ("bpm", "key", "mode", "duration")
+
+
+def _signatures_songbpm(ctx) -> dict:
+    """`{mesures SongBPM: [fiches]}` de la discographie (BPM ou tonalité lus)."""
+
+    def fabrique():
+        groupes = collections.defaultdict(list)
+        for t in ctx.disco:
+            m = tuple(_mesures(ctx, t, c).get("songbpm") for c in _CHAMPS_SONGBPM)
+            if m[0] or m[1]:
+                groupes[m].append(t)
+        return groupes
+
+    return ctx.memo("signatures_songbpm", fabrique)
+
+
+def _juge_songbpm():
+    """Le juge de la pose SongBPM, PUR (`titre_contenu_non_corrobore` n'ouvre
+    aucun navigateur) : construit sans son `__init__`, qui journalise."""
+    from src.scrapers.songbpm_scraper_v2 import SongBPMScraper
+
+    return SongBPMScraper.__new__(SongBPMScraper)
+
+
+def _tient_la_page(track, autre, duree_page) -> str | None:
+    """« confirme », « contraire » ou None : ce que les CATALOGUES de la fiche
+    (`TEMOINS_DE_RETRAIT`) disent de la durée de la page SongBPM. Une valeur que
+    l'autre fiche porte aussi de la même source (copiée, ou lue sur la même
+    page) n'est pas un témoin. « confirme » : toutes à ± 2 s ; « contraire » :
+    toutes au-delà de `ECART_VERSION_S` (deux éditions d'un même enregistrement
+    diffèrent encore en deçà) et aucune durée indépendante — vidéo comprise — à
+    ± 2 s. Entre les deux, ou sans catalogue : None."""
+    from src.services.politiques_revue import ECART_VERSION_S
+    from src.utils.titre_annee import EXCLUES_SONGBPM, ORDRE_DES_TEMOINS, TOLERANCE, _duree
+
+    obs, chez_l_autre = track.durations_observees or {}, autre.durations_observees or {}
+
+    def propres(sources):
+        for s in sources:
+            d = _duree(obs.get(s))
+            if d is not None and d != _duree(chez_l_autre.get(s)):
+                yield abs(d - duree_page)
+
+    ecarts = [e for s in ORDRE_DES_TEMOINS if s in TEMOINS_DE_RETRAIT for e in propres([s])]
+    if not ecarts:
+        return None
+    if all(e <= TOLERANCE for e in ecarts):
+        return "confirme"
+    independants = propres(s for s in ORDRE_DES_TEMOINS if s not in EXCLUES_SONGBPM)
+    if all(e > ECART_VERSION_S for e in ecarts) and all(e > TOLERANCE for e in independants):
+        return "contraire"
+    return None
+
+
+def songbpm_titre_contenu(track, ctx):
+    """Les mesures SongBPM posées par un titre CONTENU dans l'autre, avant la
+    garde de pose `cccebc7` (2026-10-29) : deux fiches de l'artiste aux mesures
+    SongBPM IDENTIQUES dont l'un des titres contient l'autre avec un mot en plus
+    (« Maybe » / « Maybe So », « Tree » / « That Tree ») — le juge de la pose
+    (`titre_contenu_non_corrobore`) les refuserait aujourd'hui sans durée
+    indépendante à ± 2 s.
+
+    La fiche que ses catalogues CONTREDISENT perd les mesures quand ceux de
+    l'autre les CONFIRMENT (`retirer` posé : une règle tranche ; la garde de
+    pose, rejouée au run suivant, refuse la même page faute de durée
+    concordante). Deux fiches que leurs catalogues confirment sont un même
+    enregistrement : aucun cas. Le reste (une fiche sans catalogue, une vidéo
+    pour seule contradiction, un écart d'édition) va à l'humain, une fois par
+    paire : sur la fiche que rien ne confirme, sinon au plus petit id. Sans
+    durée SongBPM, rien ne dit à qui la page revient : aucun cas (7 paires
+    « Jail » / « Jail, Pt. 2 » au BPM égal, 2026-10-29). Les jumelles « titre
+    + année » sont du ressort de `jumelle_annee`."""
+    from src.utils.titre_annee import _duree, jumelles
+
+    mesures = tuple(_mesures(ctx, track, c).get("songbpm") for c in _CHAMPS_SONGBPM)
+    duree_page = _duree(mesures[3])
+    autres = [t for t in _signatures_songbpm(ctx).get(mesures, ()) if t.id != track.id]
+    if duree_page is None or not autres:
+        return None
+    titres = ctx.memo("titres_disco", lambda: [(t.id, t.title) for t in ctx.disco])
+    des_jumelles = {jid for jid, _ in jumelles(track.id, track.title, titres)}
+    juge = ctx.memo("juge_songbpm", _juge_songbpm)
+    lues = dict(zip(_CHAMPS_SONGBPM, mesures, strict=True))
+    indecis = []
+    for autre in autres:
+        if autre.id in des_jumelles:
+            continue
+        page = {"title": autre.title, "duration": duree_page}
+        if not juge.titre_contenu_non_corrobore(page, track.title, None, None):
+            continue  # titres égaux, annotation, ou aucun ne contient l'autre
+        fiche = _tient_la_page(track, autre, duree_page)
+        cote = _tient_la_page(autre, track, duree_page)
+        preuves = {
+            "songbpm": lues,
+            "autre": autre.id,
+            "fiche": fiche or "aucune",
+            "l_autre": cote or "aucune",
+        }
+        if fiche == "contraire" and cote == "confirme":
+            return (
+                f"mesures SongBPM de « {autre.title} » (#{autre.id}, {duree_page} s, que ses "
+                f"catalogues confirment) : ceux de « {track.title} » la démentent",
+                {**preuves, "retirer": True, "track_ids": [track.id], "garder": autre.id},
+            )
+        if "confirme" == fiche == cote or (fiche == "confirme" and cote == "contraire"):
+            continue
+        if (cote == "confirme") or (fiche != "confirme" and track.id < autre.id):
+            indecis.append((autre, preuves))
+    if indecis:
+        autre, preuves = indecis[0]
+        return (
+            f"mesures SongBPM partagées avec « {autre.title} » (#{autre.id}), un titre contenu "
+            f"dans l'autre — les catalogues ne disent pas à qui elles reviennent "
+            f"(ici : {preuves['fiche']}, là : {preuves['l_autre']})",
+            preuves,
+        )
+    return None
+
+
 # ── Détecteurs d'ARTISTE ────────────────────────────────────────────────────
 
 
@@ -2214,6 +2480,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur(
         "jumelle_annee", "Donnée partagée avec la jumelle à l'année", "📅", donnee_de_la_jumelle
     ),
+    Detecteur(
+        "songbpm_titre_contenu",
+        "Mesures SongBPM d'un titre contenu",
+        "🪆",
+        songbpm_titre_contenu,
+    ),
     Detecteur("id_spotify_propose", "ID Spotify proposé (SongBPM)", "🆔", id_spotify_propose),
     Detecteur(
         "songbpm_original",
@@ -2257,6 +2529,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "Vidéo d'un autre artiste (chaîne et durée)",
         "📺",
         video_d_une_autre_chaine,
+    ),
+    Detecteur(
+        "video_trop_longue",
+        "Vidéo Genius bien plus longue que le morceau",
+        "📏",
+        video_trop_longue,
     ),
     # Pour INFORMATION (décision utilisateur 2026-10-26, « la vérif manuelle,
     # c'est pour les cas que le code ne peut pas trancher ») : une page qui ne

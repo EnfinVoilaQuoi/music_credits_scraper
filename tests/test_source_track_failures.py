@@ -13,12 +13,18 @@ import pytest
 from sqlalchemy import text
 
 from src.models import Artist, Track
+from src.models.track import Credit, CreditRole
 from src.observability.issues import IssueKind
 from src.observability.repository import SourceUsageRepository
 from src.observability.source_usage import Verdict
 from src.services import cycle, enrichissement
 from src.services.credits import OptionsCredits
-from src.services.runtime import Manque, Runtime, selection_morceaux
+from src.services.runtime import (
+    ABSENCE_CREDITS_GENIUS,
+    Manque,
+    Runtime,
+    selection_morceaux,
+)
 
 _T0 = datetime(2026, 9, 30, 10, 0, 0)
 
@@ -306,4 +312,62 @@ class TestAbsences:
         a.tracks[0].audio.bpm = None
         repo.record([_v(IssueKind.ABSENT, track_id=1, source="discogs", at=datetime.now())])
         sel = selection_morceaux(_runtime(data_manager), a, manquants=[Manque.AUDIO])
+        assert [t.id for t in sel] == [1]
+
+
+# ── Les constats PAR DONNÉE (2026-10-29, sans migration) ──────────────────────
+class TestAbsencesParDonnee:
+    """Une page Genius LUE sans aucun crédit pose `genius_scrape:credits`
+    (`runtime.ABSENCE_CREDITS_GENIUS`). Avant, 0 constat sur 15 217 lectures :
+    la sélection comptait ces pages « manquantes » pour toujours (A2H : 37)."""
+
+    def _sans_credits(self):
+        a = _artiste()
+        for t in a.tracks:
+            t.genius_url = f"https://genius.com/{t.title}-lyrics"
+            t.credits = [Credit(name="X", role=CreditRole.PRODUCER, source="genius")]
+            t.lyrics.text = "la la"
+        a.tracks[0].credits = []
+        return a
+
+    def test_constat_pose_date_en_avant_et_leve(self, repo):
+        cle = ABSENCE_CREDITS_GENIUS
+        lu = datetime.now() - timedelta(days=3)
+        repo.constater_absences(cle, [(1, lu)])
+        assert repo.absences_recentes([cle], lu - timedelta(days=1)) == {1: {cle}}
+        # Une lecture plus ANCIENNE ne recule pas le constat.
+        repo.constater_absences(cle, [(1, lu - timedelta(days=20))])
+        assert repo.absences_recentes([cle], lu - timedelta(hours=1)) == {1: {cle}}
+        repo.constater_absences(cle, [], retirer=[1])
+        assert repo.absences_recentes([cle], lu - timedelta(days=30)) == {}
+
+    def test_le_verdict_ok_de_la_source_ne_leve_pas_le_constat_de_la_donnee(self, repo):
+        """La page est venue (`ok`) : ça ne dit pas qu'elle a des crédits."""
+        maintenant = datetime.now()
+        repo.constater_absences(ABSENCE_CREDITS_GENIUS, [(1, maintenant)])
+        repo.record([_v(IssueKind.OK, source="genius_scrape", at=maintenant)])
+        assert repo.absences_recentes([ABSENCE_CREDITS_GENIUS], maintenant - timedelta(days=1)) == {
+            1: {ABSENCE_CREDITS_GENIUS}
+        }
+
+    def test_une_page_lue_sans_credit_n_est_plus_un_manque(self, data_manager, repo):
+        a = self._sans_credits()
+        rt = _runtime(data_manager)
+        assert [t.id for t in selection_morceaux(rt, a, manquants=[Manque.CREDITS_GENIUS])] == [1]
+        repo.constater_absences(ABSENCE_CREDITS_GENIUS, [(1, datetime.now())])
+        assert selection_morceaux(rt, a, manquants=[Manque.CREDITS_GENIUS]) == []
+
+    def test_le_constat_expire_comme_les_autres(self, data_manager, repo):
+        a = self._sans_credits()
+        repo.constater_absences(ABSENCE_CREDITS_GENIUS, [(1, datetime.now() - timedelta(days=400))])
+        sel = selection_morceaux(_runtime(data_manager), a, manquants=[Manque.CREDITS_GENIUS])
+        assert [t.id for t in sel] == [1]
+
+    def test_une_page_sans_credit_ne_fait_pas_taire_les_paroles(self, data_manager, repo):
+        """Sous la clé nue `genius_scrape`, le constat aurait aussi dispensé de
+        chercher les paroles (YTM compris) : c'est pourquoi il est PAR DONNÉE."""
+        a = self._sans_credits()
+        a.tracks[0].lyrics.text = None
+        repo.constater_absences(ABSENCE_CREDITS_GENIUS, [(1, datetime.now())])
+        sel = selection_morceaux(_runtime(data_manager), a, manquants=[Manque.PAROLES])
         assert [t.id for t in sel] == [1]

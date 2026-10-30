@@ -20,8 +20,9 @@ from tests.test_services_credits import _DM, _clients, _Genius, _Lyrics, _rt, _t
 @pytest.fixture(autouse=True)
 def _aucune_absence_memorisee(monkeypatch):
     """Les faux runtimes de ce fichier n'ont pas de base : la lecture des
-    constats d'absence (e46) est neutralisée — aucun constat."""
+    constats d'absence (e46) est neutralisée — aucun constat, ni lu ni posé."""
     monkeypatch.setattr("src.services.runtime.absences_recentes", lambda runtime, sources: {})
+    monkeypatch.setattr("src.services.runtime.constater_absences", lambda *a: None)
 
 
 class TestOptions:

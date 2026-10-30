@@ -223,6 +223,27 @@ class TestEtapeIdentite:
         assert appels == ([art.name] if corrige else [])
         assert b.corrections == (["x"] if corrige else [])
 
+    @pytest.mark.parametrize(
+        ("worker", "etape"),
+        [("src/gui/workers/identite.py", "identite"), ("src/gui/workers/streams.py", "streams")],
+    )
+    def test_les_workers_ctk_passent_le_correcteur(self, worker, etape):
+        """2026-10-29 : la GUI CTk lance le service de l'étape elle-même ; sans
+        l'appel, une Identité ou des Streams lancés depuis l'IHM ne passaient
+        jamais le correcteur du panneau (la GUI Qt passe par `cycle.run`)."""
+        import ast
+        from pathlib import Path
+
+        arbre = ast.parse((Path(__file__).resolve().parents[1] / worker).read_text("utf-8"))
+        appels = [
+            n
+            for n in ast.walk(arbre)
+            if isinstance(n, ast.Call)
+            and isinstance(n.func, ast.Attribute)
+            and n.func.attr == "corriger_apres_etape_seule"
+        ]
+        assert [a.args[2].value for a in appels] == [etape]
+
     def test_rattrapage_discogs_en_fin_de_cycle(self, monkeypatch):
         from src.services import identite, revue_auto
 

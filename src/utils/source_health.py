@@ -665,7 +665,7 @@ SOURCES: list[SourceSpec] = [
         key="youtube_clip",
         label="YouTube clip (crédits description)",
         fast_probe=lambda: [],
-        notes="Description libre des clips officiels ; regex + repli LLM",
+        notes="Description libre des clips officiels ; motifs fermés FR/EN",
         families=(Family.CREDITS,),
         usage_note="Via YouTube Data API v3 (fetch_video_meta_batch), pas de sonde propre",
     ),

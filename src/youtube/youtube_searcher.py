@@ -22,6 +22,7 @@ from src.utils.title_matching import (
     normalize_title,
 )
 from src.utils.version_descriptors import (
+    meme_disque,
     meme_version_publiee,
     titre_generique,
     titre_sans_son_disque,
@@ -107,7 +108,7 @@ def relevance_score(
     # partie : « Intro (Table d'écoute) » est l'« Intro » de *Table d'écoute*.
     target_title = titre_sans_son_disque(target_title, album)
     result_title = sans_mention_du_disque(result_title, album)
-    if titre_generique(target_title) and not meme_album(album, result_album):
+    if titre_generique(target_title) and not meme_disque(album, result_album):
         return 0.0
     artistes = [*result_artists, *invites_nommes(result_title)]
     connus = [target_artist, *artistes_connus]

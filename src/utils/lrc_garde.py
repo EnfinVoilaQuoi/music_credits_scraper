@@ -31,7 +31,7 @@ from __future__ import annotations
 import re
 
 from src.utils.concordance_paroles import jugeable, paroles_de_reference, recouvrement_bigrammes
-from src.utils.version_descriptors import meme_socle, parse_variant, titres_confondus
+from src.utils.version_descriptors import edition_de_diffusion, meme_socle, titres_confondus
 from src.utils.version_heritage import est_instrumental, famille_de
 from src.utils.vote_durees import FRAGILES, HORS_VOTE, famille
 
@@ -65,7 +65,7 @@ def _autre_enregistrement(titre: str) -> bool:
     famille = famille_de(titre)
     if famille is not None:
         return famille not in MEME_ENREGISTREMENT
-    edition = parse_variant(titre).edition or ""
+    edition = edition_de_diffusion(titre) or ""
     return bool(_RADIO_EDIT.search(edition))
 
 

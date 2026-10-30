@@ -67,6 +67,29 @@ class TestInvariants:
         cas = [c for c in audit.cas if c.famille == "soeurs_divergentes"]
         assert len(cas) == 1 and "lyrics_synced : 2 valeurs sur 2 lignes" in cas[0].libelle
 
+    def test_soeurs_aux_editions_divergentes(self, data_manager, isha):
+        """« Make Her Say » notée en édition chez Kid Cudi, pas chez Kanye
+        (2026-10-29) : l'édition décrit l'enregistrement, l'invariant la voit."""
+        _, t = isha
+        swing = Artist(name="Swing")
+        swing.id = data_manager.save_artist(swing)
+        soeur = Track(title="Durag", artist=swing)
+        soeur.genius_id = 4242
+        data_manager.save_track(soeur)
+        # En contournant l'écrivain (qui unit les éditions des sœurs).
+        _sql(
+            data_manager,
+            "INSERT INTO track_editions (track_id, label, duration) VALUES (:t, 'Radio Edit', 200)",
+            t=t.id,
+        )
+        audit = au.auditer(data_manager, ["Isha"])
+        cas = [c for c in audit.cas if c.famille == "soeurs_divergentes"]
+        assert len(cas) == 1 and "éditions : 2 jeux sur 2 lignes" in cas[0].libelle
+
+        data_manager.realigner_soeurs(appliquer=True)
+        audit = au.auditer(data_manager, ["Isha"])
+        assert not [c for c in audit.cas if c.famille == "soeurs_divergentes"]
+
     def test_un_horodatage_different_n_est_pas_une_divergence(self, data_manager, isha):
         assert au._volatile("lyrics_scraped_at") and au._volatile("youtube_video_views")
         assert not au._volatile("lyrics_synced")
@@ -519,3 +542,49 @@ def test_une_duree_trop_courte_pour_ses_paroles(duree, paroles, fausse):
     from src.utils.duree_youtube import trop_courte_pour_les_paroles
 
     assert trop_courte_pour_les_paroles(duree, paroles) is fausse
+
+
+@pytest.mark.parametrize(
+    "titre, album, segment",
+    [
+        # Décision utilisateur 2026-10-29 : le segment d'un DJ mix (46 s).
+        ("Know No Better [BROHUG Remix] [Mixed]", "Nostalgix at EDC (DJ Mix)", True),
+        ("Parking Lot (Mixed)", None, True),
+        ("Goosebumps", "Today’s Hits, November 2022 (DJ Mix)", True),
+        # « Mixed » hors d'un groupe, ou un autre montage : pas un DJ mix.
+        ("Mixed Feelings", None, False),
+        ("Know No Better (BROHUG Remix)", "Know No Better (Remixes)", False),
+    ],
+)
+def test_un_segment_de_dj_mix_n_est_pas_juge_au_debit(titre, album, segment):
+    from src.utils.duree_youtube import segment_de_dj_mix
+
+    assert segment_de_dj_mix(titre, album) is segment
+
+
+def test_duree_discogs_dementie_par_deezer_et_apple_hors_critere(data_manager, isha):
+    """CORRECTIFS D (2026-10-29) : 33 durées Discogs démenties par Deezer ET
+    Apple (B.B. Jacques « Donjon » 170 s pour 134 s). L'erreur est dans la
+    tracklist Discogs elle-même (release 24758360 : « Donjon » 2:50, « 2h22 »
+    2:14), pas dans le rapprochement par titre ; le run la repose. Discogs est
+    FRAGILE (contredit, ne soutient jamais) et 7e des priorités : la colonne
+    garde les catalogues, et l'audit ne compte rien au critère."""
+    from src.enrichment.observation import Observation
+
+    _, t = isha
+    data_manager.record_discography_observations(
+        t.id,
+        [
+            Observation("duration", 134, "deezer"),
+            Observation("duration", 134, "apple_music"),
+            Observation("duration", 134, "spotify_web"),
+            Observation("duration", 170, "discogs"),
+        ],
+    )
+    with data_manager.engine.connect() as conn:
+        colonne = conn.execute(
+            text("SELECT duration FROM tracks WHERE id = :t"), {"t": t.id}
+        ).scalar()
+    assert int(colonne) == 134
+    audit = au.auditer(data_manager, ["Isha"])
+    assert [c for c in audit.cas if t.id in c.pistes and c.nature in au.NATURES_DU_CRITERE] == []

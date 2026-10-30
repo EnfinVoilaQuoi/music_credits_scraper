@@ -24,9 +24,6 @@ AUTORISES = {
     # Écrivain de l'observabilité : le vidage part parfois DE la boucle, qui
     # écrit déjà dans la même base — un fil dédié évite qu'elle se bloque.
     "observability/repository.py": "BackgroundWriter (daemon, documenté)",
-    # Minuteur de garde de la voie SYNC (annulé dans un `finally`) ; la voie
-    # async utilise `asyncio.timeout`.
-    "enrichment/providers/songbpm.py": "threading.Timer de garde, voie sync",
 }
 
 

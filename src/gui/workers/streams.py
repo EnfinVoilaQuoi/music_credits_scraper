@@ -15,6 +15,7 @@ from src.enrichment.providers.streams import StreamsProvider
 from src.gui.dialogs import report
 from src.observability import source_usage
 from src.observability.registry import Flow
+from src.services import cycle
 from src.services import streams as streams_service
 from src.services.runtime import Hooks
 from src.utils.logger import get_logger
@@ -205,15 +206,14 @@ def run_streams_update(
             app.root.after(0, app._show_progress_bar)
             # Le provider est instancié ICI (point de patch des tests) et
             # fermé par le service.
-            bilan = streams_service.run(
-                app.runtime,
-                artist,
-                options,
-                Hooks(
-                    progress=progress, should_stop=stop_requested, confirmer_kworb=confirmer_kworb
-                ),
-                provider=StreamsProvider(),
+            hooks = Hooks(
+                progress=progress, should_stop=stop_requested, confirmer_kworb=confirmer_kworb
             )
+            bilan = streams_service.run(
+                app.runtime, artist, options, hooks, provider=StreamsProvider()
+            )
+            # La passe du panneau, comme après `streams` seul en CLI.
+            cycle.corriger_apres_etape_seule(app.runtime, artist, "streams", bilan, hooks)
             texte = streams_service.resume(bilan, options)
             app.root.after(0, lambda: report.show_scrollable_report(app, "Nb Streams", texte))
             # RECHARGER depuis la base avant de réafficher : les MàJ streams

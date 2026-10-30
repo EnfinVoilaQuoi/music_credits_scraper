@@ -89,11 +89,23 @@ def autres_ecrivains(processus: Iterable[tuple[int, str]], exclus: set[int]) -> 
     ]
 
 
+def est_python(cmdline: list[str]) -> bool:
+    """PUR. Le processus est un interpréteur Python : seul lui peut tenir la base.
+    Un shell dont la commande CITE « src.cli » (un grep, un message de commit)
+    arrêtait le lot (2026-10-29, deux bash d'une autre session)."""
+    if not cmdline:
+        return False
+    exe = cmdline[0].replace("\\", "/").rsplit("/", 1)[-1].lower()
+    return exe.startswith("python") or exe in ("py", "py.exe", "pythonw.exe")
+
+
 def _processus() -> list[tuple[int, str]]:
     vus = []
     for p in psutil.process_iter(["pid", "cmdline"]):
         try:
-            vus.append((p.info["pid"], " ".join(p.info["cmdline"] or [])))
+            cmdline = p.info["cmdline"] or []
+            if est_python(cmdline):
+                vus.append((p.info["pid"], " ".join(cmdline)))
         except (psutil.Error, TypeError):
             continue
     return vus

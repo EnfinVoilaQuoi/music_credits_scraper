@@ -60,6 +60,14 @@ def test_autres_ecrivains():
     assert lot_runs.autres_ecrivains(vus, exclus={5}) == [1, 3]
 
 
+def test_seul_un_python_est_un_ecrivain():
+    """2026-10-29 : deux bash dont la commande citait « src.cli » ont arrêté le lot."""
+    assert lot_runs.est_python([r"C:\proj\venv\Scripts\python.exe", "-m", "src.cli"])
+    assert lot_runs.est_python(["/usr/bin/python3", "-m", "src.cli"])
+    assert not lot_runs.est_python([r"C:\Program Files\Git\bin\bash.exe", "-c", "grep src.cli"])
+    assert not lot_runs.est_python([])
+
+
 def _executer(tmp_path, codes_python, **kw):
     """Un lot de `python -c <code>` ; la « base » et le « brut » sont des
     fichiers du dossier temporaire."""

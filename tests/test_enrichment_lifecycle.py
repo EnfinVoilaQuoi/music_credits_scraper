@@ -114,7 +114,9 @@ def test_provider_sans_ressource_indisponible_et_enrich_false():
     from src.enrichment.context import EnrichmentContext
 
     track = Track(title="Solo", artist=Artist(name="X"))
-    assert provider.enrich(track, EnrichmentContext()) is False
+    import asyncio
+
+    assert asyncio.run(provider.enrich_async(track, EnrichmentContext())) is False
     assert provider.is_available() is False
 
 

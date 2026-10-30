@@ -32,6 +32,15 @@ FAILURE_WINDOW = 50
 SOURCES_RETIREES = ("bpmfinder",)
 
 
+def cle_absence(source: str, donnee: str) -> str:
+    """Clé d'un constat d'absence PAR DONNÉE dans `source_track_absences`
+    (2026-10-29, sans migration) : « la source a répondu, mais sans CETTE
+    donnée ». Une page Genius lue sans crédit n'est pas une page sans paroles :
+    un constat de toute la source (`genius_scrape`) ferait taire aussi la
+    recherche de paroles. Le constat de toute la source garde la clé nue."""
+    return f"{source}:{donnee}"
+
+
 class SourceUsageRepository:
     """Lecture/écriture des compteurs d'usage. Ne lève jamais vers l'appelant."""
 
@@ -236,6 +245,51 @@ class SourceUsageRepository:
                 ),
                 params,
             )
+
+    def constater_absences(
+        self, cle: str, poser: Iterable[tuple[int, datetime]], retirer: Iterable[int] = ()
+    ) -> None:
+        """Constats d'absence posés hors verdict (clé `cle_absence`) : `poser`
+        (morceau, date de la lecture qui a répondu « rien ») pose le constat ou
+        le date — jamais en arrière, une lecture plus récente fait foi ;
+        `retirer` le lève (la donnée a été trouvée). Même table, même
+        expiration (`settings.delai_absence_jours`) que les constats des
+        verdicts."""
+        poser = [(tid, _isoformat(at)) for tid, at in poser]
+        retirer = list(retirer)
+        if not (poser or retirer):
+            return
+        try:
+            with self.engine.begin() as conn:
+                for tid in retirer:
+                    conn.execute(
+                        text(
+                            "DELETE FROM source_track_absences "
+                            "WHERE track_id = :tid AND source_key = :src"
+                        ),
+                        {"tid": tid, "src": cle},
+                    )
+                for tid, at in poser:
+                    params = {"tid": tid, "src": cle, "at": at}
+                    maj = conn.execute(
+                        text(
+                            "UPDATE source_track_absences SET derniere_absence = "
+                            "MAX(COALESCE(derniere_absence, :at), :at) "
+                            "WHERE track_id = :tid AND source_key = :src"
+                        ),
+                        params,
+                    ).rowcount
+                    if not maj:
+                        conn.execute(
+                            text(
+                                "INSERT INTO source_track_absences "
+                                "(track_id, source_key, premiere_absence, derniere_absence) "
+                                "VALUES (:tid, :src, :at, :at)"
+                            ),
+                            params,
+                        )
+        except SQLAlchemyError:
+            _log().exception(f"source_usage: constats d'absence « {cle} » non enregistrés")
 
     def absences_recentes(self, sources: Iterable[str], depuis: datetime) -> dict[int, set[str]]:
         """`{track_id: {sources}}` des constats d'absence posés depuis `depuis`."""

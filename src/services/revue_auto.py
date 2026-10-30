@@ -714,7 +714,12 @@ def corriger(dm, artiste) -> BilanCorrections:
                     compte_rendu, annulation = f(_dm, _track, c)
                     return f"{compte_rendu} [{arb.raison}]", annulation
 
-            sans_fiche = arbitrage is not None and arbitrage.action in _SANS_FICHE
+            # Un « ✓ Normal » ne touche aucune fiche : celui d'un cas qui n'en a
+            # pas (version Deezer sans page, DV1) se pose aussi.
+            sans_fiche = arbitrage is not None and (
+                arbitrage.action in _SANS_FICHE
+                or (arbitrage.action == "normal" and cas.track_id is None)
+            )
             if track is None and not sans_fiche:
                 bilan.echecs.append(f"{cas.morceau} : fiche introuvable")
                 continue
@@ -772,6 +777,8 @@ def retablir(dm, artiste, correction: dict) -> str:
         "lien",
         "fiche_kworb",
         "videos",
+        # Un « ✓ Normal » ne touche aucune fiche (DV1 : version Deezer sans page).
+        "verdict",
     ):
         raise LookupError("la fiche n'est plus dans la discographie chargée")
     if annulation.get("type") == "lrc":

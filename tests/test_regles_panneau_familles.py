@@ -149,3 +149,66 @@ class TestAutrePageDeezer:
             _candidate(1548546102, "FRZ029800460", 188, "Galaktika"),
         )
         assert pol.arbitrage_deezer(cas, t, _ctx(t), {}, set()) is None
+
+
+def _version(titre, isrc="FRX000000001"):
+    return {
+        "ecart": {
+            "nature": "version",
+            "piste": {"id": 9, "title": titre, "isrc": isrc, "duration": 200},
+            "album": {"id": 1, "title": "Fidèle à son contexte", "artist_id": 7},
+        }
+    }
+
+
+class TestVersionDeezerInstrumentale:
+    """DV1 : l'instrumental ou l'a cappella Deezer d'un morceau connu, sans
+    page Genius, ne devient pas une fiche (✓ Normal) ; les autres versions
+    restent à l'humain (décision du 2026-10-20)."""
+
+    def _juger(self, titre, isrcs=None):
+        cas = _cas("deezer_version", None, _version(titre), morceau=titre)
+        return pol.arbitrage_deezer(cas, None, _ctx(), isrcs or {}, {7})
+
+    def test_instrumental_et_acapella(self):
+        assert self._juger("Choc Frontal (Instrumental)").action == "normal"
+        assert self._juger("Fidèle à son contexte (Acapella)").action == "normal"
+
+    def test_les_autres_versions_restent_a_l_humain(self):
+        assert self._juger("Caroline (Live)") is None
+        assert self._juger("Day 'N' Nite (Club Mix)") is None
+        assert self._juger("Marine (Version 2006)") is None
+
+    def test_un_isrc_connu_ne_devient_pas_normal(self):
+        assert self._juger("Choc Frontal (Instrumental)", {"FRX000000001": "Choc frontal"}) is None
+
+
+def test_instrumental_deezer_marque_normal_sans_fiche_puis_retabli(data_manager, monkeypatch):
+    """Bout en bout : le cas n'a pas de fiche, le « ✓ Normal » se pose quand même."""
+    from src.services import ecarts_deezer as ed
+    from src.services import revue_auto
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    artiste = Artist(name="Flynt")
+    artiste.id = data_manager.save_artist(artiste)
+    data_manager.save_track(Track(title="Choc frontal", artist=artiste, genius_id=1))
+    artiste.deezer_id = 77
+    alb = ed.AlbumDeezer(id=500, title="Fidèle à son contexte", artist_id=77, artist_name="Flynt")
+    bilan = ed.BilanEcarts(deezer_id=77, artiste="Flynt")
+    piste = ed.PisteDeezer(id=9, title="Choc Frontal (Instrumental)", duration=137, isrc="FRX9")
+    bilan.ecarts = [ed.Ecart("version", alb, piste)]
+    ed.enregistrer_signalements(data_manager, artiste, bilan)
+    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
+    assert [c.detecteur for c in revue.analyser(data_manager, artiste).actifs] == ["deezer_version"]
+
+    resultat = revue_auto.corriger(data_manager, artiste)
+    assert len(resultat.appliquees) == 1 and not resultat.echecs, resultat
+    assert revue.analyser(data_manager, artiste).actifs == []
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:normal"
+    revue_auto.retablir(data_manager, artiste, correction)
+    # Rendu à l'humain : le prochain run Deezer le resignale, la règle ne le reprend plus.
+    ed.enregistrer_signalements(data_manager, artiste, bilan)
+    assert [c.detecteur for c in revue.analyser(data_manager, artiste).actifs] == ["deezer_version"]
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []

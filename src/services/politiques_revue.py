@@ -919,6 +919,9 @@ REGLES_DEEZER = frozenset(
         ("deezer_apparition", "deezer_rattacher_isrc"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
+        # 2026-10-31 (DV1) : l'instrumental / a cappella Deezer d'un morceau
+        # connu, sans page : pas de fiche. 3 / 15 sur la copie (Flynt).
+        ("deezer_version", "normal"),
     }
 )
 
@@ -960,6 +963,13 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     par_isrc = _rattacher_par_isrc(cas, ctx, isrcs_connus, ids_artiste)
     if par_isrc is not None:
         return par_isrc
+    if cas.detecteur == "deezer_version":
+        # Une version n'est jamais un original : seul le « ✓ Normal » de
+        # l'instrumental / a cappella (aucune fiche créée) passe (DV1).
+        arbitrage = politique_ecarts_deezer(isrcs_connus, ids_artiste)(cas, track, ctx)
+        if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_DEEZER:
+            return arbitrage
+        return None
     piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
     if not titre_d_original(piste.get("title") or cas.morceau):
         return None

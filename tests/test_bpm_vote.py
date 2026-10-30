@@ -68,12 +68,18 @@ class TestReconcileBpm:
         assert alt == 176  # l'autre octave reste proposée
         assert conf == 2
 
-    def test_cas_3_halftime_isole_double(self):
-        # 71 seul, aucune preuve → convention rap : on double
+    def test_cas_3_source_isolee_gardee_telle_quelle(self):
+        # 71 seul : plus de « convention rap » qui doublait (retirée le
+        # 2026-10-30, 916 fiches doublées contre ce que mesurent les sources).
         bpm, alt, src, conf = _reconcile([("deezer", 71)])
-        assert bpm == 142
-        assert alt == 71
+        assert bpm == 71
+        assert alt == 142  # l'autre octave reste proposée
         assert conf == 1
+
+    def test_une_seule_voix_sous_90_gardee(self):
+        # Isha « Gambinos » : SongBPM seul à 74 (avant : doublé, 148).
+        bpm, alt, _, conf = _reconcile([("songbpm", 74)])
+        assert (bpm, alt, conf) == (74, 148, 1)
 
     def test_source_isolee_au_dessus_du_seuil_inchangee(self):
         bpm, alt, src, conf = _reconcile([("deezer", 120)])
@@ -143,17 +149,23 @@ class TestOctaveDuConsensus:
 
     def test_reccobeats_et_songbpm_une_seule_voix_sans_consensus(self):
         # Booba « Monde » : GetSongBPM 160 contre ReccoBeats et SongBPM 80 —
-        # une voix contre une (et non deux contre une) : comportement d'avant,
-        # l'octave haute ; Deezer 107 est hors du cluster.
+        # une voix contre une (et non deux contre une) : la fiabilité tranche,
+        # ReccoBeats ; Deezer 107 est hors du cluster.
         bpm, alt, _, _ = _reconcile(
             [("deezer", 107), ("getsongbpm", 160), ("reccobeats", 80), ("songbpm", 80)]
         )
-        assert (bpm, alt) == (160, 80)
+        assert (bpm, alt) == (80, 160)
 
-    def test_sans_consensus_l_octave_haute(self):
-        # Josman « BIZ » : GetSongBPM 159, ReccoBeats 80 — une contre une.
+    def test_sans_consensus_la_source_la_plus_fiable(self):
+        # Josman « BIZ » : GetSongBPM 159, ReccoBeats 80 — une contre une ;
+        # plus d'octave haute d'office (avant le 2026-10-30 : 159).
         bpm, alt, _, _ = _reconcile([("getsongbpm", 159), ("reccobeats", 80)])
-        assert (bpm, alt) == (159, 80)
+        assert (bpm, alt) == (80, 159)
+
+    def test_sans_consensus_la_haute_si_la_plus_fiable_y_est(self):
+        # Kid Cudi « My World » : GetSongBPM 74, ReccoBeats 148.
+        bpm, alt, _, _ = _reconcile([("getsongbpm", 74), ("reccobeats", 148)])
+        assert (bpm, alt) == (148, 74)
 
 
 class TestBpmBallot:
@@ -171,4 +183,20 @@ class TestBpmBallot:
         ballot.add("deezer", 120)
         assert ballot.consensus_reached() is False
         ballot.add("getsongbpm", 121)  # concordant
+        assert ballot.consensus_reached() is True
+
+    def test_deux_octaves_ne_sont_pas_un_consensus(self):
+        # Flynt « Rap théorie » : Deezer 174, ReccoBeats 87 — le départage
+        # SongBPM n'est pas sauté (avant : « consensus » de deux sources).
+        ballot = BpmBallot()
+        ballot.add("deezer", 174)
+        ballot.add("reccobeats", 87)
+        assert ballot.consensus_reached() is False
+
+    def test_reccobeats_et_songbpm_ne_font_qu_une_voix(self):
+        ballot = BpmBallot()
+        ballot.add("reccobeats", 88)
+        ballot.add("songbpm", 88)
+        assert ballot.consensus_reached() is False
+        ballot.add("getsongbpm", 88)
         assert ballot.consensus_reached() is True

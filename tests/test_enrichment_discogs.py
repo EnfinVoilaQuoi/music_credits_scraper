@@ -14,8 +14,9 @@ class _FakeDiscogs:
         self._ret = ret
         self.calls = []
 
-    def enrich_track_data(self, track, force_update):
+    def enrich_track_data(self, track, force_update, fiches=None):
         self.calls.append((track, force_update))
+        self.fiches = fiches
         return self._ret
 
 

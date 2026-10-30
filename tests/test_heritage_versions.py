@@ -134,6 +134,41 @@ def test_heriter_versions_en_base(data_manager):
         )
 
 
+def test_un_bpm_seulement_herite_suit_le_verdict_courant_de_l_original(data_manager):
+    # « Boulbi (Instrumental) » portait 174 en héritage : le verdict de
+    # l'original sous la règle retirée le 2026-10-30 (un BPM isolé sous 90
+    # doublé). L'héritage suit le verdict COURANT, sans attendre une mesure.
+    a = Artist(name="Booba")
+    a.id = data_manager.save_artist(a)
+    o = Track(title="Boulbi", artist=a)
+    o.observations.append(Observation("bpm", 87, "songbpm"))
+    data_manager.save_track(o)
+    v = Track(title="Boulbi (Instrumental)", artist=a)
+    v.observations.append(Observation("bpm", 174, "heritage"))
+    vid = data_manager.save_track(v)
+
+    assert heriter_versions(data_manager, data_manager.get_artist_tracks(a.id)) == 1
+    relue = {t.id: t for t in data_manager.get_artist_tracks(a.id)}[vid]
+    assert (relue.audio.bpm, relue.audio.bpm_source) == (87, "heritage")
+    # Idempotent, et une vraie mesure de la version n'est jamais remplacée.
+    assert heriter_versions(data_manager, data_manager.get_artist_tracks(a.id)) == 0
+
+
+def test_un_bpm_mesure_de_la_version_n_est_pas_remplace(data_manager):
+    a = Artist(name="Booba")
+    a.id = data_manager.save_artist(a)
+    o = Track(title="Boulbi", artist=a)
+    o.observations.append(Observation("bpm", 87, "songbpm"))
+    data_manager.save_track(o)
+    v = Track(title="Boulbi (Instrumental)", artist=a)
+    v.observations.append(Observation("bpm", 90, "reccobeats"))
+    vid = data_manager.save_track(v)
+
+    heriter_versions(data_manager, data_manager.get_artist_tracks(a.id))
+    relue = {t.id: t for t in data_manager.get_artist_tracks(a.id)}[vid]
+    assert (relue.audio.bpm, relue.audio.bpm_source) == (90, "reccobeats")
+
+
 class TestACappella:
     """Une a cappella est la VOIX seule (2026-09-27) : elle était rangée avec les
     instrumentaux, héritait du BPM et recevait un constat « instrumental »."""

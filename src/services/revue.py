@@ -1327,6 +1327,13 @@ def _proprietaires_des_videos(ctx) -> dict[str, list]:
     return ctx.memo("proprietaires_videos", fabrique)
 
 
+def _nombre_de_pages(proprietaires: dict, video_id: str) -> int:
+    """Combien d'ENREGISTREMENTS portent la vidéo : les lignes sœurs (même
+    page Genius, chez un groupe et chez son membre, réunis par la
+    discographie) n'en font qu'un — compter les lignes en faisait un partage."""
+    return len({_page(t) for t in proprietaires.get(video_id, ())})
+
+
 def raison_du_refus_de_recherche(track, recherche: dict) -> str:
     """Pourquoi le score refuse ce que la recherche a vu : « artiste » (aucun
     artiste du résultat n'est un artiste de la fiche — « Outro » de Dimeh
@@ -1458,7 +1465,7 @@ def video_etrangere(track, ctx=None):
         v
         for v in track.videos or []
         if v.title
-        and len(proprietaires.get(v.video_id, ())) < 2
+        and _nombre_de_pages(proprietaires, v.video_id) < 2
         and not video_nomme(track, v)
         and not video_de_disque(v.title, track.album)
     ]
@@ -1883,7 +1890,7 @@ def _vues_expliquees(track, ctx) -> bool:
     if not avec_vues:
         return False
     for v in avec_vues:
-        if not v.title or len(proprietaires.get(v.video_id, ())) > 1:
+        if not v.title or _nombre_de_pages(proprietaires, v.video_id) > 1:
             return False
         if not video_nomme(track, v):
             return False

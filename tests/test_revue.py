@@ -1325,6 +1325,30 @@ class TestVideoPartagee:
         assert "2 fiche(s)" in action.executer(ctx, cas)
         assert [tid for tid, _ in retraits] == [1, 2]
 
+    def test_deux_lignes_soeurs_ne_sont_pas_un_partage(self):
+        """« Moon » (2026-10-29) : la discographie réunie d'un membre porte la
+        ligne du groupe ET la sienne, sœurs d'une même page Genius. Une vidéo
+        qu'elles portent toutes deux n'est pas partagée : aucun cas
+        `video_partagee`, et la vidéo muette reste jugée par 🎬 et 📺 comme
+        celle d'UNE fiche."""
+        clip = self._v("M", "Concert entier", 500)
+        cudi = _t("Moon", 1, videos=[clip], genius_id=11, album="Donda")
+        ye = _t("Moon", 2, videos=[clip], genius_id=11, album="Donda")
+        ye.artist = Artist(name="Kanye West")
+        ctx = _ctx(cudi, ye)
+        assert revue.video_partagee(ctx) == []
+        assert revue.video_etrangere(cudi, ctx) is not None
+        # Deux PAGES, elles, partagent.
+        autre = _t("Moon", 3, videos=[clip], genius_id=12)
+        assert revue.video_etrangere(cudi, _ctx(cudi, ye, autre)) is None
+
+    def test_les_vues_d_une_video_portee_par_deux_soeurs_s_expliquent(self):
+        clip = TrackVideo(video_id="M", title="Moon", views=100)
+        a = _t("Moon", 1, videos=[clip], genius_id=11)
+        b = _t("Moon", 2, videos=[clip], genius_id=11)
+        assert revue._vues_expliquees(a, _ctx(a, b))
+        assert not revue._vues_expliquees(a, _ctx(a, b, _t("Moon", 3, videos=[clip])))
+
 
 class TestDesaccordsExpliques:
     """2026-09-28 : un désaccord que la majorité ou la fiabilité mesurée

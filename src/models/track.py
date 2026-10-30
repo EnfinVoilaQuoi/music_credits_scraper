@@ -360,8 +360,8 @@ class Audio:
     `track.audio.<champ>`.
     """
 
-    bpm: int | None = None  # BPM "réel" (double-time) — valeur exportée
-    bpm_alt: int | None = None  # Octave alternative (half-time), ex. 71 pour 142
+    bpm: int | None = None  # BPM retenu (octave du consensus, `reconcile_bpm`)
+    bpm_alt: int | None = None  # L'autre octave, ex. 71 pour 142, 150 pour 75
     bpm_source: str | None = None  # Source(s) du BPM retenu (vote §8.3)
     bpm_confidence: int | None = None  # Nb de sources concordantes
     key: int | None = None  # Pitch class 0-11 (posé par le moteur, ex-attr dynamique)

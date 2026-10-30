@@ -40,14 +40,54 @@ def bpm_agree(a: int, b: int, tol: int = 3) -> bool:
     return abs(a - b) <= tol or abs(a - 2 * b) <= tol or abs(2 * a - b) <= tol
 
 
+#: ReccoBeats et SongBPM donnent la MÊME donnée (99,4 % d'accord) : une seule
+#: voix au départage d'octave, jamais deux.
+_VOIX_DE_LA_SOURCE = {"reccobeats": "reccobeats+songbpm", "songbpm": "reccobeats+songbpm"}
+
+#: Deezer double le tempo des autres dans ~11 % de ses valeurs comparables
+#: (×0,5 : 1 %), contre 0 à 0,2 % pour les autres (mesure du 2026-10-30) :
+#: seul, il ne fait jamais monter l'octave.
+_SOURCE_QUI_DOUBLE = "deezer"
+
+
+def _octave_du_consensus(basse: list, haute: list) -> str | None:
+    """Octave que suit le consensus INDÉPENDANT d'un cluster à deux octaves
+    (`"basse"` / `"haute"`), ou None sans consensus (une voix contre une).
+
+    Une voix = une source indépendante (ReccoBeats et SongBPM n'en font
+    qu'une) ; une voix présente aux DEUX octaves (ReccoBeats 75, SongBPM 150)
+    ne compte pour aucune. Deezer seul ne fait jamais monter l'octave."""
+    voix_b = {_VOIX_DE_LA_SOURCE.get(s, s) for s, _ in basse}
+    voix_h = {_VOIX_DE_LA_SOURCE.get(s, s) for s, _ in haute}
+    partagees = voix_b & voix_h
+    voix_b -= partagees
+    voix_h -= partagees
+    if voix_h == {_SOURCE_QUI_DOUBLE}:
+        return "basse"
+    if len(voix_b) > len(voix_h):
+        return "basse"
+    if len(voix_h) > len(voix_b):
+        return "haute"
+    return None
+
+
+def _le_plus_fiable(candidats: list) -> int:
+    """Valeur de la source la plus fiable (`BPM_SOURCE_RANK`) d'une liste."""
+    return max(candidats, key=lambda sb: BPM_SOURCE_RANK.get(sb[0], 0))[1]
+
+
 def reconcile_bpm(candidates):
     """
     (bpm_real, bpm_alt, 'src1+src2', confidence) à partir des candidats.
-    bpm_real = octave retenue (double-time à l'export) ; bpm_alt = autre octave.
+    bpm_real = octave retenue ; bpm_alt = autre octave.
 
     Résolution demi/double par ÉVIDENCE (pas de seuil aveugle) :
-      1. Deux octaves dans le cluster (74 + 145) → une source confirme le
-         double → on garde la valeur HAUTE réellement mesurée.
+      1. Deux octaves dans le cluster (74 + 145 + 72) → le verdict suit
+         l'octave du CONSENSUS INDÉPENDANT (décision utilisateur 2026-10-30 :
+         « la même convention partout ») — ReccoBeats et SongBPM ne font
+         qu'une voix, Deezer seul ne fait jamais monter l'octave (il double
+         ~11 % de ses valeurs). Sans consensus (une voix contre une autre,
+         hors Deezer seul en haut) → la valeur HAUTE (comportement d'avant).
       2. Une seule octave, ≥2 sources d'accord (88 + 88) → consensus = vrai
          tempo → on NE double PAS.
       3. Une seule octave, 1 source sous le seuil (71 seul) → aucune preuve
@@ -77,10 +117,13 @@ def reconcile_bpm(candidates):
     lo, hi = min(vals), max(vals)
 
     if hi >= lo * 1.5:
-        # (1) Deux octaves : double confirmé → valeur haute la plus fiable
+        # (1) Deux octaves : l'octave du consensus indépendant, sinon la haute
         high = [(s, v) for s, v in best if v >= lo * 1.5]
-        bpm_real = max(high, key=lambda sb: BPM_SOURCE_RANK.get(sb[0], 0))[1]
-        bpm_alt = lo
+        low = [(s, v) for s, v in best if v < lo * 1.5]
+        if _octave_du_consensus(low, high) == "basse":
+            bpm_real, bpm_alt = _le_plus_fiable(low), _le_plus_fiable(high)
+        else:
+            bpm_real, bpm_alt = _le_plus_fiable(high), lo
     else:
         # Une seule octave : valeur de la source la plus fiable
         V = max(best, key=lambda sb: BPM_SOURCE_RANK.get(sb[0], 0))[1]

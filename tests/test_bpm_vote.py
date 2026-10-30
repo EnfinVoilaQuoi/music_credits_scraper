@@ -53,8 +53,8 @@ class TestReconcileBpm:
     def test_sans_candidat(self):
         assert _reconcile([]) == (None, None, None, 0)
 
-    def test_cas_1_deux_octaves_double_confirme(self):
-        # 74 + 145 : une source confirme le double → valeur HAUTE mesurée
+    def test_cas_1_deux_octaves_sans_consensus(self):
+        # 74 + 145 : une voix contre une (Deezer en BAS) → valeur HAUTE mesurée
         bpm, alt, src, conf = _reconcile([("deezer", 74), ("reccobeats", 145)])
         assert bpm == 145
         assert alt == 74
@@ -91,6 +91,69 @@ class TestReconcileBpm:
         bpm, alt, src, conf = _reconcile([("deezer", 100), ("reccobeats", 150)])
         assert bpm == 150
         assert conf == 1
+
+
+class TestOctaveDuConsensus:
+    """Deux octaves dans le cluster : le verdict suit le consensus INDÉPENDANT
+    (décision utilisateur 2026-10-30, « la même convention partout »). Cas
+    réels de la base ; Deezer double ~11 % de ses valeurs comparables."""
+
+    def test_deezer_seul_en_haut_contre_reccobeats_et_songbpm(self):
+        # A2H « Petit Cœur » : ReccoBeats et SongBPM ne font qu'UNE voix,
+        # Deezer seul ne fait pas monter l'octave (avant : 150).
+        bpm, alt, src, conf = _reconcile([("deezer", 150), ("reccobeats", 75), ("songbpm", 75)])
+        assert (bpm, alt) == (75, 150)
+        assert conf == 3
+
+    def test_deux_voix_en_bas_contre_deezer(self):
+        # Josman « Narcisse » : GetSongBPM 79, ReccoBeats 80, Deezer 158.
+        bpm, alt, _, _ = _reconcile([("deezer", 158), ("getsongbpm", 79), ("reccobeats", 80)])
+        assert (bpm, alt) == (80, 158)  # la plus fiable de l'octave basse
+
+    def test_deezer_seul_contre_une_voix(self):
+        # Flynt « Rap théorie » : une voix contre une, mais Deezer seul en
+        # haut ne fait jamais monter l'octave (avant : 174).
+        bpm, alt, _, _ = _reconcile([("deezer", 174), ("reccobeats", 87)])
+        assert (bpm, alt) == (87, 174)
+
+    def test_la_majorite_basse_contre_une_autre_source_que_deezer(self):
+        # MC Solaar « Dix de mes disciples » : Deezer et GetSongBPM 98,
+        # ReccoBeats 196 (avant : 196).
+        bpm, alt, _, _ = _reconcile([("deezer", 98), ("getsongbpm", 98), ("reccobeats", 196)])
+        assert (bpm, alt) == (98, 196)
+
+    def test_reccobeats_et_songbpm_partages_ne_comptent_pas(self):
+        # Kanye West « D.O.A. » : ReccoBeats 87, SongBPM 172 — leur voix est
+        # aux deux octaves, elle ne compte pour aucune ; reste Deezer 86.
+        bpm, _, _, _ = _reconcile([("deezer", 86), ("reccobeats", 87), ("songbpm", 172)])
+        assert bpm == 87
+
+    def test_la_majorite_haute_est_suivie(self):
+        # Flynt « Un pour la plume » : trois sources à 175, Deezer à 88.
+        bpm, alt, _, _ = _reconcile(
+            [("deezer", 88), ("getsongbpm", 175), ("reccobeats", 175), ("songbpm", 175)]
+        )
+        assert (bpm, alt) == (175, 88)
+
+    def test_deezer_accompagne_fait_monter(self):
+        # Booba « Jimmy » : Deezer ET GetSongBPM 164 contre ReccoBeats 82 —
+        # Deezer n'est pas seul, la majorité est haute.
+        bpm, alt, _, _ = _reconcile([("deezer", 164), ("getsongbpm", 164), ("reccobeats", 82)])
+        assert (bpm, alt) == (164, 82)
+
+    def test_reccobeats_et_songbpm_une_seule_voix_sans_consensus(self):
+        # Booba « Monde » : GetSongBPM 160 contre ReccoBeats et SongBPM 80 —
+        # une voix contre une (et non deux contre une) : comportement d'avant,
+        # l'octave haute ; Deezer 107 est hors du cluster.
+        bpm, alt, _, _ = _reconcile(
+            [("deezer", 107), ("getsongbpm", 160), ("reccobeats", 80), ("songbpm", 80)]
+        )
+        assert (bpm, alt) == (160, 80)
+
+    def test_sans_consensus_l_octave_haute(self):
+        # Josman « BIZ » : GetSongBPM 159, ReccoBeats 80 — une contre une.
+        bpm, alt, _, _ = _reconcile([("getsongbpm", 159), ("reccobeats", 80)])
+        assert (bpm, alt) == (159, 80)
 
 
 class TestBpmBallot:

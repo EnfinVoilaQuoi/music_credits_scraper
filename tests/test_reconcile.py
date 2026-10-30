@@ -46,6 +46,18 @@ class TestReconcileBpm:
         assert bpm.confidence == 2
         assert bpm.source == "reccobeats+deezer"
 
+    def test_deezer_seul_ne_fait_pas_monter_l_octave(self):
+        # A2H « Petit Cœur » : le verdict de lecture suit le consensus
+        # indépendant (ReccoBeats et SongBPM 75), pas le ×2 de Deezer.
+        res = reconcile(
+            [
+                _obs("bpm", 150, "deezer"),
+                _obs("bpm", 75, "reccobeats"),
+                _obs("bpm", 75, "songbpm"),
+            ]
+        )
+        assert (res["bpm"].value, res["bpm"].alt) == (75, 150)
+
     def test_halftime_isole_double(self):
         res = reconcile([_obs("bpm", 71, "deezer")])
         assert res["bpm"].value == 142

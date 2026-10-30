@@ -551,7 +551,9 @@ def run(
                 hooks.progress(i, n_discogs, t.title, "Discogs")
                 try:
                     with source_usage.track_scope(t.id):
-                        trouve = client.enrich_track_data(t, force_update=options.force_credits)
+                        trouve = client.enrich_track_data(
+                            t, force_update=options.force_credits, fiches=tracks
+                        )
                     if trouve:
                         ok += 1
                     else:

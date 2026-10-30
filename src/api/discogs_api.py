@@ -14,7 +14,13 @@ from src.models import Artist, ArtistRelation, Credit, CreditRole, ReleaseObserv
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.utils.codes_barres import code_barres_discogs
-from src.utils.discogs_identity import nom_sans_suffixe, release_concorde, titre_de_piste
+from src.utils.discogs_identity import (
+    homonymes_de,
+    nom_sans_suffixe,
+    piste_concorde,
+    release_concorde,
+    titre_de_piste,
+)
 from src.utils.discogs_positions import concerne_la_piste, numeroter
 from src.utils.logger import get_logger, log_api
 from src.utils.title_matching import normalize_name
@@ -147,6 +153,8 @@ class DiscogsClient:
         *,
         noms_attendus: set[str] | None = None,
         artist_discogs_id: int | None = None,
+        fiche: Track | None = None,
+        homonymes: bool = False,
     ) -> dict[str, Any] | None:
         """
         Recherche un morceau sur Discogs
@@ -159,6 +167,10 @@ class DiscogsClient:
                 crédité — défaut : `artist_name` seul. Pour un feat, y ajouter
                 l'artiste principal.
             artist_discogs_id: identité Discogs de l'artiste, si connue.
+            fiche: la fiche cherchée, que le juge (`piste_concorde`) confronte à
+                chaque piste — défaut : une fiche réduite au titre.
+            homonymes: l'artiste porte ce titre sur d'AUTRES pages : seule une
+                piste du disque de la fiche la désigne.
 
         Returns:
             Dictionnaire avec les infos du morceau ou None
@@ -170,7 +182,14 @@ class DiscogsClient:
         attendus = set(noms_attendus or ()) | {artist_name}
         with source_usage.observe(_SOURCE, label=f"{artist_name} — {track_title}") as obs:
             return self._search_track_body(
-                obs, track_title, artist_name, album_name, attendus, artist_discogs_id
+                obs,
+                track_title,
+                artist_name,
+                album_name,
+                attendus,
+                artist_discogs_id,
+                fiche=fiche,
+                homonymes=homonymes,
             )
 
     def _search_track_body(
@@ -181,6 +200,9 @@ class DiscogsClient:
         album_name: str | None,
         noms_attendus: set[str] | None = None,
         artist_discogs_id: int | None = None,
+        *,
+        fiche: Track | None = None,
+        homonymes: bool = False,
     ) -> dict[str, Any] | None:
         """Corps de `search_track`, sous l'observation ouverte par elle."""
         noms_attendus = noms_attendus or {artist_name}
@@ -228,7 +250,9 @@ class DiscogsClient:
                     logger.debug(f"Vérification résultat #{i}: {release.title}")
 
                     # Vérifier si le release contient le track recherché
-                    track_data = self._extract_track_from_release(release, track_title, artist_name)
+                    track_data = self._extract_track_from_release(
+                        release, track_title, artist_name, fiche=fiche, homonymes=homonymes
+                    )
 
                     # Le disque est-il celui de NOTRE artiste ? (2026-09-23) La
                     # recherche est libre : Django « Nuages » rapprochait le disque
@@ -301,7 +325,13 @@ class DiscogsClient:
             return None
 
     def _extract_track_from_release(
-        self, release, track_title: str, artist_name: str
+        self,
+        release,
+        track_title: str,
+        artist_name: str,
+        *,
+        fiche: Track | None = None,
+        homonymes: bool = False,
     ) -> dict[str, Any] | None:
         """
         Extrait les données d'un track depuis un release Discogs
@@ -310,6 +340,8 @@ class DiscogsClient:
             release: Objet Release de discogs_client
             track_title: Titre du track recherché
             artist_name: Nom de l'artiste
+            fiche, homonymes: ce que le juge (`piste_concorde`) confronte à
+                chaque piste au même titre réduit (cf. `search_track`)
 
         Returns:
             Dictionnaire avec les données du track ou None
@@ -323,11 +355,29 @@ class DiscogsClient:
             normalized_search_title = self._normalize_string(track_title)
             pistes = list(release.tracklist)
             noms = [p.title if hasattr(p, "title") else str(p) for p in pistes]
-            meme_titre = [
-                i
-                for i, nom in enumerate(noms)
-                if self._normalize_string(nom) == normalized_search_title
-            ]
+            # `titre_de_piste` (parenthèses retirées) n'est que le CRIBLE ; le
+            # verdict est celui du juge (2026-10-30) : « Cudi The Kid » n'est
+            # pas « Cudi the Kid (TAI remix) », la « Reborn » de *KIDS SEE
+            # GHOSTS* n'est pas celle de Dirty Nice (`piste_concorde`).
+            fiche = fiche or Track(title=track_title, artist=Artist(name=artist_name))
+            disque_titre = getattr(release, "title", None)
+            meme_titre = []
+            for i, nom in enumerate(noms):
+                if self._normalize_string(nom) != normalized_search_title:
+                    continue
+                ok, motif = piste_concorde(
+                    fiche,
+                    nom,
+                    disque=disque_titre,
+                    duree_piste=getattr(pistes[i], "duration", None),
+                    homonymes=homonymes,
+                )
+                if ok:
+                    meme_titre.append(i)
+                else:
+                    logger.info(
+                        f"↪️ Discogs : « {disque_titre} » écarté pour '{track_title}' — {motif}"
+                    )
             # La PLACE de chaque ligne (« 1-03 » → disque 1, piste 3 ; faces
             # « A1, B2 » → ordre de la liste), lue sur TOUTE la tracklist : le
             # rang d'une face compte les pistes d'avant. Un titre présent deux
@@ -337,9 +387,8 @@ class DiscogsClient:
             # Chercher le track dans la tracklist
             for index, track in enumerate(pistes):
                 track_name = noms[index]
-                normalized_track_name = self._normalize_string(track_name)
 
-                if normalized_track_name == normalized_search_title:
+                if index in meme_titre:
                     logger.info(f"✅ Track trouvé: '{track_name}' dans release '{release.title}'")
                     disque, numero = places[index] if len(meme_titre) == 1 else (None, None)
 
@@ -779,13 +828,18 @@ class DiscogsClient:
             ajouter(str(variante), "alias", "name_variation")
         return liens
 
-    def enrich_track_data(self, track: Track, force_update: bool = False) -> bool | str:
+    def enrich_track_data(
+        self, track: Track, force_update: bool = False, fiches=None
+    ) -> bool | str:
         """
         Enrichit un track avec les données depuis Discogs
 
         Args:
             track: Objet Track à enrichir
             force_update: Si True, écrase les données existantes
+            fiches: les fiches de l'artiste — un titre qu'il porte sur d'autres
+                pages ne se rapproche que dans le disque de la fiche
+                (`discogs_identity.homonymes_de`, 2026-10-30)
 
         Returns:
             True si des données NOUVELLES ont été ajoutées ;
@@ -816,6 +870,8 @@ class DiscogsClient:
                 album_name,
                 noms_attendus=attendus,
                 artist_discogs_id=artist_discogs_id,
+                fiche=track,
+                homonymes=bool(homonymes_de(track, fiches)),
             )
 
             if not track_data:

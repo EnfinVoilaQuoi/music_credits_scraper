@@ -83,7 +83,7 @@ class _Discogs:
         self.verdicts = list(verdicts)
         self.appels = []
 
-    def enrich_track_data(self, track, force_update=False):
+    def enrich_track_data(self, track, force_update=False, fiches=None):
         self.appels.append((track.title, force_update))
         v = self.verdicts.pop(0)
         if isinstance(v, Exception):

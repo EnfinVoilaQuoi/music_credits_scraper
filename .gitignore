@@ -192,6 +192,8 @@ scripts/*
 # autre vidéo que celle du lien.
 !scripts/aligner_ids_spotify_principaux.py
 !scripts/rattraper_vues_du_lien.py
+# Durées Discogs posées sur une autre version ou une autre page (2026-10-30).
+!scripts/retirer_durees_discogs.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
 # méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
 # `scripts/*` les exclut déjà : ne PAS ajouter de négation ici.

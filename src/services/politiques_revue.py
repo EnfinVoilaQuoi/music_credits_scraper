@@ -177,9 +177,9 @@ def politique_durees(minimum: int) -> Callable:
             # Décision utilisateur 2026-10-20 : pour un ORIGINAL, une divergence de
             # durée ne dit pas grand-chose ; une version (remix, live…) ou un
             # titre générique (« Intro », « Outro ») se vérifie à la main.
-            from src.utils.version_descriptors import Kind, parse_variant, titre_generique
+            from src.utils.version_descriptors import porte_une_version, titre_generique
 
-            if parse_variant(track.title).kind != Kind.NONE or titre_generique(track.title):
+            if porte_une_version(track.title) or titre_generique(track.title):
                 return None
             for source in revue._TEMOINS_ISOLABLES:
                 if not durees.get(source):
@@ -304,7 +304,11 @@ def politique_liens_deezer(cas, track, _ctx):
     une durée indépendante la confirme à 2 s ET que les titres désignent le
     même enregistrement ; refuser si le vote la dément (autre version). Lien à
     revoir : délier si le vote dément la durée Deezer."""
-    from src.utils.version_descriptors import parse_variant, titres_equivalents
+    from src.utils.version_descriptors import (
+        edition_de_diffusion,
+        socle_du_titre,
+        titres_equivalents,
+    )
 
     if track is None:
         return None
@@ -326,14 +330,15 @@ def politique_liens_deezer(cas, track, _ctx):
     meme_titre = titres_equivalents(piste.get("title"), track.title)
     if isrc and track.isrc and isrc == str(track.isrc).upper() and meme_titre:
         return Arbitrage("rattacher", "deezer_appliquer", "même ISRC, même titre")
-    variante = parse_variant(piste.get("title") or "")
-    if variante.edition and titres_equivalents(variante.socle, track.title):
+    titre_piste = piste.get("title") or ""
+    edition = edition_de_diffusion(titre_piste)
+    if edition and titres_equivalents(socle_du_titre(titre_piste), track.title):
         # Décision utilisateur 2026-10-19 : radio edit, version radio = UNE
         # fiche, la parution en ÉDITION avec SA durée — l'écart ne dément rien.
         return Arbitrage(
             "rattacher en ÉDITION (sa durée propre)",
             "deezer_appliquer",
-            f"« {variante.edition} » de « {track.title} »",
+            f"« {edition} » de « {track.title} »",
         )
     accord = sorted(
         s
@@ -488,7 +493,7 @@ def politique_lrc(cas, track, ctx):
     316 s, LRC jusqu'à 247 s, la durée du « Jeezy Remix ») ; sans durée,
     rien ne dit lequel des deux LRC est à sa place."""
     from src.utils.lrc_garde import ECART_DUREE_S, duree_confirmee, fin_du_lrc
-    from src.utils.version_descriptors import meme_prise, parse_variant
+    from src.utils.version_descriptors import meme_prise_de_version
 
     if track is None or not track.lyrics.synced:
         return None
@@ -499,11 +504,7 @@ def politique_lrc(cas, track, ctx):
     temoin = f"LRC jusqu'à {fin} s, fiche {track.duration} s"
     if cas.detecteur == "doublon_lrc":
         titre_autre = next((t.title for t in ctx.disco if t.id == preuves.get("autre")), None)
-        if (
-            titre_autre
-            and not meme_prise(parse_variant(track.title), parse_variant(titre_autre))
-            and trop_court
-        ):
+        if titre_autre and not meme_prise_de_version(track.title, titre_autre) and trop_court:
             return Arbitrage(
                 "deux prises différentes : le LRC est celui de l'autre, le retirer",
                 "retirer_lrc",
@@ -550,7 +551,7 @@ def politique_ecarts_deezer(
     de l'artiste (et de ses formations) ; `rejoues` : les `(nature, piste)` que
     le classement D'AUJOURD'HUI produit encore, rejoué hors ligne depuis le brut
     (None : pas de rejeu) — un signalement qu'il ne produit plus est périmé."""
-    from src.utils.version_descriptors import parse_variant, titre_generique
+    from src.utils.version_descriptors import nature_de_l_edition, titre_generique
     from src.utils.version_heritage import famille_de
 
     def juger(cas, _track, _ctx):
@@ -584,13 +585,10 @@ def politique_ecarts_deezer(
                 + (" — page Genius trouvée" if ecart.get("genius") else ""),
             )
         if d == "deezer_version":
-            v = parse_variant(titre)
             fam = famille_de(titre)
             if fam in (None, "edition"):
-                from src.utils.version_descriptors import Kind, nature_d_edition
-
-                # Kind NONE : édition de DIFFUSION (« Radio Edit », « Explicit »).
-                nature = "diffusion" if v.kind == Kind.NONE else nature_d_edition(v)
+                # « diffusion » : édition de DIFFUSION (« Radio Edit », « Explicit »).
+                nature = nature_de_l_edition(titre)
                 if nature in ("diffusion", "edition", "montage"):
                     return Arbitrage(
                         "ÉDITION de la fiche du socle (décision du 2026-10-19 : une "
@@ -730,13 +728,13 @@ def titre_d_original(titre: str | None) -> bool:
     groupe entre parenthèses ou crochets, un « - » suffixe, un mot de version
     ou de titre générique suffisent à le rendre à l'humain (« Nuit
     (Interlude) », « … [ChoppedNotSlopped] » que `parse_variant` ne lit pas)."""
-    from src.utils.version_descriptors import Kind, parse_variant, titre_generique
+    from src.utils.version_descriptors import porte_une_version, titre_generique
 
     if not titre:
         return False
     if re.search(r"[\(\[]| - ", titre) or _MOTS_AMBIGUS.search(titre):
         return False
-    return parse_variant(titre).kind == Kind.NONE and not titre_generique(titre)
+    return not porte_une_version(titre) and not titre_generique(titre)
 
 
 def arbitrage_valide(cas, track, ctx) -> Arbitrage | None:

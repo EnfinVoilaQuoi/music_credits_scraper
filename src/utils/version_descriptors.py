@@ -1230,6 +1230,86 @@ def edition_de_diffusion(titre: str | None) -> str | None:
     return cle_titre(titre).variant.edition
 
 
+# ── Questions du panneau, des éditions et du catalogue Deezer (2026-10-30) ─────
+# Second passage de la délégation : ces modules lisaient `parse_variant` et
+# `Kind` pour une seule réponse à la fois (le socle, le remixeur, « est-ce un
+# remix ? ») ; ils posent désormais la question. Chacune rend exactement ce
+# que la lecture directe rendait (`cle_titre(t).variant` = `parse_variant(t)`).
+
+
+def est_un_remix(titre: str | None) -> bool:
+    """PUR. Le titre porte un descripteur de REMIX, nommé ou nu."""
+    return cle_titre(titre).variant.est_remix
+
+
+def est_une_rendition(titre: str | None) -> bool:
+    """PUR. Le titre porte un descripteur de RENDITION (live, acoustique,
+    instrumental, « Version X »…) — ni remix ni édition de diffusion."""
+    return cle_titre(titre).variant.kind == Kind.RENDITION
+
+
+def remixeur_du_titre(titre: str | None) -> str | None:
+    """PUR. Le remixeur que le titre NOMME (« Snight B » de « Dolce Camara -
+    Snight B Remix »), ou None."""
+    return cle_titre(titre).variant.remixer
+
+
+def socle_du_titre(titre: str | None) -> str:
+    """PUR. Le titre sans son descripteur de version ni ses featurings, en
+    graphie d'origine (« Dolce Camara » ; la clé normalisée est
+    `socle_normalise`)."""
+    return cle_titre(titre).variant.socle
+
+
+def descripteur_du_titre(titre: str | None) -> str | None:
+    """PUR. Le descripteur de version tel qu'écrit (« Snight B Remix »), None
+    sans version."""
+    return cle_titre(titre).variant.descriptor
+
+
+def rendition_instrumentale(titre: str | None) -> bool:
+    """PUR. Une RENDITION dont le descripteur dit « instrumental »
+    (« Boulbi (Instrumental) »)."""
+    v = cle_titre(titre).variant
+    return v.kind == Kind.RENDITION and "instrumental" in normalize_title(v.descriptor or "")
+
+
+def meme_prise_de_version(a: str | None, b: str | None) -> bool:
+    """PUR. Les descripteurs des deux titres désignent la même PRISE
+    (`meme_prise` : « Live » ≈ « Acoustic », « Live Version » ≠ « Long
+    Version ») ; le socle n'est pas jugé ici (`meme_prise_du_morceau`)."""
+    return meme_prise(cle_titre(a).variant, cle_titre(b).variant)
+
+
+#: Mentions éditoriales qui ne nomment aucune prise (« Album Version »).
+_MENTIONS_EDITORIALES = frozenset(
+    {"version", "original version", "version originale", "album version", "version album"}
+)
+
+
+def mention_editoriale(titre: str | None) -> bool:
+    """PUR. Le titre ne porte qu'une mention éditoriale, pas une nouvelle prise
+    musicale : une édition de DIFFUSION (radio edit, clean, explicit,
+    remaster : même enregistrement, même fiche, décision utilisateur
+    2026-09-24), ou une rendition « (Version) », « (Album Version) »… —
+    classement du catalogue Deezer."""
+    v = cle_titre(titre).variant
+    if v.kind == Kind.NONE and v.edition:
+        return True
+    if v.kind != Kind.RENDITION:
+        return False
+    return normalize_title(v.descriptor or "") in _MENTIONS_EDITORIALES
+
+
+def nature_de_l_edition(titre: str | None) -> str:
+    """PUR. Ce que désigne le titre quand `version_heritage.famille_de` le range
+    dans la famille « édition » : ``diffusion`` sans version (« Radio Edit »,
+    « Explicit »), sinon `nature_d_edition` (``edition``, ``montage``,
+    ``remix_named``, ``performance``, ``vitesse``, ``alternate``)."""
+    v = cle_titre(titre).variant
+    return "diffusion" if v.kind == Kind.NONE else nature_d_edition(v)
+
+
 #: Un groupe de titre de VIDÉO qui ne dit rien de la version : la nature de la
 #: vidéo, sa qualité, son album, son producteur (« (Clip Officiel) », « [4K
 #: Remastered] », « (Réédition album "L'AMOUR") », « (prod. klm) »).

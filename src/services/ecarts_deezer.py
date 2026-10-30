@@ -12,7 +12,7 @@ DISTRIBUTEURS — ce que le label a publié — avec une API libre. Ce module :
        · `album_absent`   — disque entier inconnu dont l'artiste est PRINCIPAL ;
        · `version`        — socle connu + descripteur (Live 2006, Radio Edit,
                             Instrumental — `title_version` de Deezer, sinon
-                            `parse_variant`) ; un disque inconnu fait surtout de
+                            le juge des versions) ; un disque inconnu fait surtout de
                             versions est `version` au niveau album ;
        · `apparition`     — disque d'un AUTRE artiste (AD$ (Chopped & $crewed)
                             est un album d'Ocho, Freeze y contribue) ;
@@ -57,10 +57,13 @@ from src.utils.title_matching import (
 )
 from src.utils.version_descriptors import (
     MOTS_DE_MEME_MORCEAU,
-    Kind,
+    edition_de_diffusion,
+    est_un_remix,
     graphies_equivalentes,
-    meme_prise,
-    parse_variant,
+    meme_prise_de_version,
+    mention_editoriale,
+    porte_une_version,
+    socle_normalise,
     titre_generique,
     titre_sans_son_disque,
 )
@@ -251,15 +254,29 @@ class BilanEcarts(Bilan):
 # ── Classification (pure) ────────────────────────────────────────────────────
 
 
+def _titre_structure(piste: PisteDeezer) -> str:
+    """Le titre que Deezer STRUCTURE (« titre court - version ») quand il sépare
+    la version, sinon son titre complet."""
+    if piste.title_version:
+        return f"{piste.title_short} - {piste.title_version.strip('()[]')}"
+    return piste.title
+
+
 def _variante_de(piste: PisteDeezer):
     """(socle normalisé, est une version ?) — `title_version` de Deezer d'abord
-    (structuré), `parse_variant` en repli."""
+    (structuré), le titre complet en repli."""
     if piste.title_version:
-        v = parse_variant(f"{piste.title_short} - {piste.title_version.strip('()[]')}")
-        if v.kind != Kind.NONE:
-            return normalize_title(piste.title_short or v.socle), not _edition_generique(v)
-    v = parse_variant(piste.title)
-    return normalize_title(v.socle), v.kind != Kind.NONE and not _edition_generique(v)
+        structure = _titre_structure(piste)
+        if porte_une_version(structure):
+            socle = (
+                normalize_title(piste.title_short)
+                if piste.title_short
+                else socle_normalise(structure)
+            )
+            return socle, not mention_editoriale(structure)
+    return socle_normalise(piste.title), porte_une_version(piste.title) and not (
+        mention_editoriale(piste.title)
+    )
 
 
 def nom_de_contributeur_plausible(nom: str | None) -> bool:
@@ -272,45 +289,23 @@ def nom_de_contributeur_plausible(nom: str | None) -> bool:
     return nom.count("(") == nom.count(")") and nom.count("[") == nom.count("]")
 
 
-def _edition_generique(variant) -> bool:
-    """Une mention éditoriale ne désigne pas une nouvelle prise musicale — ni une
-    édition de DIFFUSION (radio edit, clean, explicit, remaster : même
-    enregistrement, même fiche, décision utilisateur 2026-09-24)."""
-    if variant.kind == Kind.NONE and variant.edition:
-        return True
-    if variant.kind != Kind.RENDITION:
-        return False
-    return normalize_title(variant.descriptor or "") in {
-        "version",
-        "original version",
-        "version originale",
-        "album version",
-        "version album",
-    }
-
-
 def _edition_de_diffusion(piste: PisteDeezer) -> str | None:
     """Le libellé d'édition de diffusion de la piste (« Radio Edit »), ou None."""
-    if piste.title_version:
-        v = parse_variant(f"{piste.title_short} - {piste.title_version.strip('()[]')}")
-    else:
-        v = parse_variant(piste.title)
-    return v.edition if v.kind == Kind.NONE else None
+    titre = _titre_structure(piste)
+    return None if porte_une_version(titre) else edition_de_diffusion(titre)
 
 
 def _edition_generique_de(piste: PisteDeezer) -> bool:
-    if piste.title_version:
-        return _edition_generique(
-            parse_variant(f"{piste.title_short} - {piste.title_version.strip('()[]')}")
-        )
-    return _edition_generique(parse_variant(piste.title))
+    """Une mention éditoriale (`mention_editoriale` du juge) : pas une nouvelle
+    prise musicale."""
+    return mention_editoriale(_titre_structure(piste))
 
 
 def _cle_edition_generique(piste: PisteDeezer) -> str:
     """Titre du socle quand Deezer sépare seulement une mention éditoriale."""
     if piste.title_version:
         return normalize_title(piste.title_short or piste.title)
-    return normalize_title(parse_variant(piste.title).socle)
+    return socle_normalise(piste.title)
 
 
 #: « Titre [Nom] » : un nom entre crochets en fin de titre Genius.
@@ -507,7 +502,7 @@ def classer(
             deezer_ids[int(t.deezer_id)] = t
         if t.isrc:
             isrcs.setdefault(str(t.isrc).upper(), []).append(t)
-        if parse_variant(t.title).kind == Kind.NONE:
+        if not porte_une_version(t.title):
             socles.setdefault(k, t)
     cles_albums = {cle_album(t.album) for t in base if t.album}
     cles_albums |= {cle_album(a.get("title")) for a in albums_base if a.get("title")}
@@ -743,7 +738,6 @@ def cocher_par_defaut(ecarts: list[Ecart], base: list[Track]) -> None:
     for e in ecarts:
         if e.nature != "version" or e.socle is None:
             continue
-        v = parse_variant(e.titre)
         for entree in getattr(e.socle, "spotify_id_entries", None) or []:
             if (
                 entree.est_rendition
@@ -751,7 +745,7 @@ def cocher_par_defaut(ecarts: list[Ecart], base: list[Track]) -> None:
                 and entree.label
                 and (
                     normalize_title(entree.label) == normalize_title(e.titre)
-                    or meme_prise(parse_variant(entree.label), v)
+                    or meme_prise_de_version(entree.label, e.titre)
                 )
             ):
                 e.kworb_spotify_id = entree.spotify_id
@@ -987,10 +981,9 @@ def _ligne(artist, e: Ecart, contributeurs: list[tuple[int, str]]) -> Track:
         credits.append(Credit(name=a.label, role=CreditRole.LABEL, source="deezer"))
     track.credits = credits
     if e.socle is not None:
-        v = parse_variant(p.title)
         track.relationships = [
             {
-                "type": "remix_of" if v.est_remix else "version_of",
+                "type": "remix_of" if est_un_remix(p.title) else "version_of",
                 "title": e.socle.title,
                 "artist": artist.name,
                 "url": e.socle.genius_url,

@@ -28,7 +28,7 @@ from collections.abc import Iterable, Sequence
 from datetime import date, datetime
 
 from src.utils.title_matching import contains_as_words, normalize_title
-from src.utils.version_descriptors import Kind, parse_variant
+from src.utils.version_descriptors import porte_une_version, rendition_instrumentale
 
 #: Spotify ne met pas ses compteurs à jour en continu : un écart d'un jour et
 #: demi d'écoutes entre deux lectures reste « la même courbe ».
@@ -94,10 +94,7 @@ def _nb_mots(titre: str | None) -> int:
 
 
 def _instrumental(page) -> bool:
-    return bool(page.lyrics.instrumental) or (
-        parse_variant(page.title).kind is Kind.RENDITION
-        and "instrumental" in normalize_title(parse_variant(page.title).descriptor or "")
-    )
+    return bool(page.lyrics.instrumental) or rendition_instrumentale(page.title)
 
 
 def _sortie(page) -> date | None:
@@ -139,9 +136,7 @@ def page_du_compteur(pages: Sequence, rattachees_par_kworb: set) -> tuple[str, o
         return "rattachée par Kworb", kworb[0]
     # Original : sans descripteur de version lu, pas un instrumental, au titre
     # le plus court (« Keep My Spirit Alive » avant « … pt 2 »).
-    sans_version = [
-        p for p in pages if parse_variant(p.title).kind is Kind.NONE and not _instrumental(p)
-    ]
+    sans_version = [p for p in pages if not porte_une_version(p.title) and not _instrumental(p)]
     if sans_version:
         court = min(_nb_mots(p.title) for p in sans_version)
         originaux = [p for p in sans_version if _nb_mots(p.title) == court]

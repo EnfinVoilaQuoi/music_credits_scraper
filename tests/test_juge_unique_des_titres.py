@@ -55,20 +55,9 @@ PLAFONDS = {
     # remix nommé) et le remixeur affiché au dialogue — une lecture, pas un
     # jugement : les rapprochements passent par le juge.
     "utils/update_kworb.py": 4,
-    # Catalogue Deezer : appariement des écarts par socle et nature de version.
-    "services/ecarts_deezer.py": 18,
-    # Panneau « À trancher », ses politiques et l'audit.
-    "services/revue.py": 11,
-    "services/politiques_revue.py": 10,
-    "services/audit.py": 8,
-    # Éditions et doublons.
-    "services/editions.py": 8,
-    # Compteurs partagés (règle 2a) : version proche montrée.
-    "utils/compteurs_partages.py": 5,
-    # Pages Genius, participation, validation.
-    "utils/pages_genius.py": 3,
-    "utils/participation.py": 2,
-    "utils/track_validation.py": 1,
+    # Tous les autres modules délèguent (second passage, 2026-10-30) : panneau,
+    # politiques, audit, éditions, catalogue Deezer, compteurs partagés, pages
+    # Genius, participation et validation posent une question du juge.
 }
 
 
@@ -193,6 +182,28 @@ def test_les_questions_des_gates_valent_les_primitives_sur_le_corpus(paires):
             and vd.meme_prise(va, vb),
             "remix_du_meme_morceau": va.est_remix
             and normalize_title(va.socle) == normalize_title(vb.socle),
+            # Second passage (2026-10-30) : panneau, éditions, catalogue Deezer…
+            "est_un_remix": va.est_remix,
+            "est_une_rendition": va.kind == Kind.RENDITION,
+            "remixeur_du_titre": va.remixer,
+            "socle_du_titre": va.socle,
+            "descripteur_du_titre": va.descriptor,
+            "rendition_instrumentale": va.kind is Kind.RENDITION
+            and "instrumental" in normalize_title(va.descriptor or ""),
+            "meme_prise_de_version": vd.meme_prise(va, vb),
+            "mention_editoriale": (va.kind == Kind.NONE and bool(va.edition))
+            or (
+                va.kind == Kind.RENDITION
+                and normalize_title(va.descriptor or "")
+                in {
+                    "version",
+                    "original version",
+                    "version originale",
+                    "album version",
+                    "version album",
+                }
+            ),
+            "nature_de_l_edition": "diffusion" if va.kind == Kind.NONE else vd.nature_d_edition(va),
         }
         obtenu = {
             "est_remix_nu": vd.est_remix_nu(a),
@@ -204,6 +215,15 @@ def test_les_questions_des_gates_valent_les_primitives_sur_le_corpus(paires):
             "meme_version_certifiee": vd.meme_version_certifiee(a, b),
             "meme_prise_du_morceau": vd.meme_prise_du_morceau(a, b),
             "remix_du_meme_morceau": vd.remix_du_meme_morceau(a, b),
+            "est_un_remix": vd.est_un_remix(a),
+            "est_une_rendition": vd.est_une_rendition(a),
+            "remixeur_du_titre": vd.remixeur_du_titre(a),
+            "socle_du_titre": vd.socle_du_titre(a),
+            "descripteur_du_titre": vd.descripteur_du_titre(a),
+            "rendition_instrumentale": vd.rendition_instrumentale(a),
+            "meme_prise_de_version": vd.meme_prise_de_version(a, b),
+            "mention_editoriale": vd.mention_editoriale(a),
+            "nature_de_l_edition": vd.nature_de_l_edition(a),
         }
         ecarts += [(q, a, b) for q in attendu if attendu[q] != obtenu[q]]
     assert not ecarts, ecarts[:20]

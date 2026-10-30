@@ -73,12 +73,13 @@ from src.utils.title_matching import (
 )
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import (
-    Kind,
     meme_titre_de_base,
     meme_version,
     meme_version_publiee,
-    parse_variant,
+    porte_une_version,
     reeditions_evidentes,
+    remixeur_du_titre,
+    socle_du_titre,
     socle_normalise,
     titre_de_base,
     titre_generique,
@@ -432,7 +433,7 @@ def id_spotify_autre_version(track, _ctx=None):
             f"{', '.join(absents)} — un autre remix ?",
             {"spotify_id": track.spotify_id, "spotify_sert": titre, "credites": credits},
         )
-    remixeur = parse_variant(track.title).remixer
+    remixeur = remixeur_du_titre(track.title)
     if remixeur and names_match_as_words(remixeur, credits):
         return None
     return (
@@ -750,7 +751,7 @@ def songbpm_copie_de_l_original(track, ctx):
     original : la page était celle de l'original (Freeze « Louisville (Remix) »,
     196 s pour 193 s). Un INSTRUMENTAL n'est pas visé — même beat, même tempo
     attendus (décision utilisateur)."""
-    if parse_variant(track.title).kind == Kind.NONE or famille_de(track.title) == "instrumental":
+    if not porte_une_version(track.title) or famille_de(track.title) == "instrumental":
         return None
     if songbpm_de_l_original(track, ctx):
         return None  # formel : `songbpm_de_l_original`
@@ -813,7 +814,7 @@ def _versions_soeurs(a, b) -> bool:
     """Deux VERSIONS d'un même socle dont aucune n'est l'original (« Can't Tell Me
     Nothing (R.O.C. Remix) » / « (Jeezy Remix) ») : peut-être le même morceau
     sous deux pages."""
-    if parse_variant(a.title).kind == Kind.NONE or parse_variant(b.title).kind == Kind.NONE:
+    if not porte_une_version(a.title) or not porte_une_version(b.title):
         return False
     return socle_normalise(a.title) == socle_normalise(b.title)
 
@@ -1574,7 +1575,7 @@ def _titres_alternatifs(track) -> list[str]:
         mots_p = _mots(contenu)
         if (
             len(mots_p.split()) >= 2
-            and parse_variant(f"x ({contenu})").kind == Kind.NONE
+            and not porte_une_version(f"x ({contenu})")
             # Un nom de SESSION n'est pas un titre : « Temptations (Tiny Desk
             # Home) » était couvert par le Tiny Desk de Ty Dolla $ign.
             and not _CONTEXTE_RE.search(contenu)
@@ -1586,7 +1587,7 @@ def _titres_alternatifs(track) -> list[str]:
 
 def video_nomme(track, v) -> bool:
     """Le titre de la vidéo `v` nomme-t-il le morceau `track` ?"""
-    socle = _mots(parse_variant(track.title).socle)
+    socle = _mots(socle_du_titre(track.title))
     # Une parenthèse qui n'est pas un descripteur fait partie du titre Genius
     # (« Pursuit of Happiness (Nightmare) » : le clip officiel ne la porte pas) —
     # sauf sur un titre générique, qu'elle seule distingue (« Intro (A2) »).
@@ -1603,7 +1604,7 @@ def video_nomme(track, v) -> bool:
     if _FREESTYLE_RE.search(track.title or ""):
         # « Rap contenders freestyle » est publié « Rap Contenders » : le mot
         # « freestyle » manque souvent à la vidéo, le reste la nomme.
-        sans = _mots(_FREESTYLE_RE.sub(" ", parse_variant(track.title).socle))
+        sans = _mots(_FREESTYLE_RE.sub(" ", socle_du_titre(track.title)))
         if sans:
             variantes.append(sans)
     return (

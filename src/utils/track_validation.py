@@ -146,9 +146,9 @@ def remixeur_credite(track) -> bool:
     producteur du remix (2026-10-14, WIP « producteur des remix »). Le titre
     seul ne suffit pas — il faut le crédit (`services.versions.crediter_remixeurs`
     le pose depuis le titre)."""
-    from src.utils.version_descriptors import parse_variant
+    from src.utils.version_descriptors import est_un_remix
 
-    if not parse_variant(track.title or "").est_remix:
+    if not est_un_remix(track.title):
         return False
     return any(getattr(c.role, "value", c.role) == "Remixer" for c in track.credits or ())
 

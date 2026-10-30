@@ -16,7 +16,13 @@ from __future__ import annotations
 
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_title
-from src.utils.version_descriptors import parse_variant, titre_sans_edition
+from src.utils.version_descriptors import (
+    edition_de_diffusion,
+    est_un_remix,
+    porte_une_version,
+    socle_normalise,
+    titre_sans_edition,
+)
 
 logger = get_logger(__name__)
 
@@ -36,7 +42,7 @@ def socle_de(titre: str | None, fiches) -> object | None:
         return None
     cle = normalize_title(cible)
     candidats = [
-        t for t in fiches if normalize_title(t.title) == cle and not parse_variant(t.title).edition
+        t for t in fiches if normalize_title(t.title) == cle and not edition_de_diffusion(t.title)
     ]
     if len(candidats) > 1:
         # Homonymes séparés depuis e36 : « Runaway » de Kanye et trois covers.
@@ -47,7 +53,7 @@ def socle_de(titre: str | None, fiches) -> object | None:
 
 
 def libelle(titre: str) -> str:
-    return parse_variant(titre).edition or titre
+    return edition_de_diffusion(titre) or titre
 
 
 def absorber(dm, socle, fiche) -> bool:
@@ -106,10 +112,8 @@ def versions_liees(track, fiches) -> list[tuple[object, str]]:
     aussi l'original « reprise » de son propre instrumental (« Boulbi » →
     « Boulbi (Instrumental) », 21 cas) : ce sens-là ne s'affiche pas, le socle
     lie déjà l'instrumental depuis l'original."""
-    from src.utils.version_descriptors import Kind
-
-    variante = parse_variant(track.title)
-    souche = normalize_title(variante.socle)
+    version = porte_une_version(track.title)
+    souche = socle_normalise(track.title)
     page = _cle_page(track.genius_url)
 
     def vise(r, f) -> bool:
@@ -117,12 +121,7 @@ def versions_liees(track, fiches) -> list[tuple[object, str]]:
             return True
         if page is None or _cle_page(r.get("url")) != page:
             return False
-        vf = parse_variant(f.title)
-        inverse = (
-            variante.kind != Kind.NONE
-            and vf.kind == Kind.NONE
-            and normalize_title(vf.socle) == souche
-        )
+        inverse = version and not porte_une_version(f.title) and socle_normalise(f.title) == souche
         return not inverse
 
     vues, liees = {track.id}, []
@@ -137,9 +136,8 @@ def versions_liees(track, fiches) -> list[tuple[object, str]]:
             liees.append((f, _NATURES[rel["type"]]))
             vues.add(f.id)
             continue
-        v = parse_variant(f.title)
-        if v.kind != Kind.NONE and normalize_title(v.socle) == souche:
-            nature = "remix" if v.est_remix else "version"
+        if porte_une_version(f.title) and socle_normalise(f.title) == souche:
+            nature = "remix" if est_un_remix(f.title) else "version"
             if f.secondary_role == "Cover":
                 nature = "cover"
             liees.append((f, nature))

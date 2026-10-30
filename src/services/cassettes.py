@@ -173,6 +173,95 @@ def rejouer_kworb(cassette: dict) -> list[dict]:
     return sorted(sortie, key=lambda x: json.dumps(x, ensure_ascii=False, sort_keys=True))
 
 
+# ── Instantané COMPLET du rejeu Kworb (2026-10-30) ──────────────────────────
+#
+# `rejouer_kworb` ne garde que la fiche et la voie (et si une proposition
+# existe). L'instantané garde TOUT ce que `rapprocher` rend pour chaque ligne —
+# verdict, fiche, voie, score, souche, motif et la proposition entière (nature,
+# socle, parent, motifs…) — pour toutes les cassettes Kworb, dans
+# `tests/fixtures/instantanes/rejeu_kworb.json`. Il mécanise « une règle de
+# rapprochement Kworb se juge au rejeu avant d'être gardée » : tout changement
+# fait rougir `tests/test_instantane_kworb.py` jusqu'à ce qu'on le réenregistre
+# EXPRÈS (`python scripts/instantane_kworb.py`, et dire pourquoi dans le commit).
+
+
+def _arrondi(x):
+    if isinstance(x, float):
+        return round(x, 4)
+    if isinstance(x, dict):
+        return {k: _arrondi(v) for k, v in x.items()}
+    if isinstance(x, list | tuple):
+        return [_arrondi(v) for v in x]
+    return x
+
+
+def verdict_kworb_complet(entry: dict, r) -> dict:
+    """PUR. Tout le verdict de `rapprocher` pour une ligne, en JSON stable."""
+
+    def fiche(t):
+        return {"id": t.id, "titre": t.title} if t is not None else None
+
+    if r.track is not None:
+        verdict = "fiche"
+    elif r.rendition_de is not None:
+        verdict = "rendition"
+    elif r.suggestion:
+        verdict = "proposition"
+    else:
+        verdict = "rien"
+    complet = {
+        "titre": entry["title"],
+        "spotify_id": entry.get("spotify_id"),
+        "streams": entry.get("streams"),
+        "verdict": verdict,
+        "fiche": fiche(r.track),
+        "via": r.via,
+        "score": r.score,
+        "rendition_de": fiche(r.rendition_de),
+        "motif": r.motif,
+        "proposition": r.suggestion,
+    }
+    # Aller-retour JSON : tuples → listes, comme une fois relu du fichier.
+    return json.loads(json.dumps(_arrondi(complet), ensure_ascii=False, default=str))
+
+
+def instantane_kworb(cassette: dict) -> list[dict]:
+    """Le verdict COMPLET de chaque ligne d'une cassette Kworb, trié."""
+    from src.utils import update_kworb
+
+    artiste = cassette["artiste"]
+    index = update_kworb.construire_index(
+        [fiche_kworb_depuis(d, artiste) for d in cassette["base"]]
+    )
+    sortie = [
+        verdict_kworb_complet(
+            entry,
+            update_kworb.rapprocher(
+                entry,
+                index,
+                Artist(name=artiste),
+                cassette["decisions"],
+                cassette["identites"].get,
+                cassette["lignes"],
+            ),
+        )
+        for entry in cassette["lignes"]
+    ]
+    return sorted(sortie, key=lambda x: json.dumps(x, ensure_ascii=False, sort_keys=True))
+
+
+def instantane_vers_texte(instantane: dict[str, list[dict]]) -> str:
+    """Le fichier d'instantané : UNE ligne par verdict, pour que le diff git
+    nomme les lignes Kworb touchées. Relu par `json.loads`."""
+    blocs = []
+    for nom in sorted(instantane):
+        lignes = ",\n".join(
+            "  " + json.dumps(x, ensure_ascii=False, sort_keys=True) for x in instantane[nom]
+        )
+        blocs.append(f" {json.dumps(nom)}: [\n{lignes}\n ]")
+    return "{\n" + ",\n".join(blocs) + "\n}\n"
+
+
 # ── SongBPM (2026-10-25) : le choix d'un résultat de recherche ──────────────
 
 #: Ce que le choix SongBPM lit d'une fiche : son titre (le titre JUGÉ, même

@@ -46,10 +46,23 @@ class TestReconcileBpm:
         assert bpm.confidence == 2
         assert bpm.source == "reccobeats+deezer"
 
-    def test_halftime_isole_double(self):
+    def test_deezer_seul_ne_fait_pas_monter_l_octave(self):
+        # A2H « Petit Cœur » : le verdict de lecture suit le consensus
+        # indépendant (ReccoBeats et SongBPM 75), pas le ×2 de Deezer.
+        res = reconcile(
+            [
+                _obs("bpm", 150, "deezer"),
+                _obs("bpm", 75, "reccobeats"),
+                _obs("bpm", 75, "songbpm"),
+            ]
+        )
+        assert (res["bpm"].value, res["bpm"].alt) == (75, 150)
+
+    def test_source_isolee_gardee_telle_quelle(self):
+        # Plus de doublement d'un BPM isolé sous 90 (retiré le 2026-10-30).
         res = reconcile([_obs("bpm", 71, "deezer")])
-        assert res["bpm"].value == 142
-        assert res["bpm"].alt == 71
+        assert res["bpm"].value == 71
+        assert res["bpm"].alt == 142
 
     def test_valeurs_invalides_ignorees(self):
         # 900 hors borne, "abc" non numérique → seul 120 subsiste.

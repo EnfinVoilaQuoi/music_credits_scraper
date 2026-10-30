@@ -950,3 +950,57 @@ class TestEditionsDesSoeurs:
         data_manager.realigner_soeurs(appliquer=True)
         assert self._editions(data_manager, swing.id) == {("Version 3:36", 216)}
         assert data_manager.realigner_soeurs() == {}
+
+
+class TestObservationLaPlusFraiche:
+    """`unir_observations` : par (champ, source), l'observation la plus FRAÎCHE
+    gagne chez toutes les sœurs, quelle que soit la ligne touchée — 290 conflits
+    au 2026-10-11 (AUDIT §9.3), 0 sur la copie du 2026-10-29."""
+
+    @staticmethod
+    def _poser(dm, tid, valeur, vue):
+        with dm.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO observations (track_id, field, value, source, seen_at) "
+                    "VALUES (:t, 'duration', :v, 'deezer', :s)"
+                ),
+                {"t": tid, "v": valeur, "s": vue},
+            )
+
+    @staticmethod
+    def _valeurs(dm, tid):
+        with dm.engine.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT value, seen_at FROM observations WHERE track_id = :t "
+                    "AND field = 'duration' AND source = 'deezer'"
+                ),
+                {"t": tid},
+            ).all()
+
+    @pytest.mark.parametrize("touchee", [0, 1])
+    def test_la_plus_fraiche_gagne_quelle_que_soit_la_ligne_touchee(
+        self, data_manager, famille, touchee
+    ):
+        from src.utils.track_soeurs import unir_observations
+
+        swing, isha = famille
+        self._poser(data_manager, swing.id, "200", "2026-10-01 10:00:00")
+        self._poser(data_manager, isha.id, "201", "2026-10-20 10:00:00")
+        ids = [swing.id, isha.id] if touchee == 0 else [isha.id, swing.id]
+        with data_manager.engine.begin() as conn:
+            unir_observations(conn, ids)
+        for ligne in famille:
+            assert self._valeurs(data_manager, ligne.id) == [("201", "2026-10-20 10:00:00")]
+
+    def test_a_fraicheur_egale_la_ligne_touchee_l_emporte(self, data_manager, famille):
+        from src.utils.track_soeurs import unir_observations
+
+        swing, isha = famille
+        self._poser(data_manager, swing.id, "200", "2026-10-20 10:00:00")
+        self._poser(data_manager, isha.id, "201", "2026-10-20 10:00:00")
+        with data_manager.engine.begin() as conn:
+            unir_observations(conn, [isha.id, swing.id])
+        for ligne in famille:
+            assert self._valeurs(data_manager, ligne.id)[0][0] == "201"

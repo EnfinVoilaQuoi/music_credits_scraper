@@ -377,14 +377,23 @@ def _aligner_lien_youtube(conn, famille: list[int]) -> int:
         a_reecrire = [r for r in avec if video(r) != video(manuelles[0])]
     elif avec:
         gagnante = max(avec, key=lambda r: (_rang_lien(r["youtube_url_source"]), -r["id"]))
-        natures = [r["youtube_video_kind"] for r in avec if _nature_connue(r["youtube_video_kind"])]
+        # La nature est celle de la VIDÉO, relevée par le run des vues : la
+        # nature connue du relevé le plus RÉCENT gagne (pas celle de la ligne
+        # au meilleur lien, qui rendrait l'ancienne à la sœur qui vient d'être
+        # relevée) ; « unknown » ne gagne que seul. À relevé de même seconde,
+        # la ligne qu'un écrivain vient de toucher (`famille[0]`) l'emporte.
+        connues = [r for r in avec if _nature_connue(r["youtube_video_kind"])]
+        nature = (
+            max(
+                connues,
+                key=lambda r: (str(r["youtube_video_views_updated"] or ""), r["id"] == famille[0]),
+            )["youtube_video_kind"]
+            if connues
+            else gagnante["youtube_video_kind"]
+        )
         valeurs = {
             "youtube_url_source": gagnante["youtube_url_source"],
-            "youtube_video_kind": (
-                gagnante["youtube_video_kind"]
-                if _nature_connue(gagnante["youtube_video_kind"]) or not natures
-                else natures[0]
-            ),
+            "youtube_video_kind": nature,
         }
         a_reecrire = avec
     else:

@@ -154,6 +154,27 @@ def test_les_deux_videos_dun_morceau_sont_mesurees(monkeypatch):
     assert dm.ordre == [("videos", 1)]
 
 
+def test_sans_meta_pour_la_video_du_lien_les_colonnes_ne_bougent_pas(monkeypatch):
+    """« In Common (Remix) » #5071 (2026-10-30) : la vidéo du lien Genius
+    n'avait plus de méta ; la première AUTRE vidéo (« Cactus Files », 12 236
+    vues, « unknown ») a pris sa place dans `tracks.youtube_video_*`, et la
+    ligne sœur de Kanye a divergé. Les autres vidéos sont relevées quand même."""
+    _patch_ytm(
+        monkeypatch,
+        {"aaaaaaaaaaa": {"views": 12236, "title": "Travis Scott - In Common", "channel": "X"}},
+    )
+    dm = _FakeDM()
+    track = _track(1, "https://youtu.be/dQw4w9WgXcQ", videos=[TrackVideo(video_id="aaaaaaaaaaa")])
+    track.media.youtube_video_kind, track.media.youtube_video_views = "audio", 82798
+
+    report = update_video_views(_artist(), [track], dm)
+
+    assert dm.calls == []
+    assert dm.video_writes == [(1, [("aaaaaaaaaaa", "unknown", 12236)])]
+    assert (track.media.youtube_video_kind, track.media.youtube_video_views) == ("audio", 82798)
+    assert report["updated"] == 1 and report["no_meta"] == 1
+
+
 def test_la_mutation_memoire_ne_perd_pas_url_ni_provenance(monkeypatch):
     """La passe des vues ne connaît ni l'URL ni la provenance : remplacer les
     objets en mémoire les effacerait jusqu'au prochain rechargement."""

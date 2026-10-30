@@ -75,6 +75,13 @@ def _gestes():
         st.tuples(
             st.just("deplacer_edition"), fiche, st.sampled_from(["Radio Edit", "Clean"]), fiche
         ),
+        st.tuples(st.just("lien"), fiche, st.sampled_from(["AAAAAAAAAAA", "BBBBBBBBBBB"])),
+        st.tuples(
+            st.just("vues"),
+            fiche,
+            st.sampled_from(["audio", "clip", "unknown"]),
+            st.integers(0, 10**6),
+        ),
         st.tuples(st.just("sauver"), fiche),
         st.tuples(st.just("retrait_deezer"), fiche),
         st.tuples(st.just("retrait_isrc"), fiche),
@@ -163,6 +170,13 @@ def _jouer(dm, ids, geste) -> bool:
         vers = ids.get(geste[3])
         if vers is not None and vers != tid:
             dm.deplacer_edition(tid, geste[2], vers)
+    elif nom == "lien":
+        dm.update_track_youtube_url(
+            tid, f"https://www.youtube.com/watch?v={geste[2]}", "genius_media"
+        )
+    elif nom == "vues":
+        # Le relevé des vues pose la NATURE de la vidéo du lien sur UNE ligne.
+        dm.update_track_video_views(tid, geste[3], geste[2])
     elif nom == "retrait_deezer":
         dm.clear_track_deezer_id(tid)
     elif nom == "retrait_isrc":

@@ -111,26 +111,37 @@ def update_video_views(artist, tracks, data_manager, api=None, track_ids=None) -
         # recalcule lui-même (chantier A) — avant lui, la colonne gardait celle
         # du relevé précédent (2026-10-12, 10 fiches décalées de quelques vues).
         data_manager.record_track_videos(track.id, mesurees)
-        # Colonnes `tracks.youtube_video_*` : la vidéo PRINCIPALE, c'est-à-dire
-        # la première de la liste (cf. `videos_a_mesurer`).
+        # Colonnes `tracks.youtube_video_*` : la vidéo du LIEN `youtube_url`,
+        # et elle seule — première de la liste quand elle a été mesurée (cf.
+        # `videos_a_mesurer`). Sans méta pour elle, la première AUTRE vidéo
+        # prenait sa place : « In Common (Remix) » #5071 a reçu les vues et la
+        # nature d'une vidéo de « Cactus Files » sur le lien de la page Genius
+        # (2026-10-30), et sa sœur #6107 a divergé.
         principale = mesurees[0]
-        if data_manager.update_track_video_views(track.id, principale.views, principale.kind):
-            # Mutation mémoire (affichage immédiat, pas de reload nécessaire).
-            # Les vidéos déjà portées par l'objet sont mises à jour EN PLACE :
-            # les remplacer perdrait leur `url` et leur provenance, que cette
-            # passe ne connaît pas.
-            track.media.youtube_video_kind = principale.kind
+        if principale.video_id != extract_video_id(track.youtube_url):
+            principale = None
+        elif not data_manager.update_track_video_views(track.id, principale.views, principale.kind):
+            continue
+        # Mutation mémoire (affichage immédiat, pas de reload nécessaire).
+        # Les vidéos déjà portées par l'objet sont mises à jour EN PLACE :
+        # les remplacer perdrait leur `url` et leur provenance, que cette
+        # passe ne connaît pas.
+        if principale is not None:
+            # « unknown » ne remplace pas une nature connue (même règle que
+            # `update_track_video_views`).
+            if principale.kind != "unknown" or track.media.youtube_video_kind in (None, ""):
+                track.media.youtube_video_kind = principale.kind
             track.media.youtube_video_views = principale.views
-            par_id = {v.video_id: v for v in track.videos}
-            for mesuree in mesurees:
-                existante = par_id.get(mesuree.video_id)
-                if existante is None:
-                    track.videos.append(mesuree)
-                else:
-                    existante.kind = mesuree.kind
-                    existante.views = mesuree.views
-                    existante.title = mesuree.title
-            report["updated"] += 1
+        par_id = {v.video_id: v for v in track.videos}
+        for mesuree in mesurees:
+            existante = par_id.get(mesuree.video_id)
+            if existante is None:
+                track.videos.append(mesuree)
+            else:
+                existante.kind = mesuree.kind
+                existante.views = mesuree.views
+                existante.title = mesuree.title
+        report["updated"] += 1
 
     logger.info(
         f"Vues vidéos {artist.name} : {report['updated']} morceau(x) mis à jour, "

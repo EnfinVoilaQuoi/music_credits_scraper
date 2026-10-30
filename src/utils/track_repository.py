@@ -3392,6 +3392,10 @@ class TrackRepository:
                     # la durée (« Make Her Say » notée chez Kid Cudi, pas chez
                     # Kanye, 2026-10-29).
                     unir_editions(conn, [tid, *jumelles])
+                    # Le lien YouTube principal et sa NATURE : un relevé des
+                    # vues ne la posait que sur SA ligne (« In Common (Remix) »,
+                    # « audio » chez Kanye, « unknown » chez Travis, 2026-10-30).
+                    aligner_lien_youtube_des_soeurs(conn, tid)
                 a_faire.update(jumelles)
         # Les AUTRES porteurs de leurs vidéos (même artiste) : une vidéo reçue
         # par l'union des sœurs peut devenir partagée avec une fiche hors de la
@@ -5806,7 +5810,9 @@ class TrackRepository:
         réponse au « différencier un clip d'un morceau classique ». Écriture en
         `text()` non typé + `CURRENT_TIMESTAMP` (pas de bind date typé →
         contourne le piège TIMESTAMP double-face). `kind` en COALESCE : un appel
-        sans catégorie ne l'efface pas.
+        sans catégorie ne l'efface pas ; « unknown » (le classement n'a rien
+        reconnu) ne remplace pas une nature connue — ce n'est pas un constat.
+        Les sœurs suivent en fin de transaction (`aligner_lien_youtube_des_soeurs`).
         """
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
@@ -5814,7 +5820,9 @@ class TrackRepository:
                 conn.execute(
                     text(
                         "UPDATE tracks SET youtube_video_views = :views, "
-                        "youtube_video_kind = COALESCE(:kind, youtube_video_kind), "
+                        "youtube_video_kind = CASE WHEN :kind IS NULL OR (:kind = 'unknown' "
+                        "AND COALESCE(youtube_video_kind, '') NOT IN ('', 'unknown')) "
+                        "THEN youtube_video_kind ELSE :kind END, "
                         "youtube_video_views_updated = CURRENT_TIMESTAMP, "
                         "updated_at = :now WHERE id = :tid"
                     ),

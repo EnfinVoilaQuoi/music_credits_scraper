@@ -61,6 +61,7 @@ from src.utils.version_descriptors import (
     est_un_remix,
     graphies_equivalentes,
     meme_prise_de_version,
+    meme_titre_normalise,
     mention_editoriale,
     porte_une_version,
     socle_normalise,
@@ -744,7 +745,7 @@ def cocher_par_defaut(ecarts: list[Ecart], base: list[Track]) -> None:
                 and not entree.variant_track_id
                 and entree.label
                 and (
-                    normalize_title(entree.label) == normalize_title(e.titre)
+                    meme_titre_normalise(entree.label, e.titre)
                     or meme_prise_de_version(entree.label, e.titre)
                 )
             ):

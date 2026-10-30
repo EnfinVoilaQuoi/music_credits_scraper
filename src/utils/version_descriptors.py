@@ -1237,6 +1237,14 @@ def edition_de_diffusion(titre: str | None) -> str | None:
 # que la lecture directe rendait (`cle_titre(t).variant` = `parse_variant(t)`).
 
 
+def meme_titre_normalise(a: str | None, b: str | None) -> bool:
+    """PUR. Les deux titres sont ÉGAUX une fois normalisés (casse, accents,
+    ponctuation, featurings — `normalize_title`) : la question la plus étroite,
+    sans version ni graphie équivalente (`titres_equivalents` est plus large).
+    Un nom de disque se compare de même. Deux vides sont égaux."""
+    return normalize_title(a or "") == normalize_title(b or "")
+
+
 def est_un_remix(titre: str | None) -> bool:
     """PUR. Le titre porte un descripteur de REMIX, nommé ou nu."""
     return cle_titre(titre).variant.est_remix

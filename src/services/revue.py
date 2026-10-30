@@ -74,6 +74,7 @@ from src.utils.title_matching import (
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import (
     meme_titre_de_base,
+    meme_titre_normalise,
     meme_version,
     meme_version_publiee,
     porte_une_version,
@@ -1115,7 +1116,7 @@ def _relation_legitime(track, autre) -> bool:
                 return True
             if b.genius_url and rel.get("url") == b.genius_url:
                 return True
-            if rel.get("title") and normalize_title(rel["title"]) == normalize_title(b.title):
+            if rel.get("title") and meme_titre_normalise(rel["title"], b.title):
                 return True
     return False
 

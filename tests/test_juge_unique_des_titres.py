@@ -107,6 +107,81 @@ def test_le_crible_voit_les_deux_formes():
     assert _lectures(ast.parse(code)) == 3
 
 
+# ── Deux titres normalisés comparés à la main (2026-10-30) ─────────────────────
+# `normalize_title(a) == normalize_title(b)` est un verdict de titre rendu hors
+# du juge : la question est `meme_titre_normalise` (ou une plus large,
+# `titres_equivalents`…). Cliquet, comme `PLAFONDS`.
+
+#: Comparaisons `normalize_title(x) ==/!= normalize_title(y)` qu'un module hors
+#: du juge fait ENCORE (liste FERMÉE, chaque entrée commentée).
+PLAFONDS_EGALITES = {
+    # Parution reconnue par son titre (`_rattacher_parution`) : à déléguer
+    # quand la tâche « lien YouTube des lignes sœurs » aura rendu le module.
+    "utils/track_repository.py": 1,
+    # Dialogue de fusion (IHM CTk, gelée hors correctifs) : titre et album.
+    "gui/dialogs/merge_tracks.py": 1,
+}
+
+
+def _est_normalize_title(noeud: ast.AST) -> bool:
+    if not isinstance(noeud, ast.Call):
+        return False
+    f = noeud.func
+    return (isinstance(f, ast.Name) and f.id == "normalize_title") or (
+        isinstance(f, ast.Attribute) and f.attr == "normalize_title"
+    )
+
+
+def _egalites(arbre: ast.AST) -> int:
+    n = 0
+    for x in ast.walk(arbre):
+        if isinstance(x, ast.Compare):
+            termes = [x.left, *x.comparators]
+            n += sum(
+                1
+                for i, op in enumerate(x.ops)
+                if isinstance(op, (ast.Eq, ast.NotEq))
+                and _est_normalize_title(termes[i])
+                and _est_normalize_title(termes[i + 1])
+            )
+    return n
+
+
+def _sites_egalites() -> dict[str, int]:
+    sites = {}
+    for chemin in SRC.rglob("*.py"):
+        rel = chemin.relative_to(SRC).as_posix()
+        if rel in JUGE:
+            continue
+        n = _egalites(ast.parse(chemin.read_text(encoding="utf-8")))
+        if n:
+            sites[rel] = n
+    return sites
+
+
+def test_aucune_egalite_de_titres_normalises_hors_du_juge():
+    sites = _sites_egalites()
+    depasse = {f: (n, PLAFONDS_EGALITES.get(f, 0)) for f, n in sites.items()}
+    depasse = {f: v for f, v in depasse.items() if v[0] > v[1]}
+    assert not depasse, (
+        "`normalize_title(a) == normalize_title(b)` hors du juge — poser "
+        f"`meme_titre_normalise` (ou une question plus juste) : {depasse}"
+    )
+    a_baisser = {
+        f: (sites.get(f, 0), p) for f, p in PLAFONDS_EGALITES.items() if sites.get(f, 0) < p
+    }
+    assert not a_baisser, f"Baisser PLAFONDS_EGALITES (comparaisons, plafond) : {a_baisser}"
+
+
+def test_le_crible_voit_les_egalites():
+    code = (
+        "normalize_title(a) == normalize_title(b)\n"
+        "tm.normalize_title(a or '') != tm.normalize_title(\n    b\n)\n"
+        "normalize_title(a) == cle\n"
+    )
+    assert _egalites(ast.parse(code)) == 2
+
+
 # ── Le disque d'un titre générique : un seul juge (2026-10-30) ─────────────────
 # Les 13 verdicts qui ont basculé sur les 105 paires réelles (disque de la
 # fiche, parution qui la porte), tous des acceptations justes.

@@ -74,15 +74,14 @@ from src.utils.title_matching import (
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import (
     Kind,
+    meme_titre_de_base,
     meme_version,
     meme_version_publiee,
-    memes_parties,
     parse_variant,
     reeditions_evidentes,
     socle_normalise,
+    titre_de_base,
     titre_generique,
-    titre_sans_sous_titre,
-    titres_confondus,
 )
 from src.utils.version_heritage import IndexSocles, famille_de, socle_parmi
 from src.utils.vote_durees import (
@@ -1421,14 +1420,6 @@ def _a_la_meme_place(a, b, ctx) -> bool:
     return any(cle_d_emplacement(p) in cles for p in ctx.positions.get(b.id) or [])
 
 
-def _titre_de_base(titre: str | None) -> str | None:
-    """Le titre sans sous-titre ni édition de diffusion (« Make Her Say (I Poke
-    Her Face) », « Dans la tête (Bonus Track) »), None s'il porte une VERSION
-    (live, remix, acoustique…) : deux versions ne sont pas la forme cherchée."""
-    v = parse_variant(titre_sans_sous_titre(titre) or titre)
-    return v.socle if v.kind == Kind.NONE and normalize_title(v.socle) else None
-
-
 def _ids_de_catalogue(t) -> set:
     return {x for x in (t.spotify_id, t.deezer_id, t.isrc) if x}
 
@@ -1439,13 +1430,13 @@ def _premier_mot(titre: str) -> str:
 
 
 def _index_pages_genius(ctx) -> dict[str, list]:
-    """`{premier mot du titre de base: [(page, titre de base)]}` : un tri
-    grossier, `titres_confondus` juge ensuite (graphies, lettres masquées)."""
+    """`{premier mot du titre de base: [page]}` : un tri
+    grossier, `meme_titre_de_base` juge ensuite."""
     index: dict[str, list] = {}
     for t in ctx.disco:
-        base = _titre_de_base(t.title) if t.genius_id else None
+        base = titre_de_base(t.title) if t.genius_id else None
         if base:
-            index.setdefault(_premier_mot(base), []).append((t, base))
+            index.setdefault(_premier_mot(base), []).append(t)
     return index
 
 
@@ -1487,16 +1478,15 @@ def page_et_fiche_plateforme(track, ctx):
     pas réversible."""
     if track.genius_id or track.genius_url or not _ids_de_catalogue(track):
         return None
-    base = _titre_de_base(track.title)
+    base = titre_de_base(track.title)
     if not base:
         return None
     index = ctx.memo("pages_par_titre_de_base", lambda: _index_pages_genius(ctx))
-    for page, base_page in index.get(_premier_mot(base), []):
+    for page in index.get(_premier_mot(base), []):
         if (
             page is track
-            or not titres_confondus(base_page, base)
+            or not meme_titre_de_base(page.title, track.title)
             or _interprete(page) != _interprete(track)
-            or not memes_parties(page.title, track.title)
             or _ids_de_catalogue(page) & _ids_de_catalogue(track)
             or (titre_generique(base) and cle_album(page.album) != cle_album(track.album))
             or _a_la_meme_place(page, track, ctx)

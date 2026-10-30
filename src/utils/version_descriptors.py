@@ -1070,6 +1070,23 @@ def titres_confondus(a: str | None, b: str | None) -> bool:
     return meme_graphie(cle_titre(a), cle_titre(b))
 
 
+def titre_de_base(titre: str | None) -> str | None:
+    """Le titre sans sous-titre ni édition de diffusion (« Make Her Say (I Poke
+    Her Face) » → « Make Her Say », « Dans la tête (Bonus Track) » → « Dans la
+    tête »), None s'il porte une VERSION (live, remix, acoustique…) ou ne
+    contient aucun mot. Sert le panneau (forme « Make Her Say », 2026-10-30)."""
+    v = parse_variant(titre_sans_sous_titre(titre) or titre)
+    return v.socle if v.kind == Kind.NONE and normalize_title(v.socle) else None
+
+
+def meme_titre_de_base(a: str | None, b: str | None) -> bool:
+    """Deux titres au même `titre_de_base` (graphies et lettres masquées près,
+    `titres_confondus`) et aux mêmes PARTIES : le même morceau dans la même
+    version, aux sous-titres et éditions de diffusion près."""
+    ba, bb = titre_de_base(a), titre_de_base(b)
+    return bool(ba and bb) and titres_confondus(ba, bb) and memes_parties(a, b)
+
+
 def meme_socle(a: str | None, b: str | None) -> bool:
     """Deux titres désignent-ils le même MORCEAU, en une version ou une autre ?
 

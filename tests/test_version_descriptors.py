@@ -574,3 +574,18 @@ class TestReeditions:
         assert not reeditions_evidentes([("KING", "BULLY", 126), ("KING", "VULTURES 1", 126)])
         assert not reeditions_evidentes([("KING", "BULLY", None), ("KING", "BULLY (Deluxe)", 126)])
         assert not reeditions_evidentes([("KING", "BULLY", 126)])
+
+
+def test_titre_de_base_et_meme_titre_de_base():
+    """Forme « Make Her Say » du panneau (2026-10-30) : sous-titres et éditions
+    de diffusion retirés ; une version, une autre partie ou un titre sans mot
+    ne sont pas le même titre de base."""
+    from src.utils.version_descriptors import meme_titre_de_base, titre_de_base
+
+    assert titre_de_base("Make Her Say (I Poke Her Face)") == "Make Her Say"
+    assert titre_de_base("Dans la tête (Bonus Track)") == "Dans la tête"
+    assert titre_de_base("Blues (Acoustic)") is None
+    assert titre_de_base("* * *") is None
+    assert meme_titre_de_base("Illest Motherfucker Alive", "Illest Motherf**ker Alive (Clean)")
+    assert not meme_titre_de_base("Bouge de là (Part. 2)", "Bouge de là (Part. 1)")
+    assert not meme_titre_de_base("Blues", "Blues (Live)")

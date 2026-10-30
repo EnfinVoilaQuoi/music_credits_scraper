@@ -91,3 +91,61 @@ class TestLrcCaleSurLesCatalogues:
         t = _lrc(_t("X", durations_observees={"spotify_web": 200, "reccobeats": 200}))
         ctx = _ctx(t, obs={t.id: _audio("lrclib", 200)})
         assert pol.arbitrage_etendu(_cas("lrc_douteux", t), t, ctx) is None
+
+
+def _candidate(piste_id, isrc, duree, titre):
+    return {
+        "ecart": {
+            "nature": "link_candidate",
+            "piste": {"id": piste_id, "title": titre, "isrc": isrc, "duration": duree},
+            "album": {"id": 1, "title": "A"},
+            "matched_by": "title_duration_conflict",
+        }
+    }
+
+
+class TestAutrePageDeezer:
+    """DL1 : une deuxième page Deezer au même titre, autre ISRC, à plus de
+    10 s de la page de la fiche que Spotify confirme, est une autre version."""
+
+    def _galaktika(self):
+        return _t(
+            "Galaktika",
+            deezer_id=249496,
+            isrc="FR6V89801681",
+            durations_observees={"deezer": 214, "spotify_web": 214, "reccobeats": 214},
+        )
+
+    def test_galaktika_ne_se_rattache_pas(self):
+        t = self._galaktika()
+        cas = _cas(
+            "deezer_link_candidate",
+            t,
+            _candidate(1548546102, "FRZ029800460", 188, "Galaktika"),
+        )
+        arb = pol.arbitrage_deezer(cas, t, _ctx(t), {}, set())
+        assert arb.action == "normal"
+        assert "FRZ029800460" in arb.raison
+
+    def test_un_petit_ecart_reste_a_l_humain(self):
+        """« Clic clic » : 175 s contre 172 s, peut-être une édition."""
+        t = _t(
+            "Clic Clic",
+            deezer_id=209376,
+            isrc="FR6V80708984",
+            durations_observees={"deezer": 172, "spotify_web": 172, "apple_music": 172},
+        )
+        cas = _cas(
+            "deezer_link_candidate", t, _candidate(15003630, "FR43Q0700005", 175, "Clic clic")
+        )
+        assert pol.arbitrage_deezer(cas, t, _ctx(t), {}, set()) is None
+
+    def test_sans_catalogue_qui_confirme_la_page_de_la_fiche(self):
+        t = self._galaktika()
+        t.durations_observees = {"deezer": 214, "reccobeats": 214}
+        cas = _cas(
+            "deezer_link_candidate",
+            t,
+            _candidate(1548546102, "FRZ029800460", 188, "Galaktika"),
+        )
+        assert pol.arbitrage_deezer(cas, t, _ctx(t), {}, set()) is None

@@ -299,6 +299,36 @@ def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
 # ── Liens Deezer ────────────────────────────────────────────────────────────
 
 
+def _autre_que_la_page_deezer_de_la_fiche(track, piste) -> str | None:
+    """La fiche a déjà SA page Deezer, dont la durée est confirmée par un
+    autre catalogue lu par son ID (Spotify, Apple) ; la piste candidate, une
+    AUTRE page au même titre, a un autre ISRC et s'en écarte de plus de
+    `ECART_VERSION_S` : c'est une autre version (2026-10-31, DL1). Le vote
+    général ne le voyait pas : il remplace la durée Deezer de la fiche par
+    celle de la candidate, et il ne reste que Spotify, une voix. La raison,
+    sinon None."""
+    duree, isrc = piste.get("duration"), (piste.get("isrc") or "").upper()
+    if not (duree and isrc and track.isrc and track.deezer_id):
+        return None
+    if str(track.deezer_id) == str(piste.get("id")) or isrc == str(track.isrc).upper():
+        return None
+    if not titre_d_original(track.title):
+        return None
+    durees = _durees(track)
+    sienne = durees.get("deezer")
+    temoins = [
+        s
+        for s in ("spotify_web", "apple_music")
+        if sienne and durees.get(s) and abs(int(durees[s]) - int(sienne)) <= ECART_FICHIER_S
+    ]
+    if not temoins or abs(int(duree) - int(sienne)) <= ECART_VERSION_S:
+        return None
+    return (
+        f"page de la fiche {track.deezer_id} : {sienne} s = {', '.join(temoins)} ; "
+        f"candidate {piste.get('id')} : {duree} s, ISRC {isrc} ≠ {track.isrc}"
+    )
+
+
 def politique_liens_deezer(cas, track, _ctx):
     """Parution à confirmer : rattacher si l'ISRC est celui de la fiche, ou si
     une durée indépendante la confirme à 2 s ET que les titres désignent le
@@ -351,6 +381,9 @@ def politique_liens_deezer(cas, track, _ctx):
         return Arbitrage(
             "rattacher", "deezer_appliquer", f"{duree} s = {', '.join(accord)}, même titre"
         )
+    autre_version = _autre_que_la_page_deezer_de_la_fiche(track, piste)
+    if autre_version:
+        return Arbitrage("autre version : ne pas rattacher", "normal", autre_version)
     if duree and _dementie({**durees, "deezer": duree}, "deezer", editions, 2) is not None:
         return Arbitrage(
             "autre version : ne pas rattacher",

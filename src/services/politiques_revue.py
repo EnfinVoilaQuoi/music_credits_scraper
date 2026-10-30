@@ -477,6 +477,34 @@ def _part_du_lrc_dans_la_page(track) -> float | None:
     return len(paires & bigrammes(ref)) / len(paires) if paires else None
 
 
+#: Catalogues lus par un IDENTIFIANT (ou le lien) : témoins de l'audio d'un LRC.
+#: Ni YTM (le hit d'une recherche de paroles), ni les sources lues au titre.
+_CATALOGUES_PAR_ID = ("deezer", "spotify_web", "apple_music", "youtube")
+
+
+def _lrc_cale_sur_les_catalogues(track, ctx) -> str | None:
+    """Le LRC LRCLIB de la colonne est calé sur un audio que deux catalogues
+    lus par ID donnent à `ECART_FICHIER_S` près : c'est le LRC de CET
+    enregistrement, et l'écart de mots avec la page tient à la transcription
+    (2026-10-31, mesuré : « Haaland », « Alors on danse », « If I Ain't Got
+    You (Kanye West Remix) »). La raison, sinon None."""
+    from src.utils.lrc_garde import audios_des_lrc
+
+    if ctx is None or (track.lyrics.synced_source or "").casefold() != "lrclib":
+        return None
+    audio = audios_des_lrc(ctx.obs.get(track.id, [])).get("lrclib")
+    if not audio:
+        return None
+    accord = {
+        s: d
+        for s, d in _durees(track).items()
+        if s in _CATALOGUES_PAR_ID and d and abs(int(d) - audio) <= ECART_FICHIER_S
+    }
+    if len({famille(s) for s in accord}) < 2:
+        return None
+    return f"audio LRCLIB {audio} s = " + ", ".join(f"{s} {d} s" for s, d in sorted(accord.items()))
+
+
 def politique_lrc(cas, track, ctx):
     """LRC douteux : celui d'une AUTRE fiche (≥ 90 % de ses paires de mots,
     quelle que soit la part des siennes) se retire ; un LRC minuté au-delà de
@@ -536,6 +564,10 @@ def politique_lrc(cas, track, ctx):
             "retirer_lrc",
             f"LRC jusqu'à {fin} s, fiche {track.duration} s",
         )
+    if cas.detecteur == "lrc_douteux":
+        cale = _lrc_cale_sur_les_catalogues(track, ctx)
+        if cale:
+            return Arbitrage("LRC calé sur l'audio de la fiche : ✓ Normal", "normal", cale)
     return None
 
 
@@ -1301,6 +1333,9 @@ REGLES_ETENDUES = frozenset(
         # morceau (concert, émission, compilation) ; simulée sur la copie,
         # 4 liens, chacun confronté à son titre (aucun n'est le morceau).
         ("video_trop_longue", "retirer_video_recherche"),
+        # 2026-10-31 (LD1, rapport panneau-familles) : LRC LRCLIB calé sur un
+        # audio que 2 catalogues lus par ID confirment ; 3 / 22 sur la copie.
+        ("lrc_douteux", "normal"),
     }
 )
 

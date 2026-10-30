@@ -1060,6 +1060,135 @@ def lrc_d_une_autre_fiche(track, ctx):
     )
 
 
+#: Part des paires de mots d'un texte de REPLI (paroles hors Genius, ou LRC
+#: d'une fiche sans paroles Genius) qu'expliquent les paroles Genius d'une
+#: autre fiche, à partir de laquelle ce texte est peut-être le sien (WIP du
+#: 2026-10-12 : A2H « Pardonne moi » portait les paroles Musixmatch et le LRC
+#: YTM de « Pardonnez-moi », 100 %).
+PAROLES_AUTRE_MIN = 0.8
+#: … et ce texte doit couvrir au moins cette part des paires de l'autre : une
+#: page qui contient TOUT un concert (« Free Larry Hoover Benefit Concert »)
+#: explique n'importe quel morceau joué, sans en être un (mesuré le 2026-10-30).
+PAROLES_AUTRE_COUVERTES_MIN = 0.5
+#: Ressemblance des titres (hors groupes entre parenthèses) au-delà de laquelle
+#: deux fiches sont deux graphies (« Coal lla » / « Caol Ila », « Heaven At
+#: Night » / « Heaven at Nite », « La 5ème saison » / « La Cinquième Saison » :
+#: 0,75 ; les titres étrangers signalés le 2026-10-30 restent sous 0,56).
+GRAPHIE_TITRE_MIN = 0.75
+
+
+def _titres_parents(a: str | None, b: str | None) -> bool:
+    """Même titre une fois les groupes entre parenthèses retirés, l'un contenu
+    dans l'autre (mots entiers : « Fais les backs (Live) » / « 22h31 - Fais
+    les backs » ; parenthèses comprises : « DCR (Dolce Camara Remix) » /
+    « Dolce Camara (Solo) »), ou deux graphies proches."""
+    from src.utils.version_descriptors import meme_socle, titres_confondus
+
+    if meme_socle(a, b) or titres_confondus(a, b) or _titre_sans_feat(a) == _titre_sans_feat(b):
+        return True
+    na = normalize_title(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", a or "")) or normalize_title(a)
+    nb = normalize_title(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", b or "")) or normalize_title(b)
+    if not na or not nb:
+        return False
+    if na == nb or contains_as_words(na, nb) or contains_as_words(nb, na):
+        return True
+    if contains_as_words(na, normalize_title(b)) or contains_as_words(nb, normalize_title(a)):
+        return True
+    return SequenceMatcher(None, na, nb).ratio() >= GRAPHIE_TITRE_MIN
+
+
+def _relation_legitime(track, autre) -> bool:
+    """Deux fiches dont le texte PEUT être commun : ligne sœur, version ou
+    graphie du même morceau, relation Genius dans un sens ou l'autre (remix,
+    reprise, interpolation, sample…), contenant et contenu."""
+    from src.utils.contenants import ids_contenus
+
+    if track.genius_id and autre.genius_id == track.genius_id:
+        return True
+    if _titres_parents(track.title, autre.title):
+        return True
+    if autre.id in ids_contenus(track) or track.id in ids_contenus(autre):
+        return True
+    for a, b in ((track, autre), (autre, track)):
+        for rel in a.relationships or []:
+            if rel.get("track_id") is not None and rel.get("track_id") == b.id:
+                return True
+            if b.genius_url and rel.get("url") == b.genius_url:
+                return True
+            if rel.get("title") and normalize_title(rel["title"]) == normalize_title(b.title):
+                return True
+    return False
+
+
+def _textes_de_repli(track, refs) -> list[tuple[str, str]]:
+    """`[(libellé, texte)]` que rien ne juge : les paroles d'une source autre
+    que Genius, et le LRC d'une fiche sans paroles Genius jugeables (avec
+    elles, `lrc_d_une_autre_fiche` le juge déjà)."""
+    textes = []
+    if track.id in refs:
+        return textes
+    if track.lyrics.text and paroles_de_reference(track.lyrics.text, track.lyrics.source) is None:
+        textes.append((f"paroles {track.lyrics.source or '?'}", track.lyrics.text))
+    if track.lyrics.synced:
+        textes.append((f"LRC {track.lyrics.synced_source or '?'}", track.lyrics.synced))
+    return [(lib, t) for lib, t in textes if len(mots(t)) >= MOTS_MIN]
+
+
+def paroles_d_une_autre_fiche(track, ctx):
+    """Une fiche SANS paroles Genius jugeables porte des paroles de repli
+    (Musixmatch, LyricFind, YTM) ou un LRC dont au moins 80 % des paires de
+    mots sont dans les paroles Genius d'une AUTRE fiche de l'artiste — sans
+    relation qui l'explique (`_relation_legitime`). Rien ne juge ce texte : un
+    DÉTECTEUR, pas une règle (des vols probables : « Pardonne moi » ←
+    « Pardonnez-moi », Shurik'n « Interlude » ← « Samuraï »). Le refus existe
+    (`refuser_paroles_ytm`, retrait du LRC)."""
+    refs = _references_bigrammes(ctx)
+    textes = _textes_de_repli(track, refs)
+    if not textes:
+        return None
+    par_id = ctx.memo("par_id", lambda: {t.id: t for t in ctx.disco})
+    index = _index_bigrammes(ctx)
+    meilleur, autre, quels = 0.0, None, []
+    for libelle, texte in textes:
+        paires = bigrammes(texte)
+        if not paires:
+            continue
+        votes: dict[int, int] = {}
+        for b in paires:
+            for tid in index.get(b, ()):
+                votes[tid] = votes.get(tid, 0) + 1
+        for tid in sorted(votes, key=votes.get, reverse=True)[:_CANDIDATES]:
+            t = par_id[tid]
+            if t is track or t.id == track.id:
+                continue
+            les_siens = refs[tid][1]
+            commun = len(les_siens & paires)
+            part = commun / len(paires)
+            if (
+                part < PAROLES_AUTRE_MIN
+                or commun / len(les_siens) < PAROLES_AUTRE_COUVERTES_MIN
+                or _relation_legitime(track, t)
+            ):
+                continue
+            if autre is not None and t.id == autre.id:
+                meilleur = max(meilleur, part)
+                quels.append(libelle)
+            elif part > meilleur:
+                meilleur, autre, quels = part, t, [libelle]
+    if autre is None:
+        return None
+    return (
+        f"{' et '.join(sorted(set(quels)))} : ceux de « {autre.title} » ? "
+        f"({meilleur:.0%} de leurs paires de mots dans ses paroles Genius)",
+        {
+            "autre": autre.id,
+            "part": round(meilleur, 2),
+            "textes": sorted(set(quels)),
+            "empreinte": f"autre:{autre.genius_id or autre.id}",
+        },
+    )
+
+
 def page_sans_info(track, _ctx=None):
     """Page Genius lue qui ne dit rien (🕳️) : morceau poubelle ou vrai inédit."""
     if sans_info(track):
@@ -2688,6 +2817,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("bpm", "BPM en désaccord", "🥁", bpm_desaccord),
     Detecteur("tonalite", "Tonalité en désaccord", "🎹", tonalite_desaccord),
     Detecteur("lrc_autre_fiche", "LRC d'une autre fiche", "📝", lrc_d_une_autre_fiche, formel=True),
+    Detecteur(
+        "paroles_autre_fiche",
+        "Paroles ou LRC de repli d'une autre fiche",
+        "📝",
+        paroles_d_une_autre_fiche,
+    ),
     Detecteur("lrc_douteux", "LRC douteux (40-60 %)", "📝", lrc_douteux),
     Detecteur(
         "lrc_live", "LRC douteux — live, Grünt, COLORS, OKLM, Skyrock", "🎤", lrc_session_live

@@ -33,6 +33,17 @@ class TestCatalogue:
         assert _codes(_cas("deezer_absent", track_id=None)) == ["ecarts_deezer"]
         assert _codes(_cas("sans_info")) == []
 
+    def test_paroles_d_une_autre_fiche_selon_le_texte(self):
+        """Le geste suit le texte en cause : paroles de secours, LRC, ou les deux."""
+        tout = ["LRC YouTube Music", "paroles Source: Musixmatch"]
+        assert _codes(_cas("paroles_autre_fiche", preuves={"textes": tout})) == [
+            "refuser_paroles",
+            "retirer_lrc",
+        ]
+        assert _codes(_cas("paroles_autre_fiche", preuves={"textes": ["LRC LRCLIB"]})) == [
+            "retirer_lrc"
+        ]
+
     def test_un_alias_se_confirme_une_formation_s_arbitre(self):
         alias = _cas("liens_proposes", None, {"nom": "Ye", "kind": "alias"})
         formation = _cas("liens_proposes", None, {"nom": "IAM", "kind": "member_of"})

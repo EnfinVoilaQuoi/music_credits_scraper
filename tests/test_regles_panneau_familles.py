@@ -212,3 +212,43 @@ def test_instrumental_deezer_marque_normal_sans_fiche_puis_retabli(data_manager,
     ed.enregistrer_signalements(data_manager, artiste, bilan)
     assert [c.detecteur for c in revue.analyser(data_manager, artiste).actifs] == ["deezer_version"]
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
+class TestSpotifyConfirmeParUnAutreCatalogue:
+    """SP1 : la durée de l'ID Spotify démentie par un témoin, mais confirmée
+    par Apple ou Deezer lus par leur ID, est celle d'une autre édition."""
+
+    def test_take_em_high(self):
+        t = _t(
+            "Take ’Em High",
+            spotify_id="SP",
+            durations_observees={
+                "apple_music": 179,
+                "deezer": 207,
+                "reccobeats": 207,
+                "songbpm": 179,
+                "spotify_web": 179,
+                "ytmusic": 208,
+            },
+        )
+        cas = _cas("duree_spotify", t)
+        assert pol.arbitrage_valide(cas, t, None) is None
+        assert pol.arbitrage_etendu(cas, t, None).action == "normal"
+
+    def test_coeur_de_bombe_reste_a_l_humain(self):
+        """Spotify 288 s, Deezer 263 s : aucun autre catalogue pour Spotify."""
+        t = _t(
+            "Cœur de bombe",
+            spotify_id="SP",
+            durations_observees={"deezer": 263, "reccobeats": 263, "spotify_web": 288},
+        )
+        assert pol.arbitrage_etendu(_cas("duree_spotify", t), t, None) is None
+
+    def test_discogs_ne_confirme_pas(self):
+        """« Deuces (Remix) » : Spotify 339 = Discogs 338, contre l'audio Topic 404."""
+        t = _t(
+            "Deuces (Remix)",
+            spotify_id="SP",
+            durations_observees={"discogs": 338, "spotify_web": 339, "youtube": 404},
+        )
+        assert pol.arbitrage_etendu(_cas("duree_spotify", t), t, None) is None

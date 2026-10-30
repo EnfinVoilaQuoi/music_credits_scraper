@@ -1379,6 +1379,9 @@ REGLES_ETENDUES = frozenset(
         # 2026-10-31 (LD1, rapport panneau-familles) : LRC LRCLIB calé sur un
         # audio que 2 catalogues lus par ID confirment ; 3 / 22 sur la copie.
         ("lrc_douteux", "normal"),
+        # 2026-10-31 (SP1) : ID Spotify confirmé par Apple ou Deezer lus par
+        # leur ID ; 2 / 8 sur la copie (Take 'Em High, Ghetto).
+        ("duree_spotify", "normal"),
     }
 )
 
@@ -1589,6 +1592,32 @@ def politique_songbpm_version(cas, track, ctx):
     return _SONGBPM_PAR_LE_VOTE(cas, track, ctx)
 
 
+def politique_spotify_confirme(cas, track, _ctx):
+    """La durée de l'ID Spotify, démentie par un témoin, est CONFIRMÉE par un
+    autre catalogue lu par SON identifiant (Apple, Deezer) à `ECART_FICHIER_S`
+    près : l'ID est le bon, le témoin contraire décrit une autre édition
+    (2026-10-31, SP1 : « Take 'Em High » Spotify 179 = Apple 179 contre Deezer
+    207 ; « Ghetto » Spotify 219 = Apple 220 contre Deezer 204). ✓ Normal."""
+    if cas.detecteur != "duree_spotify" or track is None:
+        return None
+    durees = _durees(track)
+    d = durees.get("spotify_web")
+    if not d:
+        return None
+    temoins = [
+        f"{s} {durees[s]} s"
+        for s in ("apple_music", "deezer")
+        if durees.get(s) and abs(int(durees[s]) - int(d)) <= ECART_FICHIER_S
+    ]
+    if not temoins:
+        return None
+    return Arbitrage(
+        "ID Spotify confirmé par un autre catalogue : ✓ Normal",
+        "normal",
+        f"spotify_web {d} s = {', '.join(temoins)}",
+    )
+
+
 def politique_video_autre_chaine(cas, track, _ctx):
     """Le détecteur exige déjà les deux témoins (chaîne d'un artiste étranger,
     durée contredite par toutes celles de la fiche) : le lien part, par un
@@ -1617,6 +1646,7 @@ def politique_video_trop_longue(cas, track, _ctx):
 
 
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "duree_spotify": politique_spotify_confirme,
     "video_trop_longue": politique_video_trop_longue,
     "video_autre_chaine": politique_video_autre_chaine,
     "generique_duree": politique_generique_distincts,

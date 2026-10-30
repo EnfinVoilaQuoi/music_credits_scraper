@@ -512,3 +512,71 @@ def test_apparition_creee_par_regle_puis_retablie(data_manager, monkeypatch):
     artiste.tracks = data_manager.get_artist_tracks(artiste.id)
     revue_auto.retablir(data_manager, artiste, correction)
     assert "600K" not in {t.title for t in data_manager.get_artist_tracks(artiste.id)}
+
+
+class TestIdSpotifyProposeRefuse:
+    """IP1 / IP2 : un ID proposé (par SongBPM) que les preuves montrent faux
+    est refusé À LA POSE ; un doute reste à l'humain. Identités relues dans le
+    brut le 2026-10-30."""
+
+    def _juger(self, t, nom, duree):
+        cas = _cas("id_spotify_propose", t, {"spotify_id_propose": "SID"})
+        return pol.arbitrage_id_propose(
+            cas, t, None, lire=lambda _s: {"name": nom, "duration": duree}, gate=lambda *_: True
+        )
+
+    def test_oublie_spotify_sert_je_n_oublie_pas(self):
+        t = _t(
+            "Oublie",
+            album="Double Face 5",
+            durations_observees={"songbpm": 204, "youtube_video": 210},
+        )
+        arb = self._juger(t, "Je n'oublie pas", 204)
+        assert arb.action == "refuser_id" and "oublie pas" in arb.raison
+
+    def test_jacques_chirac_2_0(self):
+        t = _t("Jacques Chirac", durations_observees={"songbpm": 271, "youtube_video": 185})
+        assert self._juger(t, "Jacques Chirac 2.0", 271).action == "refuser_id"
+
+    def test_version_day_n_nite_main(self):
+        """Une version ne reçoit jamais d'ID par règle, mais un refus montré passe."""
+        t = _t(
+            "Day ‘n’ Nite (main)", album="A Kid Named Cudi", durations_observees={"songbpm": 221}
+        )
+        assert self._juger(t, "Day 'N' Nite (Nightmare)", 221).action == "refuser_id"
+
+    def test_ip2_un_catalogue_dement_la_duree(self):
+        t = _t(
+            "Pursuit of Happiness [Steve Aoki Remix] [Mixed]",
+            durations_observees={"apple_music": 165},
+        )
+        arb = self._juger(t, "Pursuit Of Happiness - Extended Steve Aoki Remix", 374)
+        assert arb.action == "refuser_id" and "apple_music 165" in arb.raison
+
+    def test_heartless_les_mots_en_plus_sont_dans_l_album(self):
+        t = _t(
+            "Heartless",
+            album="The Voice: Season 1 (The Highlights)",
+            durations_observees={"songbpm": 208},
+        )
+        assert self._juger(t, "Heartless - The Voice Performance", 208) is None
+
+    def test_une_duree_independante_garde_le_doute(self):
+        """Le clip confirme la durée de l'ID : rien n'est montré."""
+        t = _t("Oublie", durations_observees={"songbpm": 204, "youtube_video": 204})
+        assert self._juger(t, "Je n'oublie pas", 204) is None
+
+    def test_plentiful_et_comfy_restent_a_l_humain(self):
+        p = _t(
+            "Plentiful (Originals)",
+            durations_observees={"deezer": 181, "manual": 188, "reccobeats": 188, "ytmusic": 189},
+        )
+        assert self._juger(p, "Plentiful (Originals) (feat. Pusha T)", 189) is None
+        c = _t("Comfy", durations_observees={"deezer": 206, "reccobeats": 211, "ytmusic": 212})
+        cas = _cas("id_spotify_propose", c, {"spotify_id_propose": "SID"})
+        lire = lambda _s: {"name": "Comfy", "duration": 212}  # noqa: E731
+        assert pol.arbitrage_id_propose(cas, c, None, lire=lire, gate=lambda *_: False) is None
+
+    def test_une_version_n_est_jamais_posee(self):
+        t = _t("Testify (Instrumental)", durations_observees={"deezer": 157, "youtube": 159})
+        assert self._juger(t, "Testify (Instrumental)", 157) is None

@@ -231,6 +231,69 @@ def politique_durees(minimum: int) -> Callable:
 # ── ID Spotify proposé par SongBPM ──────────────────────────────────────────
 
 
+#: Mots qui ne font pas un autre titre (articles, liaison, crédit).
+_MOTS_VIDES = frozenset(
+    {"the", "a", "an", "le", "la", "les", "de", "du", "des", "of", "and", "et", "feat", "ft"}
+)
+
+
+def _mots_de(texte: str | None) -> set[str]:
+    import unicodedata
+
+    t = unicodedata.normalize("NFKD", texte or "").encode("ascii", "ignore").decode().casefold()
+    return set(re.findall(r"[a-z0-9]+", t))
+
+
+def refus_id_propose(track, identite: dict) -> Arbitrage | None:
+    """Refus À LA POSE d'un ID proposé (2026-10-31), quand les preuves
+    MONTRENT qu'il n'est pas celui de la fiche :
+      · IP2 — un catalogue lu par son identifiant (Apple, Deezer) s'écarte de
+        la durée de l'ID de plus de `ECART_VERSION_S`, et aucune durée
+        indépendante ne la confirme (« Pursuit of Happiness [Steve Aoki
+        Remix] [Mixed] » : Apple 165 s, l'ID sert l'« Extended » de 374 s) ;
+      · IP1 — Spotify sert un AUTRE titre (des mots en plus, « Je n'oublie
+        pas » pour « Oublie », « Jacques Chirac 2.0 »), aucune durée
+        indépendante (clip compris) ne confirme celle de l'ID, et les mots en
+        plus ne sont pas dans l'album de la fiche (« Heartless - The Voice
+        Performance » d'une fiche de *The Voice: Season 1* : sans doute juste).
+    None : rien de montré, l'humain."""
+    from src.services.revue import _titre_sans_feat
+    from src.utils.version_descriptors import titres_equivalents
+
+    nom, servie = identite.get("name") or "", identite.get("duration")
+    durees = _durees(track)
+    confirment = [
+        s
+        for s, d in durees.items()
+        if s not in FRAGILES and s not in ("heritage", "reccobeats") and d and servie
+        if abs(int(d) - int(servie)) <= ECART_FICHIER_S
+    ]
+    if confirment:
+        return None
+    contre = [
+        f"{s} {durees[s]} s"
+        for s in ("apple_music", "deezer")
+        if durees.get(s) and servie and abs(int(durees[s]) - int(servie)) > ECART_VERSION_S
+    ]
+    servi = f"Spotify sert « {nom} » ({servie} s)"
+    if contre:
+        return Arbitrage(
+            "un catalogue dément la durée de l'ID : refuser",
+            "refuser_id",
+            f"{servi} ; {', '.join(contre)}",
+        )
+    if not nom or titres_equivalents(_titre_sans_feat(nom), _titre_sans_feat(track.title)):
+        return None
+    en_plus = _mots_de(nom) - _mots_de(track.title) - _MOTS_VIDES
+    if not en_plus or en_plus & _mots_de(track.album):
+        return None
+    return Arbitrage(
+        "Spotify sert un autre titre : refuser l'ID",
+        "refuser_id",
+        f"{servi} ; mots en plus : {', '.join(sorted(en_plus))} ; aucune durée indépendante",
+    )
+
+
 def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
     """Une fiche SANS ID (une fiche à un AUTRE ID n'est jamais tranchée : autre
     édition ou ID faux, l'humain). `lire(sid)` rend l'identité de la page embed
@@ -285,7 +348,7 @@ def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
             and abs(d - duree_id) <= ECART_FICHIER_S
         )
         if not accord:
-            return None
+            return refus_id_propose(track, identite)
         return Arbitrage(
             "poser l'ID",
             "poser_id",
@@ -956,10 +1019,13 @@ def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | N
     lue (réseau, gardée au brut) et le gate est celui des runs."""
     if cas.detecteur != "id_spotify_propose" or track is None:
         return None
-    if not titre_d_original(track.title):
-        return None
     if lire is None:
         from src.utils.spotify_identity import lire_identite_http as lire
+    if not titre_d_original(track.title):
+        # Une version ne reçoit jamais d'ID par règle ; un refus MONTRÉ (IP1 /
+        # IP2), si : il ne pose rien et se rétablit.
+        identite = None if track.spotify_id else lire(cas.preuves.get("spotify_id_propose"))
+        return refus_id_propose(track, identite) if identite else None
     if gate is None:
         from src.utils.spotify_identity import valider_identite
 

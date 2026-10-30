@@ -28,6 +28,10 @@ morceaux différents numérotés par deux sources pour deux éditions (A2H
 « Trivette » / « Skit (Qui est trivette) », Josman « MOONROCK » / « 3ein »).
 Sur les 16 👯 du panneau : AUCUN n'avait de disque numéroté en commun. D'où
 l'usage : preuve d'APPOINT d'un 👯, jamais seule.
+Remesuré le 2026-10-30 : 7 paires de fiches à la même place (3 doublons fiche
+Genius / fiche sans page, 3 liens de parution faux, 1 à juger par Genius) —
+toutes des défauts, montrées au panneau (📀 `revue.meme_place`), jamais
+tranchées par la place seule.
 """
 
 from __future__ import annotations
@@ -109,6 +113,20 @@ def appoint_emplacement(a: list[dict], b: list[dict]) -> str | None:
                 " : deux morceaux"
             )
     return deux
+
+
+def cle_d_emplacement(p: dict) -> tuple | None:
+    """PUR. `(parution, disque, numéro, numérotation)` d'une place COMPARABLE
+    (`SOURCES_COMPARABLES`, Deezer et Apple confondus), None sinon : deux
+    fiches à la même clé occupent le même emplacement du même disque."""
+    if p.get("track_number") is None or p.get("position_source") not in SOURCES_COMPARABLES:
+        return None
+    return (
+        p["release_id"],
+        p.get("disc_number") or 1,
+        p["track_number"],
+        _numerotation(p["position_source"]),
+    )
 
 
 def _piste(disque: int, numero: int) -> str:

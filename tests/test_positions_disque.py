@@ -274,3 +274,75 @@ def test_deezer_et_apple_se_comparent_entre_eux():
     dit = appoint_emplacement([_p(1, 7, "deezer")], [_p(1, 8, "apple_music")])
     assert dit and "deux morceaux" in dit
     assert appoint_emplacement([_p(1, 7, "deezer")], [_p(1, 7, "musicbrainz")]) is None
+
+
+class TestMemePlace:
+    """📀 `meme_place` (2026-10-30) : deux fiches au même emplacement d'un même
+    disque — un seul morceau, ou un lien de parution faux. Mesuré sur toute la
+    base : 7 paires, 3 doublons (fiche Genius / fiche sans page), 3 liens
+    faux, 1 à juger par Genius ; aucun des 13 👯 n'a de place en commun."""
+
+    @staticmethod
+    def _fiche(titre, tid, duree, genius_id=None):
+        t = Track(title=titre, artist=Artist(name="Kid Cudi"))
+        t.id, t.duration, t.genius_id = tid, duree, genius_id
+        return t
+
+    def _ctx(self, *fiches, places):
+        ctx = revue.contexte(fiches)
+        ctx.positions = places
+        return ctx
+
+    def test_cle_d_emplacement_deezer_et_apple_confondus(self):
+        from src.utils.positions_disque import cle_d_emplacement
+
+        assert cle_d_emplacement(_p(1, 7, "deezer")) == cle_d_emplacement(_p(1, 7, "apple_music"))
+        assert cle_d_emplacement(_p(1, 7, "genius")) is None
+        assert cle_d_emplacement(_p(1, None)) is None
+
+    def test_fiche_genius_et_fiche_sans_page_a_la_meme_place(self):
+        """Kid Cudi « Heaven at Nite » / « Heaven At Night » (fiche Deezer d'une
+        autre édition de *A Kid Named Cudi*) : même place, même durée."""
+        a = self._fiche("Heaven at Nite", 1, 196, genius_id=4052)
+        b = self._fiche("Heaven At Night", 2, 196)
+        places = {1: [_p(9, 16, "apple_music")], 2: [_p(9, 16, "deezer")]}
+        ctx = self._ctx(a, b, places=places)
+        motif, preuves = revue.meme_place(a, ctx)
+        assert "un seul morceau" in motif and preuves["autres"] == [2]
+        assert revue.meme_place(b, ctx) is None  # un cas par paire
+
+    def test_durees_ecartees_un_lien_faux(self):
+        """« Par Amour » de Dinos (216 s) rangé à la place de « Par amour » de
+        Diam's (403 s) sur *Dans ma bulle*."""
+        a = self._fiche("Par Amour", 1, 216, genius_id=1)
+        b = self._fiche("Par amour", 2, 403, genius_id=2)
+        a.is_featuring, a.primary_artist_name = True, "Dinos"
+        ctx = self._ctx(a, b, places={1: [_p(9, 9)], 2: [_p(9, 9, "apple_music")]})
+        assert "lien de parution est faux" in revue.meme_place(a, ctx)[0]
+
+    def test_deux_versions_un_lien_faux(self):
+        a = self._fiche("Loup noir", 1, 160, genius_id=1)
+        b = self._fiche("Loup noir (A COLORS SHOW)", 2, 162, genius_id=2)
+        ctx = self._ctx(a, b, places={1: [_p(9, 1)], 2: [_p(9, 1, "apple_music")]})
+        assert "deux versions" in revue.meme_place(a, ctx)[0]
+
+    def test_ni_place_differente_ni_autre_parution_ni_meme_titre(self):
+        a = self._fiche("A", 1, 100, genius_id=1)
+        b = self._fiche("B", 2, 100, genius_id=2)
+        c = self._fiche("a", 3, 100, genius_id=3)  # même titre : aux 👯
+        places = {1: [_p(9, 1)], 2: [_p(9, 2), _p(8, 1)], 3: [_p(9, 1, "apple_music")]}
+        ctx = self._ctx(a, b, c, places=places)
+        assert revue.meme_place(a, ctx) is None
+        assert revue.meme_place(b, ctx) is None
+
+    def test_numeros_non_comparables_ignores(self):
+        a = self._fiche("A", 1, 100, genius_id=1)
+        b = self._fiche("B", 2, 100, genius_id=2)
+        ctx = self._ctx(a, b, places={1: [_p(9, 1, "genius")], 2: [_p(9, 1, "genius")]})
+        assert revue.meme_place(a, ctx) is None
+
+    def test_le_cas_ouvre_la_fusion(self):
+        from src.services.revue_actions import actions_pour
+
+        cas = revue.Cas("meme_place", 1, "A", "m", 0, {"autres": [2]}, "k")
+        assert [a.code for a in actions_pour(cas)] == ["fusionner"]

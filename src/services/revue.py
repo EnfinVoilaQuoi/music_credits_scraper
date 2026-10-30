@@ -74,6 +74,7 @@ from src.utils.title_matching import (
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import (
     Kind,
+    meme_version,
     meme_version_publiee,
     parse_variant,
     reeditions_evidentes,
@@ -1192,6 +1193,91 @@ def doublon_inedit(track, ctx):
     gardee = paires.get(id(track))
     if gardee is not None:
         return (f"inédit en double de « {gardee.title} »", {"garde": gardee.id})
+    return None
+
+
+def _index_des_places(ctx) -> dict[tuple, list]:
+    """`{emplacement: [fiche]}` des places COMPARABLES de la discographie."""
+    from src.utils.positions_disque import cle_d_emplacement
+
+    par_id = {t.id: t for t in ctx.disco if t.id is not None}
+    index: dict[tuple, list] = {}
+    for tid, places in ctx.positions.items():
+        if tid not in par_id:
+            continue
+        for p in places:
+            cle = cle_d_emplacement(p)
+            if cle is not None and par_id[tid] not in index.setdefault(cle, []):
+                index[cle].append(par_id[tid])
+    return index
+
+
+#: Deux durées d'une même prise (± 2 s, comme le départage des prises du gate
+#: Spotify et la garde `titre_annee`).
+MEME_PRISE_S = 2
+
+
+def _meme_cle_doublon(a, b) -> bool:
+    return (cle_doublon(a.title), _interprete(a)) == (cle_doublon(b.title), _interprete(b))
+
+
+def verdict_de_place(a, b) -> str:
+    """Ce que disent deux fiches à la même place : la place seule ne prouve rien
+    (mesuré le 2026-10-30 sur toute la base : 6 paires, 3 doublons, 2 liens de
+    parution faux — « Par Amour » de Dinos rangé sur *Dans ma bulle* de Diam's,
+    « Loup noir (A COLORS SHOW) » sur le single « Loup noir » —, 1 à juger par
+    Genius), d'où un cas à l'humain, la durée et la version en appui."""
+    if a.duration and b.duration and abs(a.duration - b.duration) > TOLERANCE_S:
+        return (
+            f"durées {a.duration} s / {b.duration} s : deux morceaux, un lien de parution est faux"
+        )
+    if not meme_version(a.title, b.title):
+        return "deux versions : un lien de parution est faux"
+    if not (a.duration and b.duration):
+        return "même version, durée inconnue"
+    if abs(a.duration - b.duration) > MEME_PRISE_S:
+        return f"même version, durées voisines ({a.duration} s / {b.duration} s)"
+    deux_pages = bool(a.genius_id and b.genius_id)
+    return f"même durée ({a.duration} s), même version : un seul morceau ?" + (
+        " — deux pages Genius, à juger d'abord par ce qu'en dit Genius" if deux_pages else ""
+    )
+
+
+def meme_place(track, ctx):
+    """Deux fiches de l'artiste au MÊME emplacement d'un même disque (même
+    parution, même disque, même numéro, numérotation comparable : Deezer ou
+    Apple — 2026-10-30, WIP « le numéro de piste comme preuve »). Un seul
+    morceau, ou un lien de parution faux : jamais deux morceaux à la même
+    place. Les paires au même titre sont aux 👯, qui affichent déjà la place
+    (`_appoint_des_places`). Une ligne de rôle secondaire en est (« Par Amour »
+    de Dinos, choeurs de Diam's : son lien de parution peut être faux aussi).
+    UN cas par paire, porté par la fiche d'identifiant le plus bas."""
+    from src.utils.positions_disque import cle_d_emplacement
+
+    if track.id is None:
+        return None
+    index = ctx.memo("places", lambda: _index_des_places(ctx))
+    for p in ctx.positions.get(track.id) or []:
+        cle = cle_d_emplacement(p)
+        for autre in index.get(cle, []) if cle else []:
+            if (
+                autre is track
+                or autre.id < track.id
+                or (autre.genius_id and autre.genius_id == track.genius_id)
+                or _meme_cle_doublon(autre, track)
+            ):
+                continue
+            piste = f"{cle[1]}-{cle[2]}" if cle[1] != 1 else str(cle[2])
+            return (
+                f"même place que « {autre.title} » sur « {p['title']} » (piste {piste}) — "
+                + verdict_de_place(track, autre),
+                {
+                    "autres": [autre.id],
+                    "parution": cle[0],
+                    "piste": piste,
+                    "empreinte": f"{autre.genius_id or f't{autre.id}'}|{cle[0]}|{piste}",
+                },
+            )
     return None
 
 
@@ -2374,6 +2460,7 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("doublon", "Doublon de titre", "👯", doublon_de_titre),
     Detecteur("doublon_lrc", "Même morceau ? (LRC d'une version sœur)", "👯", doublon_par_lrc),
     Detecteur("doublon_inedit", "Inédit en double", "👻", doublon_inedit),
+    Detecteur("meme_place", "Deux fiches à la même place d'un disque", "📀", meme_place),
     Detecteur(
         "credits_api",
         "Crédits 🎫 non confirmés",

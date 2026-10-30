@@ -326,13 +326,6 @@ class TestCandidatsArtiste:
         yt = _FauxYT(search=requests.RequestException("timeout"))
         assert _api(yt).get_artist_channel_candidates("Jul") == []
 
-    def test_premier_candidat_expose(self):
-        yt = _FauxYT(search=[{"browseId": "UC1", "artist": "Jul"}])
-        assert _api(yt).get_artist_channel_id("Jul") == "UC1"
-
-    def test_aucun_candidat(self):
-        assert _api(_FauxYT(search=[])).get_artist_channel_id("Inconnu") is None
-
 
 class TestInfosArtiste:
     def _artiste(self, albums=(), singles=(), monthly=None):
@@ -380,14 +373,6 @@ class TestInfosArtiste:
     def test_erreur_reseau(self):
         yt = _FauxYT(artist=requests.RequestException("timeout"))
         assert _api(yt).get_artist_info("UC1") == {"albums": [], "monthly_listeners": None}
-
-    def test_albums_seuls(self):
-        yt = self._artiste(albums=[{"title": "A", "browseId": "B1"}])
-        assert _api(yt).get_artist_albums("UC1") == [{"title": "A", "browseId": "B1"}]
-
-    def test_albums_erreur_reseau(self):
-        yt = _FauxYT(artist=requests.RequestException("timeout"))
-        assert _api(yt).get_artist_albums("UC1") == []
 
 
 class TestMorceauxDAlbum:

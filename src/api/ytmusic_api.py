@@ -123,8 +123,8 @@ class YTMusicAPI:
 
     Usage recommandé (quota-optimal) :
         api = YTMusicAPI()
-        channel_id = api.get_artist_channel_id(artist_name)
-        albums = api.get_artist_albums(channel_id)
+        channel_id, _nom = api.get_artist_channel_candidates(artist_name)[0]
+        albums = api.get_artist_info(channel_id)["albums"]
 
         # Étape 1 : collecter tous les tracks via ytmusicapi (pas de quota)
         all_tracks = {}
@@ -247,11 +247,6 @@ class YTMusicAPI:
             logger.warning(f"infer_channel_from_videos échec: {e}")
             return None
 
-    def get_artist_channel_id(self, artist_name: str) -> str | None:
-        """Recherche un artiste et retourne son browseId YTMusic."""
-        candidates = self.get_artist_channel_candidates(artist_name)
-        return candidates[0][0] if candidates else None
-
     def get_artist_channel_candidates(self, artist_name: str, limit: int = 5) -> list:
         """
         Retourne les canaux candidats [(browseId, nom), ...], matchs exacts
@@ -329,30 +324,6 @@ class YTMusicAPI:
         except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
             logger.error(f"Erreur get_artist_info ({channel_id}): {e}")
             return {"albums": [], "monthly_listeners": None}
-
-    def get_artist_albums(self, channel_id: str) -> list[dict]:
-        """Retourne albums + singles d'un artiste.
-
-        Returns:
-            [{'title': str, 'browseId': str}]
-        """
-        try:
-            artist = self.yt.get_artist(channel_id)
-            items = artist.get("albums", {}).get("results", []) + artist.get("singles", {}).get(
-                "results", []
-            )
-            result = [
-                {"title": a["title"], "browseId": a["browseId"]} for a in items if "browseId" in a
-            ]
-            logger.info(f"YTMusic: {len(result)} album(s)/single(s) trouvés pour {channel_id}")
-            return result
-        except json.JSONDecodeError as e:
-            # Réponse VIDE : le bridage de YTM (cf. `get_album_tracks_raw`).
-            logger.warning(f"YTM bridé : réponse vide (get_artist_albums {channel_id}) ({e})")
-            return []
-        except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
-            logger.error(f"Erreur get_artist_albums ({channel_id}): {e}")
-            return []
 
     # ── Étape 1 : tracks raw (ytmusicapi, zéro quota YT) ──────────────────────
 

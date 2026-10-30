@@ -116,6 +116,24 @@ def total_ytm(propres: dict, compteurs: dict[str, int], exclues=frozenset()) -> 
     return sum(comptees) if comptees else None
 
 
+def ecart_spotify_principal(colonne: str | None, lignes: dict[str, bool]) -> str | None:
+    """PUR. Le désaccord entre `tracks.spotify_id` (`colonne`) et les lignes
+    `track_spotify_ids` de la fiche (`lignes` : {spotify_id: is_primary}),
+    ou None. `is_primary` MATÉRIALISE la colonne : l'ID principal a sa ligne,
+    principale, et elle seule. Partagé par l'invariant d'audit
+    `spotify_principal` et son rattrapage (`aligner_ids_spotify_principaux`)."""
+    autres = sorted(s for s, prim in lignes.items() if prim and s != colonne)
+    if colonne and colonne not in lignes:
+        motif = f"ID {colonne} sans sa ligne"
+    elif colonne and not lignes[colonne]:
+        motif = f"ID {colonne} : ligne non principale"
+    elif autres:
+        motif = "ligne principale ≠ colonne"
+    else:
+        return None
+    return motif + (f" (principale : {', '.join(autres)})" if autres else "")
+
+
 def release_identity_key(
     title: str,
     scope: str,
@@ -3444,6 +3462,23 @@ class TrackRepository:
         )
         # Après la durée et les paroles : le verdict LRC en dépend.
         self._rearbitrer_lrc(conn, track_id)
+        # L'ID PRINCIPAL a toujours sa ligne : `is_primary` matérialise la
+        # colonne, il ne peut pas la matérialiser sans ligne. Un producteur qui
+        # pose la colonne sans `record_pending` la laissait seule (2026-10-30 :
+        # 88 fiches d'A2H, ID posés par SongBPM le 2026-09-08 avant
+        # `_spotify_ids_pending`). Provenance inconnue ici : NULL (« non
+        # tracée ») ; `record_track_spotify_ids`, appelé ensuite, la complète.
+        conn.execute(
+            text(
+                "INSERT INTO track_spotify_ids "
+                "(track_id, spotify_id, source, is_primary, seen_at, kind) "
+                "SELECT t.id, t.spotify_id, NULL, 1, :now, 'edition' FROM tracks t "
+                "WHERE t.id = :t AND t.spotify_id IS NOT NULL AND t.spotify_id <> '' "
+                "AND NOT EXISTS (SELECT 1 FROM track_spotify_ids s "
+                "WHERE s.track_id = t.id AND s.spotify_id = t.spotify_id)"
+            ),
+            {"t": track_id, "now": datetime.now()},
+        )
         conn.execute(
             text(
                 "UPDATE track_spotify_ids SET is_primary = "
@@ -7097,6 +7132,85 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur record_track_spotify_ids (track_id={track_id}): {e}")
             return 0
+
+    def ids_spotify_principaux_desalignes(self) -> list[dict[str, Any]]:
+        """Fiches dont `tracks.spotify_id` n'a pas sa ligne PRINCIPALE dans
+        `track_spotify_ids` : la colonne sans ligne, sa ligne non principale,
+        ou une autre ligne marquée principale. Lecture seule ; rend
+        `[{"track_id", "artiste", "titre", "spotify_id", "ligne", "autres_principales"}]`
+        (`ligne` : None sans ligne, sinon son `is_primary`). Même définition que
+        l'invariant d'audit `spotify_principal`."""
+        with self.engine.connect() as conn:
+            fiches = (
+                conn.execute(
+                    text(
+                        "SELECT t.id, t.title, t.spotify_id, a.name AS artiste FROM tracks t "
+                        "JOIN artists a ON a.id = t.artist_id "
+                        "WHERE (t.spotify_id IS NOT NULL AND t.spotify_id <> '') "
+                        "OR t.id IN (SELECT track_id FROM track_spotify_ids WHERE is_primary = 1) "
+                        "ORDER BY a.name, t.id"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            lignes: dict[int, dict[str, bool]] = {}
+            for r in conn.execute(
+                text("SELECT track_id, spotify_id, is_primary FROM track_spotify_ids")
+            ):
+                lignes.setdefault(r[0], {})[r[1]] = bool(r[2])
+        ecarts = []
+        for f in fiches:
+            colonne = f["spotify_id"] or None
+            siennes = lignes.get(f["id"], {})
+            if ecart_spotify_principal(colonne, siennes) is None:
+                continue
+            ecarts.append(
+                {
+                    "track_id": f["id"],
+                    "artiste": f["artiste"],
+                    "titre": f["title"],
+                    "spotify_id": colonne,
+                    "ligne": siennes.get(colonne) if colonne else None,
+                    "autres_principales": sorted(
+                        s for s, prim in siennes.items() if prim and s != colonne
+                    ),
+                }
+            )
+        return ecarts
+
+    def aligner_ids_spotify_principaux(self, provenances: dict[str, str] | None = None) -> int:
+        """Rattrapage de `ids_spotify_principaux_desalignes` : la ligne
+        manquante de l'ID principal est posée (provenance tirée de
+        `provenances` {spotify_id: source}, sinon NULL — « non tracée »), et
+        `is_primary` recopie la colonne. ADDITIF : aucune ligne ni colonne
+        n'est retirée. Passe par `_ecrire` (recalcul de chaque fiche, sœurs
+        comprises). Rend le nombre de fiches traitées."""
+        ecarts = self.ids_spotify_principaux_desalignes()
+        if not ecarts:
+            return 0
+        provenances = provenances or {}
+        now = datetime.now()
+        with self._ecrire() as conn:
+            for e in ecarts:
+                if e["spotify_id"] and e["ligne"] is None:
+                    conn.execute(
+                        text(
+                            "INSERT INTO track_spotify_ids "
+                            "(track_id, spotify_id, source, is_primary, seen_at, kind) "
+                            "VALUES (:tid, :sid, :source, 1, :now, 'edition')"
+                        ),
+                        {
+                            "tid": e["track_id"],
+                            "sid": e["spotify_id"],
+                            "source": provenances.get(e["spotify_id"]),
+                            "now": now,
+                        },
+                    )
+                # `_rematerialiser_fiche` (fin de `_ecrire`) recopie la colonne
+                # dans `is_primary` sur toutes les lignes de la fiche.
+                self._toucher(conn, e["track_id"])
+        return len(ecarts)
 
     def forget_track_spotify_id(self, track_id: int, spotify_id: str) -> bool:
         """Retire UN identifiant Spotify d'un morceau (rejet d'un ID erroné).

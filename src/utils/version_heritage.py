@@ -384,7 +384,15 @@ def _heriter_mesures(version, socle) -> bool:
     deja = {(o.field, o.source) for o in version.observations}
     poses = False
     valeurs = []
-    if version.audio.bpm is None:
+    # Un BPM qui ne vient QUE de l'héritage suit le verdict COURANT de
+    # l'original : une copie figée garderait l'octave d'une règle retirée
+    # (doublement d'un BPM isolé, octave haute d'office — 2026-10-30).
+    bpm_herite_perime = (
+        version.audio.bpm_source == SOURCE
+        and socle.audio.bpm is not None
+        and version.audio.bpm != socle.audio.bpm
+    )
+    if version.audio.bpm is None or bpm_herite_perime:
         valeurs.append(("bpm", socle.audio.bpm))
     if version.audio.key is None and socle.audio.key is not None and socle.audio.mode is not None:
         valeurs += [("key", socle.audio.key), ("mode", socle.audio.mode)]  # en PAIRE

@@ -402,8 +402,10 @@ def _reconcile_bpm(observations: list, alt_observations: list) -> Resolution | N
     à la main), `confidence` = celle de l'observation (None en pratique).
 
     Une observation `source='legacy'` SEULE (aucune source réelle) est reprise
-    VERBATIM elle aussi : la colonne backfillée portait déjà le BPM réconcilié, le
-    re-voter le fausserait (`reconcile_bpm` re-doublerait un 88 de consensus). Son
+    VERBATIM elle aussi : la colonne backfillée portait déjà le BPM réconcilié,
+    et rien ne dit plus de quelles mesures il venait — son octave (peut-être
+    doublée par une règle retirée le 2026-10-30) ne se corrige pas sans preuve
+    (« on ne retire que ce qu'on peut montrer ») ; une source réelle la remplace. Son
     `bpm_alt` — valeur DÉRIVÉE non recalculable pour un candidat unique — vient de
     l'observation `bpm_alt` legacy (`alt_observations`). Dès qu'une source réelle
     existe, la legacy est écartée et le vote normal reprend.

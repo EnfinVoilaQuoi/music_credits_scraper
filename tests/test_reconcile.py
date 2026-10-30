@@ -58,10 +58,11 @@ class TestReconcileBpm:
         )
         assert (res["bpm"].value, res["bpm"].alt) == (75, 150)
 
-    def test_halftime_isole_double(self):
+    def test_source_isolee_gardee_telle_quelle(self):
+        # Plus de doublement d'un BPM isolé sous 90 (retiré le 2026-10-30).
         res = reconcile([_obs("bpm", 71, "deezer")])
-        assert res["bpm"].value == 142
-        assert res["bpm"].alt == 71
+        assert res["bpm"].value == 71
+        assert res["bpm"].alt == 142
 
     def test_valeurs_invalides_ignorees(self):
         # 900 hors borne, "abc" non numérique → seul 120 subsiste.

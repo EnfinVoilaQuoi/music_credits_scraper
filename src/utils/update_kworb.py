@@ -43,11 +43,13 @@ from src.utils.version_descriptors import (
     Kind,
     doublons_evidents,
     meme_famille_de_version,
-    meme_prise,
+    meme_prise_du_morceau,
     meme_version_stricte,
     parse_variant,
     porte_une_version,
     reeditions_evidentes,
+    remix_du_meme_morceau,
+    socle_normalise,
     titre_generique,
     titres_equivalents,
 )
@@ -562,32 +564,22 @@ def original_de(socle: str, index: Index) -> Socle:
     return Socle(candidats=list(fiches.values()) or parents)
 
 
-def _fiche_de_la_version(v, index: Index):
+def _fiche_de_la_version(titre: str, index: Index):
     """Une FICHE de cette version existe-t-elle déjà (« Nudes (Live at AK
     Studios) » chez Genius pour « Nudes - Acoustic » chez Spotify) ? Alors la
     ligne est À ELLE — un morceau, pas une variante du souche. Unique, sinon rien."""
-    if v.kind != Kind.RENDITION:
-        return None
-    socle = _normalize_title(v.socle)
-    fiches = [
-        t
-        for t in index.tracks
-        if (tv := parse_variant(t.title)).kind == Kind.RENDITION
-        and _normalize_title(tv.socle) == socle
-        and meme_prise(tv, v)
-    ]
+    fiches = [t for t in index.tracks if meme_prise_du_morceau(t.title, titre)]
     return fiches[0] if len(fiches) == 1 else None
 
 
-def _candidats_remix_existants(v, index: Index) -> list:
+def _candidats_remix_existants(titre: str, index: Index) -> list:
     """Lignes de base qui SONT déjà ce remix : par relation `remix_of` vers le
     socle (Genius : « DCR (Dolce Camara Remix) » → Dolce Camara), ou par leur
     propre titre (« X (Remix) »)."""
-    socle = _normalize_title(v.socle)
+    socle = socle_normalise(titre)
     out = []
     for t in index.tracks:
-        tv = parse_variant(t.title)
-        if tv.est_remix and _normalize_title(tv.socle) == socle:
+        if remix_du_meme_morceau(t.title, titre):
             out.append(t)
             continue
         for rel in getattr(t, "relationships", None) or []:
@@ -599,7 +591,7 @@ def _candidats_remix_existants(v, index: Index) -> list:
 
 def _proposition_remix(entry, v, index: Index, artist, lire_identite, motifs) -> dict:
     """Le dict que le dialogue affiche pour un remix — jamais écrit d'office."""
-    socle = _normalize_title(v.socle)
+    socle = socle_normalise(entry["title"])
     trouve = original_de(socle, index)
     parent = trouve.fiche
     if parent is None and not trouve.candidats:
@@ -618,7 +610,7 @@ def _proposition_remix(entry, v, index: Index, artist, lire_identite, motifs) ->
     if entry.get("is_feature"):
         motifs.append("Kworb : l'artiste n'est pas premier crédité (*)")
         proposition = "tiers"
-    existants = _candidats_remix_existants(v, index)
+    existants = _candidats_remix_existants(entry["title"], index)
     if existants:
         motifs.append(
             "un morceau en base est déjà ce remix : " + " | ".join(t.title for t in existants)
@@ -752,7 +744,7 @@ def rapprocher(
         devenue = index.by_title.get(norm) or []
         if len(devenue) == 1:
             return Rapprochement(track=devenue[0], via="id")
-        fiche = _fiche_de_la_version(parse_variant(entry["title"]), index)
+        fiche = _fiche_de_la_version(entry["title"], index)
         if fiche is not None:
             return Rapprochement(track=fiche, via="fiche")
         return Rapprochement(track=index.by_rendition_id[sid], via="rendition_id")
@@ -839,8 +831,8 @@ def rapprocher(
         # prise ferme la porte.
         motifs.append("précédemment rejeté (ancienne question « même morceau ? »)")
     if v.kind == Kind.RENDITION:
-        socle = _normalize_title(v.socle)
-        fiche = _fiche_de_la_version(v, index)
+        socle = socle_normalise(entry["title"])
+        fiche = _fiche_de_la_version(entry["title"], index)
         if fiche is not None:
             return Rapprochement(track=fiche, via="fiche")
         trouve = original_de(socle, index)
@@ -1363,7 +1355,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             # La version a sa propre fiche : ses streams sont à elle. Le SOUCHE
             # garde quand même l'indication (décision utilisateur), avec le
             # pointeur vers la fiche — affichée sans compter.
-            socle = _normalize_title(parse_variant(entry["title"]).socle)
+            socle = socle_normalise(entry["title"])
             trouve = original_de(socle, index)
             parent = index.by_rendition_id.get(entry["spotify_id"]) or (
                 None if trouve.par_sous_titre else trouve.fiche

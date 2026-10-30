@@ -51,9 +51,10 @@ PRIMITIVES = frozenset(
 
 #: Lectures de primitives qu'un module hors du juge fait ENCORE (cliquet).
 PLAFONDS = {
-    # Kworb : le rattachement des renditions et les propositions de remix
-    # raisonnent sur la `Variant` de la ligne (socle, nature, remixeur).
-    "utils/update_kworb.py": 11,
+    # Kworb : le ROUTAGE d'une ligne par sa nature (sans version, rendition,
+    # remix nommé) et le remixeur affiché au dialogue — une lecture, pas un
+    # jugement : les rapprochements passent par le juge.
+    "utils/update_kworb.py": 4,
     # Catalogue Deezer : appariement des écarts par socle et nature de version.
     "services/ecarts_deezer.py": 18,
     # Panneau « À trancher », ses politiques et l'audit.
@@ -130,6 +131,7 @@ def paires():
 
 def test_les_questions_des_gates_valent_les_primitives_sur_le_corpus(paires):
     from src.utils import version_descriptors as vd
+    from src.utils.title_matching import normalize_title
 
     Kind = vd.Kind
     ecarts = []
@@ -154,6 +156,10 @@ def test_les_questions_des_gates_valent_les_primitives_sur_le_corpus(paires):
             "meme_version_certifiee": va.kind != Kind.NONE
             and va.kind == vb.kind
             and (vb.est_remix or vd.meme_prise(va, vb)),
+            "meme_prise_du_morceau": normalize_title(va.socle) == normalize_title(vb.socle)
+            and vd.meme_prise(va, vb),
+            "remix_du_meme_morceau": va.est_remix
+            and normalize_title(va.socle) == normalize_title(vb.socle),
         }
         obtenu = {
             "est_remix_nu": vd.est_remix_nu(a),
@@ -163,6 +169,8 @@ def test_les_questions_des_gates_valent_les_primitives_sur_le_corpus(paires):
             "version_au_qualificatif_pres": vd.version_au_qualificatif_pres(a, b),
             "meme_version_stricte": vd.meme_version_stricte(a, b),
             "meme_version_certifiee": vd.meme_version_certifiee(a, b),
+            "meme_prise_du_morceau": vd.meme_prise_du_morceau(a, b),
+            "remix_du_meme_morceau": vd.remix_du_meme_morceau(a, b),
         }
         ecarts += [(q, a, b) for q in attendu if attendu[q] != obtenu[q]]
     assert not ecarts, ecarts[:20]

@@ -1150,6 +1150,25 @@ def meme_version_certifiee(titre_certif: str | None, titre_version: str | None) 
     return ev.est_remix or meme_prise(ec, ev)
 
 
+def meme_prise_du_morceau(a: str | None, b: str | None) -> bool:
+    """PUR. Deux renditions du MÊME morceau (même socle normalisé) dans la même
+    PRISE (`meme_prise`) — une ligne Kworb « Nudes - Acoustic » est à la fiche
+    « Nudes (Live at AK Studios) » si elle existe."""
+    ka, kb = cle_titre(a), cle_titre(b)
+    return normalize_title(ka.variant.socle) == normalize_title(kb.variant.socle) and meme_prise(
+        ka.variant, kb.variant
+    )
+
+
+def remix_du_meme_morceau(a: str | None, b: str | None) -> bool:
+    """PUR. `a` est un remix (nu ou nommé) du morceau dont `b` a le socle — une
+    fiche « X (Remix) » est candidate pour la ligne Kworb « X - Y Remix »."""
+    ka, kb = cle_titre(a), cle_titre(b)
+    return ka.variant.est_remix and normalize_title(ka.variant.socle) == normalize_title(
+        kb.variant.socle
+    )
+
+
 def edition_de_diffusion(titre: str | None) -> str | None:
     """PUR. Le libellé de l'ÉDITION de diffusion que porte le titre (« Radio
     Edit », « 2011 Remaster » : même fiche que l'original), ou None."""

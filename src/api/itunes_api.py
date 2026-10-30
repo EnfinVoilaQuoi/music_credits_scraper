@@ -62,11 +62,17 @@ def album_du_code_barres(resultats: list[dict], nb_pistes: int | None) -> dict |
         albums = [a for a in albums if nb_pistes and a.get("trackCount") == nb_pistes]
     if len(albums) != 1:
         return None
-    album = albums[0]
+    return album_et_pistes(resultats, albums[0])
+
+
+def album_et_pistes(resultats: list[dict], album: dict) -> dict:
+    """PUR. `{"collection": album, "pistes": [fiches de piste triées]}` d'un
+    album des `results` d'un `lookup?upc=` (forme rendue par
+    `album_du_code_barres`)."""
     pistes = sorted(
         (
             r
-            for r in resultats
+            for r in resultats or []
             if r.get("wrapperType") == "track" and r.get("collectionId") == album["collectionId"]
         ),
         key=lambda r: (r.get("discNumber") or 1, r.get("trackNumber") or 0),

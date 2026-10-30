@@ -165,6 +165,9 @@ class AlbumDeezer:
     pistes: list[PisteDeezer] = field(default_factory=list)
     #: Code-barres de l'édition (2026-10-14 : renseigné sur 100 % des albums).
     upc: str | None = None
+    #: Paroles explicites (`explicit_lyrics` de l'album) : départage une édition
+    #: « clean » d'une explicite au même code-barres (`apple_parutions`).
+    explicit_lyrics: bool | None = None
 
     @classmethod
     def depuis(cls, fiche: dict, pistes: list[dict]) -> AlbumDeezer:
@@ -187,6 +190,9 @@ class AlbumDeezer:
             link=fiche.get("link"),
             pistes=[PisteDeezer.depuis(p) for p in pistes if p.get("id")],
             upc=str(fiche.get("upc") or "").strip() or None,
+            explicit_lyrics=(
+                bool(fiche["explicit_lyrics"]) if fiche.get("explicit_lyrics") is not None else None
+            ),
         )
 
 

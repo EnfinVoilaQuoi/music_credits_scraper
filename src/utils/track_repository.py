@@ -6175,6 +6175,110 @@ class TrackRepository:
             logger.error(f"Erreur clear_track_youtube_link (track_id={track_id}): {e}")
             return False
 
+    def vues_d_une_autre_video(self) -> list[dict[str, Any]]:
+        """Fiches à lien YouTube dont `youtube_video_views` est le compteur
+        d'une AUTRE vidéo de la fiche (`track_videos`), pas celui de la vidéo du
+        lien. Défaut d'`update_video_views` corrigé par e5266ec : sans méta pour
+        la vidéo du lien, la première autre vidéo mesurée prenait sa place
+        (vues ET nature). Lecture seule.
+
+        Chaque cas porte sa correction : `juste` = (vues, relevé, nature) de la
+        vidéo du lien quand une ligne de `track_videos` (de n'importe quelle
+        fiche : le compteur est celui de la vidéo) l'a mesurée — la plus
+        récente —, sinon None (la colonne se VIDE : une valeur montrée fausse
+        part, aucune n'est inventée). Sans mesure, la nature part aussi quand
+        c'est celle de l'autre vidéo (même relevé)."""
+        with self.engine.connect() as conn:
+            fiches = (
+                conn.execute(
+                    text(
+                        "SELECT t.id, t.title, a.name AS artiste, t.youtube_url, "
+                        "t.youtube_video_views, t.youtube_video_kind, "
+                        "t.youtube_video_views_updated FROM tracks t "
+                        "JOIN artists a ON a.id = t.artist_id "
+                        "WHERE t.youtube_video_views IS NOT NULL "
+                        "AND t.youtube_url IS NOT NULL AND t.youtube_url <> '' "
+                        "ORDER BY a.name, t.id"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            videos: dict[int, dict[str, Any]] = {}
+            mesures: dict[str, Any] = {}
+            for v in (
+                conn.execute(
+                    text(
+                        "SELECT track_id, video_id, views, kind, views_updated FROM track_videos "
+                        "ORDER BY views_updated"
+                    )
+                )
+                .mappings()
+                .all()
+            ):
+                videos.setdefault(v["track_id"], {})[v["video_id"]] = v
+                if v["views"] is not None:
+                    mesures[v["video_id"]] = v  # la plus récente l'emporte (ORDER BY)
+        cas = []
+        for f in fiches:
+            lien = extract_video_id(f["youtube_url"])
+            if not lien:
+                continue
+            mesure = mesures.get(lien)
+            if mesure is not None and mesure["views"] == f["youtube_video_views"]:
+                continue
+            autres = [
+                v
+                for vid, v in videos.get(f["id"], {}).items()
+                if vid != lien and v["views"] is not None and v["views"] == f["youtube_video_views"]
+            ]
+            if not autres:
+                continue
+            autre = autres[0]
+            nature = f["youtube_video_kind"]
+            if mesure is not None:
+                juste = (mesure["views"], mesure["views_updated"], mesure["kind"])
+                nature_apres = mesure["kind"] or nature
+            else:
+                juste = None
+                nature_apres = nature if nature != autre["kind"] else None
+            cas.append(
+                {
+                    "track_id": f["id"],
+                    "artiste": f["artiste"],
+                    "titre": f["title"],
+                    "video_lien": lien,
+                    "vues": f["youtube_video_views"],
+                    "nature": f["youtube_video_kind"],
+                    "autre_video": autre["video_id"],
+                    "juste": juste,
+                    "nature_apres": nature_apres,
+                }
+            )
+        return cas
+
+    def rattraper_vues_du_lien(self, cas: list[dict[str, Any]]) -> int:
+        """Applique `vues_d_une_autre_video` : vues, relevé et nature de la vidéo
+        du lien, ou vidage (vues et relevé ; la nature selon `nature_apres`).
+        Passe par `_ecrire` : sœurs et totaux recalculés en fin de transaction.
+        Rend le nombre de fiches écrites."""
+        ecrites = 0
+        with self._ecrire() as conn:
+            for c in cas:
+                vues, releve = (c["juste"][0], c["juste"][1]) if c["juste"] else (None, None)
+                ecrites += conn.execute(
+                    update(tracks)
+                    .where(tracks.c.id == c["track_id"])
+                    .values(
+                        youtube_video_views=vues,
+                        youtube_video_views_updated=date_bind(releve) if releve else None,
+                        youtube_video_kind=c["nature_apres"],
+                        updated_at=datetime.now(),
+                    )
+                ).rowcount
+                self._toucher(conn, c["track_id"])
+        return ecrites
+
     # ──────────────────────────────────────────────────────────────────────────
     # Vidéos YouTube d'un morceau (table `track_videos`, e20)
     # ──────────────────────────────────────────────────────────────────────────

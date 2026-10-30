@@ -188,8 +188,10 @@ scripts/*
 !scripts/sonder_brut.py
 # Durée de l'audio des LRC d'avant `lrc_duree_audio`, depuis le brut (2026-10-27).
 !scripts/poser_durees_audio_lrc.py
-# Rattrapage du 2026-10-30 : ID Spotify principal sans sa ligne.
+# Rattrapages du 2026-10-30 : ID Spotify principal sans sa ligne, vues d'une
+# autre vidéo que celle du lien.
 !scripts/aligner_ids_spotify_principaux.py
+!scripts/rattraper_vues_du_lien.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
 # méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
 # `scripts/*` les exclut déjà : ne PAS ajouter de négation ici.

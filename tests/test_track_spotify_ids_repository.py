@@ -284,11 +284,14 @@ class TestBackfillDeLaColonne:
                 text("SELECT spotify_id FROM tracks WHERE id = :tid"), {"tid": track.id}
             ).scalar()
         assert colonne == _ID_ALBUM  # l'ID principal n'est jamais écrasé
-        # L'édition découverte est INDEXÉE au lieu d'être jetée. `_ID_ALBUM` n'est
-        # pas dans la table : `save_track` ne l'écrit pas (écrivain dédié), il
-        # vit dans la colonne — et c'est pourquoi l'index global lit les DEUX
-        # magasins.
-        assert {e.spotify_id for e in data_manager.get_track_spotify_ids(track.id)} == {_ID_SINGLE}
+        # L'édition découverte est INDEXÉE au lieu d'être jetée. `_ID_ALBUM`, posé
+        # en colonne sans `record_pending`, a lui aussi sa ligne — principale,
+        # provenance non tracée : `_rematerialiser_fiche` la pose (invariant
+        # `spotify_principal`, 2026-10-30 : 88 fiches d'A2H sans elle).
+        entrees = {e.spotify_id: e for e in data_manager.get_track_spotify_ids(track.id)}
+        assert set(entrees) == {_ID_ALBUM, _ID_SINGLE}
+        assert entrees[_ID_ALBUM].is_primary and entrees[_ID_ALBUM].source is None
+        assert not entrees[_ID_SINGLE].is_primary
         assert set(data_manager.get_track_ids_by_spotify_id()) >= {_ID_ALBUM, _ID_SINGLE}
 
 

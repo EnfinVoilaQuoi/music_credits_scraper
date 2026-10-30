@@ -159,6 +159,7 @@ FAMILLES = {
     "schema": "INVARIANT — colonne de la base ≠ schema.py",
     "refus_vivant": "INVARIANT — valeur refusée à la main encore portée par la fiche ou une sœur",
     "isrc_edition_autre_fiche": "INVARIANT — ISRC d'une édition = celui d'une AUTRE fiche",
+    "spotify_principal": "INVARIANT — ID Spotify principal sans sa ligne `track_spotify_ids` principale",
 }
 
 #: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
@@ -174,6 +175,7 @@ INVARIANTS = (
     "schema",
     "refus_vivant",
     "isrc_edition_autre_fiche",
+    "spotify_principal",
 )
 
 _FEAT = re.compile(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", re.IGNORECASE)
@@ -946,6 +948,27 @@ def isrc_d_une_autre_fiche(c, pistes) -> list[Cas]:
     return cas
 
 
+def ids_spotify_principaux_desalignes(c, pistes) -> list[Cas]:
+    """`tracks.spotify_id` et sa ligne de `track_spotify_ids` en désaccord :
+    la colonne sans sa ligne, ou `is_primary` levé sur un autre ID (ou baissé
+    sur le sien). `is_primary` MATÉRIALISE la colonne (PROJET, « Colonnes
+    d'identité ») ; 88 fiches d'A2H avaient l'ID sans la ligne (2026-10-30).
+    Rattrapage : `scripts/aligner_ids_spotify_principaux.py`."""
+    fiches = {t["id"]: t for t in pistes}
+    lignes = collections.defaultdict(dict)
+    for r in c.execute("SELECT track_id, spotify_id, is_primary FROM track_spotify_ids"):
+        if r["track_id"] in fiches:
+            lignes[r["track_id"]][r["spotify_id"]] = bool(r["is_primary"])
+    from src.utils.track_repository import ecart_spotify_principal
+
+    cas = []
+    for tid, f in fiches.items():
+        motif = ecart_spotify_principal(f["spotify_id"] or None, lignes.get(tid, {}))
+        if motif:
+            cas.append(Cas("spotify_principal", f["artiste"], [tid], f"{_lib(f)} {motif}"))
+    return cas
+
+
 def ecarts_de_schema(db_path) -> list[Cas]:
     from src.persistence.bootstrap import ecarts_au_schema
 
@@ -1033,6 +1056,7 @@ def auditer(
             audit.cas += soeurs_divergentes(c, pistes)
             audit.cas += refus_vivants(c, pistes)
             audit.cas += isrc_d_une_autre_fiche(c, pistes)
+            audit.cas += ids_spotify_principaux_desalignes(c, pistes)
             if not noms:
                 audit.cas += orphelins(c)
     if persistance:

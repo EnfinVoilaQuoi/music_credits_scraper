@@ -116,6 +116,24 @@ def total_ytm(propres: dict, compteurs: dict[str, int], exclues=frozenset()) -> 
     return sum(comptees) if comptees else None
 
 
+def ecart_spotify_principal(colonne: str | None, lignes: dict[str, bool]) -> str | None:
+    """PUR. Le désaccord entre `tracks.spotify_id` (`colonne`) et les lignes
+    `track_spotify_ids` de la fiche (`lignes` : {spotify_id: is_primary}),
+    ou None. `is_primary` MATÉRIALISE la colonne : l'ID principal a sa ligne,
+    principale, et elle seule. Partagé par l'invariant d'audit
+    `spotify_principal` et son rattrapage (`aligner_ids_spotify_principaux`)."""
+    autres = sorted(s for s, prim in lignes.items() if prim and s != colonne)
+    if colonne and colonne not in lignes:
+        motif = f"ID {colonne} sans sa ligne"
+    elif colonne and not lignes[colonne]:
+        motif = f"ID {colonne} : ligne non principale"
+    elif autres:
+        motif = "ligne principale ≠ colonne"
+    else:
+        return None
+    return motif + (f" (principale : {', '.join(autres)})" if autres else "")
+
+
 def release_identity_key(
     title: str,
     scope: str,
@@ -3444,6 +3462,23 @@ class TrackRepository:
         )
         # Après la durée et les paroles : le verdict LRC en dépend.
         self._rearbitrer_lrc(conn, track_id)
+        # L'ID PRINCIPAL a toujours sa ligne : `is_primary` matérialise la
+        # colonne, il ne peut pas la matérialiser sans ligne. Un producteur qui
+        # pose la colonne sans `record_pending` la laissait seule (2026-10-30 :
+        # 88 fiches d'A2H, ID posés par SongBPM le 2026-09-08 avant
+        # `_spotify_ids_pending`). Provenance inconnue ici : NULL (« non
+        # tracée ») ; `record_track_spotify_ids`, appelé ensuite, la complète.
+        conn.execute(
+            text(
+                "INSERT INTO track_spotify_ids "
+                "(track_id, spotify_id, source, is_primary, seen_at, kind) "
+                "SELECT t.id, t.spotify_id, NULL, 1, :now, 'edition' FROM tracks t "
+                "WHERE t.id = :t AND t.spotify_id IS NOT NULL AND t.spotify_id <> '' "
+                "AND NOT EXISTS (SELECT 1 FROM track_spotify_ids s "
+                "WHERE s.track_id = t.id AND s.spotify_id = t.spotify_id)"
+            ),
+            {"t": track_id, "now": datetime.now()},
+        )
         conn.execute(
             text(
                 "UPDATE track_spotify_ids SET is_primary = "
@@ -6140,6 +6175,110 @@ class TrackRepository:
             logger.error(f"Erreur clear_track_youtube_link (track_id={track_id}): {e}")
             return False
 
+    def vues_d_une_autre_video(self) -> list[dict[str, Any]]:
+        """Fiches à lien YouTube dont `youtube_video_views` est le compteur
+        d'une AUTRE vidéo de la fiche (`track_videos`), pas celui de la vidéo du
+        lien. Défaut d'`update_video_views` corrigé par e5266ec : sans méta pour
+        la vidéo du lien, la première autre vidéo mesurée prenait sa place
+        (vues ET nature). Lecture seule.
+
+        Chaque cas porte sa correction : `juste` = (vues, relevé, nature) de la
+        vidéo du lien quand une ligne de `track_videos` (de n'importe quelle
+        fiche : le compteur est celui de la vidéo) l'a mesurée — la plus
+        récente —, sinon None (la colonne se VIDE : une valeur montrée fausse
+        part, aucune n'est inventée). Sans mesure, la nature part aussi quand
+        c'est celle de l'autre vidéo (même relevé)."""
+        with self.engine.connect() as conn:
+            fiches = (
+                conn.execute(
+                    text(
+                        "SELECT t.id, t.title, a.name AS artiste, t.youtube_url, "
+                        "t.youtube_video_views, t.youtube_video_kind, "
+                        "t.youtube_video_views_updated FROM tracks t "
+                        "JOIN artists a ON a.id = t.artist_id "
+                        "WHERE t.youtube_video_views IS NOT NULL "
+                        "AND t.youtube_url IS NOT NULL AND t.youtube_url <> '' "
+                        "ORDER BY a.name, t.id"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            videos: dict[int, dict[str, Any]] = {}
+            mesures: dict[str, Any] = {}
+            for v in (
+                conn.execute(
+                    text(
+                        "SELECT track_id, video_id, views, kind, views_updated FROM track_videos "
+                        "ORDER BY views_updated"
+                    )
+                )
+                .mappings()
+                .all()
+            ):
+                videos.setdefault(v["track_id"], {})[v["video_id"]] = v
+                if v["views"] is not None:
+                    mesures[v["video_id"]] = v  # la plus récente l'emporte (ORDER BY)
+        cas = []
+        for f in fiches:
+            lien = extract_video_id(f["youtube_url"])
+            if not lien:
+                continue
+            mesure = mesures.get(lien)
+            if mesure is not None and mesure["views"] == f["youtube_video_views"]:
+                continue
+            autres = [
+                v
+                for vid, v in videos.get(f["id"], {}).items()
+                if vid != lien and v["views"] is not None and v["views"] == f["youtube_video_views"]
+            ]
+            if not autres:
+                continue
+            autre = autres[0]
+            nature = f["youtube_video_kind"]
+            if mesure is not None:
+                juste = (mesure["views"], mesure["views_updated"], mesure["kind"])
+                nature_apres = mesure["kind"] or nature
+            else:
+                juste = None
+                nature_apres = nature if nature != autre["kind"] else None
+            cas.append(
+                {
+                    "track_id": f["id"],
+                    "artiste": f["artiste"],
+                    "titre": f["title"],
+                    "video_lien": lien,
+                    "vues": f["youtube_video_views"],
+                    "nature": f["youtube_video_kind"],
+                    "autre_video": autre["video_id"],
+                    "juste": juste,
+                    "nature_apres": nature_apres,
+                }
+            )
+        return cas
+
+    def rattraper_vues_du_lien(self, cas: list[dict[str, Any]]) -> int:
+        """Applique `vues_d_une_autre_video` : vues, relevé et nature de la vidéo
+        du lien, ou vidage (vues et relevé ; la nature selon `nature_apres`).
+        Passe par `_ecrire` : sœurs et totaux recalculés en fin de transaction.
+        Rend le nombre de fiches écrites."""
+        ecrites = 0
+        with self._ecrire() as conn:
+            for c in cas:
+                vues, releve = (c["juste"][0], c["juste"][1]) if c["juste"] else (None, None)
+                ecrites += conn.execute(
+                    update(tracks)
+                    .where(tracks.c.id == c["track_id"])
+                    .values(
+                        youtube_video_views=vues,
+                        youtube_video_views_updated=date_bind(releve) if releve else None,
+                        youtube_video_kind=c["nature_apres"],
+                        updated_at=datetime.now(),
+                    )
+                ).rowcount
+                self._toucher(conn, c["track_id"])
+        return ecrites
+
     # ──────────────────────────────────────────────────────────────────────────
     # Vidéos YouTube d'un morceau (table `track_videos`, e20)
     # ──────────────────────────────────────────────────────────────────────────
@@ -7097,6 +7236,85 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur record_track_spotify_ids (track_id={track_id}): {e}")
             return 0
+
+    def ids_spotify_principaux_desalignes(self) -> list[dict[str, Any]]:
+        """Fiches dont `tracks.spotify_id` n'a pas sa ligne PRINCIPALE dans
+        `track_spotify_ids` : la colonne sans ligne, sa ligne non principale,
+        ou une autre ligne marquée principale. Lecture seule ; rend
+        `[{"track_id", "artiste", "titre", "spotify_id", "ligne", "autres_principales"}]`
+        (`ligne` : None sans ligne, sinon son `is_primary`). Même définition que
+        l'invariant d'audit `spotify_principal`."""
+        with self.engine.connect() as conn:
+            fiches = (
+                conn.execute(
+                    text(
+                        "SELECT t.id, t.title, t.spotify_id, a.name AS artiste FROM tracks t "
+                        "JOIN artists a ON a.id = t.artist_id "
+                        "WHERE (t.spotify_id IS NOT NULL AND t.spotify_id <> '') "
+                        "OR t.id IN (SELECT track_id FROM track_spotify_ids WHERE is_primary = 1) "
+                        "ORDER BY a.name, t.id"
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            lignes: dict[int, dict[str, bool]] = {}
+            for r in conn.execute(
+                text("SELECT track_id, spotify_id, is_primary FROM track_spotify_ids")
+            ):
+                lignes.setdefault(r[0], {})[r[1]] = bool(r[2])
+        ecarts = []
+        for f in fiches:
+            colonne = f["spotify_id"] or None
+            siennes = lignes.get(f["id"], {})
+            if ecart_spotify_principal(colonne, siennes) is None:
+                continue
+            ecarts.append(
+                {
+                    "track_id": f["id"],
+                    "artiste": f["artiste"],
+                    "titre": f["title"],
+                    "spotify_id": colonne,
+                    "ligne": siennes.get(colonne) if colonne else None,
+                    "autres_principales": sorted(
+                        s for s, prim in siennes.items() if prim and s != colonne
+                    ),
+                }
+            )
+        return ecarts
+
+    def aligner_ids_spotify_principaux(self, provenances: dict[str, str] | None = None) -> int:
+        """Rattrapage de `ids_spotify_principaux_desalignes` : la ligne
+        manquante de l'ID principal est posée (provenance tirée de
+        `provenances` {spotify_id: source}, sinon NULL — « non tracée »), et
+        `is_primary` recopie la colonne. ADDITIF : aucune ligne ni colonne
+        n'est retirée. Passe par `_ecrire` (recalcul de chaque fiche, sœurs
+        comprises). Rend le nombre de fiches traitées."""
+        ecarts = self.ids_spotify_principaux_desalignes()
+        if not ecarts:
+            return 0
+        provenances = provenances or {}
+        now = datetime.now()
+        with self._ecrire() as conn:
+            for e in ecarts:
+                if e["spotify_id"] and e["ligne"] is None:
+                    conn.execute(
+                        text(
+                            "INSERT INTO track_spotify_ids "
+                            "(track_id, spotify_id, source, is_primary, seen_at, kind) "
+                            "VALUES (:tid, :sid, :source, 1, :now, 'edition')"
+                        ),
+                        {
+                            "tid": e["track_id"],
+                            "sid": e["spotify_id"],
+                            "source": provenances.get(e["spotify_id"]),
+                            "now": now,
+                        },
+                    )
+                # `_rematerialiser_fiche` (fin de `_ecrire`) recopie la colonne
+                # dans `is_primary` sur toutes les lignes de la fiche.
+                self._toucher(conn, e["track_id"])
+        return len(ecarts)
 
     def forget_track_spotify_id(self, track_id: int, spotify_id: str) -> bool:
         """Retire UN identifiant Spotify d'un morceau (rejet d'un ID erroné).

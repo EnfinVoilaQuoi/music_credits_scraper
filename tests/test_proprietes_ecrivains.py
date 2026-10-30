@@ -216,6 +216,9 @@ def _violations(dm, *, soeurs: bool) -> dict:
             v["refus_vivant"] = [x.libelle for x in audit.refus_vivants(c, pistes)]
         if audit.orphelins(c):
             v["orphelin"] = [x.libelle for x in audit.orphelins(c)]
+        desalignes = audit.ids_spotify_principaux_desalignes(c, pistes)
+        if desalignes:
+            v["spotify_principal"] = [x.libelle for x in desalignes]
         if soeurs:
             divergentes = audit.soeurs_divergentes(c, audit._pistes(c, None))
             if divergentes:

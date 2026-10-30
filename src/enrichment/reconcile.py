@@ -240,6 +240,76 @@ def _veto_du_vote(observations: list, ordre, editions) -> list:
     return restantes
 
 
+#: DT1 (2026-10-31) : écart au-delà duquel le LRC confirmé dément une vidéo,
+#: et écart en deçà duquel un autre témoin la confirme (mesures du rapport
+#: panneau-familles, groupe de contrôle à ≥ 2 catalogues).
+ECART_LRC_CONTRE_VIDEO_S = 10
+ACCORD_TEMOIN_VIDEO_S = 3
+
+#: Pas de colonne passée : l'appelant est l'écrivain (le repository).
+_ECRIVAIN = object()
+
+
+def _clean_duration_lrc(lrc_obs) -> int | None:
+    """La durée de l'audio du LRC LRCLIB, telle qu'observée (lecture seule)."""
+    from src.utils.track_mapper import _clean_duration
+
+    return next(
+        (
+            _clean_duration(x.value)
+            for x in lrc_obs
+            if x.field == "lrc_duree_audio" and x.source == "lrclib"
+        ),
+        None,
+    )
+
+
+def _video_dementie_par_le_lrc(
+    o, d, observations, titre, paroles, lrc_obs, voisines, colonne=_ECRIVAIN
+) -> bool:
+    """DT1 (2026-10-31). La durée d'une VIDÉO ordinaire (`youtube_video`) d'un
+    ORIGINAL est démentie, de plus de `ECART_LRC_CONTRE_VIDEO_S`, par l'audio
+    sur lequel LRCLIB a calé un LRC que les paroles Genius confirment (et qui
+    tient dans cet audio). Mesuré sur les fiches à catalogues : la vidéo du
+    lien y est fausse 9,8 % du temps, et ce démenti juste 302 fois sur 306.
+    Gardes : aucun autre témoin ne confirme la vidéo à `ACCORD_TEMOIN_VIDEO_S`
+    près ; aucune AUTRE fiche de l'artiste dont le titre contient celui-ci n'a
+    la durée du LRC (« out for the night » portait le LRC de la pt. 2) — les
+    versions restent hors règle (le LRC d'un remix est souvent l'original).
+    `colonne` : la durée que le REPOSITORY a écrite. Un LECTEUR (`reconcile`
+    au chargement : ni le texte des LRC, ni les fiches voisines) s'en remet à
+    elle : la vidéo démentie par l'audio du LRC reste écartée tant que la
+    colonne ne la porte pas."""
+    if o.source != "youtube_video" or not lrc_obs:
+        return False
+    if colonne is not _ECRIVAIN:
+        audio = _clean_duration_lrc(lrc_obs)
+        return bool(audio) and abs(d - audio) > ECART_LRC_CONTRE_VIDEO_S and colonne != d
+    if not paroles:
+        return False
+    from src.utils.concordance_paroles import SEUIL_JUSTE, lrc_dementi, recouvrement
+    from src.utils.lrc_garde import ECART_DUREE_S, audios_des_lrc, fin_du_lrc
+    from src.utils.track_mapper import _clean_duration
+    from src.utils.version_descriptors import titre_d_original
+
+    audios = audios_des_lrc(lrc_obs)
+    audio = audios.get("lrclib")
+    if not audio or abs(d - audio) <= ECART_LRC_CONTRE_VIDEO_S or not titre_d_original(titre):
+        return False
+    lrc = next(
+        (x.value for x in lrc_obs if x.field == "lyrics_synced" and x.source == "lrclib"), None
+    )
+    fin, score = fin_du_lrc(lrc), recouvrement(paroles, lrc)
+    if not fin or fin > audio + ECART_DUREE_S or score is None or score < SEUIL_JUSTE:
+        return False
+    if lrc_dementi(paroles, lrc):
+        return False
+    temoins = [_clean_duration(x.value) for x in observations if x is not o]
+    if any(t and abs(t - d) <= ACCORD_TEMOIN_VIDEO_S for t in [*temoins, *audios.values()]):
+        return False
+    return not any(abs(v - audio) <= ECART_DUREE_S for v in (voisines() if voisines else ()))
+
+
 def resoudre_duree(
     observations: list,
     ordre,
@@ -247,6 +317,9 @@ def resoudre_duree(
     paroles: str | None = None,
     editions=(),
     veto: bool | None = None,
+    lrc_obs: list | None = None,
+    voisines=None,
+    colonne=_ECRIVAIN,
 ) -> Resolution | None:
     """Verdict `duration` : `resolve_by_priority`, deux vidéos ordinaires
     écartées (2026-10-27) :
@@ -266,7 +339,14 @@ def resoudre_duree(
     `veto` (None = `VETO_DU_VOTE`) : écarte en plus les valeurs que le vote des
     catalogues isole (`_veto_du_vote`) ; `editions` = durées des autres
     éditions connues de la fiche, qui expliquent un témoin au lieu de
-    l'accuser."""
+    l'accuser.
+
+    `lrc_obs` (observations `lyrics_synced` et `lrc_duree_audio` de la fiche)
+    et `voisines` (appelable : durées des autres fiches de l'artiste dont le
+    titre contient celui-ci) arment DT1 (`_video_dementie_par_le_lrc`) : le
+    repository, qui écrit la colonne, passe les deux ; `reconcile` (lecture
+    d'une fiche) passe `lrc_obs` et la `colonne` écrite, à laquelle il s'en
+    remet quand elle porte encore la vidéo."""
     from src.utils.duree_youtube import (
         DUREE_MIN_MORCEAU,
         court_par_nature,
@@ -285,6 +365,10 @@ def resoudre_duree(
             return False
         if o.source not in _VIDEOS_ORDINAIRES:
             return True
+        if _video_dementie_par_le_lrc(
+            o, d, observations, titre, paroles, lrc_obs, voisines, colonne
+        ):
+            return False
         return (court or d >= DUREE_MIN_MORCEAU) and not dementie_par_les_paroles(d, paroles)
 
     retenues = [o for o in observations if recevable(o)]
@@ -741,7 +825,14 @@ def reconcile(
         if field == "release_date":
             res = resoudre_date_de_sortie(obs_list, ordre)
         elif field == "duration":
-            res = resoudre_duree(obs_list, ordre, titre, paroles)
+            res = resoudre_duree(
+                obs_list,
+                ordre,
+                titre,
+                paroles,
+                lrc_obs=by_field.get(LYRICS_SYNCED_FIELD, []) + by_field.get("lrc_duree_audio", []),
+                colonne=track_duration,
+            )
             if res is None and resolve_by_priority(obs_list, field, ordre) is not None:
                 # Toutes écartées (extraits) : le verdict est « pas de durée »
                 # — sans lui la colonne garderait l'extrait.

@@ -23,6 +23,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from src.services import revue
+
+# `titre_d_original` vit chez le juge des titres depuis le 2026-10-31 : le
+# verdict de durée (`reconcile`) le consulte aussi.
+from src.utils.version_descriptors import titre_d_original
 from src.utils.vote_durees import FRAGILES, ISOLEE, SOUTENUE, TOLERANCE_S, famille, voter
 
 #: Écart au-delà duquel deux durées ne sont plus une édition du même fichier :
@@ -915,29 +919,6 @@ REGLES_VALIDEES = frozenset(
 #: « ✓ Normal », qui ne change aucune donnée, 2.
 _DUREES_POUR_RETIRER = politique_durees(3)
 _DUREES_POUR_NORMAL = politique_durees(2)
-
-
-#: Mots d'un titre AMBIGU (version, prise, titre générique) — en mots entiers.
-_MOTS_AMBIGUS = re.compile(
-    r"\b(?:intro|outro|interlude|skit|prelude|prélude|remix|rmx|mix|live|edit|version|"
-    r"demo|démo|acoustic|acoustique|instrumental|chopped|screwed|slowed|sped|reprise|"
-    r"freestyle|session|snippet|extended|radio)\b",
-    re.IGNORECASE,
-)
-
-
-def titre_d_original(titre: str | None) -> bool:
-    """Le titre est celui d'un ORIGINAL sans ambiguïté — PRUDENT à dessein : un
-    groupe entre parenthèses ou crochets, un « - » suffixe, un mot de version
-    ou de titre générique suffisent à le rendre à l'humain (« Nuit
-    (Interlude) », « … [ChoppedNotSlopped] » que `parse_variant` ne lit pas)."""
-    from src.utils.version_descriptors import porte_une_version, titre_generique
-
-    if not titre:
-        return False
-    if re.search(r"[\(\[]| - ", titre) or _MOTS_AMBIGUS.search(titre):
-        return False
-    return not porte_une_version(titre) and not titre_generique(titre)
 
 
 def arbitrage_valide(cas, track, ctx) -> Arbitrage | None:

@@ -3134,7 +3134,7 @@ class TrackRepository:
         from src.utils.concordance_paroles import paroles_de_reference
 
         fiche = conn.execute(
-            text("SELECT title, lyrics, lyrics_source FROM tracks WHERE id = :id"),
+            text("SELECT title, lyrics, lyrics_source, artist_id FROM tracks WHERE id = :id"),
             {"id": track_id},
         ).first()
         titre = fiche.title if fiche is not None else None
@@ -3158,6 +3158,12 @@ class TrackRepository:
                     titre,
                     paroles,
                     editions=self._durees_editions(conn, track_id),
+                    lrc_obs=[
+                        o for o in observations if o.field in ("lyrics_synced", "lrc_duree_audio")
+                    ],
+                    voisines=lambda: self._durees_des_titres_parents(
+                        conn, track_id, fiche.artist_id, titre
+                    ),
                 )
             else:
                 verdict = resolve_by_priority(obs_du_champ, field, ordre)
@@ -3195,6 +3201,32 @@ class TrackRepository:
                 {"t": track_id},
             )
         )
+
+    @staticmethod
+    def _durees_des_titres_parents(conn, track_id: int, artist_id, titre) -> list[int]:
+        """Durées des AUTRES fiches de l'artiste dont le titre contient tous les
+        mots de celui-ci (« out for the night, pt. 2 » pour « out for the
+        night »), lignes sœurs exclues : la garde de DT1 (`reconcile.
+        _video_dementie_par_le_lrc`). Lu seulement quand la règle allait jouer."""
+        import re
+        import unicodedata
+
+        def mots(t):
+            t = unicodedata.normalize("NFKD", t or "").encode("ascii", "ignore").decode()
+            return set(re.findall(r"[a-z0-9]+", t.casefold()))
+
+        les_miens = mots(titre)
+        if not les_miens or artist_id is None:
+            return []
+        lignes = conn.execute(
+            text(
+                "SELECT t.title, t.duration FROM tracks t WHERE t.artist_id = :a "
+                "AND t.id != :id AND t.duration IS NOT NULL AND (t.genius_id IS NULL "
+                "OR t.genius_id IS NOT (SELECT genius_id FROM tracks WHERE id = :id))"
+            ),
+            {"a": artist_id, "id": track_id},
+        )
+        return [int(d) for t, d in lignes if les_miens <= mots(t)]
 
     def rearbitrer_duree_et_date(self, track_id: int) -> bool:
         """Écrivain PUBLIC de `_rearbitrer_duree_et_date` — réparation des

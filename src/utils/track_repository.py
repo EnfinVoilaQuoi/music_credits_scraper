@@ -2217,9 +2217,13 @@ class TrackRepository:
     ) -> bool:
         """Réécrit VERBATIM la relation de la fiche à son artiste (principal / feat
         / rôle secondaire), `None` compris — `save_track` passe ces champs en
-        COALESCE et ne sait pas les remplacer (corrections à la main, étape 3)."""
+        COALESCE et ne sait pas les remplacer (corrections à la main, étape 3).
+
+        Par `_ecrire` (2026-10-29) : l'interprète principal entre dans le score
+        de la recherche YouTube, donc dans le total YTM (`_videos_exclues`)."""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 conn.execute(
                     update(tracks)
                     .where(tracks.c.id == track_id)
@@ -3160,10 +3164,13 @@ class TrackRepository:
 
     def rearbitrer_duree_et_date(self, track_id: int) -> bool:
         """Écrivain PUBLIC de `_rearbitrer_duree_et_date` — réparation des
-        colonnes restées en retard sur leurs observations (CORRECTIFS 2.2)."""
+        colonnes restées en retard sur leurs observations (CORRECTIFS 2.2).
+        Par `_ecrire` (2026-10-29) : la fiche ET ses sœurs sont recalculées en
+        entier (observations unies d'abord), plus seulement la durée et la date
+        de la seule ligne — une réparation qui laissait la sœur en retard."""
         try:
-            with self.engine.begin() as conn:
-                self._rearbitrer_duree_et_date(conn, track_id)
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur rearbitrer_duree_et_date({track_id}): {e}")
@@ -3614,10 +3621,15 @@ class TrackRepository:
         """Fiches à ISRC VIDE alors qu'une observation en donne un : rend
         `[(track_id, titre, isrc_du_verdict)]`, et l'écrit si `appliquer`.
         Rattrapage des colonnes laissées vides avant la règle « remplir sans
-        remplacer » (2026-10-11)."""
+        remplacer » (2026-10-11).
+
+        Le passage à blanc ne fait que LIRE. L'application passe par `_ecrire` :
+        les fiches trouvées (et leurs sœurs) sont recalculées en entier —
+        `_rematerialiser_fiche` remplit l'ISRC vide par le même verdict
+        (`_isrc_sans_remplacer`), et rien n'est laissé en retard à côté."""
         trouvees = []
         try:
-            with self.engine.begin() as conn:
+            with self.engine.connect() as conn:
                 lignes = conn.execute(
                     text(
                         "SELECT DISTINCT t.id, t.title FROM tracks t JOIN observations o "
@@ -3629,8 +3641,9 @@ class TrackRepository:
                     valeurs = self._arbitrer_discographie(conn, tid, {"isrc"})
                     if valeurs.get("isrc"):
                         trouvees.append((tid, titre, valeurs["isrc"]))
-                        if appliquer:
-                            self._ecrire_colonnes_discographie(conn, tid, {"isrc": valeurs["isrc"]})
+            if appliquer and trouvees:
+                with self._ecrire() as conn:
+                    self._toucher(conn, *(tid for tid, _, _ in trouvees))
         except SQLAlchemyError as e:
             logger.error(f"Erreur combler_isrc_vides : {e}")
             return []
@@ -4432,14 +4445,17 @@ class TrackRepository:
 
     def clear_track_album(self, track_id: int) -> bool:
         """Détache un morceau de son album (édition MANUELLE : album_override=1
-        empêche l'API de re-remplir le champ au prochain prefill)."""
+        empêche l'API de re-remplir le champ au prochain prefill). Par `_ecrire`
+        (2026-10-29) : l'album entre dans le score de la recherche YouTube, donc
+        dans le total YTM (`_videos_exclues`)."""
         try:
             stmt = (
                 update(tracks)
                 .where(tracks.c.id == track_id)
                 .values(album=None, album_override=1, updated_at=datetime.now())
             )
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 conn.execute(stmt)
             return True
         except SQLAlchemyError as e:
@@ -5121,9 +5137,11 @@ class TrackRepository:
             self._persist_release_observations(conn, track_id, int(row["artist_id"]), observations)
 
     def set_track_reference_release(self, track_id: int, release_id: int) -> bool:
-        """Choisit explicitement l'album repère, sans toucher aux autres liens."""
+        """Choisit explicitement l'album repère, sans toucher aux autres liens.
+        Par `_ecrire` : l'album entre dans le total YTM (`_videos_exclues`)."""
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 row = (
                     conn.execute(
                         text(
@@ -5343,9 +5361,11 @@ class TrackRepository:
         Retourne `removed`, `needs_replacement` ou `missing`. L'appelant doit
         confirmer explicitement un remplacement : ne jamais laisser une simple
         suppression de compilation réécrire silencieusement `tracks.album`.
+        Par `_ecrire` : l'album repère entre dans le total YTM (`_videos_exclues`).
         """
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 current = (
                     conn.execute(
                         text(
@@ -5852,11 +5872,27 @@ class TrackRepository:
         `album_override` n'est PAS posé : ce n'est pas une saisie humaine mais
         le nettoyage d'une convention de Genius, et le marquer en manuel
         empêcherait toute correction ultérieure par la source.
+
+        Par `_ecrire` (2026-10-29) : l'album entre dans le total YTM (score de
+        la recherche, `_videos_exclues`) — les morceaux du disque (quelques
+        dizaines au plus) sont recalculés.
         """
         if not ancien or not nouveau or ancien == nouveau:
             return 0, 0
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(
+                    conn,
+                    *(
+                        r[0]
+                        for r in conn.execute(
+                            text(
+                                "SELECT id FROM tracks WHERE artist_id = :aid AND album = :ancien"
+                            ),
+                            {"aid": artist_id, "ancien": ancien},
+                        )
+                    ),
+                )
                 morceaux = conn.execute(
                     text(
                         "UPDATE tracks SET album = :nouveau, updated_at = :now "
@@ -6008,10 +6044,15 @@ class TrackRepository:
 
         Même nettoyage qu'à l'enregistrement : un titre collé depuis Genius
         emporte volontiers un caractère invisible avec lui.
+
+        Par `_ecrire` (2026-10-29) : le titre entre dans deux verdicts — la
+        durée (`resoudre_duree` : titre court, intro, skit) et le total YTM
+        (score de la recherche, `_videos_exclues`).
         """
         titre = clean_stored_title(new_title)
         try:
-            with self.engine.begin() as conn:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
                 # Depuis e36 le titre n'est plus UNIQUE en base (homonymes de
                 # genius_id différents) : le refus qu'assurait la contrainte est
                 # explicite ici. Seul le retrait du marqueur d'inédit

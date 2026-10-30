@@ -55,17 +55,16 @@ EXCEPTIONS: dict[str, str] = {
     "purger_credits_relations_deguisees": _CREDITS + " (purge par lots)",
     "reclasser_credits": _CREDITS + " (reclassement par lots)",
     # ── Données propres à la ligne ──
-    "clear_track_album": _LIGNE + " (album repère)",
-    "set_track_reference_release": _LIGNE + " (album repère) + " + _PARUTIONS,
-    "unlink_track_from_release": _LIGNE + " (album repère) + " + _PARUTIONS,
-    "renommer_album": _LIGNE + " (album repère) + parutions et albums",
+    # (Titre, album repère et interprète principal n'en sont PLUS, 2026-10-29 :
+    # la durée lit le titre, le total YTM et les streams lisent titre, album et
+    # principal — `rename_track`, `clear_track_album`, `renommer_album`,
+    # `set_track_reference_release`, `unlink_track_from_release` et
+    # `record_relation_artiste` passent par `_ecrire`.)
     "record_certifications": _LIGNE + " (certifs : refus et rattachement à la ligne)",
-    "record_relation_artiste": _LIGNE + " (feat / principal / rôle de CET artiste)",
-    "record_secondary_role": _LIGNE + " (rôle de CET artiste)",
-    "rename_track": _LIGNE + " (titre de la ligne ; le verdict LRC ne lit pas le titre)",
+    "record_secondary_role": _LIGNE + " (rôle de CET artiste ; aucun verdict ne le lit)",
     # ── Recalculs ──
-    "rearbitrer_duree_et_date": _RECALCUL,
-    "combler_isrc_vides": _RECALCUL + " (rattrapage par lots, passage à blanc)",
+    # (`rearbitrer_duree_et_date` et `combler_isrc_vides` passent par `_ecrire`
+    # depuis le 2026-10-29 : un recalcul partiel laissait les sœurs en retard.)
     "rematerialiser": _RECALCUL + " (appelle `_rematerialiser_fiche`, passage à blanc)",
     "realigner_soeurs": (
         _RECALCUL + " (pilote le mécanisme à la main, une transaction par famille, passage à blanc)"
@@ -77,7 +76,8 @@ EXCEPTIONS: dict[str, str] = {
     # ── Décisions documentées (CORRECTIFS, chantier A lot 2) ──
     "declarer_provenance_legacy": (
         "par lots ; déclare `legacy` la valeur DÉJÀ en colonne, et `legacy` ne sert que "
-        "seul — aucun verdict ne change"
+        "seul — aucun verdict ne change. Le convertir recalculerait des milliers de "
+        "fiches (6 201 datées après e24) en UNE transaction, verrou tenu d'autant"
     ),
 }
 

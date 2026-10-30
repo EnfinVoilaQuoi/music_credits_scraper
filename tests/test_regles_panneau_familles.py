@@ -435,3 +435,80 @@ class TestDoublonDeuxEnregistrements:
         a = _page("OUTSIDE", 1, "Kanye-west-outside", "")
         b = _page("OUTSIDE", 2, "Kanye-west-and-ye-outside", _REFRAIN)
         assert self._juger(a, b) is None
+
+
+def _apparition(titre, contributeurs, isrc="FRX762622179"):
+    return {
+        "ecart": {
+            "nature": "apparition",
+            "piste": {
+                "id": 4342405602,
+                "title": titre,
+                "isrc": isrc,
+                "duration": 167,
+                "contributors": contributeurs,
+            },
+            "album": {"id": 2, "title": titre, "artist_id": 13645509, "artist_name": "Heuss"},
+        }
+    }
+
+
+class TestApparitionCrediteeParDeezer:
+    """DA2 : une piste du disque d'un autre, sans page Genius, où Deezer
+    crédite l'artiste par SON identifiant, devient sa fiche."""
+
+    PLK = 1479842
+
+    def _juger(self, titre, contributeurs, isrcs=None):
+        cas = _cas("deezer_apparition", None, _apparition(titre, contributeurs), morceau=titre)
+        return pol.arbitrage_deezer(cas, None, _ctx(), isrcs or {}, {self.PLK})
+
+    def test_600k(self):
+        arb = self._juger("600K", [[13645509, "Heuss L'enfoiré"], [self.PLK, "PLK"]])
+        assert arb.action == "deezer_appliquer" and "PLK" in arb.raison
+
+    def test_un_homonyme_n_est_pas_l_artiste(self):
+        """Un « PLK » d'un autre identifiant Deezer ne crédite pas le nôtre."""
+        assert self._juger("600K", [[13645509, "Heuss"], [999, "PLK"]]) is None
+
+    def test_un_isrc_connu_se_rattache(self):
+        arb = self._juger("600K", [[self.PLK, "PLK"]], isrcs={"FRX762622179": "600K"})
+        assert arb is None or arb.action != "deezer_appliquer"
+
+    def test_une_version_reste_a_l_humain(self):
+        """Les 17 « … (Chopped & $crewed) » d'Ocho : la décision est ouverte (DA1)."""
+        assert self._juger("Tarkov (Chopped & $crewed)", [[self.PLK, "PLK"]]) is None
+
+
+def test_apparition_creee_par_regle_puis_retablie(data_manager, monkeypatch):
+    from src.services import ecarts_deezer as ed
+    from src.services import revue_auto
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    artiste = Artist(name="PLK")
+    artiste.id = data_manager.save_artist(artiste)
+    data_manager.save_track(Track(title="Pas les mêmes", artist=artiste, genius_id=1))
+    artiste.deezer_id = 77
+    alb = ed.AlbumDeezer(id=500, title="600K", artist_id=88, artist_name="Heuss L'enfoiré")
+    bilan = ed.BilanEcarts(deezer_id=77, artiste="PLK")
+    piste = ed.PisteDeezer(
+        id=9,
+        title="600K",
+        duration=167,
+        isrc="FRX762622179",
+        contributors=[(88, "Heuss L'enfoiré"), (77, "PLK")],
+    )
+    bilan.ecarts = [ed.Ecart("apparition", alb, piste)]
+    ed.enregistrer_signalements(data_manager, artiste, bilan)
+    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
+
+    resultat = revue_auto.corriger(data_manager, artiste)
+    assert len(resultat.appliquees) == 1 and not resultat.echecs, resultat
+    titres = {t.title for t in data_manager.get_artist_tracks(artiste.id)}
+    assert "600K" in titres
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:deezer_appliquer"
+    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert "600K" not in {t.title for t in data_manager.get_artist_tracks(artiste.id)}

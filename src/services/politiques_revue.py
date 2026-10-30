@@ -681,6 +681,16 @@ def politique_ecarts_deezer(
                     "deezer_appliquer",
                     f"disque de {album.get('artist_name')}",
                 )
+            # DA2 (2026-10-31) : sans page Genius, Deezer crédite l'artiste
+            # par SON identifiant (vérifié) parmi les contributeurs : un
+            # featuring réel (« 600K » de Heuss L'enfoiré avec PLK).
+            credite = [nom for cid, nom in piste.get("contributors") or [] if cid in ids_artiste]
+            if credite:
+                return Arbitrage(
+                    "créer la fiche (Deezer crédite l'artiste par son ID)",
+                    "deezer_appliquer",
+                    f"disque de {album.get('artist_name')} ; contributeur {credite[0]}",
+                )
             return None
         return None
 

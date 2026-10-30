@@ -300,6 +300,35 @@ def _porte_vocabulaire(texte: str) -> bool:
     return any(t in _VOCABULAIRE or _NUMERO_DE_VERSION.match(t) for t in tokens)
 
 
+#: Le contenu d'un groupe IMBRIQUÉ lisible : un texte, puis UN groupe final
+#: (« Grandtheft Remix (Clean) », « Junior Sanchez (Deep In The Sheets Remix) »).
+_CONTENU_IMBRIQUE = re.compile(r"^(?P<a>[^\(\)\[\]]*?\S)\s*[\(\[](?P<b>[^\(\)\[\]]*\S)\s*[\)\]]$")
+
+
+def _groupe_final_imbrique(titre: str) -> tuple[int, str, list[str]] | None:
+    """Le groupe final du titre quand il en CONTIENT un autre, à sa fin :
+    `(début, contenu, [texte, groupe intérieur])` — « … [Grandtheft Remix
+    (Clean)] » → `[« Grandtheft Remix », « Clean »]`. None sinon : pas de
+    groupe final, groupe simple (`_GROUPE_FINAL_RE` le lit), groupe intérieur
+    au milieu (« (GOOD (DON'T DIE) Original) ») ou sur plusieurs niveaux."""
+    t = titre.rstrip()
+    if not t or t[-1] not in ")]":
+        return None
+    profondeur = 0
+    for i in range(len(t) - 1, -1, -1):
+        if t[i] in ")]":
+            profondeur += 1
+        elif t[i] in "([":
+            profondeur -= 1
+            if profondeur == 0:
+                contenu = t[i + 1 : -1].strip()
+                m = _CONTENU_IMBRIQUE.match(contenu)
+                if not m:
+                    return None
+                return i, contenu, [m.group("a").strip(), m.group("b").strip()]
+    return None
+
+
 def _detacher_descripteur(titre: str) -> tuple[str, list[str]]:
     """Sépare le titre de ses descripteurs candidats, dans l'ordre d'apparition.
 
@@ -307,7 +336,9 @@ def _detacher_descripteur(titre: str) -> tuple[str, list[str]]:
       1. tout ce qui suit le premier ` - ` (convention Spotify — les segments
          suivants sont conservés : « Live Symphonic - Paris La Défense Aréna ») ;
       2. les groupes finaux entre parenthèses ou crochets, pelés un à un
-         (« Praise God (DANNE Remix) [Mixed] » en donne deux) ;
+         (« Praise God (DANNE Remix) [Mixed] » en donne deux) ; un groupe qui en
+         CONTIENT un à sa fin en donne deux aussi (« [Grandtheft Remix
+         (Clean)] », `_groupe_final_imbrique`) ;
       3. un dernier mot nu « Remix » / « RMX » (« 5G Remix »).
     Un segment n'est retenu comme descripteur que s'il PORTE un mot du
     vocabulaire ; sinon il reste dans le titre.
@@ -321,6 +352,23 @@ def _detacher_descripteur(titre: str) -> tuple[str, list[str]]:
     # même morceau, qui arrête la lecture sans faire de descripteur).
     while True:
         m = _GROUPE_FINAL_RE.search(titre)
+        imbrique = None if m else _groupe_final_imbrique(titre)
+        if imbrique is not None:
+            # « X [A (B)] » se lit « X (A) (B) » (2026-10-30) : « Whole Lotta
+            # Lovin' [Grandtheft Remix (Clean)] » est le remix Grandtheft en
+            # édition Clean, pas l'original.
+            debut, contenu, sous_groupes = imbrique
+            tokens = _tokens(contenu)
+            if (tokens and all(t in MOTS_DE_MEME_MORCEAU for t in tokens)) or not (
+                _porte_vocabulaire(contenu)
+            ):
+                break
+            avant = titre[:debut].strip()
+            if not avant:
+                break
+            titre = avant
+            groupes[0:0] = sous_groupes
+            continue
         if not m or not m.group(1).strip():
             break
         contenu = m.group(1).strip()

@@ -811,6 +811,47 @@ class TestLienYoutube:
         assert self._lien(data_manager, swing.id)[1] == "genius_media"
         assert self._lien(data_manager, isha.id)[1] == "search_auto"
 
+    def test_le_media_de_la_lecture_la_plus_recente_par_save_track(self, data_manager, famille):
+        """Disco de Travis Scott (2026-10-31) : la page relue pose son média par
+        `save_track` ; « CAN U BE » gardait chez Kanye le média d'avant."""
+        swing, isha = famille
+        ancien = "https://www.youtube.com/watch?v=AAAAAAAAAAA"
+        neuf = "https://www.youtube.com/watch?v=BBBBBBBBBBB"
+        self._poser(data_manager, swing.id, ancien, "genius_media", "audio")
+        self._poser(data_manager, isha.id, neuf, "genius_media", "audio")
+        with data_manager.engine.begin() as conn:
+            for tid, quand in ((swing.id, "2026-10-16T16:25:06"), (isha.id, "2026-10-31T09:28:17")):
+                conn.execute(
+                    text("UPDATE tracks SET genius_detail_checked_at = :q WHERE id = :t"),
+                    {"q": quand, "t": tid},
+                )
+        data_manager.save_track(swing)
+        assert self._lien(data_manager, swing.id)[0] == neuf
+        assert self._lien(data_manager, isha.id)[0] == neuf
+
+    def test_une_soeur_sans_horloge_recoit_le_media_de_la_page_relue(self, data_manager, famille):
+        """« PABLO » : la ligne Kanye n'avait pas d'horloge de lecture ; le
+        comblement lui recopiait celle de Travis AVANT l'alignement, ex æquo."""
+        swing, isha = famille
+        neuf = "https://www.youtube.com/watch?v=BBBBBBBBBBB"
+        self._poser(data_manager, swing.id, "https://youtu.be/AAAAAAAAAAA", "genius_media", "audio")
+        self._poser(data_manager, isha.id, neuf, "genius_media", "audio")
+        with data_manager.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE tracks SET genius_detail_checked_at = :q WHERE id = :t"),
+                {"q": "2026-10-31T09:26:43", "t": isha.id},
+            )
+        data_manager.save_track(isha)
+        assert self._lien(data_manager, swing.id)[0] == neuf
+
+    def test_meme_lecture_deux_medias_restent_au_panneau(self, data_manager, famille):
+        swing, isha = famille
+        self._poser(data_manager, swing.id, "https://youtu.be/AAAAAAAAAAA", "genius_media", "audio")
+        self._poser(data_manager, isha.id, "https://youtu.be/BBBBBBBBBBB", "genius_media", "audio")
+        data_manager.save_track(isha)
+        assert self._lien(data_manager, swing.id)[0] == "https://youtu.be/AAAAAAAAAAA"
+        assert self._lien(data_manager, isha.id)[0] == "https://youtu.be/BBBBBBBBBBB"
+
     def test_le_media_de_la_page_relue_vaut_chez_la_soeur(self, data_manager, famille):
         """Propriété hypothesis rouge du 2026-10-31 : deux liens `genius_media`
         différents restaient chez deux sœurs. Le média de la PAGE (partagée) :

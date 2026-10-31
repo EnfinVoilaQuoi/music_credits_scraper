@@ -335,6 +335,29 @@ def _nature_connue(nature) -> bool:
     return not _est_vide(nature) and nature != "unknown"
 
 
+#: Horloges de la lecture du DÉTAIL de la page Genius (média compris).
+_HORLOGES_DE_PAGE = ("genius_detail_checked_at", "last_scraped")
+
+
+def _media_de_la_lecture_la_plus_recente(avec) -> dict | None:
+    """Liens tous `genius_media`, vidéos différentes : celui de la ligne dont
+    la lecture de page est STRICTEMENT la plus récente — c'est le média que la
+    page sert aujourd'hui. L'étape discographie pose le média par `save_track`,
+    sans `page_relue` (Travis Scott, 2026-10-31 : « CAN U BE », « PABLO »,
+    « Piss On Your Grave » gardaient chez Kanye le média d'avant). Ex æquo ou
+    sans horloge : None, le panneau 🧬."""
+    if any(r["youtube_url_source"] != "genius_media" for r in avec):
+        return None
+
+    def horloge(r):
+        return max((str(r[h]) for h in _HORLOGES_DE_PAGE if not _est_vide(r[h])), default="")
+
+    rangees = sorted(avec, key=horloge, reverse=True)
+    if not horloge(rangees[0]) or horloge(rangees[0]) == horloge(rangees[1]):
+        return None
+    return rangees[0]
+
+
 def _aligner_lien_youtube(conn, famille: list[int], *, page_relue: bool = False) -> int:
     """Le lien YouTube principal, aligné entre sœurs là où un arbitre existe.
 
@@ -358,7 +381,7 @@ def _aligner_lien_youtube(conn, famille: list[int], *, page_relue: bool = False)
     lignes = (
         conn.execute(
             text(
-                f"SELECT id, {', '.join(COLONNES_LIEN_YOUTUBE)} "  # noqa: S608
+                f"SELECT id, {', '.join(COLONNES_LIEN_YOUTUBE + _HORLOGES_DE_PAGE)} "  # noqa: S608
                 f"FROM tracks WHERE id IN ({marques})"
             ),
             {f"f{n}": tid for n, tid in enumerate(famille)},
@@ -382,7 +405,7 @@ def _aligner_lien_youtube(conn, famille: list[int], *, page_relue: bool = False)
             # (propriété hypothesis rouge du 2026-10-31 : deux liens
             # `genius_media` différents restaient chez deux sœurs).
             reference = fraiche
-        else:
+        elif (reference := _media_de_la_lecture_la_plus_recente(avec)) is None:
             return 0
         valeurs = {c: reference[c] for c in COLONNES_LIEN_YOUTUBE}
         a_reecrire = [r for r in avec if video(r) != video(reference)]
@@ -750,6 +773,13 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
 
     famille = [track_id, *jumelles]
 
+    # Données de PAGE : la lecture la plus récente l'emporte (remplacement,
+    # jamais vidage) — décision utilisateur 2026-10-12. AVANT le comblement :
+    # il recopierait l'horloge de la ligne relue chez la sœur qui n'en avait
+    # pas, et les deux lectures deviendraient ex æquo (Travis Scott / Kanye
+    # « PABLO », « Piss On Your Grave », 2026-10-31).
+    rapport["donnees_de_page"] = _aligner_sur_la_lecture_la_plus_recente(conn, famille)
+    rapport["lien_youtube"] = _aligner_lien_youtube(conn, famille)
     for cible, trous in _colonnes_a_combler(conn, famille).items():
         assignations = ", ".join(f"{c} = :{c}" for c in trous)
         conn.execute(
@@ -757,10 +787,10 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
             {**trous, "tid": cible},
         )
         rapport["colonnes"] += len(trous)
-    # Données de PAGE : la lecture la plus récente l'emporte (remplacement,
-    # jamais vidage) — décision utilisateur 2026-10-12.
-    rapport["donnees_de_page"] = _aligner_sur_la_lecture_la_plus_recente(conn, famille)
-    rapport["lien_youtube"] = _aligner_lien_youtube(conn, famille)
+    # Une seconde passe : le comblement a pu apporter la première valeur
+    # d'un lien (même vidéo, étiquettes à unir). Idempotent.
+    rapport["donnees_de_page"] += _aligner_sur_la_lecture_la_plus_recente(conn, famille)
+    rapport["lien_youtube"] += _aligner_lien_youtube(conn, famille)
     # `has_lyrics` n'est que le reflet de `lyrics` : `0` étant une VALEUR pour
     # le comblement, une ligne qui recevait les paroles gardait son `0`
     # (2026-10-11 : 72 fiches à paroles marquées « sans paroles »).

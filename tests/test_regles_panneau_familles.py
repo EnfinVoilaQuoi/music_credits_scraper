@@ -477,9 +477,49 @@ class TestApparitionCrediteeParDeezer:
         arb = self._juger("600K", [[self.PLK, "PLK"]], isrcs={"FRX762622179": "600K"})
         assert arb is None or arb.action != "deezer_appliquer"
 
-    def test_une_version_reste_a_l_humain(self):
-        """Les 17 « … (Chopped & $crewed) » d'Ocho : la décision est ouverte (DA1)."""
+    def test_une_version_hors_disque_de_versions_reste_a_l_humain(self):
+        """Une version sur un disque d'un tiers qui n'est pas un disque de
+        versions (ni socle connu) : DA2 ne crée pas de version."""
         assert self._juger("Tarkov (Chopped & $crewed)", [[self.PLK, "PLK"]]) is None
+
+
+class TestDisqueDeVersionsDUnTiers:
+    """DA1 (décision utilisateur 2026-10-31) : les pistes de « LM$ (Chopped &
+    $crewed) » d'Ocho, sans page Genius, versions de fiches de Freeze,
+    deviennent des fiches secondaires (version de l'original)."""
+
+    FREEZE = 13755123
+
+    def _juger(self, titre, album="LM$ (Chopped & $crewed)", socle=2810, genius=None):
+        preuves = _apparition(titre, [[380482, "Ocho"], [self.FREEZE, "Freeze Corleone"]])
+        preuves["ecart"]["album"]["title"] = album
+        preuves["ecart"]["socle_id"] = socle
+        preuves["ecart"]["genius"] = genius
+        cas = _cas("deezer_apparition", None, preuves, morceau=titre)
+        ctx = _ctx(_t("Freeze Raël", tid=2810))
+        return pol.arbitrage_deezer(cas, None, ctx, {}, {self.FREEZE})
+
+    def test_freeze_rael_chopped(self):
+        arb = self._juger("Freeze Raël (Chopped & $crewed)")
+        assert arb.action == "deezer_appliquer" and "Freeze Raël" in arb.raison
+
+    def test_sans_socle_connu_reste_a_l_humain(self):
+        assert self._juger("Freeze Raël (Chopped & $crewed)", socle=None) is None
+        assert self._juger("Freeze Raël (Chopped & $crewed)", socle=999) is None
+
+    def test_un_disque_qui_n_est_pas_une_version_reste_a_l_humain(self):
+        assert self._juger("Freeze Raël (Chopped & $crewed)", album="Ocho Vol. 2") is None
+
+    def test_une_autre_famille_que_le_disque_reste_a_l_humain(self):
+        assert self._juger("Freeze Raël (Remix)") is None
+
+    def test_un_instrumental_n_a_pas_de_fiche(self):
+        arb = self._juger("Freeze Raël (Instrumental)", album="LM$ (Instrumental)")
+        assert arb is None or arb.action != "deezer_appliquer"
+
+    def test_une_page_genius_passe_par_la_regle_des_pages(self):
+        arb = self._juger("Freeze Raël (Chopped & $crewed)", genius={"id": 1, "url": "u"})
+        assert arb is None or "secondaire" not in arb.raison
 
 
 def test_apparition_creee_par_regle_puis_retablie(data_manager, monkeypatch):

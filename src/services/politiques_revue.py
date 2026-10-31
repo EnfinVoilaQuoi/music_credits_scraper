@@ -1066,6 +1066,37 @@ def _rattacher_par_isrc(cas, ctx, isrcs_connus: dict, ids_artiste: set) -> Arbit
     )
 
 
+def _version_d_un_disque_de_versions(cas, ctx) -> Arbitrage | None:
+    """DA1 (décision utilisateur 2026-10-31) : la piste d'un disque d'un TIERS
+    qui est tout entier une version (« LM$ (Chopped & $crewed) » d'Ocho, C&S de
+    l'album de Freeze Corleone), sans page Genius, de la même famille que son
+    disque et version d'une fiche connue de l'artiste (`socle_id`), devient une
+    fiche SECONDAIRE : version de l'original (relation `version_of`, posée par
+    `creer_lignes`), ses streams jamais sommés à ceux de l'original — comme les
+    15 fiches C&S de Freeze déjà créées. Instrumental et a cappella restent
+    sans fiche (DV1)."""
+    from src.utils.version_heritage import famille_de
+
+    if cas.detecteur != "deezer_apparition":
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    if ecart.get("genius") or not ecart.get("socle_id"):
+        return None
+    socle = next((t for t in ctx.disco if t.id == ecart["socle_id"]), None) if ctx else None
+    if socle is None:
+        return None
+    titre = (ecart.get("piste") or {}).get("title") or cas.morceau
+    album = (ecart.get("album") or {}).get("title") or ""
+    fam = famille_de(titre)
+    if fam in (None, "edition", "instrumental", "a_cappella") or famille_de(album) != fam:
+        return None
+    return Arbitrage(
+        "créer la fiche secondaire (version d'une fiche, disque de versions d'un tiers)",
+        "deezer_appliquer",
+        f"« {album} » ({fam}) ; version de « {socle.title} »",
+    )
+
+
 def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     """L'arbitrage de la famille « écarts Deezer », restreint aux originaux
     sans ambiguïté — le titre de la PISTE Deezer et celui de la fiche."""
@@ -1082,6 +1113,9 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
             return arbitrage
         return None
     piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
+    disque_de_versions = _version_d_un_disque_de_versions(cas, ctx)
+    if disque_de_versions is not None:
+        return disque_de_versions
     if not titre_d_original(piste.get("title") or cas.morceau):
         return None
     if track is not None and not titre_d_original(track.title):

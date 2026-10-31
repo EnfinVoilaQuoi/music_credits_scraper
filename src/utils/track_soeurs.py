@@ -335,14 +335,16 @@ def _nature_connue(nature) -> bool:
     return not _est_vide(nature) and nature != "unknown"
 
 
-def _aligner_lien_youtube(conn, famille: list[int]) -> int:
+def _aligner_lien_youtube(conn, famille: list[int], *, page_relue: bool = False) -> int:
     """Le lien YouTube principal, aligné entre sœurs là où un arbitre existe.
 
     · MÊME vidéo partout : seule l'étiquette diffère — la provenance au plus
       haut rang (`manual` > `genius_media` > le reste) et la nature connue
       (« audio » plutôt que « unknown ») gagnent.
     · Vidéos DIFFÉRENTES : seul un choix `manual` UNIQUE se transmet — c'est
-      déjà la décision de l'utilisateur, pour tout l'enregistrement. Sinon rien :
+      déjà la décision de l'utilisateur, pour tout l'enregistrement. Sans choix
+      `manual`, une lecture FRAÎCHE de la page (`page_relue`, la ligne
+      `famille[0]` vient de recevoir le média Genius) se transmet. Sinon rien :
       l'une des deux est fausse, le panneau 🧬 le montre (décision 2026-10-12).
 
     Le comblement ne remplissait que les trous : un ✔️ posé sur une ligne ne
@@ -371,10 +373,19 @@ def _aligner_lien_youtube(conn, famille: list[int]) -> int:
 
     if len({video(r) for r in avec}) > 1:
         manuelles = [r for r in avec if r["youtube_url_source"] == "manual"]
-        if len({video(r) for r in manuelles}) != 1:
+        fraiche = next((r for r in avec if r["id"] == famille[0]), None)
+        if len({video(r) for r in manuelles}) == 1:
+            reference = manuelles[0]
+        elif page_relue and not manuelles and fraiche is not None:
+            # Le média de la PAGE Genius, que les sœurs partagent : la lecture
+            # la plus récente l'emporte, comme pour les autres données de page
+            # (propriété hypothesis rouge du 2026-10-31 : deux liens
+            # `genius_media` différents restaient chez deux sœurs).
+            reference = fraiche
+        else:
             return 0
-        valeurs = {c: manuelles[0][c] for c in COLONNES_LIEN_YOUTUBE}
-        a_reecrire = [r for r in avec if video(r) != video(manuelles[0])]
+        valeurs = {c: reference[c] for c in COLONNES_LIEN_YOUTUBE}
+        a_reecrire = [r for r in avec if video(r) != video(reference)]
     elif avec:
         gagnante = max(avec, key=lambda r: (_rang_lien(r["youtube_url_source"]), -r["id"]))
         # La nature est celle de la VIDÉO, relevée par le run des vues : la
@@ -413,7 +424,7 @@ def _aligner_lien_youtube(conn, famille: list[int]) -> int:
     return reecrites
 
 
-def aligner_lien_youtube_des_soeurs(conn, track_id: int) -> int:
+def aligner_lien_youtube_des_soeurs(conn, track_id: int, *, page_relue: bool = False) -> int:
     """`_aligner_lien_youtube` sur la famille de `track_id` — pour l'écrivain
     qui pose le lien sur UNE ligne (`update_track_youtube_url`) sans passer par
     `synchroniser_soeurs`."""
@@ -423,7 +434,9 @@ def aligner_lien_youtube_des_soeurs(conn, track_id: int) -> int:
         text("SELECT genius_id FROM tracks WHERE id = :tid"), {"tid": track_id}
     ).scalar()
     jumelles, _ = ids_soeurs(conn, track_id, gid)
-    return _aligner_lien_youtube(conn, [track_id, *jumelles]) if jumelles else 0
+    return (
+        _aligner_lien_youtube(conn, [track_id, *jumelles], page_relue=page_relue) if jumelles else 0
+    )
 
 
 def _colonnes_a_combler(conn, ids: list[int]) -> dict[int, dict]:

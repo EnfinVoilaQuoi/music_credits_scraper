@@ -811,6 +811,24 @@ class TestLienYoutube:
         assert self._lien(data_manager, swing.id)[1] == "genius_media"
         assert self._lien(data_manager, isha.id)[1] == "search_auto"
 
+    def test_le_media_de_la_page_relue_vaut_chez_la_soeur(self, data_manager, famille):
+        """Propriété hypothesis rouge du 2026-10-31 : deux liens `genius_media`
+        différents restaient chez deux sœurs. Le média de la PAGE (partagée) :
+        la lecture la plus récente l'emporte — jamais sur un choix `manual`."""
+        swing, isha = famille
+        url_a = "https://www.youtube.com/watch?v=AAAAAAAAAAA"
+        url_b = "https://www.youtube.com/watch?v=BBBBBBBBBBB"
+        data_manager.update_track_youtube_url(swing.id, url_b, "genius_media")
+        data_manager.update_track_youtube_url(isha.id, url_a, "genius_media")
+        assert self._lien(data_manager, swing.id)[:2] == (url_a, "genius_media")
+        assert self._lien(data_manager, isha.id)[:2] == (url_a, "genius_media")
+
+        self._poser(data_manager, swing.id, url_b, "manual", "audio")
+        data_manager.update_track_youtube_url(isha.id, url_a, "genius_media")
+        # Le choix manuel de Swing gagne, chez les deux (règle existante).
+        assert self._lien(data_manager, swing.id)[:2] == (url_b, "manual")
+        assert self._lien(data_manager, isha.id)[:2] == (url_b, "manual")
+
     def test_deux_choix_manuels_differents_restent_au_panneau(self, data_manager, famille):
         swing, isha = famille
         self._poser(

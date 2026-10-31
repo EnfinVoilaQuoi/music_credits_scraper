@@ -5971,7 +5971,7 @@ class TrackRepository:
                 conn.execute(stmt)
                 # Un ✔️ vaut pour l'ENREGISTREMENT : la sœur qui a déjà un lien
                 # ne le recevrait jamais par le comblement (2026-10-26).
-                aligner_lien_youtube_des_soeurs(conn, track_id)
+                aligner_lien_youtube_des_soeurs(conn, track_id, page_relue=source == "genius_media")
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur update_track_youtube_url (track_id={track_id}): {e}")

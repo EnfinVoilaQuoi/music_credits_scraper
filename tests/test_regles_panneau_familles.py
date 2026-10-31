@@ -349,14 +349,16 @@ class TestSongbpmDementiParLAudioDeLaPage:
         )
         assert self._juger(t) is None
 
-    def test_versions_et_medleys_restent_a_l_humain(self):
-        for titre in ("E.T. (Remix)", "Material Girls Medley"):
+    def test_versions_et_medleys_compris(self):
+        """Q3 (décision utilisateur 2026-10-31) : le témoin est l'audio que la
+        page de la version elle-même lie."""
+        for titre in ("E.T. (Remix)", "Material Girls Medley", "Ego (Live)"):
             t = _t(
                 titre,
                 durations_observees={"songbpm": 279, "youtube": 238},
                 videos=[_video(238, "The Puppini Sisters - Topic")],
             )
-            assert self._juger(t) is None, titre
+            assert self._juger(t).action == "retirer_songbpm", titre
 
     def test_une_video_de_la_recherche_ne_suffit_pas(self):
         """« Welcome To The World » : l'audio vient de la recherche, pas de la page."""

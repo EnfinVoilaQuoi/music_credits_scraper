@@ -1778,15 +1778,15 @@ def _audios_de_la_page(track) -> list:
 
 
 def politique_songbpm_audio_de_la_page(cas, track, _ctx):
-    """SB1 (2026-10-31) : la durée SongBPM d'un ORIGINAL est démentie, de plus
-    de `ECART_VERSION_S`, par l'audio Topic que la page Genius lie elle-même,
-    et aucun catalogue lu par ID ne la soutient à `ECART_FICHIER_S` : la page
+    """SB1 (2026-10-31) : la durée SongBPM est démentie, de plus de
+    `ECART_VERSION_S`, par l'audio Topic que la page Genius lie elle-même, et
+    aucun catalogue lu par ID ne la soutient à `ECART_FICHIER_S` : la page
     SongBPM est celle d'une autre version, ses mesures partent (« Cash
     Money » 161 s contre l'audio de la page 138 s). Versions et medleys
-    restent à l'humain (décision du 2026-10-20)."""
+    compris (Q3, décision utilisateur 2026-10-31) : le témoin est l'audio que
+    la page de la VERSION elle-même lie (« Ego (Live) » 115 s contre 236 s,
+    « Material Girls Medley » 238 s contre 279 s)."""
     if cas.detecteur != "duree_songbpm" or track is None:
-        return None
-    if not titre_d_original(track.title) or re.search(r"\bmedley\b", track.title, re.I):
         return None
     durees = _durees(track)
     sb = durees.get("songbpm")

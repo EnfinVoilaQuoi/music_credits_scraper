@@ -57,6 +57,7 @@ from src.utils.title_matching import (
 )
 from src.utils.version_descriptors import (
     MOTS_DE_MEME_MORCEAU,
+    cle_de_socle,
     edition_de_diffusion,
     est_un_remix,
     graphies_equivalentes,
@@ -494,6 +495,8 @@ def classer(
     deezer_ids: dict[int, Track] = {}
     isrcs: dict[str, list[Track]] = {}
     socles: dict[str, Track] = {}
+    # La même souche à la graphie de la PARTIE près (« pt. 2 » / « Part. 2 »).
+    socles_par_partie: dict[str, Track] = {}
     for t in base:
         k = normalize_title(t.title)
         titres.setdefault(k, t)
@@ -505,6 +508,8 @@ def classer(
             isrcs.setdefault(str(t.isrc).upper(), []).append(t)
         if not porte_une_version(t.title):
             socles.setdefault(k, t)
+            if cle_partie := cle_de_socle(t.title):
+                socles_par_partie.setdefault(cle_partie, t)
     cles_albums = {cle_album(t.album) for t in base if t.album}
     cles_albums |= {cle_album(a.get("title")) for a in albums_base if a.get("title")}
     # Disques que la base ne connaît QUE par des lignes d'invité : celui d'un
@@ -611,7 +616,11 @@ def classer(
             if not present:
                 continue
             socle_key, est_version = _variante_de(p)
-            socle = socles.get(socle_key) or titres.get(socle_key)
+            socle = (
+                socles.get(socle_key)
+                or titres.get(socle_key)
+                or socles_par_partie.get(cle_de_socle(p.title_short or p.title))
+            )
             inconnues.append((p, socle, est_version and socle is not None))
         if not inconnues:
             if album.pistes and not connu:

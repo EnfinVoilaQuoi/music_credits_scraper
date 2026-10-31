@@ -973,6 +973,19 @@ def cle_titre(titre: str | None) -> CleTitre:
     )
 
 
+def cle_de_socle(titre: str | None) -> str:
+    """PUR. Clé d'INDEX du morceau souche, à la graphie de la PARTIE près :
+    le socle sans son marqueur de partie, puis les numéros (« Scellé pt. 2
+    (Chopped & $crewed) » et « Scellé Part. 2 » → `scelle|2`, 2026-10-31 :
+    le classement Deezer cherchait `scelle pt2` parmi les `scelle part2`).
+    Pour un dictionnaire ; deux titres se comparent par `cle_titre`. Vide
+    quand rien ne reste de la souche (« Part 2 » seul) : à ne pas indexer."""
+    k = cle_titre(titre)
+    if not k.socle:
+        return ""
+    return f"{k.socle}|{','.join(str(n) for n in sorted(k.parties))}"
+
+
 def meme_enregistrement(a: CleTitre, b: CleTitre) -> bool:
     """Le MÊME morceau dans la MÊME version (voir `titres_equivalents`)."""
     if not a.titre or not b.titre:

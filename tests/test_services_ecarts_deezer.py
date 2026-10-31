@@ -50,6 +50,28 @@ def _track(title, album=None, isrc=None):
 
 
 class TestClasser:
+    def test_socle_a_la_graphie_de_la_partie_pres(self):
+        """2026-10-31 : « Scellé pt. 2 (Chopped & $crewed) » d'Ocho est une
+        version de « Scellé Part. 2 » (#2823 de Freeze) ; le socle n'était pas
+        trouvé (`scelle pt2` / `scelle part2`)."""
+        base = [_track("Scellé Part. 2", "LMF"), _track("Scellé", "Ashe Tape, Vol. 2")]
+        p = _piste(
+            10,
+            "Scellé pt. 2 (Chopped & $crewed)",
+            short="Scellé pt. 2",
+            version="(Chopped & $crewed)",
+            contributors=[(9, "Ocho"), (NOUS, "Nous")],
+        )
+        albums = [_album(1, "LM$ (Chopped & $crewed)", [p], artist_id=9)]
+        (e,) = ed.classer(albums, base, [], NOUS)[0]
+        assert e.nature == "apparition" and e.socle is base[0]
+
+    def test_une_partie_seule_n_est_le_socle_de_personne(self):
+        base = [_track("Part 2", "A")]
+        p = _piste(10, "Pt. 2 (Remix)", "Pt. 2", "(Remix)", contributors=[(NOUS, "Nous")])
+        (e,) = ed.classer([_album(1, "B (Remix)", [p], artist_id=9)], base, [], NOUS)[0]
+        assert e.socle is None
+
     def test_trou_sur_disque_connu(self):
         base = [_track("Chardons", "Chardons Bleus")]
         albums = [_album(1, "Chardons Bleus", [_piste(10, "Chardons"), _piste(11, "Coal lla")])]

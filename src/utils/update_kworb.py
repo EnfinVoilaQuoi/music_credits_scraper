@@ -33,7 +33,9 @@ from src.utils import corrections_fiches, spotify_identity
 from src.utils.discogs_identity import nom_sans_suffixe
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import (
+    TOLERANCE_MEME_FICHIER,
     artiste_etranger,
+    duree_temoin,
     est_accepte,
     identite_concorde,
     valider_identite,
@@ -656,6 +658,39 @@ def _recevable(fiche, sid, lire_identite) -> bool:
     return any(names_match_as_words(fiche.primary_artist_name, a) for a in credites)
 
 
+def _identite_embed(sid: str, lire_identite) -> dict | None:
+    """L'identité d'un ID lue à sa page `/embed/` : la dernière lecture gardée
+    dans le BRUT d'abord (zéro réseau, rejeu compris), sinon le lecteur."""
+    from src.persistence import brut
+    from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
+
+    for lu in brut.lectures("spotify_embed", f"https://open.spotify.com/embed/track/{sid}"):
+        if not brut.bridee(lu["statut"], lu["corps"]):
+            texte = lu["corps"].decode("utf-8", "replace")
+            return SpotifyIDScraper._identite_depuis_embed(texte)
+    return lire_identite(sid)
+
+
+def flou_confirme(entry, track, score: float, lire_identite) -> bool:
+    """Un rapprochement FLOU qui n'en est pas un : identique après
+    normalisation (100 %), et la durée de l'ID de la ligne, lue à son embed, à
+    ± 2 s d'une durée INDÉPENDANTE de la fiche (`duree_temoin`) — le même
+    morceau, rien à soumettre. Cas d'origine (2026-10-31, confirmé à la main) :
+    Kanye « Don't Like.1 » (apostrophe droite) / la fiche « Don’t Like.1 ».
+
+    Jamais un ID REFUSÉ sur la fiche (« New God Flow.1 » : l'ID de la ligne
+    y est refusé à la main) ; sans durée de l'un ou l'autre côté, rien n'est
+    prouvé : le cas reste au panneau."""
+    sid = entry.get("spotify_id")
+    if score < 1.0 or not sid or sid in corrections_fiches.ids_refuses(track):
+        return False
+    temoin = duree_temoin(track)
+    if not temoin:
+        return False
+    duree = (_identite_embed(sid, lire_identite) or {}).get("duration")
+    return bool(duree) and abs(temoin - duree) <= TOLERANCE_MEME_FICHIER
+
+
 def lien_tranche(entry, track, decisions: dict) -> bool:
     """Le lien ligne Kworb → `track` a-t-il déjà été TRANCHÉ à la main : titre
     confirmé (ou décidé) vers cette fiche dans `kworb_decisions`, ou ID
@@ -1235,6 +1270,8 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         "matched_by_title": 0,
         "matched_by_fuzzy": 0,
         "fuzzy_matched": [],  # [(titre kworb, titre base, score)] — à vérifier côté GUI
+        # Flous à 100 % que la durée de l'ID confirme (`flou_confirme`) : non soumis.
+        "flous_confirmes": [],  # [(titre kworb, titre base)]
         # Rapprochements INCERTAINS (bande sous le seuil auto) : NON écrits,
         # à confirmer/rejeter par l'utilisateur (mémorisé ensuite).
         "suggestions": [],  # [{kworb_title, streams, daily, track_id, db_title, score}]
@@ -1440,7 +1477,13 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                     label=entry["title"],
                     variant_track_id=track.id,
                 )
-        if via == "fuzzy":
+        if via == "fuzzy" and flou_confirme(entry, track, r.score, lire_identite):
+            result["flous_confirmes"].append((entry["title"], track.title))
+            logger.info(
+                f"🔗 Kworb '{entry['title']}' → '{track.title}' : même titre normalisé, "
+                f"même durée — confirmé"
+            )
+        elif via == "fuzzy":
             result["fuzzy_matched"].append((entry["title"], track.title, r.score))
             _a_trancher(
                 result,

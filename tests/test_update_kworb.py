@@ -26,6 +26,7 @@ from src.utils.update_kworb import (
     sommer_editions,
     update_kworb_streams,
 )
+from tests.conftest import load_fixture
 
 
 def _track(id_, titre, spotify_id=None, album=None, feat=False, primary=None):
@@ -411,6 +412,66 @@ class TestNiveauxDeRapprochement:
             [_entry("Zzz inconnu un", 100), _entry("Zzz inconnu deux", 9000)],
         )
         assert [s for _, s in res["unmatched_details"]] == [9000, 100]
+
+
+class TestFlouConfirme:
+    """Kanye « Don't Like.1 » (Kworb, apostrophe droite) / la fiche « Don’t
+    Like.1 » : rapprochés à 100 %, même durée, confirmés à la main le
+    2026-10-31 — un flou à 100 % que la durée de l'ID confirme n'est plus
+    soumis. « New God Flow.1 » : l'ID de la ligne est REFUSÉ sur la fiche, le
+    cas reste au panneau."""
+
+    def _run(self, track, entry, lire):
+        dm = _DataManager([track])
+        scraper = _Scraper(songs=_page([entry]))
+        return update_kworb_streams(_Artist(), dm, scraper=scraper, lire_identite=lire), dm
+
+    def _fiche(self):
+        t = _track(1, "Don’t Like.1", spotify_id="FICHE")
+        t.duration = 216
+        return t
+
+    def _codes(self, res):
+        return [c["detecteur"] for c in res["a_trancher"]]
+
+    def test_meme_titre_meme_duree_confirme(self):
+        entree = _entry("Don't Like.1", 5000, 50, "KWORB")
+        res, dm = self._run(self._fiche(), entree, lambda sid: {"duration": 217})
+        assert res["flous_confirmes"] == [("Don't Like.1", "Don’t Like.1")]
+        assert "kworb_flou" not in self._codes(res)
+        assert dm.streams_writes[0][:2] == (1, 5000)
+
+    def test_la_duree_se_lit_dans_le_brut(self):
+        from src.persistence import brut
+
+        corps = load_fixture("spotify_embed/track.html").encode("utf-8")  # 244 s
+        brut.consigner("spotify_embed", "https://open.spotify.com/embed/track/KWORB", 200, corps)
+        t = self._fiche()
+        t.duration = 245
+        res, _ = self._run(t, _entry("Don't Like.1", 5000, 50, "KWORB"), lambda sid: None)
+        assert res["flous_confirmes"] and "kworb_flou" not in self._codes(res)
+
+    def test_id_refuse_jamais_confirme(self, monkeypatch):
+        from src.utils import corrections_fiches
+
+        monkeypatch.setattr(corrections_fiches, "ids_refuses", lambda track: {"KWORB"})
+        res, _ = self._run(
+            self._fiche(), _entry("Don't Like.1", 5000, 50, "KWORB"), lambda s: {"duration": 216}
+        )
+        assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
+
+    @pytest.mark.parametrize("duree", [None, 230])
+    def test_sans_duree_qui_concorde_le_cas_reste(self, duree):
+        res, _ = self._run(
+            self._fiche(), _entry("Don't Like.1", 5000, 50, "KWORB"), lambda s: {"duration": duree}
+        )
+        assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
+
+    def test_une_coquille_n_est_pas_confirmee(self):
+        t = _track(1, "Rythm is love")
+        t.duration = 200
+        res, _ = self._run(t, _entry("Rhythm is love", spotify_id="K"), lambda s: {"duration": 200})
+        assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
 
 
 class TestDecisionsMemorisees:

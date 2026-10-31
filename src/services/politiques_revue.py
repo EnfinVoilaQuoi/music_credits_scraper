@@ -396,6 +396,29 @@ def _autre_que_la_page_deezer_de_la_fiche(track, piste) -> str | None:
     )
 
 
+def _seconde_page_du_meme_enregistrement(track, piste, vote, meme_titre) -> str | None:
+    """La fiche a déjà SA page Deezer ; la candidate est une AUTRE page au même
+    titre (deux originaux), dont le vote des catalogues SOUTIENT la durée par
+    deux voix indépendantes de Deezer (MC Solaar « Clic clic » : single 2011
+    à 175 s, Apple et Spotify à 172 s ; 2026-10-31). Une seconde page du même
+    enregistrement est une ÉDITION, avec sa durée (décision utilisateur
+    2026-10-19) — exactement ce que le motif du cas annonçait (« rattachement
+    sûr », `revue._vote_de_parution`). La raison, sinon None."""
+    if not (meme_titre and vote and vote.nature == SOUTENUE and track.deezer_id):
+        return None
+    if str(track.deezer_id) == str(piste.get("id")):
+        return None
+    if not (titre_d_original(track.title) and titre_d_original(piste.get("title"))):
+        return None
+    voix = sorted(s for s in vote.pour if famille(s) != famille("deezer"))
+    if len(voix) < 2:
+        return None
+    return (
+        f"page {piste.get('id')} ({piste.get('duration')} s) soutenue par "
+        f"{', '.join(voix)} ; la fiche garde sa page {track.deezer_id}"
+    )
+
+
 def politique_liens_deezer(cas, track, _ctx):
     """Parution à confirmer : rattacher si l'ISRC est celui de la fiche, ou si
     une durée indépendante la confirme à 2 s ET que les titres désignent le
@@ -448,6 +471,9 @@ def politique_liens_deezer(cas, track, _ctx):
         return Arbitrage(
             "rattacher", "deezer_appliquer", f"{duree} s = {', '.join(accord)}, même titre"
         )
+    seconde = _seconde_page_du_meme_enregistrement(track, piste, vote, meme_titre)
+    if seconde:
+        return Arbitrage("rattacher en ÉDITION (sa durée propre)", "deezer_appliquer", seconde)
     autre_version = _autre_que_la_page_deezer_de_la_fiche(track, piste)
     if autre_version:
         return Arbitrage("autre version : ne pas rattacher", "normal", autre_version)

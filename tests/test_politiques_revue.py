@@ -160,6 +160,37 @@ class TestLiensDeezer:
         arb = pol.politique_liens_deezer(self._cas(t, "Playmate", 200, "fr1"), t, None)
         assert arb.sens == "rattacher"
 
+    def _clic_clic(self, titre="Clic clic", **durees):
+        t = _t(
+            "Clic Clic",
+            4128,
+            isrc="FR6V80708984",
+            deezer_id=209376,
+            duration=172,
+            durations_observees=durees
+            or {"apple_music": 172, "deezer": 172, "spotify_web": 172, "reccobeats": 172},
+        )
+        cas = self._cas(t, titre, 175, "FR43Q0700005")
+        cas.preuves["ecart"]["piste"]["id"] = 15003630
+        return cas, t
+
+    def test_seconde_page_soutenue_rattachee_en_edition(self):
+        """MC Solaar « Clic clic » (2026-10-31) : la fiche a sa page (172 s) ; le
+        single de 2011, 175 s, autre ISRC, que le vote soutient par Apple et
+        Spotify — une ÉDITION, ce que le motif annonçait déjà."""
+        cas, t = self._clic_clic()
+        arb = pol.politique_liens_deezer(cas, t, None)
+        assert arb.action == "deezer_appliquer" and "ÉDITION" in arb.sens
+
+    def test_seconde_page_d_une_seule_voix_reste_a_l_humain(self):
+        cas, t = self._clic_clic(deezer=172, spotify_web=172)
+        assert pol.politique_liens_deezer(cas, t, None) is None
+
+    def test_seconde_page_d_une_version_reste_a_l_humain(self):
+        cas, t = self._clic_clic(titre="Clic clic (Remix)")
+        arb = pol.politique_liens_deezer(cas, t, None)
+        assert arb is None or arb.action != "deezer_appliquer"
+
 
 def _ctx_mesures(track, champ, valeurs):
     from src.enrichment.observation import Observation

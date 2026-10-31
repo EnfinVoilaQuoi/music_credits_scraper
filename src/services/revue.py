@@ -3592,10 +3592,24 @@ def _vote_de_parution(s, par_id: dict) -> str:
     return ""
 
 
+def fiches_actives(artiste) -> list:
+    """Les fiches que le panneau juge : la discographie MOINS les pages
+    désactivées (`DisabledTracksManager`), comme les runs
+    (`runtime.restriction`). Une page désactivée à la main ne produit plus
+    de cas — six pages de Kanye et Travis, désactivées, soumises encore à
+    `annotee` le 2026-10-31."""
+    from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+    tracks = artiste.tracks or []
+    desactives = DisabledTracksManager().load_disabled_tracks(artiste.name)
+    return [t for t in tracks if t.id not in desactives] if desactives else list(tracks)
+
+
 def charger_contexte(data_manager, artiste) -> Contexte:
     """Le contexte des détecteurs, lu UNE fois (lectures seules) — celui
-    qu'`analyser` juge, et que les politiques d'arbitrage relisent."""
-    tracks = artiste.tracks or []
+    qu'`analyser` juge, et que les politiques d'arbitrage relisent. Sans les
+    pages désactivées (`fiches_actives`)."""
+    tracks = fiches_actives(artiste)
     durees_editions = data_manager.get_artist_edition_durations(artiste.id)
     for t in tracks:
         t.durees_editions = editions_distinctes(
@@ -3613,8 +3627,9 @@ def charger_contexte(data_manager, artiste) -> Contexte:
 
 def analyser(data_manager, artiste, ctx: Contexte | None = None) -> Revue:
     """Détecteurs hors ligne + signalements des runs, moins ce que
-    l'utilisateur a déjà tranché. Lectures seules, aucune écriture."""
-    tracks = artiste.tracks or []
+    l'utilisateur a déjà tranché, et sans les pages désactivées. Lectures
+    seules, aucune écriture."""
+    tracks = fiches_actives(artiste)
     ctx = ctx or charger_contexte(data_manager, artiste)
     cas = detecter(ctx)
     cas += _cas_des_signalements(

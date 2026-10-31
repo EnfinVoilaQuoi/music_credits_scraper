@@ -833,6 +833,23 @@ def test_analyser_lit_le_contexte(data_manager):
     assert [c.detecteur for c in r.actifs] == ["bpm"] and r.masques == []
 
 
+def test_une_page_desactivee_ne_produit_aucun_cas(data_manager):
+    """2026-10-31 : six pages de Kanye et Travis désactivées à la main
+    (« BIPLOMATIK Immunity »…) restaient soumises à `annotee` ; il avait fallu
+    leur poser un verdict pour les faire taire. Désactivée, la page sort du
+    panneau ; réactivée, elle y revient."""
+    from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+    a = _booba_lunatic(data_manager)
+    assert len(revue.analyser(data_manager, a).actifs) == 1
+    DisabledTracksManager().save_disabled_tracks(a.name, {a.tracks[0].id})
+    r = revue.analyser(data_manager, a)
+    assert r.actifs == [] and r.masques == []
+    assert revue.charger_contexte(data_manager, a).disco == []
+    DisabledTracksManager().save_disabled_tracks(a.name, set())
+    assert len(revue.analyser(data_manager, a).actifs) == 1
+
+
 class TestMemoireDesVerdicts:
     """Étape 3 : un cas tranché ne revient plus… tant que ses preuves tiennent."""
 

@@ -145,6 +145,15 @@ def _brut_isole(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _pages_desactivees_isolees(tmp_path, monkeypatch):
+    """AUCUN test ne lit `data/disabled_tracks/` réel : le panneau les relit
+    (`revue.fiches_actives`, 2026-10-31)."""
+    from src.utils import disabled_tracks_manager
+
+    monkeypatch.setattr(disabled_tracks_manager, "DATA_DIR", tmp_path)
+
+
+@pytest.fixture(autouse=True)
 def _corrections_de_fiches_isolees(tmp_path, monkeypatch):
     """AUCUN test ne lit `data/corrections/fiches.json` réel : il est relu par le
     gate Spotify, `save_track` et l'import discographie (2026-09-24)."""

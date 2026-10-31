@@ -26,7 +26,12 @@ from __future__ import annotations
 from src.utils.logger import get_logger
 from src.utils.title_matching import cle_album, names_match_as_words
 from src.utils.track_mapper import _clean_duration
-from src.utils.version_descriptors import meme_disque, titre_generique, titres_equivalents
+from src.utils.version_descriptors import (
+    meme_disque,
+    studio_sur_disque_live,
+    titre_generique,
+    titres_equivalents,
+)
 from src.utils.version_heritage import remixeur_etranger
 
 logger = get_logger(__name__)
@@ -34,6 +39,21 @@ logger = get_logger(__name__)
 #: Même fichier chez le même distributeur : ± 2 s (tolérance des écarts Deezer),
 #: plus étroit que les 5 s inter-plateformes de `spotify_identity`.
 TOLERANCE_DUREE = 2
+
+
+#: Albums Deezer LIVE selon MusicBrainz (`releases.mb_live`, e64) :
+#: `() -> set[int]`. Posé par `DataManager` — ce module ne touche jamais la
+#: base. `None` (tests purs, scripts sans base) ⇒ seul le titre du disque dit
+#: le live.
+fournisseur_albums_live = None
+
+
+def album_live(hit: dict | None) -> bool:
+    """L'album Deezer du hit est-il un album live selon MusicBrainz ?"""
+    album_id = ((hit or {}).get("album") or {}).get("id")
+    if album_id is None or fournisseur_albums_live is None:
+        return False
+    return int(album_id) in fournisseur_albums_live()
 
 
 def titre_deezer(hit: dict | None) -> str:
@@ -178,6 +198,10 @@ def hit_concorde(
     disque = ((hit.get("album") or {}).get("title")) or ""
     if album and disque and titre_generique(title) and not meme_disque(disque, album):
         return False, f"titre générique : piste du disque « {disque} », attendu « {album} »"
+    # Une piste d'album LIVE n'est pas la fiche studio (MC Solaar « Les temps
+    # changent » : le live de *Le tour de la question*, 2026-10-31).
+    if disque and studio_sur_disque_live(title, album, disque, live=album_live(hit)):
+        return False, f"piste de l'album live « {disque} », la fiche est studio"
     # La piste d'un disque où une AUTRE fiche au titre équivalent a sa place
     # est la sienne : Kanye « GONE » (VULTURES 3) portait la « Gone » de *Late
     # Registration*, « KING » (VULTURES 1) celle de *BULLY* (2026-10-13).

@@ -42,6 +42,10 @@ class DataManager(ArtistRepository, TrackRepository, RevueRepository):
         spotify_identity.fournisseur_propres = self.titres_des_fiches_propres
         spotify_identity.fournisseur_ids_artiste = self.ids_spotify_connus
         spotify_identity.fournisseur_ids_du_disque = self.ids_spotify_du_disque
+        # Le gate Deezer refuse une piste d'album LIVE pour une fiche studio (e64).
+        from src.utils import deezer_identity
+
+        deezer_identity.fournisseur_albums_live = self.albums_deezer_live
         # La garde « titre + année nue » juge aussi la durée des JUMELLES.
         from src.utils import titre_annee
 

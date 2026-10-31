@@ -42,7 +42,7 @@ from src.utils.apple_identity import titre_sans_invites
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import remixeur_etranger_a_la_fiche
 from src.utils.track_mapper import _clean_duration
-from src.utils.version_descriptors import titres_equivalents
+from src.utils.version_descriptors import studio_sur_disque_live, titres_equivalents
 
 logger = get_logger(__name__)
 
@@ -114,13 +114,22 @@ def album_designe_par_musicbrainz(
     return album_et_pistes(resultats, album)
 
 
-def propositions_par_place(places: dict, pistes_apple: list[dict], fiches: dict) -> dict[int, str]:
+def propositions_par_place(
+    places: dict,
+    pistes_apple: list[dict],
+    fiches: dict,
+    *,
+    album_apple: str | None = None,
+    live: bool = False,
+) -> dict[int, str]:
     """PUR. `{track_id: trackId Apple}` à proposer.
 
     `places` : `{track_id: (disque, numéro)}` Deezer sur la parution ;
     `pistes_apple` : les fiches iTunes des pistes de l'album retenu ;
     `fiches` : `{track_id: Track}`. Une fiche qui a déjà un ID Apple n'est pas
-    concernée ; la place doit être confirmée par le titre ou la durée."""
+    concernée ; la place doit être confirmée par le titre ou la durée. Album
+    LIVE (`live`, MusicBrainz ; ou le nom iTunes `album_apple`, « Le tour de la
+    question (live) ») : rien pour une fiche studio (`studio_sur_disque_live`)."""
     par_place = {
         (p.get("discNumber") or 1, p.get("trackNumber")): p
         for p in pistes_apple
@@ -131,6 +140,8 @@ def propositions_par_place(places: dict, pistes_apple: list[dict], fiches: dict)
         fiche = fiches.get(tid)
         piste = par_place.get((disque or 1, numero))
         if fiche is None or piste is None or getattr(fiche, "apple_music_id", None):
+            continue
+        if studio_sur_disque_live(fiche.title, fiche.album, album_apple, live=live):
             continue
         duree_fiche = _clean_duration(fiche.duration)
         duree_apple = (
@@ -218,7 +229,13 @@ def rattacher_parutions_apple(
             for p in liste
             if p["release_id"] == release_id and p.get("position_source") == "deezer"
         }
-        proposes = propositions_par_place(places, trouve["pistes"], fiches)
+        proposes = propositions_par_place(
+            places,
+            trouve["pistes"],
+            fiches,
+            album_apple=trouve["collection"].get("collectionName"),
+            live=dm.parution_live(release_id),
+        )
         for tid, apple_id in proposes.items():
             if tid in deja_proposes:
                 continue

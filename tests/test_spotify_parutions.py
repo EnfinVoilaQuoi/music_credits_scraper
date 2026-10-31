@@ -194,3 +194,22 @@ def test_garde_ecarte_une_autre_edition(data_manager):
     (parution,) = data_manager.get_track_releases(t.id)
     album_sp, vu = data_manager.etat_parution_spotify(parution["id"])
     assert album_sp is None and vu is not None  # daté : pas redemandé avant expiration
+
+
+def test_album_live_pas_d_id_pour_une_fiche_studio(data_manager):
+    """e64 : MusicBrainz dit la parution LIVE — l'ID de sa piste ne va pas à
+    une fiche studio (MC Solaar « Les temps changent », 2026-10-31)."""
+    artiste, t, album, _ = _scenario(data_manager)
+    mb = _MB([{"albums": {"deezer": ["486213345"], "spotify": ["ALB"]}, "live": True}])
+    bilan = relier_par_parution(
+        data_manager,
+        artiste,
+        [album],
+        mb=mb,
+        lire_albums=lambda ids: {"ALB": _page([("SPX", "Intro")], durees={"SPX": 120})},
+        valider=lambda track, sid: True,
+    )
+    assert (bilan.ids_poses, bilan.refuses_live) == (0, 1)
+    (parution,) = data_manager.get_track_releases(t.id)
+    assert data_manager.parution_live(parution["id"])
+    assert data_manager.get_artist_tracks(artiste.id)[0].spotify_id is None

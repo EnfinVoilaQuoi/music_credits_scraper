@@ -481,6 +481,7 @@ class TestParutionsParCodeBarres:
                 "titre": "ADC",
                 "barcode": "03701421546227",
                 "albums": {"deezer": ["486213345"]},
+                "live": False,
             }
         ]
         assert file == []

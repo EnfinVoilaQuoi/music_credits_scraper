@@ -1205,6 +1205,32 @@ def porte_une_version(titre: str | None) -> bool:
     return cle_titre(titre).variant.kind != Kind.NONE
 
 
+def prise_live(titre: str | None) -> bool:
+    """PUR. Le titre (d'un morceau ou d'un DISQUE) désigne une prise LIVE :
+    rendition de la famille live (« Les temps changent (Live) », « Le tour de
+    la question (live) » chez iTunes). Une session ou un « Symphonic » en sont,
+    comme dans `_FAMILLES_RENDITION`."""
+    v = cle_titre(titre).variant
+    return v.kind == Kind.RENDITION and "live" in _familles_de_rendition(v)
+
+
+def studio_sur_disque_live(
+    titre: str | None, album: str | None, disque: str | None, *, live: bool = False
+) -> bool:
+    """PUR. Une piste du disque `disque`, LIVE (`live` : MusicBrainz le dit,
+    e64 ; ou son titre, `prise_live`), désignerait-elle une fiche STUDIO —
+    titre sans version, disque Genius ni live ni le même ? Alors ce n'est pas
+    son enregistrement : MC Solaar « Les temps changent » (*Paradisiaque*,
+    197 s) portait les ID Deezer, Apple et Spotify du live de *Le tour de la
+    question* (219 s), corrigé à la main le 2026-10-31. La page Genius d'une
+    piste du live (« Galaktika », disque *Le tour de la question*) en est une."""
+    if not (live or prise_live(disque)):
+        return False
+    if porte_une_version(titre) or prise_live(album):
+        return False
+    return not meme_disque(album, disque)
+
+
 #: Mots d'un titre AMBIGU (version, prise, titre générique) — en mots entiers.
 _MOTS_AMBIGUS = re.compile(
     r"\b(?:intro|outro|interlude|skit|prelude|prélude|remix|rmx|mix|live|edit|version|"

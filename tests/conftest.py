@@ -128,6 +128,9 @@ def _gate_spotify_sans_fournisseur(monkeypatch):
     monkeypatch.setattr(spotify_identity, "fournisseur_propres", None)
     monkeypatch.setattr(spotify_identity, "fournisseur_ids_artiste", None)
     monkeypatch.setattr(spotify_identity, "fournisseur_ids_du_disque", None)
+    from src.utils import deezer_identity
+
+    monkeypatch.setattr(deezer_identity, "fournisseur_albums_live", None)
     from src.utils import titre_annee
 
     monkeypatch.setattr(titre_annee, "fournisseur_durees", None)

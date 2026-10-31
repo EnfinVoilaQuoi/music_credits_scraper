@@ -838,6 +838,26 @@ class TestMemoireDesVerdicts:
         a.tracks = data_manager.get_artist_tracks(a.id)
         assert len(revue.analyser(data_manager, a).actifs) == 1
 
+    def test_un_lrc_retabli_ne_revient_pas_sous_un_autre_detecteur(self):
+        """Travis « Love Galore (Version 1) » : LRC rétabli à la main contre
+        `lrc_autre_fiche` le 2026-09-29, revenu en `lrc_douteux` (2026-10-31).
+        Un AUTRE LRC se juge à nouveau ; un verdict de règle ne compte pas."""
+        from src.utils.corrections_fiches import empreinte_lrc
+
+        t = _t("Love Galore (Version 1)", 5107, genius_id=11046462)
+        t.lyrics.synced = "[00:01.00] a\n[00:02.00] b"
+        cas = revue.Cas("lrc_douteux", 5107, t.title, "", cle="g11046462|{}")
+        cle = f"g11046462|{empreinte_lrc(t.lyrics.synced)}"
+        humain = {("lrc_autre_fiche", cle): {"verdict": "normal", "note": "rétablie"}}
+        juges = revue._lrc_rendus_normaux(humain)
+        assert revue._lrc_deja_juge(cas, {5107: t}, juges)
+        regle = {("lrc_autre_fiche", cle): {"verdict": "normal", "note": "regle:x"}}
+        assert not revue._lrc_deja_juge(cas, {5107: t}, revue._lrc_rendus_normaux(regle))
+        t.lyrics.synced = "[00:01.00] autre texte"
+        assert not revue._lrc_deja_juge(cas, {5107: t}, juges)
+        doublon = revue.Cas("doublon_lrc", 5107, t.title, "", cle="x")
+        assert not revue._lrc_deja_juge(doublon, {5107: t}, juges)
+
     def test_cle_stable_hors_valeurs_volatiles(self):
         t = _t("Cruella", genius_id=42)
         t.streams.spotify_streams, t.streams.ytm_streams = 316_410, 5_552_707

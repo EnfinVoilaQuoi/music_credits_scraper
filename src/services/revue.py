@@ -3525,10 +3525,50 @@ def analyser(data_manager, artiste, ctx: Contexte | None = None) -> Revue:
     cas = _marquer_les_fiches_decidees(data_manager, artiste, cas)
     cas.sort(key=lambda c: (-c.impact, c.detecteur, c.morceau))
     tranches = data_manager.verdicts_revue(artiste.id)
+    lrc_juges = _lrc_rendus_normaux(tranches)
+    par_id = {t.id: t for t in tracks}
+
+    def tranche(c: Cas) -> bool:
+        return (c.detecteur, c.cle) in tranches or _lrc_deja_juge(c, par_id, lrc_juges)
+
     return Revue(
-        actifs=[c for c in cas if (c.detecteur, c.cle) not in tranches],
-        masques=[c for c in cas if (c.detecteur, c.cle) in tranches],
+        actifs=[c for c in cas if not tranche(c)],
+        masques=[c for c in cas if tranche(c)],
     )
+
+
+#: Détecteurs qui mettent en doute le LRC LUI-MÊME (pas une fusion de fiches).
+_DETECTEURS_DU_LRC = frozenset({"lrc_autre_fiche", "lrc_original", "lrc_douteux", "lrc_live"})
+
+
+def _lrc_rendus_normaux(tranches: dict) -> set[str]:
+    """Les clés « fiche|empreinte du LRC » qu'un humain a dites normales : un
+    LRC rétabli après sa correction automatique, ou marqué ✓ Normal, par un
+    détecteur qui le désigne par son empreinte (`lrc_autre_fiche`,
+    `lrc_original`). Les verdicts posés par une règle n'en sont pas."""
+    return {
+        cle
+        for (detecteur, cle), v in tranches.items()
+        if detecteur in _DETECTEURS_DU_LRC
+        and v.get("verdict") == "normal"
+        and not str(v.get("note") or "").startswith("regle:")
+    }
+
+
+def _lrc_deja_juge(c: Cas, par_id: dict, lrc_juges: set[str]) -> bool:
+    """Un LRC qu'un humain a rétabli ne se re-soumet pas sous un AUTRE
+    détecteur (Travis « Love Galore (Version 1) » et « (Version 2) » : LRC
+    rétabli le 2026-09-29 contre `lrc_autre_fiche`, revenu au panneau en
+    `lrc_douteux` ; 2026-10-31). Le même LRC seulement : un autre texte
+    (autre empreinte) se juge à nouveau."""
+    if c.detecteur not in _DETECTEURS_DU_LRC or not lrc_juges:
+        return False
+    track = par_id.get(c.track_id)
+    if track is None or not track.lyrics.synced:
+        return False
+    from src.utils.corrections_fiches import empreinte_lrc
+
+    return cle_du_cas(track, {"empreinte": empreinte_lrc(track.lyrics.synced)}) in lrc_juges
 
 
 def _decisions_kworb(artiste) -> dict | None:

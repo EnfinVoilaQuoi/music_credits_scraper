@@ -482,6 +482,22 @@ class TestVideos:
         ):
             assert revue.video_etrangere(_t(titre, videos=[self._v(video)])) is None
 
+    def test_dates_ordinaux_et_apostrophes(self):
+        """2026-10-31 : Médine « 17 Octobre » / « 17-Oct », MC Solaar « La
+        Cinquième Saison » / « La 5ème saison », Diam's « Vu D’Ici » / « Vue
+        d'ici », Shurik'n « Qu’est-ce tu veux ? » (apostrophe typographique)."""
+        for titre, video in (
+            ("17 Octobre", "17-Oct"),
+            ("11 Septembre", "11-Sep"),
+            ("La Cinquième Saison", "La 5ème saison"),
+            ("Onzième commandement", "Mc Solaar - 11ème commandement"),
+            ("Vu D’Ici", "Vue d'ici (feat. Diam's, Eloquence)"),
+            ("Qu’est-ce tu veux ?", "Qu'est Ce Que Tu Veux"),
+        ):
+            assert revue.video_etrangere(_t(titre, videos=[self._v(video)])) is None, titre
+        # Un mois seul n'est pas une date : « Mars » ne nomme pas « Mai ».
+        assert revue.video_etrangere(_t("Mars", videos=[self._v("Mai")])) is not None
+
     def test_le_sigle_du_titre_le_nomme(self):
         """2026-09-28, relevé en échantillon : « LMLVSB », « BBHMM », « TGIF ».
         Seulement à partir de quatre mots, et comme mot ENTIER."""

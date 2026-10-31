@@ -1688,14 +1688,88 @@ def _titres_alternatifs(track) -> list[str]:
     return alternatifs
 
 
+#: Apostrophes typographiques : `_mots` les PERD (non ASCII) quand l'apostrophe
+#: droite fait une coupure — « Qu’est-ce » donnait « quest », « Qu'est » « qu
+#: est » (Shurik'n, 2026-10-31).
+_APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "´": "'", "`": "'"})
+_MOIS = {
+    "janvier": "jan",
+    "january": "jan",
+    "fevrier": "feb",
+    "february": "feb",
+    "fev": "feb",
+    "mars": "mar",
+    "march": "mar",
+    "avril": "apr",
+    "april": "apr",
+    "avr": "apr",
+    "mai": "may",
+    "juin": "jun",
+    "june": "jun",
+    "juillet": "jul",
+    "july": "jul",
+    "juil": "jul",
+    "aout": "aug",
+    "august": "aug",
+    "septembre": "sep",
+    "september": "sep",
+    "sept": "sep",
+    "octobre": "oct",
+    "october": "oct",
+    "novembre": "nov",
+    "november": "nov",
+    "decembre": "dec",
+    "december": "dec",
+}
+#: Un MOIS ne s'abrège qu'après un jour (« 17 Octobre » / « 17-Oct ») : seul,
+#: « Mars » ou « Mai » est un titre.
+_DATE_RE = re.compile(r"\b(\d{1,2}) (" + "|".join(_MOIS) + r")\b")
+_ORDINAUX = {
+    "premier": "1e",
+    "premiere": "1e",
+    "deuxieme": "2e",
+    "troisieme": "3e",
+    "quatrieme": "4e",
+    "cinquieme": "5e",
+    "sixieme": "6e",
+    "septieme": "7e",
+    "huitieme": "8e",
+    "neuvieme": "9e",
+    "dixieme": "10e",
+    "onzieme": "11e",
+    "douzieme": "12e",
+    "treizieme": "13e",
+    "quatorzieme": "14e",
+    "quinzieme": "15e",
+    "seizieme": "16e",
+    "dix septieme": "17e",
+    "dix huitieme": "18e",
+    "dix neuvieme": "19e",
+    "vingtieme": "20e",
+}
+_ORDINAL_CHIFFRE_RE = re.compile(r"\b(\d{1,2})(?:e|eme|ieme|er|ere)\b")
+_ORDINAL_MOT_RE = re.compile(r"\b(" + "|".join(_ORDINAUX) + r")\b")
+
+
+def _mots_d_un_titre(texte: str | None) -> str:
+    """`_mots` d'un titre comparé à une vidéo, sous une forme commune aux deux
+    graphies : apostrophes typographiques, dates abrégées (« 11 Septembre » /
+    « 11-Sep »), ordinaux en chiffres (« La Cinquième Saison » / « La 5ème
+    saison ») — Médine, MC Solaar, Shurik'n (2026-10-31)."""
+    t = _mots((texte or "").translate(_APOSTROPHES))
+    t = _DATE_RE.sub(lambda m: f"{m.group(1)} {_MOIS[m.group(2)]}", t)
+    t = _ORDINAL_CHIFFRE_RE.sub(r"\1e", t)
+    return _ORDINAL_MOT_RE.sub(lambda m: _ORDINAUX[m.group(1)], t)
+
+
 def video_nomme(track, v) -> bool:
     """Le titre de la vidéo `v` nomme-t-il le morceau `track` ?"""
-    socle = _mots(socle_du_titre(track.title))
+    socle = _mots_d_un_titre(socle_du_titre(track.title))
     # Une parenthèse qui n'est pas un descripteur fait partie du titre Genius
     # (« Pursuit of Happiness (Nightmare) » : le clip officiel ne la porte pas) —
     # sauf sur un titre générique, qu'elle seule distingue (« Intro (A2) »).
-    nu = _mots(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", track.title or ""))
-    titre = _mots(v.title)
+    nu = _mots_d_un_titre(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", track.title or ""))
+    titre = _mots_d_un_titre(v.title)
     if titre_generique(nu):
         # … mais la vidéo que la page Genius du morceau désigne elle-même, et
         # qui porte le mot générique (« Intro (0.9) » → « Intro », « Outro

@@ -1061,6 +1061,108 @@ def lrc_d_une_autre_fiche(track, ctx):
     )
 
 
+#: Part des paires du LRC que les paroles de l'ORIGINAL expliquent, et avance
+#: minimale sur celles de la version, pour `lrc_de_l_original` (2026-10-31).
+LRC_ORIGINAL_MIN, LRC_ORIGINAL_ECART = 0.8, 0.2
+#: Au-delà, la version partage presque tout le texte : rien ne la distingue.
+LRC_ORIGINAL_PROPRE_MAX = 0.8
+#: Écart toléré entre la fin du LRC de la version et celle du LRC de l'original.
+LRC_ORIGINAL_FIN_S = 5
+#: Part des lignes communes aux deux LRC horodatées à `LIGNE_CALEE_S` près, sur
+#: au moins `LIGNES_COMMUNES_MIN` lignes : le LRC suit l'audio de l'original
+#: (mesuré le 2026-10-31 : 40 cas sur 45 au-dessus de 0,85, « Monster [Demo] »
+#: 123 / 123 ; en dessous, « FML (Original Demo) » 31 / 52, laissé).
+LRC_ORIGINAL_CALEES, LIGNE_CALEE_S, LIGNES_COMMUNES_MIN = 0.85, 1.0, 10
+_LIGNE_LRC = re.compile(r"\[(\d+):(\d+(?:\.\d+)?)\]\s*(.*)")
+
+
+def _lignes_calees(lrc: str, lrc_autre: str) -> tuple[int, int]:
+    """`(calées, communes)` : les lignes de `lrc` dont le texte est aussi dans
+    `lrc_autre`, et parmi elles celles qu'une occurrence de `lrc_autre`
+    horodate à `LIGNE_CALEE_S` près (un refrain revient : toute occurrence vaut)."""
+
+    def lignes(texte):
+        for m, s, t in _LIGNE_LRC.findall(texte or ""):
+            cle = re.sub(r"\W+", " ", t).strip().casefold()
+            if cle:
+                yield int(m) * 60 + float(s), cle
+
+    autres: dict[str, list[float]] = {}
+    for ts, cle in lignes(lrc_autre):
+        autres.setdefault(cle, []).append(ts)
+    communes = [(ts, autres[cle]) for ts, cle in lignes(lrc) if cle in autres]
+    calees = sum(any(abs(ts - x) <= LIGNE_CALEE_S for x in xs) for ts, xs in communes)
+    return calees, len(communes)
+
+
+def lrc_de_l_original(track, ctx):
+    """FORMEL. Une VERSION (démo, live, `[V…]`, référence, medley) porte le LRC
+    de son ORIGINAL : ses paires de mots sont dans les paroles Genius de
+    l'original (≥ 80 %, 20 points de plus que dans les siennes), et ses lignes
+    sont horodatées comme celles du LRC de l'original, lu à part (≥ 85 % à 1 s
+    près, fin à ± 5 s) — synchronisé sur l'audio de l'original, pas sur celui
+    de la version. `lrc_autre_fiche` ne
+    les voyait pas : leur texte commun dépasse 60 % (mesuré sur la base le
+    2026-10-31 : 64 cas, « FML (Original Demo) », « Monster [Demo] »…).
+    Deux versions de même durée (± 2 s) peuvent être le même audio : pas jugé."""
+    from src.utils.lrc_garde import fin_du_lrc
+
+    lrc = track.lyrics.synced
+    refs = _references_bigrammes(ctx)
+    if not lrc or track.id not in refs or not porte_une_version(track.title):
+        return None
+    if len(mots(lrc)) < MOTS_MIN or lrc_d_une_autre_fiche(track, ctx) is not None:
+        return None
+    paires = bigrammes(lrc)
+    propre = _part_commune(refs[track.id][1], paires)
+    if not paires or propre >= LRC_ORIGINAL_PROPRE_MAX:
+        return None
+    par_id = ctx.memo("par_id", lambda: {t.id: t for t in ctx.disco})
+    index = _index_bigrammes(ctx)
+    votes: dict[int, int] = {}
+    for b in paires:
+        for tid in index.get(b, ()):
+            votes[tid] = votes.get(tid, 0) + 1
+    meilleur, autre = 0.0, None
+    for tid in sorted(votes, key=votes.get, reverse=True)[: _CANDIDATES + 2]:
+        t = par_id[tid]
+        if t.id == track.id or (track.genius_id and t.genius_id == track.genius_id):
+            continue
+        part = len(refs[tid][1] & paires) / len(paires)
+        if part > meilleur:
+            meilleur, autre = part, t
+    if (
+        autre is None
+        or porte_une_version(autre.title)
+        or meilleur < LRC_ORIGINAL_MIN
+        or meilleur - propre < LRC_ORIGINAL_ECART
+        or not autre.lyrics.synced
+    ):
+        return None
+    if track.duration and autre.duration and abs(int(track.duration) - int(autre.duration)) <= 2:
+        return None
+    fin, fin_autre = fin_du_lrc(lrc), fin_du_lrc(autre.lyrics.synced)
+    if not fin or not fin_autre or abs(fin - fin_autre) > LRC_ORIGINAL_FIN_S:
+        return None
+    calees, communes = _lignes_calees(lrc, autre.lyrics.synced)
+    if communes < LIGNES_COMMUNES_MIN or calees < LRC_ORIGINAL_CALEES * communes:
+        return None
+    from src.utils.corrections_fiches import empreinte_lrc
+
+    return (
+        f"LRC de l'original « {autre.title} » ({meilleur:.0%} de ses paires de mots, "
+        f"{propre:.0%} avec les siennes ; {calees} / {communes} lignes horodatées comme "
+        f"le LRC de l'original, fin {fin} s / {fin_autre} s)",
+        {
+            "autre": autre.id,
+            "bigrammes": round(propre, 2),
+            "bigrammes_autre": round(meilleur, 2),
+            "source": track.lyrics.synced_source,
+            "empreinte": empreinte_lrc(lrc),
+        },
+    )
+
+
 #: Part des paires de mots d'un texte de REPLI (paroles hors Genius, ou LRC
 #: d'une fiche sans paroles Genius) qu'expliquent les paroles Genius d'une
 #: autre fiche, à partir de laquelle ce texte est peut-être le sien (WIP du
@@ -3023,6 +3125,9 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("bpm", "BPM en désaccord", "🥁", bpm_desaccord),
     Detecteur("tonalite", "Tonalité en désaccord", "🎹", tonalite_desaccord),
     Detecteur("lrc_autre_fiche", "LRC d'une autre fiche", "📝", lrc_d_une_autre_fiche, formel=True),
+    Detecteur(
+        "lrc_original", "Version au LRC de son original", "📝", lrc_de_l_original, formel=True
+    ),
     Detecteur(
         "paroles_autre_fiche",
         "Paroles ou LRC de repli d'une autre fiche",

@@ -643,6 +643,7 @@ _CORRECTEURS_DE_REGLE = {
 
 _CORRECTEURS = {
     "lrc_autre_fiche": ("retirer_lrc", _corriger_lrc),
+    "lrc_original": ("retirer_lrc", _corriger_lrc),
     "certif_autre_titre": ("retirer_certif", _corriger_certif),
     "songbpm_original": ("retirer_songbpm", _corriger_songbpm),
 }

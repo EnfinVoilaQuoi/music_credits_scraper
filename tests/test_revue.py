@@ -225,6 +225,53 @@ class TestLrcAutreFiche:
         assert "certif_autre_titre" in revue.CODES_FORMELS
 
 
+def _lrc(texte, decalage=0.0):
+    """LRC de `texte`, une ligne de 6 mots toutes les 20 s (+ `decalage`)."""
+    mots_ = texte.split()
+    lignes = [" ".join(mots_[i : i + 6]) for i in range(0, len(mots_), 6)]
+    return "\n".join(
+        f"[{(20 * k + decalage) // 60:02.0f}:{(20 * k + decalage) % 60:05.2f}] {ligne}"
+        for k, ligne in enumerate(lignes)
+    )
+
+
+class TestLrcDeLOriginal:
+    """« FML (Original Demo) » portait le LRC de « FML » : 73 % de son texte est
+    celui de l'original (au-delà du seuil de `lrc_autre_fiche`), mais le LRC
+    finit avec celui de l'original — 64 cas sur la base (2026-10-31)."""
+
+    DEMO = " ".join(ORIGINAL.split()[:44]) + " " + " ".join(f"d{i} b{i}" for i in range(12))
+
+    def _paire(self, titre="FML (Original Demo)", decalage=0.5, **kw):
+        o = _fiche_paroles("FML", 1, ORIGINAL, lrc=_lrc(ORIGINAL, decalage))
+        d = _fiche_paroles(titre, 2, self.DEMO, lrc=_lrc(ORIGINAL))
+        for k, v in kw.items():
+            setattr(d, k, v)
+        return d, _ctx(o, d)
+
+    def test_la_version_porte_le_lrc_de_l_original(self):
+        d, ctx = self._paire()
+        assert revue.lrc_d_une_autre_fiche(d, ctx) is None
+        motif, preuves = revue.lrc_de_l_original(d, ctx)
+        assert "« FML »" in motif and preuves["autre"] == 1
+        assert "lrc_original" in revue.CODES_FORMELS
+
+    def test_sans_temoin_pas_jugee(self):
+        # Le LRC de l'original finit ailleurs : rien ne dit sur quel audio.
+        d, ctx = self._paire(decalage=30)
+        assert revue.lrc_de_l_original(d, ctx) is None
+        # Même fin, mais chaque ligne décalée de 3 s : un autre audio.
+        d, ctx = self._paire(decalage=3)
+        assert revue.lrc_de_l_original(d, ctx) is None
+
+    def test_pas_une_version_ou_meme_duree_pas_jugee(self):
+        d, ctx = self._paire(titre="FML 2")
+        assert revue.lrc_de_l_original(d, ctx) is None
+        d, ctx = self._paire(duration=236)
+        ctx.disco[0].duration = 237
+        assert revue.lrc_de_l_original(d, ctx) is None
+
+
 AUTRE_TEXTE = " ".join(f"autre{i} chose{i}" for i in range(30))
 
 

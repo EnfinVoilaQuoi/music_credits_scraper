@@ -532,7 +532,7 @@ def actions_pour(cas: Cas) -> list[Action]:
             return [Action("confirmer_lien", "✔️ Confirmer", _statut_lien("confirmed")), refuser]
         # Une formation demande sa nature (groupe / collectif) : la fenêtre Groupes.
         return [Action("groupes", "👥 Arbitrer…", _renvoi("groupes"), resout=False), refuser]
-    if d in ("lrc_douteux", "lrc_autre_fiche", "lrc_live"):
+    if d in ("lrc_douteux", "lrc_autre_fiche", "lrc_original", "lrc_live"):
         return [_action_retirer_lrc()]
     if d == "paroles_autre_fiche":
         # Les paroles de secours (et le LRC YTM qui les accompagne), ou le LRC

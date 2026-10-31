@@ -192,7 +192,13 @@ class TestHausse:
         audit.cas += [au.Cas("revue:doublon", "A", [], "", au.DECISION)]
         assert au.en_hausse(audit, ref) == {"revue:doublon": (0, 1)}
         assert audit.critere() == 1
-        assert audit.par_nature() == {au.ERREUR: 0, au.DECISION: 1, au.RUN: 3, au.INFORMATION: 1}
+        assert audit.par_nature() == {
+            au.ERREUR: 0,
+            au.DECISION: 1,
+            au.RUN: 3,
+            au.INFORMATION: 1,
+            au.INDECIDABLE: 0,
+        }
         texte = au.tableau(audit, ref)
         assert "panneau : à faire par un run (3)" in texte and "pour information (1)" in texte
         assert "CRITÈRE de fin du gel (erreurs + décisions) : 1 (avant : 1)" in texte
@@ -216,6 +222,10 @@ class TestHausse:
         _, hausse, avait = au.apres_run(data_manager, a, tmp_path)
         assert hausse == {} and not avait
 
+        from src.enrichment.observation import Observation
+
+        # Une durée que fait une plateforme (sans elle : indécidable, hors critère).
+        data_manager.record_discography_observations(t.id, [Observation("duration", 5, "deezer")])
         _sql(data_manager, "UPDATE tracks SET duration = 5 WHERE id = :t", t=t.id)
         audit, hausse, avait = au.apres_run(data_manager, a, tmp_path)
         assert avait and hausse["duree_aberrante"] == (0, 1)
@@ -351,6 +361,7 @@ def test_lrc_minute_au_dela_de_la_duree(data_manager, isha):
     )
     (cas,) = [c for c in au.auditer(data_manager, ["Isha"]).cas if c.famille == "lrc_trop_long"]
     assert cas.pistes == [t.id] and "199s" in cas.libelle and "(confirmée)" in cas.libelle
+    assert cas.nature == au.ERREUR
 
     _sql(data_manager, "UPDATE tracks SET lyrics_synced = '[00:30.00] a' WHERE id = :t", t=t.id)
     assert not _familles(au.auditer(data_manager, ["Isha"])).get("lrc_trop_long")
@@ -588,3 +599,20 @@ def test_duree_discogs_dementie_par_deezer_et_apple_hors_critere(data_manager, i
     assert int(colonne) == 134
     audit = au.auditer(data_manager, ["Isha"])
     assert [c for c in audit.cas if t.id in c.pistes and c.nature in au.NATURES_DU_CRITERE] == []
+
+
+@pytest.mark.parametrize(
+    ("observees", "nature"),
+    [
+        # BULLY V1 : Discogs contre une vidéo, aucune source qui fait foi.
+        ({"discogs": 2711, "youtube_video": 1278}, au.INDECIDABLE),
+        ({"legacy": 159}, au.INDECIDABLE),
+        ({"apple_music": 167, "lrclib": 327}, au.ERREUR),
+        ({"manual": 147}, au.ERREUR),
+    ],
+)
+def test_une_duree_sans_plateforme_est_indecidable(observees, nature):
+    """Décision utilisateur 2026-10-31 : un choix entre sources faibles n'est
+    pas une erreur démontrable — hors du critère, gardé à l'affichage."""
+    assert au._nature_d_une_duree(observees) == nature
+    assert au.INDECIDABLE not in au.NATURES_DU_CRITERE

@@ -77,6 +77,15 @@ _ABSENCE = re.compile(
 
 #: Nature des cas des familles de l'audit (suspicions et invariants).
 ERREUR = "erreur"
+#: Une donnée suspecte qu'AUCUNE source ne départage : pas de durée plateforme,
+#: seulement des sources faibles en désaccord (décision utilisateur 2026-10-31 :
+#: « si on ne peut pas trancher entre deux durées, on ne tranche pas »). Hors du
+#: critère, mais gardée à l'affichage pour ne pas la perdre de vue.
+INDECIDABLE = "indecidable"
+#: Sources d'une durée qui FONT FOI : catalogues lus par leur identifiant, et le
+#: choix de l'utilisateur. Sans aucune, une durée n'est qu'un choix entre
+#: sources faibles (vidéo, Discogs, legacy, SongBPM).
+SOURCES_DUREE_PLATEFORME = frozenset({"deezer", "spotify_web", "apple_music", "manual"})
 #: Les natures, dans l'ordre d'affichage, et celles que compte le critère de
 #: fin du gel (décision utilisateur 2026-10-19).
 NATURES = {
@@ -84,6 +93,7 @@ NATURES = {
     DECISION: "décisions",
     RUN: "à faire par un run",
     INFORMATION: "pour information",
+    INDECIDABLE: "indécidables (aucune source ne tranche)",
 }
 NATURES_DU_CRITERE = (ERREUR, DECISION)
 
@@ -441,7 +451,15 @@ def durees(c, pistes) -> list[Cas]:
             t["title"], d, observees[tid], paroles_de_reference(t["lyrics"], t["lyrics_source"])
         ):
             continue
-        cas.append(Cas("duree_aberrante", t["artiste"], [t["id"]], f"{_lib(t)} {d}s"))
+        cas.append(
+            Cas(
+                "duree_aberrante",
+                t["artiste"],
+                [t["id"]],
+                f"{_lib(t)} {d}s",
+                _nature_d_une_duree(observees[tid]),
+            )
+        )
     cas += lrc_trop_longs(c, pistes)
     for t in pistes:
         ref = paroles_de_reference(t["lyrics"], t["lyrics_source"])
@@ -492,9 +510,17 @@ def lrc_trop_longs(c, pistes) -> list[Cas]:
                 t["artiste"],
                 [tid],
                 f"{_lib(t)} LRC jusqu'à {fin}s, durée {d}s ({etat})",
+                _nature_d_une_duree(durees_vues[tid]),
             )
         )
     return cas
+
+
+def _nature_d_une_duree(observees: dict) -> str:
+    """PUR. Une durée suspecte sans AUCUNE source qui fait foi
+    (`SOURCES_DUREE_PLATEFORME`) est indécidable : un choix entre sources
+    faibles (BULLY V1 : Discogs 2 711 s, une vidéo 1 278 s). Sinon, une erreur."""
+    return ERREUR if SOURCES_DUREE_PLATEFORME & set(observees) else INDECIDABLE
 
 
 def duree_aberrante(titre, duree: int, observees: dict, paroles: str | None) -> bool:
@@ -1135,6 +1161,10 @@ def tableau(audit: Audit, reference: dict | None = None) -> str:
     for code, libelle in FAMILLES.items():
         if code not in FAMILLES_DECISION:
             lignes.append(ligne(par[ERREUR][code], ref_par[ERREUR][code], code, libelle))
+    indecis = par[INDECIDABLE]
+    lignes.append(f"\n── {NATURES[INDECIDABLE]} ({sum(indecis.values())}) ──")
+    for code in sorted(set(indecis) | set(ref_par[INDECIDABLE])):
+        lignes.append(ligne(indecis[code], ref_par[INDECIDABLE][code], code, FAMILLES[code]))
     for nature in (DECISION, RUN, INFORMATION):
         lignes.append(f"\n── panneau : {NATURES[nature]} ({sum(par[nature].values())}) ──")
         # Une famille de l'audit peut être une décision (`recherche_perimee`).

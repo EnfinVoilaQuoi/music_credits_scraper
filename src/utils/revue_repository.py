@@ -22,6 +22,9 @@ from sqlalchemy import delete, insert, select, update
 from src.persistence.schema import revue_corrections, revue_signalements, revue_verdicts
 
 VERDICT_NORMAL = "normal"
+#: « Aucune donnée ne tranche » (décision utilisateur 2026-10-31) : le cas quitte
+#: le panneau et le critère, mais l'audit le garde parmi les indécidables.
+VERDICT_INDECIDABLE = "indecidable"
 
 
 class RevueRepository:

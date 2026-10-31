@@ -1030,8 +1030,20 @@ def toutes_les_familles() -> dict[str, str]:
 def a_trancher(dm, noms: list[str]) -> list[Cas]:
     """Les cas ACTIFS du panneau pour chaque artiste — sa discographie RÉUNIE
     (la sienne + groupes + part dans ses collectifs), exactement ce que la
-    fenêtre ouvre. Zéro réseau, zéro écriture (`revue.analyser`)."""
+    fenêtre ouvre. Zéro réseau, zéro écriture (`revue.analyser`). Un cas tranché
+    « indécidable » (`VERDICT_INDECIDABLE`) reste compté, parmi les indécidables :
+    hors critère, mais visible (décision utilisateur 2026-10-31)."""
     from src.services import revue
+    from src.utils.revue_repository import VERDICT_INDECIDABLE
+
+    def _cas(artiste, c, nature):
+        return Cas(
+            f"revue:{c.detecteur}",
+            artiste.name,
+            [c.track_id] if c.track_id else [],
+            f"{c.morceau} — {c.motif}",
+            nature,
+        )
 
     cas = []
     for nom in noms:
@@ -1039,16 +1051,14 @@ def a_trancher(dm, noms: list[str]) -> list[Cas]:
         if artiste is None:
             continue
         artiste.tracks = dm.discographie_reunie(artiste)
-        for c in revue.analyser(dm, artiste).actifs:
-            cas.append(
-                Cas(
-                    f"revue:{c.detecteur}",
-                    artiste.name,
-                    [c.track_id] if c.track_id else [],
-                    f"{c.morceau} — {c.motif}",
-                    c.nature,
-                )
-            )
+        analyse = revue.analyser(dm, artiste)
+        cas += [_cas(artiste, c, c.nature) for c in analyse.actifs]
+        verdicts = dm.verdicts_revue(artiste.id)
+        cas += [
+            _cas(artiste, c, INDECIDABLE)
+            for c in analyse.masques
+            if verdicts.get((c.detecteur, c.cle), {}).get("verdict") == VERDICT_INDECIDABLE
+        ]
     return cas
 
 
@@ -1164,7 +1174,8 @@ def tableau(audit: Audit, reference: dict | None = None) -> str:
     indecis = par[INDECIDABLE]
     lignes.append(f"\n── {NATURES[INDECIDABLE]} ({sum(indecis.values())}) ──")
     for code in sorted(set(indecis) | set(ref_par[INDECIDABLE])):
-        lignes.append(ligne(indecis[code], ref_par[INDECIDABLE][code], code, FAMILLES[code]))
+        libelle = FAMILLES.get(code) or revue.get(code, code)  # cas du panneau tranchés
+        lignes.append(ligne(indecis[code], ref_par[INDECIDABLE][code], code, libelle))
     for nature in (DECISION, RUN, INFORMATION):
         lignes.append(f"\n── panneau : {NATURES[nature]} ({sum(par[nature].values())}) ──")
         # Une famille de l'audit peut être une décision (`recherche_perimee`).

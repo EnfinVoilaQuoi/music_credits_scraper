@@ -616,3 +616,25 @@ def test_une_duree_sans_plateforme_est_indecidable(observees, nature):
     pas une erreur démontrable — hors du critère, gardé à l'affichage."""
     assert au._nature_d_une_duree(observees) == nature
     assert au.INDECIDABLE not in au.NATURES_DU_CRITERE
+
+
+def test_un_cas_tranche_indecidable_reste_compte_hors_critere(isha, data_manager, monkeypatch):
+    """Décision utilisateur 2026-10-31 : un cas du panneau qu'aucune donnée ne
+    tranche quitte le panneau et le critère, mais l'audit le garde parmi les
+    indécidables ; un verdict « normal » le fait disparaître tout à fait."""
+    from src.services import revue
+    from src.utils.revue_repository import VERDICT_INDECIDABLE
+
+    a, t = isha
+    lrc = revue.Cas("lrc_douteux", t.id, "Durag", "LRC douteux", cle="g4242|lrc")
+    bpm = revue.Cas("bpm", t.id, "Durag", "BPM en désaccord", cle="g4242|bpm")
+    monkeypatch.setattr(
+        revue, "analyser", lambda dm, artiste: revue.Revue(actifs=[], masques=[lrc, bpm])
+    )
+    data_manager.trancher_cas(a.id, "lrc_douteux", lrc.cle, verdict=VERDICT_INDECIDABLE)
+    data_manager.trancher_cas(a.id, "bpm", bpm.cle)
+
+    cas = au.a_trancher(data_manager, ["Isha"])
+
+    assert [(c.famille, c.nature) for c in cas] == [("revue:lrc_douteux", au.INDECIDABLE)]
+    assert au.INDECIDABLE not in au.NATURES_DU_CRITERE

@@ -1678,6 +1678,26 @@ def politique_kworb_tiers(cas, _track, ctx):
     )
 
 
+_CATALOGUES_LUS_PAR_ID = ("deezer", "spotify_web", "apple_music")
+
+
+def _autre_fichier(version, d_id: int) -> bool:
+    """La version nommée (`version`, sa fiche) n'est pas le fichier de l'ID
+    (`d_id` s) : plus de `ECART_VERSION_S` d'écart, ou plus
+    d'`ECART_FICHIER_S` quand deux catalogues lus par leur ID confirment sa
+    durée à `ECART_FICHIER_S` près."""
+    ecart = abs(int(version.duration) - d_id)
+    if ecart > ECART_VERSION_S:
+        return True
+    durees = _durees(version)
+    confirmee = sum(
+        1
+        for s in _CATALOGUES_LUS_PAR_ID
+        if durees.get(s) and abs(int(durees[s]) - int(version.duration)) <= ECART_FICHIER_S
+    )
+    return ecart > ECART_FICHIER_S and confirmee >= 2
+
+
 def politique_id_spotify_version(cas, track, ctx):
     """La page Spotify de l'ID nomme une AUTRE version (« Deep Diving - me n ü
     Remix » pour « Deep Diving », « K-POP » pour « K-POP (Chopped &
@@ -1689,7 +1709,13 @@ def politique_id_spotify_version(cas, track, ctx):
       · un catalogue de la fiche lu par SON identifiant (Deezer, Apple) donne
         la durée de l'ID, à `ECART_FICHIER_S` près.
     ✓ Normal : aucune donnée ne change. Deux versions à la même durée
-    (instrumental, édition) restent à l'humain."""
+    (instrumental, édition) restent à l'humain.
+
+    L'écart suffit au-delà d'`ECART_FICHIER_S` quand la durée de la version
+    nommée est elle-même confirmée par deux catalogues lus par leur ID : deux
+    fichiers distincts, sûrement (Travis « FRANCHISE (REMIX) » 207 s, Deezer du
+    remix 207 s ; « FRANCHISE » 202 s chez Deezer, Spotify et ReccoBeats ;
+    2026-10-31). Rien n'est modifié, l'action n'est pas destructive."""
     from src.services.revue import _titre_sans_feat
 
     preuves = cas.preuves or {}
@@ -1715,7 +1741,7 @@ def politique_id_spotify_version(cas, track, ctx):
         t.spotify_id
         and t.spotify_id not in ids_de_la_fiche
         and t.duration
-        and abs(int(t.duration) - int(d_id)) > ECART_VERSION_S
+        and _autre_fichier(t, int(d_id))
         for t in nommees
     ):
         return None

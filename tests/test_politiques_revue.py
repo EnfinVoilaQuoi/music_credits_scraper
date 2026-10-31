@@ -707,6 +707,35 @@ class TestIdSpotifyVersion:
         cas.preuves["spotify_sert"] = "K-POP (feat. Bad Bunny & The Weeknd)"
         assert pol.arbitrage_etendu(cas, cs, ctx).action == "normal"
 
+    def _franchise(self, original_durees):
+        remix = _t(
+            "FRANCHISE (REMIX)",
+            4791,
+            spotify_id="REMIX",
+            spotify_ids=["REMIX"],
+            durations_observees={"spotify_web": 207, "deezer": 207, "youtube": 208},
+        )
+        original = _t(
+            "FRANCHISE",
+            4794,
+            spotify_id="ORIG",
+            duration=202,
+            durations_observees=original_durees,
+        )
+        sert = "FRANCHISE (feat. Young Thug & M.I.A.)"
+        cas = _cas("id_spotify_version", remix, {"spotify_id": "REMIX", "spotify_sert": sert})
+        return cas, remix, SimpleNamespace(disco=[remix, original])
+
+    def test_ecart_court_mais_duree_de_l_original_confirmee(self):
+        """Travis « FRANCHISE (REMIX) » (2026-10-31) : 5 s d'écart seulement,
+        mais l'original est à 202 s chez Deezer, Spotify et ReccoBeats."""
+        cas, remix, ctx = self._franchise({"deezer": 202, "spotify_web": 202, "reccobeats": 202})
+        assert pol.arbitrage_etendu(cas, remix, ctx).action == "normal"
+
+    def test_ecart_court_sans_duree_confirmee_l_humain(self):
+        cas, remix, ctx = self._franchise({"deezer": 202, "youtube": 203})
+        assert pol.arbitrage_etendu(cas, remix, ctx) is None
+
 
 class TestGeneriqueDistincts:
     """Décision utilisateur 2026-10-29 : « Interlude » et « Outro » de Diam's,

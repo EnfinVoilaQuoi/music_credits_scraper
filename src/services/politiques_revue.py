@@ -1095,6 +1095,10 @@ REGLES_DEEZER = frozenset(
         ("deezer_apparition", "deezer_rattacher_isrc"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
+        # 2026-10-31 : édition de diffusion d'une fiche au sous-titre omis par
+        # Deezer (Kid Cudi) ; simulée sur la copie, 3 / 4 `deezer_absent`.
+        ("deezer_absent", "deezer_edition"),
+        ("deezer_album_absent", "deezer_edition"),
         # 2026-10-31 (DV1) : l'instrumental / a cappella Deezer d'un morceau
         # connu, sans page : pas de fiche. 3 / 15 sur la copie (Flynt).
         ("deezer_version", "normal"),
@@ -1162,6 +1166,32 @@ def _version_d_un_disque_de_versions(cas, ctx) -> Arbitrage | None:
     )
 
 
+def _edition_d_une_fiche(cas, ctx, ids_artiste: set) -> Arbitrage | None:
+    """La piste Deezer « absente » d'un disque PROPRE est une édition de
+    diffusion (« Album Version Edited », « Explicit ») d'une fiche dont Deezer
+    omet le sous-titre Genius, à la durée de la fiche ou d'une de ses
+    éditions (`editions.socle_au_sous_titre_pres`) : le même enregistrement,
+    noté en ÉDITION avec sa durée (décision utilisateur 2026-10-19), pas une
+    fiche à créer (Kid Cudi, 2026-10-31)."""
+    from src.services.editions import socle_au_sous_titre_pres
+
+    if cas.detecteur not in ("deezer_absent", "deezer_album_absent") or ctx is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    if album.get("artist_id") not in ids_artiste:
+        return None
+    titre = piste.get("title") or cas.morceau
+    socle = socle_au_sous_titre_pres(titre, piste.get("duration"), ctx.disco)
+    if socle is None:
+        return None
+    return Arbitrage(
+        f"ÉDITION de « {socle.title} » (sa durée propre), pas de fiche",
+        "deezer_edition",
+        f"« {titre} » {piste.get('duration')} s ; « {socle.title} » {socle.duration} s",
+    )
+
+
 def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     """L'arbitrage de la famille « écarts Deezer », restreint aux originaux
     sans ambiguïté — le titre de la PISTE Deezer et celui de la fiche."""
@@ -1170,6 +1200,9 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     par_isrc = _rattacher_par_isrc(cas, ctx, isrcs_connus, ids_artiste)
     if par_isrc is not None:
         return par_isrc
+    edition = _edition_d_une_fiche(cas, ctx, ids_artiste)
+    if edition is not None:
+        return edition
     if cas.detecteur == "deezer_version":
         # Une version n'est jamais un original : seul le « ✓ Normal » de
         # l'instrumental / a cappella (aucune fiche créée) passe (DV1).

@@ -31,6 +31,24 @@ class TestSocle:
         fiches = [_t("Runaway", 1), _t("Runaway", 2, "Cover"), _t("Runaway", 3, "Cover")]
         assert editions.socle_de("Runaway (Explicit)", fiches).id == 1
 
+    def test_au_sous_titre_pres_a_la_duree(self):
+        """Kid Cudi (2026-10-31) : Deezer omet « (The Anthem) » ; la durée de la
+        fiche (ou d'une de ses éditions) à 10 s près le confirme."""
+        fiche = _t("Man on the Moon (The Anthem)", 1)
+        fiche.duration, fiche.durees_editions = 207, ()
+        titre = "Man On The Moon (Album Version Explicit)"
+        assert editions.socle_au_sous_titre_pres(titre, 211, [fiche]) is fiche
+        assert editions.socle_au_sous_titre_pres(titre, 260, [fiche]) is None
+        assert editions.socle_au_sous_titre_pres(titre, None, [fiche]) is None
+        fiche.durees_editions = (258,)
+        assert editions.socle_au_sous_titre_pres(titre, 260, [fiche]) is fiche
+        autre = _t("Man on the Moon (Remix)", 2)
+        autre.duration, autre.durees_editions = 211, ()
+        assert editions.socle_au_sous_titre_pres(titre, 211, [autre]) is None  # une version
+        homonyme = _t("Man on the Moon (Moonshot)", 3)
+        homonyme.duration, homonyme.durees_editions = 211, ()
+        assert editions.socle_au_sous_titre_pres(titre, 211, [fiche, homonyme]) is None
+
     def test_deux_originaux_ne_tranche_pas(self):
         fiches = [_t("Intro", 1), _t("Intro", 2)]
         assert editions.socle_de("Intro (Clean)", fiches) is None

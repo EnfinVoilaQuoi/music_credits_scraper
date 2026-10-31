@@ -444,6 +444,37 @@ def test_deezer_isrc_connu_rattache_malgre_le_descripteur(data_manager, artiste,
     assert fiches["Love64"].deezer_id == 9 and fiches["Joe Le Taxi"].deezer_id is None
 
 
+def test_deezer_edition_au_sous_titre_omis_notee_puis_retablie(data_manager, artiste, monkeypatch):
+    """Kid Cudi « Make Her Say (Album Version Edited) » (2026-10-31) : Deezer
+    omet le sous-titre Genius « (I Poke Her Face) » — une édition de la fiche,
+    pas une fiche à créer."""
+    from src.services import ecarts_deezer as ed
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    durees = {"deezer": 238, "spotify_web": 238}
+    _fiche_durees(data_manager, artiste, "Make Her Say (I Poke Her Face)", 40, durees, duration=238)
+    _ecarts_deezer(
+        data_manager,
+        artiste,
+        ed.PisteDeezer(id=9, title="Make Her Say (Album Version Edited)", duration=236),
+    )
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1 and "édition" in bilan.appliquees[0], bilan
+    fiches = _charger(data_manager, artiste)
+    assert set(fiches) == {"Make Her Say (I Poke Her Face)"}
+    fiche = fiches["Make Her Say (I Poke Her Face)"]
+    assert 9 in data_manager.get_artist_edition_deezer_ids(artiste.id)
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:deezer_edition"
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert 9 not in data_manager.get_artist_edition_deezer_ids(artiste.id)
+    assert fiche.id in {t.id for t in _charger(data_manager, artiste).values()}
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
 def test_retablir_un_rattachement_retire_l_autre_edition_deezer(data_manager, artiste):
     """#8199, corrections 679/680 du 2026-10-26 : le rattachement « autre
     édition Deezer » avait noté la page en édition de la fiche. Rétablir délie

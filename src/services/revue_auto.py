@@ -118,6 +118,7 @@ _SANS_FICHE = frozenset(
     {
         "deezer_appliquer",
         "deezer_rattacher_isrc",
+        "deezer_edition",
         "confirmer_lien",
         "kworb_tiers",
         # Cas d'ARTISTE : ses fiches sont dans ses preuves.
@@ -556,6 +557,33 @@ def _deezer_rattacher_isrc(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]
     }
 
 
+def _deezer_edition(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Note la piste « absente » en ÉDITION de sa fiche (`_edition_d_une_fiche`)."""
+    from src.services import editions
+
+    piste = cas.preuves["ecart"]["piste"]
+    titre = piste.get("title") or cas.morceau
+    socle = editions.socle_au_sous_titre_pres(
+        titre, piste.get("duration"), charger_contexte(dm, artiste).disco
+    )
+    if socle is None:
+        raise LookupError("le morceau d'origine n'est plus identifiable")
+    editions.rattacher(
+        dm,
+        socle,
+        titre,
+        "deezer",
+        duration=piste.get("duration"),
+        deezer_id=piste.get("id"),
+        isrc=piste.get("isrc"),
+    )
+    return f"« {titre} » noté en édition de « {socle.title} »", {
+        "type": "edition_deezer",
+        "track_id": socle.id,
+        "label": editions.libelle(titre),
+    }
+
+
 def _delier_deezer(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
     """Délie l'ID Deezer (`duree_deezer`) ou la parution à revoir
     (`deezer_link_review`) — l'action du panneau ; les observations Deezer de
@@ -632,6 +660,7 @@ _CORRECTEURS_DE_REGLE = {
     "delier_deezer": _delier_deezer,
     "deezer_appliquer": _deezer_appliquer,
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,
+    "deezer_edition": _deezer_edition,
     "retirer_songbpm": _corriger_songbpm,
     "retirer_champs_songbpm": _corriger_champs_songbpm,
     "retirer_getsongbpm": _corriger_getsongbpm,
@@ -778,6 +807,7 @@ def retablir(dm, artiste, correction: dict) -> str:
     if track is None and annulation.get("type") not in (
         "fiche_deezer",
         "lien_deezer",
+        "edition_deezer",
         "lien",
         "fiche_kworb",
         "videos",
@@ -869,6 +899,10 @@ def retablir(dm, artiste, correction: dict) -> str:
         retirees = ecarts_deezer.retirer_editions_de_la_page(dm, fiche.id, e.piste.id)
         if retirees:
             compte_rendu += f" — édition(s) retirée(s) : {', '.join(retirees)}"
+    elif annulation.get("type") == "edition_deezer":
+        if not dm.retirer_edition(annulation["track_id"], annulation["label"]):
+            raise LookupError(f"édition « {annulation['label']} » introuvable")
+        compte_rendu = f"édition « {annulation['label']} » retirée"
     elif annulation.get("type") == "delie_deezer":
         from src.utils.corrections_fiches import oublier_deezer_refuse
 

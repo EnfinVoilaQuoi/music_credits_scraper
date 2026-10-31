@@ -880,18 +880,41 @@ _ROMAINS = {
 }
 
 
+#: Chiffre romain FINAL, en capitales et d'au moins deux lettres : « Solaar
+#: Pleure II » est « Solaar pleure (part. 2) » (2026-10-31). Ni « I », « V »,
+#: « X » seuls (« Malcolm X », « Generation X »), ni une minuscule (un mot).
+_ROMAIN_FINAL = re.compile(r"\s(II|III|IV|VI|VII|VIII|IX)$")
+
+
+def _principal(texte: str) -> str:
+    return re.split(r"\s[-–]\s|[(\[]", texte, maxsplit=1)[0].strip()
+
+
+def partie_finale(texte: str | None) -> int | None:
+    """PUR. Le numéro de partie isolé en FIN de titre principal, sans
+    marqueur : un nombre (« Le chill 2 ») ou un chiffre romain en capitales
+    (« Solaar Pleure II », `_ROMAIN_FINAL`). Partagé avec la garde de la
+    recherche YouTube (`youtube_searcher.numeros_de_partie`)."""
+    principal = _principal(texte or "")
+    if m := re.search(r"\s(\d{1,3})$", principal):
+        return int(m.group(1))
+    if m := _ROMAIN_FINAL.search(principal):
+        return _ROMAINS[m.group(1).lower()]
+    return None
+
+
 def parties_du_morceau(titre: str | None) -> frozenset[int]:
     """PUR. Les numéros de PARTIE d'un titre : après « Pt », « Part »,
     « Partie », « Chapitre », « Épisode » — où qu'ils soient, descripteur
-    compris —, plus un nombre isolé en FIN de titre principal (« Le chill 2 »)."""
+    compris —, plus un nombre ou un chiffre romain isolé en FIN de titre
+    principal (« Le chill 2 », « Solaar Pleure II » : `partie_finale`)."""
     texte = titre or ""
     numeros = set()
     for m in _PARTIE_DU_MORCEAU.finditer(texte):
         brut = m.group(1).lower()
         numeros.add(_ROMAINS[brut] if brut in _ROMAINS else int(brut))
-    principal = re.split(r"\s[-–]\s|[(\[]", texte, maxsplit=1)[0].strip()
-    if m := re.search(r"\s(\d{1,3})$", principal):
-        numeros.add(int(m.group(1)))
+    if (n := partie_finale(texte)) is not None:
+        numeros.add(n)
     return frozenset(numeros)
 
 
@@ -966,7 +989,9 @@ def cle_titre(titre: str | None) -> CleTitre:
         # (`parties`), et « Bouge de là (Part. 1) » / « Bouge de là, Pt. 1 »
         # (Deezer / Apple, même place du même disque) donnaient « part1 » /
         # « pt1 » (2026-10-14).
-        socle=normalize_title(_PARTIE_DU_MORCEAU.sub(" ", v.socle)),
+        # Le chiffre romain final aussi (« Solaar Pleure II » / « Solaar
+        # pleure (part. 2) », 2026-10-31) ; un nombre final reste au socle.
+        socle=normalize_title(_ROMAIN_FINAL.sub(" ", _PARTIE_DU_MORCEAU.sub(" ", v.socle))),
         parties=parties_du_morceau(t),
         generique=titre_generique(_sans_parentheses(t)),
         censure=_motif_censure(t),

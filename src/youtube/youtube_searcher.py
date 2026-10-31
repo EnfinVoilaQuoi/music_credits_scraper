@@ -24,6 +24,7 @@ from src.utils.title_matching import (
 from src.utils.version_descriptors import (
     meme_disque,
     meme_version_publiee,
+    partie_finale,
     titre_generique,
     titre_sans_son_disque,
     titre_sans_sous_titre,
@@ -312,9 +313,8 @@ def numeros_de_partie(titre: str, artistes=()) -> frozenset[int]:
     for m in _MARQUEUR_DE_PARTIE.finditer(texte):
         brut = (m.group(1) or m.group(2)).lower()
         numeros.add(_ROMAINS[brut] if brut in _ROMAINS else int(brut))
-    principal = re.split(r"\s[-–]\s|[(\[]", texte, maxsplit=1)[0].strip()
-    if m := re.search(r"\s(\d{1,3})$", principal):
-        numeros.add(int(m.group(1)))
+    if (n := partie_finale(texte)) is not None:
+        numeros.add(n)
     return frozenset(numeros)
 
 

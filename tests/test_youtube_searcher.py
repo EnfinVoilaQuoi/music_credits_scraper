@@ -486,6 +486,18 @@ class TestRefusATortDuScore:
 
         assert relevance_score("Evasion (Radio Edit)", ["Diam's"], "Diam's", "Evasion") < 0.85
 
+    def test_un_chiffre_romain_final_est_la_partie(self):
+        """MC Solaar « Solaar Pleure II » (2026-10-31) : la recherche avait vu
+        « Solaar pleure (part. 2) », refusée sur le titre ; c'est le même
+        morceau. Jamais la part. 1, ni le morceau sans partie."""
+        from src.youtube.youtube_searcher import numeros_de_partie, relevance_score
+
+        cible = "Solaar Pleure II"
+        assert numeros_de_partie(cible) == frozenset({2})
+        assert relevance_score("Solaar pleure (part. 2)", ["MC Solaar"], "MC Solaar", cible) >= 0.85
+        assert relevance_score("Solaar pleure (part. 1)", ["MC Solaar"], "MC Solaar", cible) == 0
+        assert relevance_score("Solaar pleure", ["MC Solaar"], "MC Solaar", cible) == 0
+
     def test_une_partie_1_publiee_sans_son_numero(self):
         from src.youtube.youtube_searcher import relevance_score
 

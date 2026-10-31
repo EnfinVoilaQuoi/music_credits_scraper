@@ -695,3 +695,29 @@ class TestGroupeFinalImbrique:
 def test_relation_des_titres(a, b, attendu):
     assert relation_des_titres(a, b) == attendu
     assert relation_des_titres(b, a) == attendu
+
+
+class TestChiffreRomainFinal:
+    """« Solaar Pleure II » = « Solaar pleure (part. 2) » (MC Solaar,
+    2026-10-31), jamais « part. 1 ». Une année finale n'est pas une partie
+    (« Suzy 2003 »), ni un « X » seul (« Malcolm X »), ni un chiffre romain
+    au-delà de IX (« Louis XIV »)."""
+
+    def test_meme_partie(self):
+        from src.utils.version_descriptors import (
+            cle_de_socle,
+            parties_du_morceau,
+            titres_equivalents,
+        )
+
+        assert parties_du_morceau("Solaar Pleure II") == frozenset({2})
+        assert cle_de_socle("Solaar Pleure II") == cle_de_socle("Solaar pleure, part. 2")
+        assert titres_equivalents("Solaar Pleure II", "Solaar pleure (part. 2)")
+        assert not titres_equivalents("Solaar Pleure II", "Solaar pleure (part. 1)")
+        assert not titres_equivalents("Solaar Pleure II", "Solaar pleure")
+
+    @pytest.mark.parametrize("titre", ["Suzy 2003", "Malcolm X", "Louis XIV", "Pour la vie"])
+    def test_pas_une_partie(self, titre):
+        from src.utils.version_descriptors import parties_du_morceau
+
+        assert parties_du_morceau(titre) == frozenset()

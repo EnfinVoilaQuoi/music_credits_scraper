@@ -223,6 +223,42 @@ def test_lrc_aux_paroles_proches_mais_a_sa_place_reste():
     assert pol.politique_lrc(cas, t, revue.contexte([t])) is None
 
 
+class TestLrcDeLAutreFiche:
+    """Booba « Gyrophare* » (extrait, sans paroles ni catalogue) portait le LRC
+    YouTube Music de « Garcimore » ; simulée sur la base : 16 / 19 (2026-10-31)."""
+
+    @staticmethod
+    def _paire(fin_autre=165, **kw):
+        t = _t("Gyrophare", 1, **kw)
+        t.lyrics.synced = "[00:30.10] Tous les jours\n[02:40.00] fin"
+        autre = _t("Garcimore", 2, duration=182)
+        autre.lyrics.synced = (
+            f"[00:32.09] Tous les jours\n[{fin_autre // 60:02d}:{fin_autre % 60:02d}.00] fin"
+        )
+        cas = _cas(
+            "paroles_autre_fiche", t, {"autre": 2, "part": 0.86, "textes": ["LRC YouTube Music"]}
+        )
+        return t, cas, revue.contexte([t, autre])
+
+    def test_le_lrc_de_l_autre_se_retire(self):
+        t, cas, ctx = self._paire()
+        assert pol.arbitrage_etendu(cas, t, ctx).action == "retirer_lrc"
+
+    def test_sans_temoin_ou_fiche_publiee_l_humain(self):
+        # Le LRC de l'autre finit ailleurs : un couplet cité, peut-être.
+        t, cas, ctx = self._paire(fin_autre=230)
+        assert pol.politique_paroles_autre_fiche(cas, t, ctx) is None
+        # Une fiche qui a sa durée ou un catalogue : son LRC peut être le sien.
+        for kw in ({"duration": 160}, {"spotify_id": "SP"}, {"deezer_id": 7}):
+            t, cas, ctx = self._paire(**kw)
+            assert pol.politique_paroles_autre_fiche(cas, t, ctx) is None, kw
+
+    def test_des_paroles_de_repli_restent_a_l_humain(self):
+        t, cas, ctx = self._paire()
+        cas.preuves["textes"] = ["LRC YouTube Music", "paroles Source: Musixmatch"]
+        assert pol.politique_paroles_autre_fiche(cas, t, ctx) is None
+
+
 _EMISSION = (
     "Je rappe depuis la cave avec les frères du quartier on garde la flamme\n"
     "Les micros chauffent la nuit tombe sur la ville et personne ne recule\n"

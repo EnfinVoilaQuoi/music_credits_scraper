@@ -671,6 +671,45 @@ def politique_lrc(cas, track, ctx):
     return None
 
 
+#: Écart toléré entre la fin du LRC d'une fiche que rien ne publie et celle du
+#: LRC de l'autre fiche dont il porte les paroles (2026-10-31 : 2 à 16 s sur
+#: les 5 cas du panneau — Gyrophare / Garcimore, Ripaille / Mémoire…).
+LRC_MEME_FIN_S = 20
+
+
+def politique_paroles_autre_fiche(cas, track, ctx):
+    """LRC de repli d'une fiche que RIEN ne publie (ni durée, ni ID Spotify ou
+    Deezer : un inédit, un extrait, une page « à retranscrire ») dont les
+    paroles sont celles d'une autre fiche : YouTube Music ne sert de LRC que
+    pour un enregistrement publié, c'est celui de l'autre (Booba « Gyrophare* »,
+    extrait sans paroles, portait le LRC de « Garcimore », 2026-10-31).
+    TÉMOIN : le LRC de l'autre fiche, lu à part, finit au même moment
+    (± `LRC_MEME_FIN_S`) — le LRC couvre tout l'autre morceau, pas un couplet
+    cité. Des paroles de repli (hors LRC) restent à l'humain."""
+    from src.utils.lrc_garde import fin_du_lrc
+
+    if track is None or not track.lyrics.synced:
+        return None
+    if track.duration or track.spotify_id or track.deezer_id:
+        return None
+    preuves = cas.preuves or {}
+    textes = preuves.get("textes") or []
+    if not textes or not all(t.startswith("LRC") for t in textes):
+        return None
+    autre = next((t for t in ctx.disco if t.id == preuves.get("autre")), None)
+    if autre is None or not autre.lyrics.synced or autre.lyrics.synced == track.lyrics.synced:
+        return None
+    fin, fin_autre = fin_du_lrc(track.lyrics.synced), fin_du_lrc(autre.lyrics.synced)
+    if not fin or not fin_autre or abs(fin - fin_autre) > LRC_MEME_FIN_S:
+        return None
+    return Arbitrage(
+        "LRC de l'autre fiche sur une fiche que rien ne publie : le retirer",
+        "retirer_lrc",
+        f"paroles de « {autre.title} » ({preuves.get('part', 0):.0%}) ; LRC jusqu'à "
+        f"{fin} s, celui de « {autre.title} » jusqu'à {fin_autre} s",
+    )
+
+
 # ── Écarts Deezer et propositions Kworb : par CAS TYPIQUE ───────────────────
 
 
@@ -1530,6 +1569,10 @@ REGLES_ETENDUES = frozenset(
         # 2026-10-31 (D1) : deux pages au même titre, artistes crédités
         # différents (adresse Genius) et paroles communes < 0,9 ; 6 / 13.
         ("doublon", "normal"),
+        # 2026-10-31 : LRC de l'autre fiche sur une fiche que rien ne publie ;
+        # simulée sur la base, 5 / 5 cas du panneau (Gyrophare / Garcimore…),
+        # témoin la fin du LRC de l'autre fiche à 2-16 s près.
+        ("paroles_autre_fiche", "retirer_lrc"),
     }
 )
 
@@ -1921,6 +1964,7 @@ _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "recherche_perimee": politique_recherche_perimee,
     "jumelle_annee": politique_jumelle_annee,
     "songbpm_titre_contenu": politique_songbpm_titre_contenu,
+    "paroles_autre_fiche": politique_paroles_autre_fiche,
 }
 
 

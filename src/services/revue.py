@@ -3422,12 +3422,20 @@ def _signalement_deezer_resolu(
 
 
 def _cas_des_signalements(
-    signalements, ids_disco: set, tracks=None, editions_deezer: frozenset = frozenset()
+    signalements,
+    ids_disco: set,
+    tracks=None,
+    editions_deezer: frozenset = frozenset(),
+    decisions_kworb: dict | None = None,
 ) -> list[Cas]:
     """Un signalement dont la fiche a disparu depuis le run (fusion,
     suppression) n'a plus d'objet ; avec `tracks`, ceux que l'état présent
     dément non plus (`_signalement_resolu`). `editions_deezer` = pages Deezer
-    notées en édition d'une fiche (`track_editions`)."""
+    notées en édition d'une fiche (`track_editions`) ; `decisions_kworb` =
+    décisions Kworb de l'artiste (`KworbLinksManager.load`), qui règlent les
+    signalements Kworb décidés depuis le run (`update_kworb.signalement_resolu`)."""
+    from src.utils.update_kworb import CODES_DECIDABLES, signalement_resolu
+
     partages = None
     if tracks is not None and any(s["detecteur"] in _CODES_ID_PARTAGE for s in signalements):
         partages = ids_spotify_encore_partages(tracks)
@@ -3439,6 +3447,10 @@ def _cas_des_signalements(
             return False
         if partages is not None and s["detecteur"] in _CODES_ID_PARTAGE:
             return (s["preuves"] or {}).get("spotify_id") in partages
+        if decisions_kworb is not None and s["detecteur"] in CODES_DECIDABLES:
+            track = par_id.get(s["track_id"])
+            if signalement_resolu(s["detecteur"], s["preuves"] or {}, track, decisions_kworb):
+                return False
         if tracks is not None:
             return not _signalement_deezer_resolu(s, par_id, ids_deezer, editions_deezer)
         return True
@@ -3508,6 +3520,7 @@ def analyser(data_manager, artiste, ctx: Contexte | None = None) -> Revue:
         {t.id for t in tracks},
         tracks,
         data_manager.get_artist_edition_deezer_ids(artiste.id),
+        _decisions_kworb(artiste),
     )
     cas = _marquer_les_fiches_decidees(data_manager, artiste, cas)
     cas.sort(key=lambda c: (-c.impact, c.detecteur, c.morceau))
@@ -3516,6 +3529,16 @@ def analyser(data_manager, artiste, ctx: Contexte | None = None) -> Revue:
         actifs=[c for c in cas if (c.detecteur, c.cle) not in tranches],
         masques=[c for c in cas if (c.detecteur, c.cle) in tranches],
     )
+
+
+def _decisions_kworb(artiste) -> dict | None:
+    """Les décisions Kworb de l'artiste, en base ; None si illisibles."""
+    from src.utils.kworb_links_manager import KworbLinksManager
+
+    try:
+        return KworbLinksManager().load(artiste.name)
+    except (OSError, ValueError):
+        return None
 
 
 def _marquer_les_fiches_decidees(data_manager, artiste, cas: list[Cas]) -> list[Cas]:

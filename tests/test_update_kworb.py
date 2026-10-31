@@ -1632,6 +1632,87 @@ class TestAutreUploadAuMemeTitre:
         res, dm = self._lancer({1: 50_000})
         assert [w[0] for w in dm.streams_writes] == [1]
 
+    def test_ligne_confirmee_a_la_main_n_est_plus_ecartee(self, monkeypatch):
+        """Kanye « Marvin & Chardonnay (10th Anniversary) » : confirmée le
+        2026-10-12, écartée à chaque run jusqu'au 2026-10-31."""
+        _memoire(monkeypatch, confirmed={"day n nite": 1})
+        res, dm = self._lancer({1: 66_193_696})
+        assert [w[0] for w in dm.streams_writes] == [1]
+        assert res["lignes_ecartees"] == []
+        assert not [c for c in res["a_trancher"] if c["detecteur"] == "kworb_ecartee"]
+
+
+class TestSignalementDecideDepuisLeRun:
+    """2026-10-31 : un signalement Kworb vit jusqu'au run suivant ; une
+    décision prise entre-temps le règle au panneau (SCH « Solvable »)."""
+
+    @staticmethod
+    def _decisions(**data):
+        return {"confirmed": {}, "rejected": [], "decisions": {}, **data}
+
+    def test_meme_morceau_confirme(self):
+        preuves = {"kworb_title": "Solvable"}
+        fiche = _track(1806, "Solvable, Partie 1")
+        assert not uk.signalement_resolu("kworb_a_confirmer", preuves, fiche, self._decisions())
+        decide = self._decisions(confirmed={"solvable": 1806})
+        assert uk.signalement_resolu("kworb_a_confirmer", preuves, fiche, decide)
+
+    def test_variante_a_classer_pas_reglee_par_l_ancien_rejet(self):
+        """Kanye « Birthday Song - Chopped Not Slopped » : rejetée sur « même
+        morceau ? », reproposée exprès pour la taxonomie des variantes."""
+        preuves = {"kworb_title": "Birthday Song - Chopped Not Slopped"}
+        fiche = _track(6321, "Birthday Song")
+        rejete = self._decisions(rejected=["birthday song chopped not slopped"])
+        assert not uk.signalement_resolu("kworb_proposition", preuves, fiche, rejete)
+        classee = self._decisions(
+            decisions={"birthday song chopped not slopped": {"kind": "rendition", "track_id": 6321}}
+        )
+        assert uk.signalement_resolu("kworb_proposition", preuves, fiche, classee)
+
+    def test_ligne_ecartee_dont_le_lien_est_confirme(self):
+        titre = "Marvin & Chardonnay (10th Anniversary) feat. Kanye West & Roscoe Dash"
+        fiche = _track(6356, "Marvin & Chardonnay")
+        preuves = {"titre_kworb": titre}
+        assert not uk.signalement_resolu("kworb_ecartee", preuves, fiche, self._decisions())
+        decide = self._decisions(confirmed={"marvin chardonnay10th anniversary": 6356})
+        assert uk.signalement_resolu("kworb_ecartee", preuves, fiche, decide)
+        ailleurs = self._decisions(confirmed={"marvin chardonnay10th anniversary": 9})
+        assert not uk.signalement_resolu("kworb_ecartee", preuves, fiche, ailleurs)
+
+
+class TestVarianteAuLibelle:
+    """2026-10-31 : le titre Spotify qui porte la MÊME version n'est pas une
+    variante — au qualificatif près, ou coupé par Kworb à 99 caractères."""
+
+    @pytest.mark.parametrize(
+        "fiche, libelle",
+        [
+            ("La Gamberge (Live 2006; Version EP)", "La Gamberge - Live 2006"),
+            ("Jeune demoiselle (Live 2006; Version EP)", "Jeune Demoiselle - Live 2006"),
+            (
+                "Cudi the Kid (Lucky Date VIP Drumstep Edit)",
+                "Cudi the Kid (feat. Kid Cudi & Travis Barker) (feat. Kid Cudi & Travis "
+                "Barker) - Lucky Date VIP Dru",
+            ),
+        ],
+    )
+    def test_meme_version(self, fiche, libelle):
+        entree = {"title": libelle, "spotify_id": "X"}
+        assert not uk.variante_suspecte(entree, _track(1, fiche), {})
+
+    @pytest.mark.parametrize(
+        "fiche, libelle",
+        [
+            ("Heartless (Remix)", "Heartless"),
+            ("Marine", "Marine - Version 2006"),
+            # Un titre COURT n'est pas coupé : son début ne suffit pas.
+            ("Cudi the Kid (Lucky Date VIP Drumstep Edit)", "Cudi the Kid - Lucky Date VIP Dru"),
+        ],
+    )
+    def test_autre_version(self, fiche, libelle):
+        entree = {"title": libelle, "spotify_id": "X"}
+        assert uk.variante_suspecte(entree, _track(1, fiche), {})
+
 
 def test_les_fiches_en_role_secondaire_ne_disputent_pas_le_titre():
     """Kanye « Heartless » : l'original et huit reprises (The Fray, KIDZ BOP…)

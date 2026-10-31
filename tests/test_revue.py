@@ -888,6 +888,24 @@ class TestSignalementsDesRuns:
         deux = [*seule, _t("L'histoire est simple (Remix)", 3, spotify_id=sid)]
         assert len(revue._cas_des_signalements([s], {1, 2, 3}, deux)) == 1
 
+    def test_signalement_kworb_decide_depuis_le_run(self):
+        """SCH « Solvable » : confirmé le 2026-10-30 au soir, après le run du
+        matin — le cas restait au panneau jusqu'au run suivant."""
+        s = {
+            "detecteur": "kworb_a_confirmer",
+            "track_id": 1,
+            "morceau": "Solvable",
+            "motif": "",
+            "impact": 0,
+            "preuves": {"kworb_title": "Solvable"},
+            "cle": "k",
+        }
+        fiches = [_t("Solvable, Partie 1", 1)]
+        vide = {"confirmed": {}, "rejected": [], "decisions": {}}
+        assert len(revue._cas_des_signalements([s], {1}, fiches, frozenset(), vide)) == 1
+        decide = {**vide, "confirmed": {"solvable": 1}}
+        assert revue._cas_des_signalements([s], {1}, fiches, frozenset(), decide) == []
+
     @staticmethod
     def _deezer(detecteur, track_id, preuves):
         return {

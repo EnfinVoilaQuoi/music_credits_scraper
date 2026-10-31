@@ -3977,17 +3977,27 @@ class TrackRepository:
         return (str(album) if album is not None else None), vu
 
     def noter_parution_musicbrainz(
-        self, release_id: int, artist_id: int, spotify_album_id: str | None
+        self,
+        release_id: int,
+        artist_id: int,
+        spotify_album_id: str | None,
+        live: bool | None = None,
     ) -> None:
         """Une recherche MusicBrainz par code-barres a RÉPONDU : datée ; l'album
         Spotify retenu (garde : lien Deezer = notre album) devient un
-        identifiant `spotify_web` de la parution."""
+        identifiant `spotify_web` de la parution ; `live` (e64) dit si son
+        release-group est un album live (None : rien de connu, rien d'écrit)."""
         now = datetime.now()
         with self.engine.begin() as conn:
             conn.execute(
                 text("UPDATE releases SET mb_checked_at = :now WHERE id = :r"),
                 {"now": now, "r": release_id},
             )
+            if live is not None:
+                conn.execute(
+                    text("UPDATE releases SET mb_live = :l WHERE id = :r"),
+                    {"l": bool(live), "r": release_id},
+                )
             if spotify_album_id:
                 conn.execute(
                     text(
@@ -6930,6 +6940,74 @@ class TrackRepository:
                     text("SELECT id, title FROM tracks WHERE artist_id = :a"), {"a": artist_id}
                 )
             ]
+
+    def albums_deezer_live(self) -> set[int]:
+        """Les albums Deezer dont la parution est LIVE selon MusicBrainz
+        (`releases.mb_live`, e64), tous artistes."""
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text(
+                    "SELECT r.deezer_album_id FROM releases r WHERE r.mb_live = 1 "
+                    "AND r.deezer_album_id IS NOT NULL "
+                    "UNION SELECT CAST(i.external_id AS INTEGER) FROM release_identifiers i "
+                    "JOIN releases r ON r.id = i.release_id "
+                    "WHERE r.mb_live = 1 AND i.source = 'deezer'"
+                )
+            ).scalars()
+            return {int(x) for x in lignes if x is not None}
+
+    def marquer_parutions_live(self, lives: dict[int, bool]) -> int:
+        """Pose `releases.mb_live` (e64) `{release_id: live}` — ce que
+        MusicBrainz dit du release-group, relu dans le brut
+        (`scripts/marquer_parutions_live.py`). Ne date rien (`mb_checked_at`
+        reste la recherche de l'album Spotify). Rend le nombre de lignes changées."""
+        n = 0
+        with self.engine.begin() as conn:
+            for release_id, live in lives.items():
+                n += conn.execute(
+                    text(
+                        "UPDATE releases SET mb_live = :l WHERE id = :r "
+                        "AND (mb_live IS NULL OR mb_live != :l)"
+                    ),
+                    {"l": bool(live), "r": release_id},
+                ).rowcount
+        return n
+
+    def parutions_pour_live(self) -> list[dict]:
+        """Les parutions et ce qui désigne leur code-barres : `[{id, upc,
+        deezer_album_ids, mb_live}]` (`utils.parutions_live`)."""
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text("SELECT id, upc, deezer_album_id, mb_live FROM releases ORDER BY id")
+            ).mappings()
+            parutions = {
+                r["id"]: {
+                    "id": r["id"],
+                    "upc": r["upc"],
+                    "deezer_album_ids": (
+                        {int(r["deezer_album_id"])} if r["deezer_album_id"] else set()
+                    ),
+                    "mb_live": r["mb_live"],
+                }
+                for r in lignes
+            }
+            for rid, ext in conn.execute(
+                text(
+                    "SELECT release_id, external_id FROM release_identifiers WHERE source = 'deezer'"
+                )
+            ):
+                if rid in parutions and str(ext).isdigit():
+                    parutions[rid]["deezer_album_ids"].add(int(ext))
+        return list(parutions.values())
+
+    def parution_live(self, release_id: int) -> bool:
+        """La parution est-elle un album live selon MusicBrainz (e64) ?"""
+        with self.engine.connect() as conn:
+            return bool(
+                conn.execute(
+                    text("SELECT mb_live FROM releases WHERE id = :r"), {"r": release_id}
+                ).scalar()
+            )
 
     def ids_spotify_du_disque(self, artist_id: int, album: str) -> list[str]:
         """IDs Spotify (principaux) des fiches de l'artiste rangées sur ce disque,

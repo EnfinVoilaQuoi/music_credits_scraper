@@ -292,6 +292,10 @@ releases = Table(
     # (e57) Dernière recherche RÉPONDUE de la parution MusicBrainz par le
     # code-barres (album Spotify de l'édition) — refaite à expiration.
     Column("mb_checked_at", TIMESTAMP),
+    # (e64) La parution est un album LIVE selon MusicBrainz (type secondaire
+    # « Live » du release-group), lu à la même recherche : 1 / 0, NULL =
+    # inconnu. Une fiche studio n'en reçoit aucune piste (`studio_sur_live`).
+    Column("mb_live", _BOOL),
     UniqueConstraint("artist_id", "identity_key"),
     sqlite_autoincrement=True,
 )

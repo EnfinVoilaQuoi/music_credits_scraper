@@ -880,18 +880,41 @@ _ROMAINS = {
 }
 
 
+#: Chiffre romain FINAL, en capitales et d'au moins deux lettres : « Solaar
+#: Pleure II » est « Solaar pleure (part. 2) » (2026-10-31). Ni « I », « V »,
+#: « X » seuls (« Malcolm X », « Generation X »), ni une minuscule (un mot).
+_ROMAIN_FINAL = re.compile(r"\s(II|III|IV|VI|VII|VIII|IX)$")
+
+
+def _principal(texte: str) -> str:
+    return re.split(r"\s[-–]\s|[(\[]", texte, maxsplit=1)[0].strip()
+
+
+def partie_finale(texte: str | None) -> int | None:
+    """PUR. Le numéro de partie isolé en FIN de titre principal, sans
+    marqueur : un nombre (« Le chill 2 ») ou un chiffre romain en capitales
+    (« Solaar Pleure II », `_ROMAIN_FINAL`). Partagé avec la garde de la
+    recherche YouTube (`youtube_searcher.numeros_de_partie`)."""
+    principal = _principal(texte or "")
+    if m := re.search(r"\s(\d{1,3})$", principal):
+        return int(m.group(1))
+    if m := _ROMAIN_FINAL.search(principal):
+        return _ROMAINS[m.group(1).lower()]
+    return None
+
+
 def parties_du_morceau(titre: str | None) -> frozenset[int]:
     """PUR. Les numéros de PARTIE d'un titre : après « Pt », « Part »,
     « Partie », « Chapitre », « Épisode » — où qu'ils soient, descripteur
-    compris —, plus un nombre isolé en FIN de titre principal (« Le chill 2 »)."""
+    compris —, plus un nombre ou un chiffre romain isolé en FIN de titre
+    principal (« Le chill 2 », « Solaar Pleure II » : `partie_finale`)."""
     texte = titre or ""
     numeros = set()
     for m in _PARTIE_DU_MORCEAU.finditer(texte):
         brut = m.group(1).lower()
         numeros.add(_ROMAINS[brut] if brut in _ROMAINS else int(brut))
-    principal = re.split(r"\s[-–]\s|[(\[]", texte, maxsplit=1)[0].strip()
-    if m := re.search(r"\s(\d{1,3})$", principal):
-        numeros.add(int(m.group(1)))
+    if (n := partie_finale(texte)) is not None:
+        numeros.add(n)
     return frozenset(numeros)
 
 
@@ -966,7 +989,9 @@ def cle_titre(titre: str | None) -> CleTitre:
         # (`parties`), et « Bouge de là (Part. 1) » / « Bouge de là, Pt. 1 »
         # (Deezer / Apple, même place du même disque) donnaient « part1 » /
         # « pt1 » (2026-10-14).
-        socle=normalize_title(_PARTIE_DU_MORCEAU.sub(" ", v.socle)),
+        # Le chiffre romain final aussi (« Solaar Pleure II » / « Solaar
+        # pleure (part. 2) », 2026-10-31) ; un nombre final reste au socle.
+        socle=normalize_title(_ROMAIN_FINAL.sub(" ", _PARTIE_DU_MORCEAU.sub(" ", v.socle))),
         parties=parties_du_morceau(t),
         generique=titre_generique(_sans_parentheses(t)),
         censure=_motif_censure(t),
@@ -1203,6 +1228,32 @@ def porte_une_version(titre: str | None) -> bool:
     """PUR. Le titre porte un descripteur de VERSION (remix, live, acoustique…) —
     une édition de diffusion (« Radio Edit ») n'en est pas une."""
     return cle_titre(titre).variant.kind != Kind.NONE
+
+
+def prise_live(titre: str | None) -> bool:
+    """PUR. Le titre (d'un morceau ou d'un DISQUE) désigne une prise LIVE :
+    rendition de la famille live (« Les temps changent (Live) », « Le tour de
+    la question (live) » chez iTunes). Une session ou un « Symphonic » en sont,
+    comme dans `_FAMILLES_RENDITION`."""
+    v = cle_titre(titre).variant
+    return v.kind == Kind.RENDITION and "live" in _familles_de_rendition(v)
+
+
+def studio_sur_disque_live(
+    titre: str | None, album: str | None, disque: str | None, *, live: bool = False
+) -> bool:
+    """PUR. Une piste du disque `disque`, LIVE (`live` : MusicBrainz le dit,
+    e64 ; ou son titre, `prise_live`), désignerait-elle une fiche STUDIO —
+    titre sans version, disque Genius ni live ni le même ? Alors ce n'est pas
+    son enregistrement : MC Solaar « Les temps changent » (*Paradisiaque*,
+    197 s) portait les ID Deezer, Apple et Spotify du live de *Le tour de la
+    question* (219 s), corrigé à la main le 2026-10-31. La page Genius d'une
+    piste du live (« Galaktika », disque *Le tour de la question*) en est une."""
+    if not (live or prise_live(disque)):
+        return False
+    if porte_une_version(titre) or prise_live(album):
+        return False
+    return not meme_disque(album, disque)
 
 
 #: Mots d'un titre AMBIGU (version, prise, titre générique) — en mots entiers.

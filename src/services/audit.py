@@ -65,6 +65,7 @@ from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, 
 from src.utils.version_descriptors import (
     meme_socle,
     porte_une_version,
+    studio_sur_disque_live,
     titre_generique,
     titres_equivalents,
 )
@@ -162,6 +163,7 @@ FAMILLES = {
     "streams_double": "même compteur Spotify sur deux pages Genius",
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
+    "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
     "soeurs_divergentes": "INVARIANT — lignes sœurs aux valeurs d'enregistrement différentes",
@@ -984,6 +986,47 @@ def isrc_d_une_autre_fiche(c, pistes) -> list[Cas]:
     return cas
 
 
+def studio_sur_live(c, pistes) -> list[Cas]:
+    """Une fiche STUDIO rattachée à une parution d'album LIVE — type « Live »
+    du release-group MusicBrainz (`releases.mb_live`, e64) ou titre de la
+    parution (« Le tour de la question (live) » chez iTunes) : ses ID de
+    plateforme sont ceux du live (MC Solaar « Les temps changent », réparé à
+    la main le 2026-10-31). Le juge est celui de la pose
+    (`studio_sur_disque_live`) ; les liens `legacy` et Genius n'en sont pas
+    (Genius range la page sur SON disque). Montré, jamais réparé seul."""
+    fiches = {t["id"]: t for t in pistes}
+    if not fiches:
+        return []
+    cas = []
+    for r in c.execute(
+        "SELECT rt.track_id, rt.source, rt.external_track_id, r.title, r.mb_live "
+        "FROM release_tracks rt "
+        "JOIN releases r ON r.id = rt.release_id "
+        "WHERE rt.source NOT IN ('legacy', 'genius', 'genius_scrape') "
+        "ORDER BY rt.track_id, r.title"
+    ):
+        f = fiches.get(r["track_id"])
+        if f is None or not studio_sur_disque_live(
+            f["title"], f["album"], r["title"], live=bool(r["mb_live"])
+        ):
+            continue
+        preuve = "MusicBrainz : live" if r["mb_live"] else "titre de la parution"
+        porte = r["external_track_id"] and str(r["external_track_id"]) == str(f["deezer_id"])
+        cas.append(
+            Cas(
+                "studio_sur_live",
+                f["artiste"],
+                [f["id"]],
+                f"{_lib(f)} (disque « {f['album'] or '—'} ») sur la parution {r['source']} "
+                f"« {r['title']} » ({preuve})"
+                + (" ; son ID Deezer principal est la piste du live" if porte else "")
+                + f" — Deezer {f['deezer_id'] or '—'}, "
+                f"Apple {f['apple_music_id'] or '—'}, Spotify {f['spotify_id'] or '—'}",
+            )
+        )
+    return cas
+
+
 def ids_spotify_principaux_desalignes(c, pistes) -> list[Cas]:
     """`tracks.spotify_id` et sa ligne de `track_spotify_ids` en désaccord :
     la colonne sans sa ligne, ou `is_primary` levé sur un autre ID (ou baissé
@@ -1098,6 +1141,7 @@ def auditer(
         audit.cas += certifs(pistes)
         audit.cas += streams(c, par)
         audit.cas += echecs(c, pistes)
+        audit.cas += studio_sur_live(c, pistes)
         if persistance:
             audit.cas += soeurs_divergentes(c, pistes)
             audit.cas += refus_vivants(c, pistes)

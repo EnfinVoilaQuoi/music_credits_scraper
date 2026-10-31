@@ -280,6 +280,14 @@ _ALBUMS_LIES_RE: dict[str, re.Pattern] = {
 }
 
 
+def est_live(parution: dict) -> bool:
+    """PUR. Le release-group de la parution (résultat de recherche) porte le
+    type secondaire « Live » — la source fiable d'un album live (e64) : le
+    titre Deezer de *Le tour de la question* (MC Solaar) n'en dit rien."""
+    types = (parution.get("release-group") or {}).get("secondary-types") or []
+    return "Live" in types
+
+
 def albums_lies(detail: dict) -> dict[str, list[str]]:
     """`{plateforme: [ID d'album]}` des liens d'une parution, triés. Pure."""
     out: dict[str, set[str]] = {}
@@ -487,7 +495,8 @@ class MusicBrainzAPI:
 
     def parutions_par_code_barres(self, upc: str, *, limite: int = 3) -> list[dict]:
         """Les parutions MusicBrainz de ce code-barres, avec les albums de
-        plateforme qu'elles lient : `[{mbid, titre, barcode, albums}]`.
+        plateforme qu'elles lient : `[{mbid, titre, barcode, albums, live}]` —
+        `live` : le release-group porte le type secondaire « Live » (e64).
 
         Une recherche, puis un lookup `url-rels` par parution retenue. Le
         code-barres est cherché sous ses deux écritures (UPC-A / EAN-13) et
@@ -513,6 +522,7 @@ class MusicBrainzAPI:
                         "titre": r.get("title"),
                         "barcode": r.get("barcode"),
                         "albums": albums_lies(detail),
+                        "live": est_live(r),
                     }
                 )
             if out:

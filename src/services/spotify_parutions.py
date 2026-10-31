@@ -25,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from src.utils.logger import get_logger
-from src.utils.version_descriptors import titres_equivalents
+from src.utils.version_descriptors import studio_sur_disque_live, titres_equivalents
 
 logger = get_logger(__name__)
 
@@ -44,6 +44,7 @@ class BilanSpotifyParutions:
     pages_inutilisables: int = 0
     ids_poses: int = 0
     ids_refuses_gate: int = 0
+    refuses_live: int = 0
     divergents: int = 0
     erreurs: list[str] = field(default_factory=list)
 
@@ -131,11 +132,12 @@ def relier_par_parution(
                 continue
             bilan.albums_mb += 1
             spotify_album = album_spotify_garde(parutions, album.id)
+            live = any(p.get("live") for p in parutions) if parutions else None
             if spotify_album is None and any(
                 (p.get("albums") or {}).get("spotify") for p in parutions
             ):
                 bilan.albums_ecartes_garde += 1
-            dm.noter_parution_musicbrainz(release_id, artist.id, spotify_album)
+            dm.noter_parution_musicbrainz(release_id, artist.id, spotify_album, live=live)
             if spotify_album:
                 bilan.albums_rattaches += 1
         if spotify_album:
@@ -167,6 +169,7 @@ def relier_par_parution(
         bilan.erreurs.append(f"pages album Spotify : {e}")
         return _journal(bilan)
     for sid_album, (release_id, album) in utiles.items():
+        live = dm.parution_live(release_id)
         page = pages.get(sid_album)
         bilan.pages_lues += page is not None
         alignes = ids_par_place(page, album.pistes)
@@ -179,6 +182,10 @@ def relier_par_parution(
                 continue
             if fiche.spotify_id:
                 bilan.divergents += fiche.spotify_id != sid
+                continue
+            # Piste d'un album LIVE : jamais l'ID d'une fiche studio (e64).
+            if studio_sur_disque_live(fiche.title, fiche.album, album.title, live=live):
+                bilan.refuses_live += 1
                 continue
             if not valider(fiche, sid):
                 bilan.ids_refuses_gate += 1

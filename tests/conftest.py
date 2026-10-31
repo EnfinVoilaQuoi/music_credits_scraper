@@ -128,6 +128,9 @@ def _gate_spotify_sans_fournisseur(monkeypatch):
     monkeypatch.setattr(spotify_identity, "fournisseur_propres", None)
     monkeypatch.setattr(spotify_identity, "fournisseur_ids_artiste", None)
     monkeypatch.setattr(spotify_identity, "fournisseur_ids_du_disque", None)
+    from src.utils import deezer_identity
+
+    monkeypatch.setattr(deezer_identity, "fournisseur_albums_live", None)
     from src.utils import titre_annee
 
     monkeypatch.setattr(titre_annee, "fournisseur_durees", None)
@@ -142,6 +145,15 @@ def _brut_isole(tmp_path, monkeypatch):
     monkeypatch.setattr(brut, "CHEMIN", tmp_path / "brut" / "brut.db")
     yield
     brut.fermer()
+
+
+@pytest.fixture(autouse=True)
+def _pages_desactivees_isolees(tmp_path, monkeypatch):
+    """AUCUN test ne lit `data/disabled_tracks/` réel : le panneau les relit
+    (`revue.fiches_actives`, 2026-10-31)."""
+    from src.utils import disabled_tracks_manager
+
+    monkeypatch.setattr(disabled_tracks_manager, "DATA_DIR", tmp_path)
 
 
 @pytest.fixture(autouse=True)

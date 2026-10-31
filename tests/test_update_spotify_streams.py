@@ -365,6 +365,54 @@ def test_le_total_somme_TOUTES_les_pistes():
     assert result["albums_totalises"] == 1
 
 
+class TestFraicheurDesTotaux:
+    """2026-10-31 : un total `spotify_web` frais n'est pas refait (Médine :
+    120 pages pour 12 compteurs, chaque run rouvrait tous les albums), et les
+    albums jamais totalisés passent avant les plus anciens."""
+
+    def _scraper(self):
+        return _Scraper(
+            _page_artiste(playcounts={_ID_A: 100, _ID_B: 200}, albums={_ID_ALBUM: "Mon Album"}),
+            album_pages={_ID_ALBUM: _page_album([(_ID_A, "A"), (_ID_B, "B")])},
+        )
+
+    def test_un_total_frais_n_est_pas_refait(self):
+        hier = (datetime.now() - timedelta(days=1)).isoformat()
+        album = {
+            "title": "Mon Album",
+            "spotify_streams_source": "spotify_web",
+            "spotify_streams_updated": hier,
+        }
+        dm = _DataManager(albums=[album])
+        result = _run(dm, self._scraper())
+        assert dm.album_calls == [] and result["albums_totalises"] == 0
+
+    def test_un_total_perime_ou_de_kworb_est_refait(self):
+        vieux = (datetime.now() - timedelta(days=30)).isoformat()
+        for source, date in (("spotify_web", vieux), ("kworb", datetime.now().isoformat())):
+            album = {
+                "title": "Mon Album",
+                "spotify_streams_source": source,
+                "spotify_streams_updated": date,
+            }
+            dm = _DataManager(albums=[album])
+            assert _run(dm, self._scraper())["albums_totalises"] == 1, source
+
+    def test_ordre_jamais_totalise_puis_le_plus_ancien(self):
+        from src.utils.update_spotify_streams import albums_a_totaliser
+
+        now = datetime(2026, 10, 31)
+        totaux = {
+            "recent": ("spotify_web", "2026-10-10T00:00:00"),
+            "ancien": ("spotify_web", "2026-09-01T00:00:00"),
+            "kworb": ("kworb", "2026-10-30T00:00:00"),
+            "jamais": (None, None),
+            "frais": ("spotify_web", "2026-10-30T00:00:00"),
+        }
+        groupes = {c: [c] for c in totaux}
+        assert albums_a_totaliser(groupes, totaux, now) == ["kworb", "jamais", "ancien", "recent"]
+
+
 def test_deux_editions_ne_comptent_pas_deux_fois_le_meme_enregistrement():
     """Le piège mesuré le 2026-09-05 sur Bitume Caviar (vol.1) : les deux
     éditions n'ont AUCUN track_id commun, mais un titre présent sur les deux y

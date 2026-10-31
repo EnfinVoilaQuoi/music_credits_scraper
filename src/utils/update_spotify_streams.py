@@ -451,6 +451,36 @@ def resoudre_ids_par_album(album: dict, artiste_nom: str, fiches: list, deja_pri
     return trouves
 
 
+def albums_a_totaliser(groupes: dict, totaux: dict, now: datetime) -> list[str]:
+    """PUR. Les albums dont le total se recalcule à ce run, dans l'ordre où le
+    budget de pages les servira (2026-10-31). `totaux` : `{clé: (source,
+    date)}` du total en base.
+
+    · Un total `spotify_web` de moins de `spotify_web_freshness_days` n'est pas
+      refait : la même péremption que les pages titre. Sans elle, chaque run
+      rouvrait les pages de TOUS les albums connus — Médine : 120 pages pour
+      12 compteurs relevés et 2 totaux, 13 compteurs seulement étaient périmés.
+    · D'abord les albums jamais totalisés par Spotify, puis du plus ancien au
+      plus récent : un album abandonné faute de budget (« le total, ou rien »)
+      passe en tête au run suivant au lieu d'être recommencé derrière les autres.
+    """
+    max_age = settings.spotify_web_freshness_days
+
+    def deja_totalise(cle) -> bool:
+        return (totaux.get(cle) or (None, None))[0] == _SOURCE
+
+    restants = [
+        c for c in groupes if not (deja_totalise(c) and _is_fresh(totaux[c][1], now, max_age))
+    ]
+
+    def anciennete(cle):
+        if not deja_totalise(cle):
+            return (False, datetime.min)
+        return (True, _parse_seen_at(totaux[cle][1]) or datetime.min)
+
+    return sorted(restants, key=anciennete)
+
+
 async def _totaliser_albums(
     sess,
     scraper,
@@ -500,11 +530,13 @@ async def _totaliser_albums(
 
     connus: dict[str, str] = {}
     groupes: dict[str, list[str]] = {}
+    totaux: dict[str, tuple] = {}
     for album in data_manager.get_albums_for_artist(artist.id):
         if not album.get("title"):
             continue
         cle = normalize_title(album["title"])
         connus[cle] = album["title"]
+        totaux[cle] = (album.get("spotify_streams_source"), album.get("spotify_streams_updated"))
         # Éditions DÉJÀ connues de la base — Kworb en voit que la page artiste
         # ne liste pas : celle-ci ne montre qu'une vingtaine d'albums, et une
         # réédition confidentielle n'y figure pas. Sans cette amorce, son total
@@ -530,7 +562,8 @@ async def _totaliser_albums(
                 sans_id.setdefault(normalize_title(t.album), []).append(t)
     resolus: list[str] = []
 
-    for cle, editions in groupes.items():
+    for cle in albums_a_totaliser(groupes, totaux, datetime.now()):
+        editions = groupes[cle]
         if budget <= 0 or (stop_requested and stop_requested()):
             break
 

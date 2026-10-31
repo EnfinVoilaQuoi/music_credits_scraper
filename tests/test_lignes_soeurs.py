@@ -648,6 +648,29 @@ class TestDonneesDePageLaPlusRecenteGagne:
         assert _colonne(data_manager, chez_swing.id, "anecdotes") == "relue"
         assert _colonne(data_manager, chez_isha.id, "anecdotes") == "relue"
 
+    def test_l_adresse_de_la_page_relue_gagne(self, data_manager, famille):
+        """« Lord (I Am a God Demo) » : Genius a renommé la page."""
+        chez_swing, chez_isha = famille
+        ancienne = "https://genius.com/Kanye-west-lord-i-am-a-god-demo-lyrics"
+        relue = "https://genius.com/Kanye-west-i-am-a-god-v5-lyrics"
+        self._poser(
+            data_manager,
+            chez_swing.id,
+            genius_url=ancienne,
+            genius_detail_checked_at="2026-10-16T16:44:25",
+        )
+        self._poser(
+            data_manager,
+            chez_isha.id,
+            genius_url=relue,
+            genius_detail_checked_at="2026-10-31T09:49:18",
+        )
+        with data_manager.engine.begin() as conn:
+            from src.utils.track_soeurs import synchroniser_soeurs
+
+            synchroniser_soeurs(conn, chez_swing.id, _GENIUS)
+        assert _colonne(data_manager, chez_swing.id, "genius_url") == relue
+
     def test_une_valeur_vide_ne_se_transmet_jamais(self, data_manager, famille):
         chez_swing, chez_isha = famille
         self._poser(

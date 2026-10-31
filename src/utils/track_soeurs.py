@@ -185,6 +185,11 @@ DONNEES_DE_PAGE = (
     (("lyrics", "lyrics_source", "lyrics_scraped_at"), ("lyrics_scraped_at",)),
     (("anecdotes",), ("genius_detail_checked_at", "last_scraped")),
     (("relationships",), ("genius_detail_checked_at", "last_scraped")),
+    # L'adresse de la page : Genius renomme ses pages (« Lord (I Am a God
+    # Demo) » → « …-i-am-a-god-v5-lyrics », relue chez Travis Scott le
+    # 2026-10-31, l'ancienne gardée chez Kanye). Les décisions désignent la
+    # page par son `genius_id`, jamais par l'adresse.
+    (("genius_url",), ("genius_detail_checked_at", "last_scraped")),
 )
 
 

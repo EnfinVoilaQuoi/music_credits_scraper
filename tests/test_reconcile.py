@@ -131,6 +131,50 @@ class TestReconcileKeyMode:
         assert res["key"].value == 5
         assert res["mode"].value == 1
 
+    def test_deux_voix_battent_la_source_la_plus_fiable(self):
+        # Kanye / Kid Cudi « Erase Me » : GetSongBPM et SongBPM la majeur (deux
+        # voix) contre ReccoBeats si mineur (avant : si mineur, rang 3).
+        obs = [
+            _obs("key", 9, "getsongbpm"),
+            _obs("mode", 1, "getsongbpm"),
+            _obs("key", 11, "reccobeats"),
+            _obs("mode", 0, "reccobeats"),
+            _obs("key", 9, "songbpm"),
+            _obs("mode", 1, "songbpm"),
+        ]
+        res = reconcile(obs)
+        assert (res["key"].value, res["mode"].value) == (9, 1)
+        assert res["key"].source == "songbpm"
+
+    def test_reccobeats_et_songbpm_ne_font_qu_une_voix(self):
+        # Une voix contre une : la fiabilité tranche, comme avant.
+        res = reconcile(
+            [
+                _obs("key", 9, "getsongbpm"),
+                _obs("mode", 1, "getsongbpm"),
+                _obs("key", 4, "reccobeats"),
+                _obs("mode", 0, "reccobeats"),
+                _obs("key", 4, "songbpm"),
+                _obs("mode", 0, "songbpm"),
+            ]
+        )
+        assert res["key"].source == "reccobeats"
+
+    def test_la_relative_vote_avec_la_tonalite(self):
+        # do majeur (GetSongBPM) et la mineur (Deezer) : même armure, deux voix
+        # contre ReccoBeats mi majeur ; la plus fiable de l'armure gagnante.
+        res = reconcile(
+            [
+                _obs("key", 0, "getsongbpm"),
+                _obs("mode", 1, "getsongbpm"),
+                _obs("key", 9, "deezer"),
+                _obs("mode", 0, "deezer"),
+                _obs("key", 4, "reccobeats"),
+                _obs("mode", 1, "reccobeats"),
+            ]
+        )
+        assert (res["key"].value, res["mode"].value) == (0, 1)
+
     def test_aucune_source_complete_rien_emis(self):
         # deezer ne donne que key, songbpm que mode : aucune paire complète →
         # aucun verdict (mais les observations sont conservées côté persistance

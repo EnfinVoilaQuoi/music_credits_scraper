@@ -1729,6 +1729,29 @@ class TestConsensusDesVoix:
         assert revue.bpm_desaccord(t, ctx) is None
 
 
+class TestTonaliteDesVoix:
+    """2026-10-31 : la tonalité retenue est celle que portent le plus de voix
+    indépendantes ; le panneau ne montre plus ce que ce consensus tranche."""
+
+    def test_erase_me(self):
+        from src.enrichment.reconcile import reconcile
+
+        obs = [
+            Observation(champ, valeur, source)
+            for source, (cle, mode) in {
+                "getsongbpm": (9, 1),
+                "reccobeats": (11, 0),
+                "songbpm": (9, 1),
+            }.items()
+            for champ, valeur in (("key", cle), ("mode", mode))
+        ]
+        res = reconcile(obs)
+        t = _t("Erase Me", 1)
+        t.audio.key, t.audio.mode = res["key"].value, res["mode"].value
+        assert (t.audio.key, t.audio.mode) == (9, 1)
+        assert revue.tonalite_desaccord(t, _ctx(t, obs={1: obs})) is None
+
+
 class TestVoteDesCatalogues:
     """Les détecteurs de durée accusent la valeur que les catalogues démentent
     (2026-10-13)."""

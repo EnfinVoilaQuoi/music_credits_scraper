@@ -1746,6 +1746,79 @@ class TestDesaccordsExpliques:
         )
 
 
+class TestConsensusDesVoix:
+    """2026-10-31 : un désaccord BPM n'est une décision humaine que si aucun
+    consensus de VOIX indépendantes ne désigne la valeur (ReccoBeats et SongBPM
+    n'en font qu'une). Le verdict de la colonne suit ce même consensus."""
+
+    @staticmethod
+    def _cas(**bpms):
+        from src.enrichment.reconcile import _reconcile_bpm
+
+        obs = [Observation("bpm", v, s) for s, v in bpms.items()]
+        t = _t("x", 1)
+        t.audio.bpm = _reconcile_bpm(obs, []).value
+        return t, _ctx(t, obs={1: obs})
+
+    def test_deux_voix_contre_reccobeats_et_songbpm(self):
+        # Booba « Futur », Kanye « Good To You ».
+        t, ctx = self._cas(deezer=133, getsongbpm=133, reccobeats=89, songbpm=89)
+        assert t.audio.bpm == 133
+        assert revue.bpm_desaccord(t, ctx) is None
+        t, ctx = self._cas(deezer=174, getsongbpm=174, reccobeats=117, songbpm=117)
+        assert t.audio.bpm == 174
+        assert revue.bpm_desaccord(t, ctx) is None
+
+    def test_deezer_seul_contre_les_autres(self):
+        # Kanye « Uncle Rahiem » : GetSongBPM 113 et SongBPM 114, deux voix ;
+        # ReccoBeats 119 n'en retire pas une (sa voix a SongBPM au verdict).
+        t, ctx = self._cas(deezer=180, getsongbpm=113, reccobeats=119, songbpm=114)
+        assert t.audio.bpm == 114
+        assert revue.bpm_desaccord(t, ctx) is None
+
+    def test_sans_consensus_l_humain(self):
+        # A2H « Recalage » : une voix contre une.
+        t, ctx = self._cas(deezer=168, songbpm=78)
+        assert revue.bpm_desaccord(t, ctx) is not None
+        # Booba « Bienvenue dans le Texas » : Deezer 162 n'est que l'octave de
+        # GetSongBPM 80 — une seule voix MESURE 80, contre ReccoBeats et
+        # SongBPM 104 ; le verdict garde 104 (fiabilité, à voix égales).
+        t, ctx = self._cas(deezer=162, getsongbpm=80, reccobeats=104, songbpm=104)
+        assert t.audio.bpm == 104
+        assert revue.bpm_desaccord(t, ctx) is not None
+
+    def test_deezer_seul_contre_reccobeats_et_songbpm_reste_explique(self):
+        # Une voix contre une, mais Deezer est la voix isolée de 49 des 88
+        # désaccords à trois voix (ReccoBeats + SongBPM : 8) : la majorité de
+        # sources l'explique toujours (A2H « Sang chaud »).
+        t, ctx = self._cas(deezer=166, reccobeats=80, songbpm=80)
+        assert t.audio.bpm == 80
+        assert revue.bpm_desaccord(t, ctx) is None
+
+
+class TestTonaliteDesVoix:
+    """2026-10-31 : la tonalité retenue est celle que portent le plus de voix
+    indépendantes ; le panneau ne montre plus ce que ce consensus tranche."""
+
+    def test_erase_me(self):
+        from src.enrichment.reconcile import reconcile
+
+        obs = [
+            Observation(champ, valeur, source)
+            for source, (cle, mode) in {
+                "getsongbpm": (9, 1),
+                "reccobeats": (11, 0),
+                "songbpm": (9, 1),
+            }.items()
+            for champ, valeur in (("key", cle), ("mode", mode))
+        ]
+        res = reconcile(obs)
+        t = _t("Erase Me", 1)
+        t.audio.key, t.audio.mode = res["key"].value, res["mode"].value
+        assert (t.audio.key, t.audio.mode) == (9, 1)
+        assert revue.tonalite_desaccord(t, _ctx(t, obs={1: obs})) is None
+
+
 class TestVoteDesCatalogues:
     """Les détecteurs de durée accusent la valeur que les catalogues démentent
     (2026-10-13)."""

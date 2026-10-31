@@ -614,17 +614,26 @@ class TestIdSpotifyProposeRefuse:
         t = _t("Oublie", durations_observees={"songbpm": 204, "youtube_video": 204})
         assert self._juger(t, "Je n'oublie pas", 204) is None
 
-    def test_plentiful_et_comfy_restent_a_l_humain(self):
+    def test_plentiful_pose_au_meme_titre(self):
+        """Décision utilisateur 2026-10-31 : une version au MÊME titre (le
+        crédit retiré), sa durée confirmée par YTM, reçoit son ID."""
         p = _t(
             "Plentiful (Originals)",
             durations_observees={"deezer": 181, "manual": 188, "reccobeats": 188, "ytmusic": 189},
         )
-        assert self._juger(p, "Plentiful (Originals) (feat. Pusha T)", 189) is None
+        assert self._juger(p, "Plentiful (Originals) (feat. Pusha T)", 189).action == "poser_id"
+
+    def test_comfy_reste_a_l_humain(self):
         c = _t("Comfy", durations_observees={"deezer": 206, "reccobeats": 211, "ytmusic": 212})
         cas = _cas("id_spotify_propose", c, {"spotify_id_propose": "SID"})
         lire = lambda _s: {"name": "Comfy", "duration": 212}  # noqa: E731
         assert pol.arbitrage_id_propose(cas, c, None, lire=lire, gate=lambda *_: False) is None
 
-    def test_une_version_n_est_jamais_posee(self):
+    def test_une_version_n_est_posee_qu_au_meme_titre(self):
+        """La décision du 2026-10-20 (jamais de pose pour une version) est
+        levée le 2026-10-31 pour le MÊME titre, descripteur compris."""
         t = _t("Testify (Instrumental)", durations_observees={"deezer": 157, "youtube": 159})
-        assert self._juger(t, "Testify (Instrumental)", 157) is None
+        assert self._juger(t, "Testify - Instrumental", 159).action == "poser_id"
+        assert self._juger(t, "Testify - A Cappella", 159) is None
+        r = _t("Hustlin’ (French Remix)", durations_observees={"ytmusic": 285})
+        assert self._juger(r, "Hustlin' - Remix", 284) is None

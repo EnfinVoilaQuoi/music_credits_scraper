@@ -549,11 +549,12 @@ def _reconcile_key_mode(key_obs: list, mode_obs: list) -> dict[str, Resolution]:
     mode_by_source = {o.source: o for o in mode_obs}
     complete = key_by_source.keys() & mode_by_source.keys()
     if complete:
-        # Départage : confiance (key) puis fiabilité de source.
-        winner = max(
-            complete,
-            key=lambda s: (_confidence_key(key_by_source[s].confidence), _source_rank(s)),
-        )
+        # Départage : la tonalité que portent le plus de VOIX indépendantes,
+        # puis confiance (key) et fiabilité de source.
+        def fiabilite(s):
+            return (_confidence_key(key_by_source[s].confidence), _source_rank(s))
+
+        winner = max(_tonalite_des_voix(complete, key_by_source, mode_by_source), key=fiabilite)
         resolutions["key"] = _as_resolution("key", key_by_source[winner])
         resolutions["mode"] = _as_resolution("mode", mode_by_source[winner])
 
@@ -566,6 +567,30 @@ def _reconcile_key_mode(key_obs: list, mode_obs: list) -> dict[str, Resolution]:
         resolutions["mode"] = _as_resolution("mode", manual_mode)
 
     return resolutions
+
+
+def _tonalite_des_voix(complete, key_by_source: dict, mode_by_source: dict) -> list:
+    """Les sources complètes de la tonalité (à l'armure près : do majeur = la
+    mineur) que portent le plus de VOIX indépendantes (ReccoBeats et SongBPM
+    n'en font qu'une, `voix_de`), puis le plus de sources ; à égalité, toutes
+    — la fiabilité départage (2026-10-31). Kanye « Erase Me » : GetSongBPM et
+    SongBPM la majeur, deux voix, contre ReccoBeats si mineur (avant : si
+    mineur, la source la plus fiable). Une tonalité illisible ne vote pas."""
+    from src.utils.bpm_vote import voix_de
+
+    armures: dict[int, list] = {}
+    for s in complete:
+        try:
+            cle, mode = int(float(key_by_source[s].value)), int(float(mode_by_source[s].value))
+        except (TypeError, ValueError):
+            return list(complete)
+        armures.setdefault((cle + (0 if mode == 1 else 3)) % 12, []).append(s)
+
+    def poids(sources):
+        return (len({voix_de(s) for s in sources}), len(sources))
+
+    meilleur = max(poids(sources) for sources in armures.values())
+    return [s for sources in armures.values() if poids(sources) == meilleur for s in sources]
 
 
 def _as_resolution(field: str, obs) -> Resolution:

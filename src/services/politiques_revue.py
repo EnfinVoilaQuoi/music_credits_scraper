@@ -26,7 +26,7 @@ from src.services import revue
 
 # `titre_d_original` vit chez le juge des titres depuis le 2026-10-31 : le
 # verdict de durée (`reconcile`) le consulte aussi.
-from src.utils.version_descriptors import titre_d_original
+from src.utils.version_descriptors import titre_d_original, titre_generique
 from src.utils.vote_durees import FRAGILES, ISOLEE, SOUTENUE, TOLERANCE_S, famille, voter
 
 #: Écart au-delà duquel deux durées ne sont plus une édition du même fichier :
@@ -298,6 +298,21 @@ def refus_id_propose(track, identite: dict) -> Arbitrage | None:
     )
 
 
+def _familles_qui_confirment(durees: dict, servie) -> set:
+    """Familles de catalogues INDÉPENDANTS de l'ID (ni fragiles, ni vidéo
+    ordinaire, ni la colonne Deezer, souvent une autre édition) qui
+    confirment à `ECART_FICHIER_S` la durée que Spotify sert."""
+    return {
+        famille(s)
+        for s, d in durees.items()
+        if s not in FRAGILES
+        and s not in ("legacy", "heritage", "manual", "youtube_video", "deezer")
+        and d
+        and servie
+        and abs(d - servie) <= ECART_FICHIER_S
+    }
+
+
 def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
     """Une fiche SANS ID (une fiche à un AUTRE ID n'est jamais tranchée : autre
     édition ou ID faux, l'humain). `lire(sid)` rend l'identité de la page embed
@@ -323,17 +338,7 @@ def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
             # colonne (souvent une autre édition Deezer) qui dément, pas l'ID —
             # Kanye « Comfy » : Spotify 212 s, YTM 212, ReccoBeats 211, Deezer
             # 206 en colonne (2026-10-21). L'humain tranche.
-            servie = identite.get("duration")
-            confirment = [
-                s
-                for s, d in durees.items()
-                if s not in FRAGILES
-                and s not in ("legacy", "heritage", "manual", "youtube_video", "deezer")
-                and d
-                and servie
-                and abs(d - servie) <= ECART_FICHIER_S
-            ]
-            if len({famille(s) for s in confirment}) >= 2:
+            if len(_familles_qui_confirment(durees, identite.get("duration"))) >= 2:
                 return None
             return Arbitrage(
                 "le gate d'identité refuse l'ID : refuser",
@@ -1022,19 +1027,21 @@ REGLES_ID_PROPOSE = frozenset(
 
 
 def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | None:
-    """L'arbitrage de la famille « ID Spotify proposé », restreint aux
-    ORIGINAUX sans ambiguïté (`titre_d_original`). `lire` (page embed) et
-    `gate` (gate d'identité STRICT) sont injectables ; par défaut, la page est
-    lue (réseau, gardée au brut) et le gate est celui des runs."""
+    """L'arbitrage de la famille « ID Spotify proposé ». `lire` (page embed)
+    et `gate` (gate d'identité STRICT) sont injectables ; par défaut, la page
+    est lue (réseau, gardée au brut) et le gate est celui des runs.
+
+    Toute fiche sans ID passe par le gate, comme à l'étape Identité ; ce qu'il
+    refuse est refusé par règle (rétablissable) — un titre générique dont le
+    disque n'est pas montré le même, un freestyle auquel Spotify sert le
+    titre d'une autre fiche (2026-10-31). Une POSE exige en plus une durée
+    indépendante à ± 2 s, et ne vaut que pour un ORIGINAL sans ambiguïté
+    auquel Spotify sert un original : une version ne reçoit jamais d'ID par
+    règle (décision du 2026-10-20 ; un refus montré, si)."""
     if cas.detecteur != "id_spotify_propose" or track is None:
         return None
     if lire is None:
         from src.utils.spotify_identity import lire_identite_http as lire
-    if not titre_d_original(track.title):
-        # Une version ne reçoit jamais d'ID par règle ; un refus MONTRÉ (IP1 /
-        # IP2), si : il ne pose rien et se rétablit.
-        identite = None if track.spotify_id else lire(cas.preuves.get("spotify_id_propose"))
-        return refus_id_propose(track, identite) if identite else None
     if gate is None:
         from src.utils.spotify_identity import valider_identite
 
@@ -1046,7 +1053,20 @@ def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | N
         # Le titre SERVI doit lui aussi être un original sans ambiguïté :
         # « Heartless - The Voice Performance » passait le gate (2026-10-20).
         servi = (lire(cas.preuves.get("spotify_id_propose")) or {}).get("name")
-        if not titre_d_original(servi):
+        if not (titre_d_original(track.title) and titre_d_original(servi)):
+            return None
+    if (
+        arbitrage is not None
+        and arbitrage.action == "refuser_id"
+        and not titre_d_original(track.title)
+        and not titre_generique(track.title)
+    ):
+        # Une version que le gate refuse sur son seul NOM (« Liberation Time -
+        # Hip Hop RMX » pour « (Remix) ») quand un catalogue lu à part a la
+        # durée servie : rien n'est montré, l'humain. Un titre générique dont
+        # le disque n'est pas montré le même se refuse (gate, 2026-10-13).
+        identite = lire(cas.preuves.get("spotify_id_propose")) or {}
+        if _familles_qui_confirment(_durees(track), identite.get("duration")):
             return None
     if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_ID_PROPOSE:
         return arbitrage

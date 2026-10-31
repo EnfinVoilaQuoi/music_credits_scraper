@@ -583,6 +583,66 @@ def test_id_propose_un_refus_de_duree_dementi_par_les_catalogues_va_a_l_humain()
     assert arb.action == "refuser_id"
 
 
+class TestIdProposeVersions:
+    """2026-10-31 : une VERSION passe par le gate comme à l'étape Identité. Ce
+    qu'il refuse est refusé par règle ; elle ne reçoit jamais d'ID par règle
+    (décision du 2026-10-20). Cas réels de la base."""
+
+    @staticmethod
+    def _juger(titre, durees, servi, duree_servie, gate=True, album=None):
+        t = _t(titre, album=album, durations_observees=durees)
+        cas = _cas("id_spotify_propose", t, {"spotify_id_propose": "SID"})
+        return pol.arbitrage_id_propose(
+            cas,
+            t,
+            None,
+            lire=lambda _s: {"name": servi, "duration": duree_servie},
+            gate=lambda *_: gate,
+        )
+
+    def test_une_version_que_le_gate_accepte_reste_a_l_humain(self):
+        # Kanye « Freestyle » (Iggy Azalea) : Deezer 152 lu par son ID, même
+        # titre — une pose de version attend une décision.
+        arb = self._juger("Freestyle", {"deezer": 152, "youtube": 153}, "Freestyle", 152)
+        assert arb is None
+
+    def test_un_autre_remix_n_est_jamais_pose(self):
+        # Booba « Hustlin' (French Remix) » : Spotify sert le remix de JAY-Z et
+        # Jeezy, YTM a trouvé le même au titre — l'humain.
+        arb = self._juger(
+            "Hustlin’ (French Remix)", {"songbpm": 284, "ytmusic": 285}, "Hustlin' - Remix", 284
+        )
+        assert arb is None
+
+    def test_le_gate_refuse_le_freestyle(self):
+        # Booba « Boulbi (Freestyle Cut Killer Show) » : Spotify sert « Boulbi »,
+        # titre d'une autre fiche ; l'extrait officiel dure 86 s.
+        arb = self._juger(
+            "Boulbi (Freestyle Cut Killer Show)",
+            {"songbpm": 243, "youtube_officiel": 86},
+            "Boulbi",
+            243,
+            gate=False,
+        )
+        assert arb.action == "refuser_id"
+
+    def test_un_refus_sur_le_seul_nom_que_ytm_dement_va_a_l_humain(self):
+        # Booba « Liberation Time (Remix) » : « - Hip Hop RMX », 239 s comme YTM.
+        arb = self._juger(
+            "Liberation Time (Remix)",
+            {"songbpm": 239, "ytmusic": 239},
+            "Liberation Time - Hip Hop RMX",
+            239,
+            gate=False,
+        )
+        assert arb is None
+
+    def test_un_titre_generique_sans_le_meme_disque_se_refuse(self):
+        # Népal « Intro » (AVS) : le disque Spotify n'est pas montré le même.
+        arb = self._juger("Intro", {"youtube": 141}, "Intro", 141, gate=False, album="AVS")
+        assert arb.action == "refuser_id"
+
+
 def test_lien_deezer_dementi_par_des_sources_fragiles_seules_est_garde():
     """Kanye « I CAN'T WAIT » : Deezer 137 s, seule la colonne SongBPM (127 s)
     le contredit — le piège de « Comfy » : on garde le lien."""

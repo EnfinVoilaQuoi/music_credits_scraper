@@ -702,6 +702,36 @@ def test_liens_proposes_au_niveau_artiste():
     ]
 
 
+class TestLienProposeSansTrace:
+    """Q1 (décision utilisateur 2026-10-31) : un lien proposé dont le nom
+    n'apparaît sur aucune fiche (ni crédit, ni interprète, ni invité) est
+    pour information ; il redevient une décision dès que le nom apparaît."""
+
+    def _nature(self, nom, *tracks):
+        rel = SimpleNamespace(related_name=nom, kind="alias", detail=None)
+        (cas,) = revue.detecter(_ctx(*tracks, relations=[rel]), detecteurs=())
+        return cas.nature
+
+    def test_sans_trace_pour_information(self):
+        t = _t("Sans lui", featured_artists="Kaaris")
+        assert self._nature("Eric Kwok", t) == revue.INFORMATION
+
+    def test_credite_decision(self):
+        t = _t("Caroline", credits=[Credit(name="Claude M'Barali", role=CreditRole.WRITER)])
+        assert self._nature("Claude M'barali", t) == revue.DECISION
+
+    def test_interprete_ou_invite_decision(self):
+        assert self._nature("Hustle Gang", _t("X", primary_artist_name="Hustle Gang")) == (
+            revue.DECISION
+        )
+        t = _t("Y", featured_artists="Kid Cudi & Hustle Gang")
+        assert self._nature("Hustle Gang", t) == revue.DECISION
+
+    def test_jamais_une_sous_chaine(self):
+        t = _t("Z", featured_artists="The Throne Kids")
+        assert self._nature("The Throne", t) == revue.INFORMATION
+
+
 def test_detecter_trie_par_impact():
     # Deux PAIRES : un cas par paire (2026-09-28), porté par la fiche d'id le
     # plus bas.

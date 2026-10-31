@@ -865,17 +865,6 @@ def _fiches_ou_il_ecrit(nom: str, ctx) -> list[str]:
     ]
 
 
-def _interpretes(track) -> set[str]:
-    from src.utils.title_matching import normalize_name
-
-    noms = f"{track.primary_artist_name or ''},{track.featured_artists or ''}"
-    return {
-        normalize_name(n)
-        for n in re.split(r",|&|\band\b|\bx\b|\bfeat\.?", noms, flags=re.IGNORECASE)
-        if n.strip()
-    }
-
-
 def _formation_par_ses_morceaux(rel, ctx) -> Arbitrage | None:
     """Une formation proposée dont la NATURE (groupe / collectif) est déjà
     connue, et que Genius donne pour interprète d'au moins `FICHES_MIN_LIEN`
@@ -886,7 +875,7 @@ def _formation_par_ses_morceaux(rel, ctx) -> Arbitrage | None:
     if not rel.formation:
         return None
     cle = normalize_name(rel.related_name)
-    fiches = [t.title for t in ctx.disco if cle in _interpretes(t)]
+    fiches = [t.title for t in ctx.disco if cle in revue.interpretes(t)]
     if len(fiches) < FICHES_MIN_LIEN:
         return None
     return Arbitrage(

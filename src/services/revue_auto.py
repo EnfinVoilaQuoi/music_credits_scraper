@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 from src.services.revue import (
     CODES_FORMELS,
     DECISION,
+    INFORMATIONS_ARBITRABLES,
     Cas,
     Revue,
     analyser,
@@ -185,7 +186,9 @@ def cas_par_regle(
 
     sortie = []
     for c in revue.actifs:
-        if c.nature != DECISION or c.detecteur in CODES_FORMELS:
+        if c.detecteur in CODES_FORMELS:
+            continue
+        if c.nature != DECISION and c.detecteur not in INFORMATIONS_ARBITRABLES:
             continue
         track = tracks.get(c.track_id)
         arbitrage = None

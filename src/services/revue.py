@@ -2921,6 +2921,46 @@ def songbpm_titre_contenu(track, ctx):
 # ── Détecteurs d'ARTISTE ────────────────────────────────────────────────────
 
 
+def interpretes(track) -> set[str]:
+    """Noms normalisés des interprètes de la fiche : principal et invités."""
+    noms = f"{track.primary_artist_name or ''},{track.featured_artists or ''}"
+    return {
+        normalize_name(n)
+        for n in re.split(r",|&|\band\b|\bx\b|\bfeat\.?", noms, flags=re.IGNORECASE)
+        if n.strip()
+    }
+
+
+def _noms_de_la_disco(ctx) -> frozenset[str]:
+    """Tous les noms normalisés que la discographie porte : interprètes,
+    invités et personnes créditées, quel que soit le rôle."""
+
+    def fabriquer():
+        noms = set()
+        for t in ctx.disco:
+            noms |= interpretes(t)
+            noms.update(normalize_name(c.name) for c in t.credits or [] if c.name)
+        return frozenset(noms)
+
+    return ctx.memo("noms_de_la_disco", fabriquer)
+
+
+#: Détecteurs dont un cas « pour information » reste ouvert aux règles du
+#: correcteur (`revue_auto`) : un alias que MusicBrainz ET Discogs donnent se
+#: confirme même sans trace dans la discographie (Q1, 2026-10-31).
+INFORMATIONS_ARBITRABLES = frozenset({"liens_proposes"})
+
+
+def nature_lien_propose(preuves, ctx) -> str:
+    """Q1 (décision utilisateur 2026-10-31) : un alias ou une formation proposé
+    dont le nom n'apparaît sur AUCUNE fiche de l'artiste (ni crédit, ni
+    interprète, ni invité ; nom normalisé égal) ne change aucune donnée tant
+    qu'il n'est pas confirmé : pour information. Recalculé à chaque analyse —
+    le nom apparu, le lien redevient une décision."""
+    nom = normalize_name(preuves.get("nom") or "")
+    return DECISION if nom and nom in _noms_de_la_disco(ctx) else INFORMATION
+
+
 def liens_proposes(ctx):
     """Alias et formations PROPOSÉS par MusicBrainz / Discogs, pas encore
     arbitrés dans la fenêtre « Groupes »."""
@@ -3041,7 +3081,13 @@ DETECTEURS: tuple[Detecteur, ...] = (
 )
 
 DETECTEURS_ARTISTE: tuple[DetecteurArtiste, ...] = (
-    DetecteurArtiste("liens_proposes", "Alias / formations proposés", "👥", liens_proposes),
+    DetecteurArtiste(
+        "liens_proposes",
+        "Alias / formations proposés",
+        "👥",
+        liens_proposes,
+        nature_du_cas=nature_lien_propose,
+    ),
     DetecteurArtiste(
         "video_partagee",
         "Vidéo portée par plusieurs fiches",

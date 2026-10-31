@@ -1647,8 +1647,21 @@ class TestVideoTropLongue:
 
         assert cas("1 son en 1H", 300) is None  # 3 × : pas au-delà
         assert cas("1 son en 1H", 301) is not None
-        assert cas("Elixir (Court métrage)", 400) is None  # nommée : 4 ×
-        assert cas("Elixir (Court métrage)", 401) is not None
+        assert cas("Elixir (Extended)", 400) is None  # nommée : 4 ×
+        assert cas("Elixir (Extended)", 401) is not None
+
+    def test_un_clip_qui_le_nomme_n_est_pas_un_cas(self):
+        """BEN plg « Quitter la fête (Court métrage) », 5,1 × (2026-10-31) : un
+        clip ne donne pas sa durée, ses vues comptent — rien à juger."""
+        t = self._fiche(
+            "BEN plg - Quitter la fête (Court métrage)",
+            1141,
+            {"deezer": 223},
+            titre="Quitter la fête",
+        )
+        assert revue.video_trop_longue(t, _ctx(t)) is None
+        t = self._fiche("Concert (Court métrage)", 1141, {"deezer": 223}, titre="Quitter la fête")
+        assert revue.video_trop_longue(t, _ctx(t)) is not None  # muette : jugée
 
     def test_ce_qui_n_est_pas_jugé(self):
         def cas(**kw):

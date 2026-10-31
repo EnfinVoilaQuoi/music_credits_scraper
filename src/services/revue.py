@@ -57,7 +57,7 @@ from src.utils.concordance_paroles import (
     recouvrement_bigrammes,
 )
 from src.utils.credits_genius_api import SOURCE_API, SOURCE_SCRAPE
-from src.utils.duree_youtube import SOURCE_AUDIO
+from src.utils.duree_youtube import CLIP, SOURCE_AUDIO
 from src.utils.spotify_identity import (
     CHAMP_ID_PROPOSE,
     remix_d_autres_artistes,
@@ -1967,7 +1967,9 @@ def video_trop_longue(track, ctx=None):
     contredisent, l'humain. La vidéo d'un disque ENTIER (comptée à l'album,
     `contenants.video_de_disque`), une page qui en CONTIENT d'autres (medley,
     album entier), une vidéo portée par plusieurs pages (`video_partagee`) ou
-    une fiche sans durée indépendante : rien."""
+    une fiche sans durée indépendante : rien. Un CLIP qui nomme le morceau
+    (court métrage, film) non plus : il ne donne jamais sa durée, ses vues
+    comptent (BEN plg « Quitter la fête (Court métrage) », 2026-10-31)."""
     from src.utils.contenants import est_contenant, video_de_disque
 
     if not track.videos or est_contenant(track):
@@ -1991,6 +1993,8 @@ def video_trop_longue(track, ctx=None):
         if video_de_disque(v.title, track.album):
             continue
         nommee = video_nomme(track, v)
+        if nommee and CLIP.search(v.title or ""):
+            continue  # un clip qui le nomme ne donne pas sa durée : rien à juger
         ratio = v.duration / reference
         if ratio <= (RATIO_VIDEO_NOMMEE if nommee else RATIO_VIDEO_MUETTE):
             continue

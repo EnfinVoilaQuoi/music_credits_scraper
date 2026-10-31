@@ -157,10 +157,12 @@ def segment_de_dj_mix(titre: str | None, album: str | None) -> bool:
 
 #: Un CLIP a son propre montage (« On contrôle la zone » : clip 4:04, CD 4:48 ;
 #: décision utilisateur 2026-10-13 : « la mention Clip officiel doit bloquer
-#: la durée »).
+#: la durée »). Un court métrage est un clip (BEN plg « Quitter la fête (Court
+#: métrage) », 1 141 s pour 224 s ; 2026-10-31).
 CLIP = re.compile(
     r"\bclip\b|official\s+(?:music\s+)?video|vid[ée]o\s+(?:officielle|clip)|music\s+video|"
-    r"\bteaser\b|\btrailer\b|making\s+of",
+    r"\bteaser\b|\btrailer\b|making\s+of|"
+    r"\bcourt[\s-]?m[ée]trage\b|\bshort\s+film\b|\bfull[\s-]length\s+film\b",
     re.IGNORECASE,
 )
 #: Une CAPTATION (live, concert) : autre prise que le studio — sauf pour une

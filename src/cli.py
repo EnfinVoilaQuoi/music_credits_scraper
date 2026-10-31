@@ -196,6 +196,15 @@ def _credits_args(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _fiches_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--fiches",
+        help="seulement ces fiches (ID de base séparés par des virgules) ; avec le "
+        "--force… de l'étape pour les relire même complètes. Les passes d'ARTISTE "
+        "(page Kworb, catalogue Deezer, MusicBrainz) tournent quand même",
+    )
+
+
 def _enrich_args(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--sources",
@@ -247,6 +256,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _artiste_args(i)
     _identite_args(i, etape_seule=True)
+    _fiches_arg(i)
 
     _deezer_args(
         sub.add_parser(
@@ -268,6 +278,7 @@ def build_parser() -> argparse.ArgumentParser:
     _echecs_arg(c)
     _tout_arg(c)
     _credits_args(c)
+    _fiches_arg(c)
 
     e = sub.add_parser("enrich", help="BPM/key/durée (sans forcer : manquants et échecs)")
     _artiste_args(e)
@@ -275,12 +286,14 @@ def build_parser() -> argparse.ArgumentParser:
     _echecs_arg(e)
     _tout_arg(e)
     _enrich_args(e)
+    _fiches_arg(e)
     _anciens_drapeaux(e, "enrich")
 
     s = sub.add_parser("streams", help="streams Spotify / YouTube Music")
     _artiste_args(s)
     _manquants_arg(s)
     _streams_args(s)
+    _fiches_arg(s)
 
     ce = sub.add_parser("certifs", help="certifications")
     ce_sub = ce.add_subparsers(dest="action", required=True)
@@ -371,6 +384,7 @@ def options_identite(a: argparse.Namespace) -> identite.OptionsIdentite:
         force=a.force_identite,
         deezer_id=a.deezer_id,
         spotify_id=a.spotify_artist_id or None,
+        track_ids=_ids_de_fiches(getattr(a, "fiches", None)),
     )
 
 
@@ -389,13 +403,27 @@ def options_credits(a: argparse.Namespace) -> credits.OptionsCredits:
         sync_musixmatch=a.musixmatch,
         force_sync=a.force_sync,
         lrc_sans_duree_audio=getattr(a, "lrc_sans_duree_audio", False),
+        track_ids=_ids_de_fiches(getattr(a, "fiches", None)),
     )
+
+
+def _ids_de_fiches(v: str | None) -> frozenset[int] | None:
+    """`--fiches 10126,10152` → leurs ID de base (None sans l'option)."""
+    if not v:
+        return None
+    try:
+        return frozenset(int(x) for x in _liste(v))
+    except ValueError:
+        raise SystemExit(
+            f"--fiches attend des ID de fiche séparés par des virgules : {v!r}"
+        ) from None
 
 
 def options_enrich(a: argparse.Namespace) -> enrichissement.OptionsEnrich:
     return enrichissement.OptionsEnrich(
         sources=_liste(a.sources) or None,
         force_update=a.force,
+        track_ids=_ids_de_fiches(getattr(a, "fiches", None)),
     )
 
 
@@ -406,6 +434,7 @@ def options_streams(a: argparse.Namespace) -> streams.OptionsStreams:
         spotify_full=a.spotify_full,
         ytm=a.ytm_streams,
         ytm_channel=a.ytm_channel,
+        track_ids=_ids_de_fiches(getattr(a, "fiches", None)),
     )
 
 

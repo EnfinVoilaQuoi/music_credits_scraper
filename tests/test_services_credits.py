@@ -515,3 +515,26 @@ def test_l_option_lrc_sans_duree_audio_passe_par_la_cli():
     )
     assert options_credits(a).lrc_sans_duree_audio
     assert not options_credits(build_parser().parse_args(["credits", "X"])).lrc_sans_duree_audio
+
+
+def test_l_option_fiches_passe_par_la_cli():
+    import pytest
+
+    from src.cli import build_parser, options_credits
+
+    a = build_parser().parse_args(["credits", "Kanye West", "--fiches", "10126, 11721"])
+    assert options_credits(a).track_ids == frozenset({10126, 11721})
+    assert options_credits(build_parser().parse_args(["credits", "X"])).track_ids is None
+    with pytest.raises(SystemExit):
+        options_credits(build_parser().parse_args(["credits", "X", "--fiches", "abc"]))
+
+
+def test_l_option_fiches_vaut_pour_identite_enrich_et_streams():
+    from src.cli import build_parser, options_enrich, options_identite, options_streams
+
+    def ids(cmd, options):
+        return options(build_parser().parse_args([cmd, "X", "--fiches", "3,1"])).track_ids
+
+    assert ids("identite", options_identite) == frozenset({1, 3})
+    assert ids("enrich", options_enrich) == frozenset({1, 3})
+    assert ids("streams", options_streams) == frozenset({1, 3})

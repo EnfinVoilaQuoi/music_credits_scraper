@@ -68,6 +68,9 @@ class OptionsIdentite:
     force: bool = False
     deezer_id: int | None = None
     spotify_id: str | None = None
+    #: Passes PAR MORCEAU (3a, 3b) restreintes à ces fiches (`identite --fiches`) ;
+    #: les couches d'artiste tournent quand même.
+    track_ids: frozenset[int] | None = None
 
 
 @dataclass
@@ -358,7 +361,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
     hits_albums: dict[int, int] = {}
     if options.par_morceau and options.deezer and not arret("Deezer par morceau"):
         kinds = () if options.force else (Manque.IDENTITE_DEEZER,)
-        tracks = selection_morceaux(runtime, artist, manquants=kinds)
+        tracks = selection_morceaux(runtime, artist, manquants=kinds, track_ids=options.track_ids)
         if tracks:
             b = _passage(runtime, artist, tracks, "deezer", hooks, "Deezer par morceau")
             bilan.deezer_morceaux = b.traites
@@ -459,7 +462,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
     # 3b — Spotify par morceau (APRÈS 3a : une durée indépendante existe)
     if options.par_morceau and not arret("Spotify par morceau"):
         kinds = (Manque.IDENTITE_SPOTIFY_FORCE,) if options.force else (Manque.IDENTITE_SPOTIFY,)
-        tracks = selection_morceaux(runtime, artist, manquants=kinds)
+        tracks = selection_morceaux(runtime, artist, manquants=kinds, track_ids=options.track_ids)
         sans_duree = {
             t.id for t in tracks if not (set(t.durations_observees) & set(DUREES_INDEPENDANTES))
         }

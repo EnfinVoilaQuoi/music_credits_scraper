@@ -30,6 +30,8 @@ class OptionsEnrich:
 
     sources: tuple[str, ...] | None = None
     force_update: bool = False
+    #: Seulement ces fiches (`enrich --fiches`).
+    track_ids: frozenset[int] | None = None
     # MusicBrainz/Discogs (formations, alias) et nature des disques ne sont plus
     # des fins de run de l'enrichissement : c'est l'étape Identité (2026-09-28).
 

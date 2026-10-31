@@ -51,6 +51,10 @@ class OptionsCredits:
     #: (lus avant le 2026-10-27) : avec `force_sync`, la relecture qui la pose
     #: sans refaire toute la discographie (Kanye : 2 h ne suffisaient pas).
     lrc_sans_duree_audio: bool = False
+    #: Ne traiter que ces fiches (ID de base, `credits --fiches`) : relire trois
+    #: pages sans relancer toute la discographie (2026-10-31, crédits Genius de
+    #: versions lues avant le correctif de l'héritage).
+    track_ids: frozenset[int] | None = None
 
     @property
     def paroles(self) -> bool:

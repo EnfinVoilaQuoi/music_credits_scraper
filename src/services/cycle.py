@@ -154,7 +154,13 @@ def executer_etape(
             )
             kinds = manques_credits(options.credits) if par_manque else ()
             sources = options.credits.sources_suivies() if par_echec else ()
-            tracks = selection_morceaux(runtime, artist, manquants=kinds, echecs=sources)
+            tracks = selection_morceaux(
+                runtime,
+                artist,
+                manquants=kinds,
+                echecs=sources,
+                track_ids=options.credits.track_ids,
+            )
             return credits.run(runtime, artist, tracks, options.credits, hooks)
         if etape == "enrich":
             par_manque, par_echec = restriction(
@@ -162,7 +168,13 @@ def executer_etape(
             )
             kinds = (Manque.AUDIO,) if par_manque else ()
             sources = enrichissement.sources_suivies(runtime, options.enrich) if par_echec else ()
-            tracks = selection_morceaux(runtime, artist, manquants=kinds, echecs=sources)
+            tracks = selection_morceaux(
+                runtime,
+                artist,
+                manquants=kinds,
+                echecs=sources,
+                track_ids=options.enrich.track_ids,
+            )
             return enrichissement.run(runtime, artist, tracks, options.enrich, hooks)
         if etape == "streams":
             ids = options.streams.track_ids

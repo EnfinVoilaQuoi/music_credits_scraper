@@ -92,6 +92,32 @@ class TestExecuterEtape:
         cycle.executer_etape(_rt(tracks), _artist(tracks), "credits", opts, Hooks())
         assert [t.id for t in vus["t"]] == [2]
 
+    def test_credits_restreint_aux_fiches_demandees(self, monkeypatch):
+        """`credits --fiches` (2026-10-31) : seules ces fiches, même complètes
+        quand l'option force."""
+        vus = {}
+        monkeypatch.setattr(
+            cycle.credits, "run", lambda rt, a, tracks, o, h: vus.update(t=tracks) or Bilan()
+        )
+        tracks = [_track(1), _track(2), _track(3)]
+        opts = cycle.OptionsCycle(
+            credits=credits.OptionsCredits(force_credits=True, track_ids=frozenset({1, 3}))
+        )
+        cycle.executer_etape(_rt(tracks), _artist(tracks), "credits", opts, Hooks())
+        assert [t.id for t in vus["t"]] == [1, 3]
+
+    def test_enrich_restreint_aux_fiches_demandees(self, monkeypatch):
+        vus = {}
+        monkeypatch.setattr(
+            cycle.enrichissement, "run", lambda rt, a, tracks, o, h: vus.update(t=tracks) or Bilan()
+        )
+        tracks = [_track(1), _track(2), _track(3)]
+        opts = cycle.OptionsCycle(
+            enrich=enrichissement.OptionsEnrich(force_update=True, track_ids=frozenset({2}))
+        )
+        cycle.executer_etape(_rt(tracks), _artist(tracks), "enrich", opts, Hooks())
+        assert [t.id for t in vus["t"]] == [2]
+
     def test_enrich_ne_garde_que_l_audio_absent(self, monkeypatch):
         vus = {}
         monkeypatch.setattr(

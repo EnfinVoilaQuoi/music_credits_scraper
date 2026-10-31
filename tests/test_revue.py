@@ -988,6 +988,7 @@ def test_fenetre_se_construit(racine_tk):
         get_artist_positions=lambda _id: {},
         signalements_revue=lambda _id: [],
         verdicts_revue=lambda _id: {},
+        decisions_humaines_par_fiche=lambda _id: {},
         trancher_cas=lambda aid, det, cle, **kw: tranches.append((det, cle)),
         annuler_verdict=lambda aid, det, cle: True,
         corrections_revue=lambda _id: [

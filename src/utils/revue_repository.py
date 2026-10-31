@@ -25,6 +25,15 @@ VERDICT_NORMAL = "normal"
 
 
 class RevueRepository:
+    def decisions_humaines_par_fiche(self, artist_id: int) -> dict:
+        """`{track_id: Decision}` : la décision HUMAINE la plus récente de chaque
+        fiche de l'artiste (ou d'une ligne sœur) — le ⚖️ du panneau
+        (`historique.marques_par_fiche`, 2026-10-31)."""
+        from src.services.historique import marques_par_fiche
+
+        with self.engine.connect() as conn:
+            return marques_par_fiche(conn, artist_id)
+
     def verdicts_revue(self, artist_id: int) -> dict[tuple[str, str], dict]:
         """`{(détecteur, clé): {verdict, note, morceau, motif, decided_at}}`."""
         with self.engine.connect() as conn:

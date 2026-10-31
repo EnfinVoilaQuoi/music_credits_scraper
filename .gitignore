@@ -122,6 +122,8 @@ scripts/*
 !scripts/lister_lrc_a_reattribuer.py
 # Lots de runs surveillés (règle « Lots de runs en fond », 2026-10-25)
 !scripts/lot_runs.py
+# Historique d'une fiche, à lire avant toute proposition (2026-10-31)
+!scripts/historique_fiche.py
 # Tests / santé des sources
 !scripts/warm_cf_profile.py
 !scripts/capture_fixtures.py

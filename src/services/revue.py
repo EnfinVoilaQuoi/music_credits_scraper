@@ -3509,12 +3509,31 @@ def analyser(data_manager, artiste, ctx: Contexte | None = None) -> Revue:
         tracks,
         data_manager.get_artist_edition_deezer_ids(artiste.id),
     )
+    cas = _marquer_les_fiches_decidees(data_manager, artiste, cas)
     cas.sort(key=lambda c: (-c.impact, c.detecteur, c.morceau))
     tranches = data_manager.verdicts_revue(artiste.id)
     return Revue(
         actifs=[c for c in cas if (c.detecteur, c.cle) not in tranches],
         masques=[c for c in cas if (c.detecteur, c.cle) in tranches],
     )
+
+
+def _marquer_les_fiches_decidees(data_manager, artiste, cas: list[Cas]) -> list[Cas]:
+    """Le motif d'un cas dont la fiche (ou une ligne sœur) a une décision
+    HUMAINE porte « ⚖️ décidé le … » : on ne retraite pas ce qui a été tranché
+    (« Écorchée Vive », 2026-10-31). Le motif seulement — la clé du cas, qui
+    porte les verdicts, n'en dépend pas."""
+    from dataclasses import replace
+
+    from src.services.historique import marque
+
+    if not cas or artiste.id is None:
+        return cas
+    decidees = data_manager.decisions_humaines_par_fiche(artiste.id)
+    return [
+        replace(c, motif=c.motif + marque(decidees[c.track_id])) if c.track_id in decidees else c
+        for c in cas
+    ]
 
 
 CODES_FORMELS = frozenset(d.code for d in DETECTEURS if d.formel)

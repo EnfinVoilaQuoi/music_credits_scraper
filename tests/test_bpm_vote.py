@@ -168,6 +168,31 @@ class TestOctaveDuConsensus:
         assert (bpm, alt) == (148, 74)
 
 
+class TestVoixDuVote:
+    """Entre deux clusters (deux tempos, pas deux octaves), le vote compte les
+    VOIX indépendantes avant les sources (2026-10-31)."""
+
+    def test_deux_voix_battent_reccobeats_et_songbpm(self):
+        # Booba « Futur » : Deezer et GetSongBPM 133, ReccoBeats et SongBPM 89
+        # — deux sources contre deux, mais deux voix contre une (avant : 89).
+        bpm, _, src, _ = _reconcile(
+            [("deezer", 133), ("getsongbpm", 133), ("reccobeats", 89), ("songbpm", 89)]
+        )
+        assert bpm == 133
+        assert src == "getsongbpm+deezer"
+
+    def test_a_egalite_de_voix_la_taille_puis_la_fiabilite(self):
+        # Kanye « Uncle Rahiem » : {GetSongBPM 113, SongBPM 114} deux voix ;
+        # ReccoBeats 119 et Deezer 180, une chacun.
+        bpm, _, _, _ = _reconcile(
+            [("deezer", 180), ("getsongbpm", 113), ("reccobeats", 119), ("songbpm", 114)]
+        )
+        assert bpm == 114
+        # Une voix contre une : la paire ReccoBeats + SongBPM garde la taille.
+        bpm, _, _, _ = _reconcile([("deezer", 120), ("reccobeats", 80), ("songbpm", 80)])
+        assert bpm == 80
+
+
 class TestBpmBallot:
     """Le scrutin encapsule collecte + réconciliation + écriture sur le track."""
 

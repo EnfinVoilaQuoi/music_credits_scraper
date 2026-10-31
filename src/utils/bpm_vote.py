@@ -47,6 +47,13 @@ def bpm_agree(a: int, b: int, tol: int = 3) -> bool:
 #: voix au départage d'octave, jamais deux.
 _VOIX_DE_LA_SOURCE = {"reccobeats": "reccobeats+songbpm", "songbpm": "reccobeats+songbpm"}
 
+
+def voix_de(source: str) -> str:
+    """La voix INDÉPENDANTE d'une source (BPM et tonalité) : ReccoBeats et
+    SongBPM n'en font qu'une."""
+    return _VOIX_DE_LA_SOURCE.get(source, source)
+
+
 #: Deezer double le tempo des autres dans ~11 % de ses valeurs comparables
 #: (×0,5 : 1 %), contre 0 à 0,2 % pour les autres (mesure du 2026-10-30) :
 #: seul, il ne fait jamais monter l'octave.
@@ -93,8 +100,12 @@ def reconcile_bpm(candidates):
     (bpm_real, bpm_alt, 'src1+src2', confidence) à partir des candidats.
     bpm_real = octave retenue ; bpm_alt = autre octave.
 
-    Le vote d'abord : le cluster le plus nombreux (demi/double inclus), à
-    égalité celui de la source la plus fiable. Puis l'octave :
+    Le vote d'abord : le cluster qui a le plus de VOIX indépendantes à une
+    même octave (ReccoBeats et SongBPM n'en font qu'une), puis le plus
+    nombreux, puis celui de la source la plus fiable — Booba « Futur » :
+    Deezer et GetSongBPM 133 contre ReccoBeats et SongBPM 89, deux voix contre
+    une (2026-10-31 ; avant, deux sources contre deux, la fiabilité donnait 89).
+    Puis l'octave :
       1. Deux octaves dans le cluster (74 + 145 + 72) → celle du CONSENSUS
          INDÉPENDANT — ReccoBeats et SongBPM ne font qu'une voix, Deezer seul ne
          fait jamais monter l'octave (il double ~11 % de ses valeurs). Sans
@@ -116,9 +127,13 @@ def reconcile_bpm(candidates):
         else:
             clusters.append([cand])
 
-    # Meilleur cluster : d'abord la taille (vote), puis la source la plus fiable
+    # Meilleur cluster : les voix indépendantes qui le mesurent à la MÊME octave
+    # (Deezer 162 n'appuie pas GetSongBPM 80), la taille, la source la plus fiable
     def rank(cl):
-        return (len(cl), max(BPM_SOURCE_RANK.get(s, 0) for s, _ in cl))
+        bas = min(v for _, v in cl)
+        octaves = ([s for s, v in cl if v < bas * 1.5], [s for s, v in cl if v >= bas * 1.5])
+        voix = max(len({voix_de(s) for s in octave}) for octave in octaves)
+        return (voix, len(cl), max(BPM_SOURCE_RANK.get(s, 0) for s, _ in cl))
 
     best = max(clusters, key=rank)
     conf = len(best)

@@ -621,20 +621,43 @@ def _meme_tempo(a: float, b: float) -> bool:
     return any(abs(a * k - b) <= TOLERANCE_BPM * b for k in (0.5, 1, 2))
 
 
+def _meme_mesure_de_tempo(a: float, b: float) -> bool:
+    """Le même tempo à la MÊME octave."""
+    return abs(a - b) <= TOLERANCE_BPM * b
+
+
 #: Source isolée dans 61 des 64 désaccords à trois sources (2026-09-28) : un
 #: désaccord À DEUX où elle est seule contre une source fiable s'explique.
 SOURCE_PEU_FIABLE = "getsongbpm"
 
 
-def _desaccord_explique(valeurs: dict, retenue, meme) -> bool:
+def _desaccord_explique(valeurs: dict, retenue, meme, meme_mesure=None) -> bool:
     """Le désaccord ne demande rien à l'utilisateur (2026-09-28, panneau le
-    moins rempli possible) : la valeur RETENUE est celle d'une majorité stricte
-    de sources — mesuré, le cas des 64 désaccords à trois sources —, ou celle de
-    la source fiable face à GetSongBPM seul contre elle."""
+    moins rempli possible) : la valeur RETENUE est celle d'un CONSENSUS de
+    voix indépendantes (ReccoBeats et SongBPM n'en font qu'une, `voix_de`) —
+    au moins deux voix la MESURENT (`meme_mesure` : même octave pour le BPM),
+    plus que les voix dont aucune source ne la rejoint (`meme`, octave
+    comprise) —, ou celle de la source fiable face à GetSongBPM seul contre
+    elle. Booba « Futur » : Deezer et GetSongBPM 133 contre ReccoBeats et
+    SongBPM 89, deux voix contre une (2026-10-31).
+
+    La majorité stricte de SOURCES (2026-09-28) explique toujours : la paire
+    ReccoBeats + SongBPM d'accord contre Deezer seul n'est qu'une voix contre
+    une, mais c'est Deezer qui est isolé (sur les 88 désaccords à trois voix
+    de la base, la voix isolée est Deezer 49 fois, GetSongBPM 28,
+    ReccoBeats + SongBPM 8 — mesure du 2026-10-31) ; la retirer rendait 50
+    cas à l'humain."""
+    from src.utils.bpm_vote import voix_de
+
     if retenue is None:
         return False
+    meme_mesure = meme_mesure or meme
     d_accord = [s for s, v in valeurs.items() if meme(retenue, v)]
     if len(d_accord) * 2 > len(valeurs):
+        return True
+    voix = {voix_de(s) for s in valeurs}
+    pour = {voix_de(s) for s, v in valeurs.items() if meme_mesure(retenue, v)}
+    if len(pour) >= 2 and len(pour) > len(voix - {voix_de(s) for s in d_accord}):
         return True
     return (
         len(valeurs) == 2
@@ -646,11 +669,12 @@ def _desaccord_explique(valeurs: dict, retenue, meme) -> bool:
 def bpm_desaccord(track, ctx):
     """Les sources de BPM se contredisent (hors octave) et le vote a tranché
     SANS le dire (Booba « Lunatic » : GetSongBPM 83, ReccoBeats et SongBPM 130).
-    Un désaccord que la majorité ou la fiabilité explique n'est pas montré."""
+    Un désaccord que la majorité, le consensus des voix ou la fiabilité
+    explique n'est pas montré."""
     bpms = {s: float(v) for s, v in _mesures(ctx, track, "bpm").items()}
     vals = list(bpms.values())
     retenu = float(track.audio.bpm) if track.audio.bpm is not None else None
-    if _desaccord_explique(bpms, retenu, _meme_tempo):
+    if _desaccord_explique(bpms, retenu, _meme_tempo, _meme_mesure_de_tempo):
         return None
     if len(vals) > 1 and not all(_meme_tempo(vals[0], v) for v in vals[1:]):
         detail = ", ".join(f"{s} {v:g}" for s, v in sorted(bpms.items()))

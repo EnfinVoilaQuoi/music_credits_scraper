@@ -363,6 +363,8 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
                 f"{r.get('albums_totalises', 0)} album(s) totalisé(s), "
                 f"{r.get('pages', 0)} page(s) ouverte(s)"
             )
+            for ligne in r.get("chrono") or []:
+                lines.append(f"   ⏱️ {ligne}")
             if r.get("sans_stream"):
                 lines.append(
                     f"   • {r['sans_stream']} morceau(x) à ID sans stream visité(s) "

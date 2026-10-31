@@ -189,3 +189,41 @@ class TestPagesSpotify:
             assert asyncio.run(_rejouer()) == (self.HTML, None)
         assert page.vues == 1
         assert compte["servies"] == 1 and len(compte["absentes"]) == 1
+
+    def test_le_temps_est_compte_par_type_de_page_et_par_phase(self):
+        """2026-10-31 : la latence des pages Spotify a triplé en cinq jours sans
+        que rien ne dise où ; chaque phase est chronométrée, par type de page,
+        et une attente de sélecteur expirée est comptée."""
+        from src.scrapers.crawl4ai_scraper_base import PatchrightError, _BrowserSession
+        from src.scrapers.spotify_web_scraper import SpotifyWebScraper
+
+        class _SansCompteur(self._Page):
+            async def wait_for_selector(self, *a, **k):
+                raise PatchrightError("timeout")
+
+        scraper = SpotifyWebScraper()
+        asyncio.run(
+            _BrowserSession(scraper, self._Page(self.HTML)).fetch(self.URL, wait_for="css:x")
+        )
+        album = "https://open.spotify.com/album/1"
+        asyncio.run(
+            _BrowserSession(scraper, _SansCompteur(self.HTML)).fetch(
+                album, wait_for="css:x", js_before_wait="1", delay_before_return=0.01
+            )
+        )
+        c = scraper.chrono
+        assert c.pages == {"track": 1, "album": 1} and c.delais == {"album": 1}
+        assert set(c.phases["track"]) == {"goto", "attente", "html", "brut"}
+        assert set(c.phases["album"]) == {"goto", "attente", "script", "pause", "html", "brut"}
+        ligne_album, ligne_titre = c.resume()
+        assert (
+            ligne_album.startswith("album : 1 page(s)") and "1 attente(s) expirée(s)" in ligne_album
+        )
+        assert ligne_titre.startswith("track : 1 page(s)") and "expirée" not in ligne_titre
+
+    def test_type_de_page(self):
+        from src.scrapers.crawl4ai_scraper_base import type_de_page
+
+        assert type_de_page(self.URL) == "track"
+        assert type_de_page("https://open.spotify.com/artist/x") == "artist"
+        assert type_de_page("https://open.spotify.com/") == "?"

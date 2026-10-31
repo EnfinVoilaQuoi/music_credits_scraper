@@ -11,6 +11,7 @@ boucle applicative ; `_crawl_page` n'est plus qu'un pont bloquant
 
 import inspect
 import os
+import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -110,6 +111,50 @@ def _profile_dir() -> str:
     return f"{base}_{_BROWSER_CHANNEL}" if _BROWSER_CHANNEL else base
 
 
+def type_de_page(url: str) -> str:
+    """PUR. Le type d'une page de session, d'après le premier segment de son
+    chemin hors locale (`/intl-fr/track/…` → `track`)."""
+    from urllib.parse import urlsplit
+
+    segments = [s for s in urlsplit(url).path.split("/") if s and not s.startswith("intl-")]
+    return segments[0] if segments else "?"
+
+
+@dataclass
+class ChronoPages:
+    """Temps passé par TYPE de page et par PHASE d'une navigation de session
+    (2026-10-31) : la latence moyenne des pages Spotify est passée de ~7 s
+    (26/10) à ~25 s (31/10) sans que rien ne dise où. Phases : `goto`
+    (navigation jusqu'au DOM), `attente` (sélecteur ; `delais` compte ceux qui
+    ont expiré), `script`, `pause` (délai fixe), `html`, `brut`."""
+
+    phases: dict = field(default_factory=dict)  # {type: {phase: [n, total, max]}}
+    pages: dict = field(default_factory=dict)  # {type: n}
+    delais: dict = field(default_factory=dict)  # {type: n} sélecteurs expirés
+
+    def noter(self, type_: str, phase: str, secondes: float) -> None:
+        n_total_max = self.phases.setdefault(type_, {}).setdefault(phase, [0, 0.0, 0.0])
+        n_total_max[0] += 1
+        n_total_max[1] += secondes
+        n_total_max[2] = max(n_total_max[2], secondes)
+
+    def resume(self) -> list[str]:
+        """Une ligne par type de page : moyenne par phase, et le max."""
+        lignes = []
+        for type_, n in sorted(self.pages.items()):
+            phases = self.phases.get(type_, {})
+            total = sum(v[1] for v in phases.values())
+            detail = ", ".join(
+                f"{p} {v[1] / v[0]:.1f} s (max {v[2]:.0f})" for p, v in phases.items() if v[0]
+            )
+            expires = self.delais.get(type_, 0)
+            lignes.append(
+                f"{type_} : {n} page(s), {total / n:.1f} s/page — {detail}"
+                + (f" ; {expires} attente(s) expirée(s)" if expires else "")
+            )
+        return lignes
+
+
 class CrawlAIScraperBase:
     """
     Base class pour tous les scrapers Crawl4AI du projet.
@@ -139,6 +184,7 @@ class CrawlAIScraperBase:
         # REDIRIGE l'URL en conséquence (`/intl-fr/…`) : sans épinglage, le libellé
         # sur lequel s'accrochent les parseurs change avec la machine.
         self.locale = locale
+        self.chrono = ChronoPages()
         self._browser_config = self._make_browser_config(headless)
 
     @staticmethod
@@ -625,10 +671,22 @@ class _BrowserSession:
     ) -> str | None:
         from src.persistence import brut
 
+        chrono = self._scraper.chrono
+        type_ = type_de_page(url)
+        chrono.pages[type_] = chrono.pages.get(type_, 0) + 1
+        top = time.monotonic()
+
+        def phase(nom: str) -> None:
+            nonlocal top
+            maintenant = time.monotonic()
+            chrono.noter(type_, nom, maintenant - top)
+            top = maintenant
+
         try:
             reponse = await self._page.goto(
                 url, wait_until="domcontentloaded", timeout=page_timeout
             )
+            phase("goto")
             if wait_for and wait_for.startswith("css:"):
                 try:
                     await self._page.wait_for_selector(wait_for[4:], timeout=wait_timeout)
@@ -637,14 +695,19 @@ class _BrowserSession:
                     # l'appelant de dire si c'est une donnée absente ou une
                     # structure changée — lui seul sait ce qu'il cherchait.
                     logger.debug(f"{url}: sélecteur {wait_for[4:]} non apparu")
+                    chrono.delais[type_] = chrono.delais.get(type_, 0) + 1
+                phase("attente")
             if js_before_wait:
                 try:
                     await self._page.evaluate(js_before_wait)
                 except PatchrightError as e:
                     logger.debug(f"{url}: js_before_wait ignoré ({e})")
+                phase("script")
             if delay_before_return:
                 await self._page.wait_for_timeout(int(delay_before_return * 1000))
+                phase("pause")
             html = await self._page.content()
+            phase("html")
         except PatchrightError as e:
             source_usage.note_failure(key, e, detail=f"session : {e}")
             logger.error(f"{type(self._scraper).__name__}: session {url}: {e}")
@@ -655,4 +718,5 @@ class _BrowserSession:
             return None
         source_usage.record_attempt(key, IssueKind.OK, detail="session")
         brut.consigner(key, url, reponse.status if reponse else None, html.encode("utf-8"))
+        phase("brut")
         return html

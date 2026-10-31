@@ -37,6 +37,7 @@ from datetime import datetime, timedelta
 
 from src.concurrency import async_loop
 from src.config import settings
+from src.scrapers.crawl4ai_scraper_base import ChronoPages, CrawlAIScraperBase
 from src.scrapers.spotify_web_scraper import SpotifyWebScraper
 from src.utils.logger import get_logger
 from src.utils.title_matching import base_album_key, normalize_title
@@ -128,6 +129,11 @@ def update_spotify_streams(
 
     own_scraper = scraper is None
     scraper = scraper or SpotifyWebScraper(headless=True)
+    # Temps par type de page et par phase (2026-10-31) : un VRAI scraper
+    # seulement, les faux des tests n'en ont pas.
+    chronometre = isinstance(scraper, CrawlAIScraperBase)
+    if chronometre:
+        scraper.chrono = ChronoPages()
     try:
         return async_loop.run_sync(
             _crawl(
@@ -141,6 +147,10 @@ def update_spotify_streams(
             )
         )
     finally:
+        if chronometre:
+            result["chrono"] = scraper.chrono.resume()
+            for ligne in result["chrono"]:
+                logger.info(f"⏱️ Pages Spotify — {ligne}")
         if own_scraper:
             scraper.close()
 

@@ -585,8 +585,8 @@ def test_id_propose_un_refus_de_duree_dementi_par_les_catalogues_va_a_l_humain()
 
 class TestIdProposeVersions:
     """2026-10-31 : une VERSION passe par le gate comme à l'étape Identité. Ce
-    qu'il refuse est refusé par règle ; elle ne reçoit jamais d'ID par règle
-    (décision du 2026-10-20). Cas réels de la base."""
+    qu'il refuse est refusé par règle ; une pose exige le MÊME titre (version
+    comprise) et une durée lue par un autre identifiant. Cas réels de la base."""
 
     @staticmethod
     def _juger(titre, durees, servi, duree_servie, gate=True, album=None):
@@ -600,10 +600,19 @@ class TestIdProposeVersions:
             gate=lambda *_: gate,
         )
 
-    def test_une_version_que_le_gate_accepte_reste_a_l_humain(self):
-        # Kanye « Freestyle » (Iggy Azalea) : Deezer 152 lu par son ID, même
-        # titre — une pose de version attend une décision.
+    def test_meme_version_et_catalogue_qui_confirme_pose(self):
+        # Kanye « Testify (Instrumental) » (Common) : Deezer 157, audio 159.
+        arb = self._juger(
+            "Testify (Instrumental)", {"deezer": 157, "youtube": 159}, "Testify - Instrumental", 159
+        )
+        assert arb.action == "poser_id"
+        # Kanye « Freestyle » (Iggy Azalea) : Deezer 152 lu par son ID.
         arb = self._juger("Freestyle", {"deezer": 152, "youtube": 153}, "Freestyle", 152)
+        assert arb.action == "poser_id"
+
+    def test_meme_version_sans_catalogue_l_humain(self):
+        # Kanye « Heartless » (The Voice) : SongBPM et une vidéo seulement.
+        arb = self._juger("Freestyle", {"songbpm": 152, "youtube_video": 152}, "Freestyle", 152)
         assert arb is None
 
     def test_un_autre_remix_n_est_jamais_pose(self):

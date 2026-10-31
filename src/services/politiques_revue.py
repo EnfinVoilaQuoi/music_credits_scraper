@@ -1035,9 +1035,15 @@ def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | N
     refuse est refusé par règle (rétablissable) — un titre générique dont le
     disque n'est pas montré le même, un freestyle auquel Spotify sert le
     titre d'une autre fiche (2026-10-31). Une POSE exige en plus une durée
-    indépendante à ± 2 s, et ne vaut que pour un ORIGINAL sans ambiguïté
-    auquel Spotify sert un original : une version ne reçoit jamais d'ID par
-    règle (décision du 2026-10-20 ; un refus montré, si)."""
+    indépendante à ± 2 s, et le titre servi : un original sans ambiguïté pour
+    un original ; pour une VERSION, le MÊME titre, descripteur compris
+    (« Testify - Instrumental » = « Testify (Instrumental) » ; « Hustlin' -
+    Remix » n'est pas « Hustlin' (French Remix) »). Décision utilisateur du
+    2026-10-31, qui lève pour ce seul cas celle du 2026-10-20 (« une version
+    ne reçoit jamais d'ID par règle ») : ce qui trompait le gate sur une
+    version, c'est un autre nom de version, que le même titre exclut."""
+    from src.utils.version_descriptors import meme_titre_normalise
+
     if cas.detecteur != "id_spotify_propose" or track is None:
         return None
     if lire is None:
@@ -1053,7 +1059,10 @@ def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | N
         # Le titre SERVI doit lui aussi être un original sans ambiguïté :
         # « Heartless - The Voice Performance » passait le gate (2026-10-20).
         servi = (lire(cas.preuves.get("spotify_id_propose")) or {}).get("name")
-        if not (titre_d_original(track.title) and titre_d_original(servi)):
+        if titre_d_original(track.title):
+            if not titre_d_original(servi):
+                return None
+        elif not meme_titre_normalise(servi, track.title):
             return None
     if (
         arbitrage is not None

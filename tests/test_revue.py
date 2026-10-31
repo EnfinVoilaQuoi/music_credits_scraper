@@ -482,6 +482,22 @@ class TestVideos:
         ):
             assert revue.video_etrangere(_t(titre, videos=[self._v(video)])) is None
 
+    def test_dates_ordinaux_et_apostrophes(self):
+        """2026-10-31 : Médine « 17 Octobre » / « 17-Oct », MC Solaar « La
+        Cinquième Saison » / « La 5ème saison », Diam's « Vu D’Ici » / « Vue
+        d'ici », Shurik'n « Qu’est-ce tu veux ? » (apostrophe typographique)."""
+        for titre, video in (
+            ("17 Octobre", "17-Oct"),
+            ("11 Septembre", "11-Sep"),
+            ("La Cinquième Saison", "La 5ème saison"),
+            ("Onzième commandement", "Mc Solaar - 11ème commandement"),
+            ("Vu D’Ici", "Vue d'ici (feat. Diam's, Eloquence)"),
+            ("Qu’est-ce tu veux ?", "Qu'est Ce Que Tu Veux"),
+        ):
+            assert revue.video_etrangere(_t(titre, videos=[self._v(video)])) is None, titre
+        # Un mois seul n'est pas une date : « Mars » ne nomme pas « Mai ».
+        assert revue.video_etrangere(_t("Mars", videos=[self._v("Mai")])) is not None
+
     def test_le_sigle_du_titre_le_nomme(self):
         """2026-09-28, relevé en échantillon : « LMLVSB », « BBHMM », « TGIF ».
         Seulement à partir de quatre mots, et comme mot ENTIER."""
@@ -838,6 +854,26 @@ class TestMemoireDesVerdicts:
         a.tracks = data_manager.get_artist_tracks(a.id)
         assert len(revue.analyser(data_manager, a).actifs) == 1
 
+    def test_un_lrc_retabli_ne_revient_pas_sous_un_autre_detecteur(self):
+        """Travis « Love Galore (Version 1) » : LRC rétabli à la main contre
+        `lrc_autre_fiche` le 2026-09-29, revenu en `lrc_douteux` (2026-10-31).
+        Un AUTRE LRC se juge à nouveau ; un verdict de règle ne compte pas."""
+        from src.utils.corrections_fiches import empreinte_lrc
+
+        t = _t("Love Galore (Version 1)", 5107, genius_id=11046462)
+        t.lyrics.synced = "[00:01.00] a\n[00:02.00] b"
+        cas = revue.Cas("lrc_douteux", 5107, t.title, "", cle="g11046462|{}")
+        cle = f"g11046462|{empreinte_lrc(t.lyrics.synced)}"
+        humain = {("lrc_autre_fiche", cle): {"verdict": "normal", "note": "rétablie"}}
+        juges = revue._lrc_rendus_normaux(humain)
+        assert revue._lrc_deja_juge(cas, {5107: t}, juges)
+        regle = {("lrc_autre_fiche", cle): {"verdict": "normal", "note": "regle:x"}}
+        assert not revue._lrc_deja_juge(cas, {5107: t}, revue._lrc_rendus_normaux(regle))
+        t.lyrics.synced = "[00:01.00] autre texte"
+        assert not revue._lrc_deja_juge(cas, {5107: t}, juges)
+        doublon = revue.Cas("doublon_lrc", 5107, t.title, "", cle="x")
+        assert not revue._lrc_deja_juge(doublon, {5107: t}, juges)
+
     def test_cle_stable_hors_valeurs_volatiles(self):
         t = _t("Cruella", genius_id=42)
         t.streams.spotify_streams, t.streams.ytm_streams = 316_410, 5_552_707
@@ -887,6 +923,24 @@ class TestSignalementsDesRuns:
         assert revue._cas_des_signalements([s], {1, 2}, seule) == []
         deux = [*seule, _t("L'histoire est simple (Remix)", 3, spotify_id=sid)]
         assert len(revue._cas_des_signalements([s], {1, 2, 3}, deux)) == 1
+
+    def test_signalement_kworb_decide_depuis_le_run(self):
+        """SCH « Solvable » : confirmé le 2026-10-30 au soir, après le run du
+        matin — le cas restait au panneau jusqu'au run suivant."""
+        s = {
+            "detecteur": "kworb_a_confirmer",
+            "track_id": 1,
+            "morceau": "Solvable",
+            "motif": "",
+            "impact": 0,
+            "preuves": {"kworb_title": "Solvable"},
+            "cle": "k",
+        }
+        fiches = [_t("Solvable, Partie 1", 1)]
+        vide = {"confirmed": {}, "rejected": [], "decisions": {}}
+        assert len(revue._cas_des_signalements([s], {1}, fiches, frozenset(), vide)) == 1
+        decide = {**vide, "confirmed": {"solvable": 1}}
+        assert revue._cas_des_signalements([s], {1}, fiches, frozenset(), decide) == []
 
     @staticmethod
     def _deezer(detecteur, track_id, preuves):
@@ -1593,8 +1647,21 @@ class TestVideoTropLongue:
 
         assert cas("1 son en 1H", 300) is None  # 3 × : pas au-delà
         assert cas("1 son en 1H", 301) is not None
-        assert cas("Elixir (Court métrage)", 400) is None  # nommée : 4 ×
-        assert cas("Elixir (Court métrage)", 401) is not None
+        assert cas("Elixir (Extended)", 400) is None  # nommée : 4 ×
+        assert cas("Elixir (Extended)", 401) is not None
+
+    def test_un_clip_qui_le_nomme_n_est_pas_un_cas(self):
+        """BEN plg « Quitter la fête (Court métrage) », 5,1 × (2026-10-31) : un
+        clip ne donne pas sa durée, ses vues comptent — rien à juger."""
+        t = self._fiche(
+            "BEN plg - Quitter la fête (Court métrage)",
+            1141,
+            {"deezer": 223},
+            titre="Quitter la fête",
+        )
+        assert revue.video_trop_longue(t, _ctx(t)) is None
+        t = self._fiche("Concert (Court métrage)", 1141, {"deezer": 223}, titre="Quitter la fête")
+        assert revue.video_trop_longue(t, _ctx(t)) is not None  # muette : jugée
 
     def test_ce_qui_n_est_pas_jugé(self):
         def cas(**kw):

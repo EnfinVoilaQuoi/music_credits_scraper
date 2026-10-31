@@ -57,7 +57,7 @@ from src.utils.concordance_paroles import (
     recouvrement_bigrammes,
 )
 from src.utils.credits_genius_api import SOURCE_API, SOURCE_SCRAPE
-from src.utils.duree_youtube import SOURCE_AUDIO
+from src.utils.duree_youtube import CLIP, SOURCE_AUDIO
 from src.utils.spotify_identity import (
     CHAMP_ID_PROPOSE,
     remix_d_autres_artistes,
@@ -1688,14 +1688,88 @@ def _titres_alternatifs(track) -> list[str]:
     return alternatifs
 
 
+#: Apostrophes typographiques : `_mots` les PERD (non ASCII) quand l'apostrophe
+#: droite fait une coupure — « Qu’est-ce » donnait « quest », « Qu'est » « qu
+#: est » (Shurik'n, 2026-10-31).
+_APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "´": "'", "`": "'"})
+_MOIS = {
+    "janvier": "jan",
+    "january": "jan",
+    "fevrier": "feb",
+    "february": "feb",
+    "fev": "feb",
+    "mars": "mar",
+    "march": "mar",
+    "avril": "apr",
+    "april": "apr",
+    "avr": "apr",
+    "mai": "may",
+    "juin": "jun",
+    "june": "jun",
+    "juillet": "jul",
+    "july": "jul",
+    "juil": "jul",
+    "aout": "aug",
+    "august": "aug",
+    "septembre": "sep",
+    "september": "sep",
+    "sept": "sep",
+    "octobre": "oct",
+    "october": "oct",
+    "novembre": "nov",
+    "november": "nov",
+    "decembre": "dec",
+    "december": "dec",
+}
+#: Un MOIS ne s'abrège qu'après un jour (« 17 Octobre » / « 17-Oct ») : seul,
+#: « Mars » ou « Mai » est un titre.
+_DATE_RE = re.compile(r"\b(\d{1,2}) (" + "|".join(_MOIS) + r")\b")
+_ORDINAUX = {
+    "premier": "1e",
+    "premiere": "1e",
+    "deuxieme": "2e",
+    "troisieme": "3e",
+    "quatrieme": "4e",
+    "cinquieme": "5e",
+    "sixieme": "6e",
+    "septieme": "7e",
+    "huitieme": "8e",
+    "neuvieme": "9e",
+    "dixieme": "10e",
+    "onzieme": "11e",
+    "douzieme": "12e",
+    "treizieme": "13e",
+    "quatorzieme": "14e",
+    "quinzieme": "15e",
+    "seizieme": "16e",
+    "dix septieme": "17e",
+    "dix huitieme": "18e",
+    "dix neuvieme": "19e",
+    "vingtieme": "20e",
+}
+_ORDINAL_CHIFFRE_RE = re.compile(r"\b(\d{1,2})(?:e|eme|ieme|er|ere)\b")
+_ORDINAL_MOT_RE = re.compile(r"\b(" + "|".join(_ORDINAUX) + r")\b")
+
+
+def _mots_d_un_titre(texte: str | None) -> str:
+    """`_mots` d'un titre comparé à une vidéo, sous une forme commune aux deux
+    graphies : apostrophes typographiques, dates abrégées (« 11 Septembre » /
+    « 11-Sep »), ordinaux en chiffres (« La Cinquième Saison » / « La 5ème
+    saison ») — Médine, MC Solaar, Shurik'n (2026-10-31)."""
+    t = _mots((texte or "").translate(_APOSTROPHES))
+    t = _DATE_RE.sub(lambda m: f"{m.group(1)} {_MOIS[m.group(2)]}", t)
+    t = _ORDINAL_CHIFFRE_RE.sub(r"\1e", t)
+    return _ORDINAL_MOT_RE.sub(lambda m: _ORDINAUX[m.group(1)], t)
+
+
 def video_nomme(track, v) -> bool:
     """Le titre de la vidéo `v` nomme-t-il le morceau `track` ?"""
-    socle = _mots(socle_du_titre(track.title))
+    socle = _mots_d_un_titre(socle_du_titre(track.title))
     # Une parenthèse qui n'est pas un descripteur fait partie du titre Genius
     # (« Pursuit of Happiness (Nightmare) » : le clip officiel ne la porte pas) —
     # sauf sur un titre générique, qu'elle seule distingue (« Intro (A2) »).
-    nu = _mots(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", track.title or ""))
-    titre = _mots(v.title)
+    nu = _mots_d_un_titre(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", track.title or ""))
+    titre = _mots_d_un_titre(v.title)
     if titre_generique(nu):
         # … mais la vidéo que la page Genius du morceau désigne elle-même, et
         # qui porte le mot générique (« Intro (0.9) » → « Intro », « Outro
@@ -1893,7 +1967,9 @@ def video_trop_longue(track, ctx=None):
     contredisent, l'humain. La vidéo d'un disque ENTIER (comptée à l'album,
     `contenants.video_de_disque`), une page qui en CONTIENT d'autres (medley,
     album entier), une vidéo portée par plusieurs pages (`video_partagee`) ou
-    une fiche sans durée indépendante : rien."""
+    une fiche sans durée indépendante : rien. Un CLIP qui nomme le morceau
+    (court métrage, film) non plus : il ne donne jamais sa durée, ses vues
+    comptent (BEN plg « Quitter la fête (Court métrage) », 2026-10-31)."""
     from src.utils.contenants import est_contenant, video_de_disque
 
     if not track.videos or est_contenant(track):
@@ -1917,6 +1993,8 @@ def video_trop_longue(track, ctx=None):
         if video_de_disque(v.title, track.album):
             continue
         nommee = video_nomme(track, v)
+        if nommee and CLIP.search(v.title or ""):
+            continue  # un clip qui le nomme ne donne pas sa durée : rien à juger
         ratio = v.duration / reference
         if ratio <= (RATIO_VIDEO_NOMMEE if nommee else RATIO_VIDEO_MUETTE):
             continue
@@ -3422,12 +3500,20 @@ def _signalement_deezer_resolu(
 
 
 def _cas_des_signalements(
-    signalements, ids_disco: set, tracks=None, editions_deezer: frozenset = frozenset()
+    signalements,
+    ids_disco: set,
+    tracks=None,
+    editions_deezer: frozenset = frozenset(),
+    decisions_kworb: dict | None = None,
 ) -> list[Cas]:
     """Un signalement dont la fiche a disparu depuis le run (fusion,
     suppression) n'a plus d'objet ; avec `tracks`, ceux que l'état présent
     dément non plus (`_signalement_resolu`). `editions_deezer` = pages Deezer
-    notées en édition d'une fiche (`track_editions`)."""
+    notées en édition d'une fiche (`track_editions`) ; `decisions_kworb` =
+    décisions Kworb de l'artiste (`KworbLinksManager.load`), qui règlent les
+    signalements Kworb décidés depuis le run (`update_kworb.signalement_resolu`)."""
+    from src.utils.update_kworb import CODES_DECIDABLES, signalement_resolu
+
     partages = None
     if tracks is not None and any(s["detecteur"] in _CODES_ID_PARTAGE for s in signalements):
         partages = ids_spotify_encore_partages(tracks)
@@ -3439,6 +3525,10 @@ def _cas_des_signalements(
             return False
         if partages is not None and s["detecteur"] in _CODES_ID_PARTAGE:
             return (s["preuves"] or {}).get("spotify_id") in partages
+        if decisions_kworb is not None and s["detecteur"] in CODES_DECIDABLES:
+            track = par_id.get(s["track_id"])
+            if signalement_resolu(s["detecteur"], s["preuves"] or {}, track, decisions_kworb):
+                return False
         if tracks is not None:
             return not _signalement_deezer_resolu(s, par_id, ids_deezer, editions_deezer)
         return True
@@ -3508,14 +3598,65 @@ def analyser(data_manager, artiste, ctx: Contexte | None = None) -> Revue:
         {t.id for t in tracks},
         tracks,
         data_manager.get_artist_edition_deezer_ids(artiste.id),
+        _decisions_kworb(artiste),
     )
     cas = _marquer_les_fiches_decidees(data_manager, artiste, cas)
     cas.sort(key=lambda c: (-c.impact, c.detecteur, c.morceau))
     tranches = data_manager.verdicts_revue(artiste.id)
+    lrc_juges = _lrc_rendus_normaux(tranches)
+    par_id = {t.id: t for t in tracks}
+
+    def tranche(c: Cas) -> bool:
+        return (c.detecteur, c.cle) in tranches or _lrc_deja_juge(c, par_id, lrc_juges)
+
     return Revue(
-        actifs=[c for c in cas if (c.detecteur, c.cle) not in tranches],
-        masques=[c for c in cas if (c.detecteur, c.cle) in tranches],
+        actifs=[c for c in cas if not tranche(c)],
+        masques=[c for c in cas if tranche(c)],
     )
+
+
+#: Détecteurs qui mettent en doute le LRC LUI-MÊME (pas une fusion de fiches).
+_DETECTEURS_DU_LRC = frozenset({"lrc_autre_fiche", "lrc_original", "lrc_douteux", "lrc_live"})
+
+
+def _lrc_rendus_normaux(tranches: dict) -> set[str]:
+    """Les clés « fiche|empreinte du LRC » qu'un humain a dites normales : un
+    LRC rétabli après sa correction automatique, ou marqué ✓ Normal, par un
+    détecteur qui le désigne par son empreinte (`lrc_autre_fiche`,
+    `lrc_original`). Les verdicts posés par une règle n'en sont pas."""
+    return {
+        cle
+        for (detecteur, cle), v in tranches.items()
+        if detecteur in _DETECTEURS_DU_LRC
+        and v.get("verdict") == "normal"
+        and not str(v.get("note") or "").startswith("regle:")
+    }
+
+
+def _lrc_deja_juge(c: Cas, par_id: dict, lrc_juges: set[str]) -> bool:
+    """Un LRC qu'un humain a rétabli ne se re-soumet pas sous un AUTRE
+    détecteur (Travis « Love Galore (Version 1) » et « (Version 2) » : LRC
+    rétabli le 2026-09-29 contre `lrc_autre_fiche`, revenu au panneau en
+    `lrc_douteux` ; 2026-10-31). Le même LRC seulement : un autre texte
+    (autre empreinte) se juge à nouveau."""
+    if c.detecteur not in _DETECTEURS_DU_LRC or not lrc_juges:
+        return False
+    track = par_id.get(c.track_id)
+    if track is None or not track.lyrics.synced:
+        return False
+    from src.utils.corrections_fiches import empreinte_lrc
+
+    return cle_du_cas(track, {"empreinte": empreinte_lrc(track.lyrics.synced)}) in lrc_juges
+
+
+def _decisions_kworb(artiste) -> dict | None:
+    """Les décisions Kworb de l'artiste, en base ; None si illisibles."""
+    from src.utils.kworb_links_manager import KworbLinksManager
+
+    try:
+        return KworbLinksManager().load(artiste.name)
+    except (OSError, ValueError):
+        return None
 
 
 def _marquer_les_fiches_decidees(data_manager, artiste, cas: list[Cas]) -> list[Cas]:

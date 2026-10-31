@@ -19,9 +19,11 @@ from src.utils.title_matching import normalize_title
 from src.utils.version_descriptors import (
     edition_de_diffusion,
     est_un_remix,
+    meme_titre_normalise,
     porte_une_version,
     socle_normalise,
     titre_sans_edition,
+    titre_sans_sous_titre,
 )
 
 logger = get_logger(__name__)
@@ -50,6 +52,42 @@ def socle_de(titre: str | None, fiches) -> object | None:
         # tiers (rôle secondaire Cover / Remix / Writer…).
         candidats = [t for t in candidats if not t.secondary_role]
     return candidats[0] if len(candidats) == 1 else None
+
+
+#: Écart au-delà duquel une page n'est plus une édition de la fiche : celui
+#: des actions destructives (`politiques_revue.ECART_VERSION_S`).
+ECART_EDITION_S = 10
+
+
+def socle_au_sous_titre_pres(titre: str | None, duree, fiches) -> object | None:
+    """PUR. `socle_de`, puis, à défaut, la fiche UNIQUE dont le titre SANS SES
+    SOUS-TITRES (`titre_sans_sous_titre`) est l'original de l'édition `titre`,
+    à `ECART_EDITION_S` de sa durée ou d'une de ses éditions : Deezer omet le
+    sous-titre Genius (Kid Cudi « Make Her Say (Album Version Edited) », 216 s,
+    pour « Make Her Say (I Poke Her Face) », édition déjà notée à 216 s ;
+    « Man On The Moon (Album Version Explicit) », 211 s, pour « Man on the Moon
+    (The Anthem) », 207 s ; 2026-10-31). Sans durée, rien."""
+    socle = socle_de(titre, fiches)
+    if socle is not None:
+        return socle
+    cible = titre_sans_edition(titre)
+    if cible is None or not duree:
+        return None
+    candidats = [
+        t
+        for t in fiches
+        if not t.secondary_role
+        and not edition_de_diffusion(t.title)
+        and meme_titre_normalise(titre_sans_sous_titre(t.title), cible)
+    ]
+    if len(candidats) != 1:
+        return None
+    t = candidats[0]
+    # `durees_editions` : posées par `revue.charger_contexte` (fiches du panneau).
+    durees = [d for d in (t.duration, *(t.durees_editions or ())) if d]
+    if not any(abs(int(d) - int(duree)) <= ECART_EDITION_S for d in durees):
+        return None
+    return t
 
 
 def libelle(titre: str) -> str:

@@ -1242,6 +1242,33 @@ def version_au_qualificatif_pres(a: str | None, b: str | None) -> bool:
     return not meme_famille(va, vb) and meme_famille(va, vb, compter_qualificatifs=False)
 
 
+def debut_de_titre(tronque: str | None, complet: str | None) -> bool:
+    """PUR. `tronque`, un titre COUPÉ en fin par un affichage de longueur
+    limitée, est-il le début de `complet`, invités retirés ? Son dernier mot,
+    peut-être coupé, n'est que le début du mot correspondant (Kworb « Cudi the
+    Kid (feat. …) - Lucky Date VIP Dru » pour « Cudi the Kid (Lucky Date VIP
+    Drumstep Edit) », 2026-10-31). Par MOTS entiers, sauf le dernier."""
+    a = _tokens(strip_featuring(tronque or ""))
+    b = _tokens(strip_featuring(complet or ""))
+    if len(a) < 2 or len(a) > len(b):
+        return False
+    *tete, fin = a
+    return b[: len(tete)] == tete and b[len(tete)].startswith(fin)
+
+
+def libelle_de_la_version(libelle: str | None, titre: str | None, *, tronque=False) -> bool:
+    """PUR. Le libellé d'un catalogue pour un ID (« La Gamberge - Live 2006 »)
+    désigne-t-il la version de `titre` (« La Gamberge (Live 2006; Version EP) ») ?
+    Même famille de descripteurs, ou un qualificatif de plus d'un seul côté :
+    le libellé ne départage pas, l'ID a été jugé par sa durée (gate Spotify).
+    `tronque` : le libellé est coupé en fin (`debut_de_titre`)."""
+    return (
+        meme_famille_de_version(libelle, titre)
+        or version_au_qualificatif_pres(libelle, titre)
+        or (tronque and debut_de_titre(libelle, titre))
+    )
+
+
 def meme_version_stricte(a: str | None, b: str | None) -> bool:
     """PUR. Deux titres qu'un rapprochement FLOU peut confondre : même absence
     de descripteur (une coquille), même remix, ou même PRISE (`meme_prise` :

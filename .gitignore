@@ -200,6 +200,8 @@ scripts/*
 !scripts/copie_base.py
 # Durées Discogs posées sur une autre version ou une autre page (2026-10-30).
 !scripts/retirer_durees_discogs.py
+# Titre de la page Spotify relu dans le brut (2026-10-31).
+!scripts/rafraichir_titres_spotify.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
 # méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
 # `scripts/*` les exclut déjà : ne PAS ajouter de négation ici.

@@ -6387,6 +6387,39 @@ class TrackRepository:
                 self._toucher(conn, tid)
         return ecrites
 
+    def titres_pages_spotify(self) -> list[dict[str, Any]]:
+        """`[{track_id, titre, artiste, spotify_id, page}]` des fiches à ID
+        Spotify principal — ce que `scripts/rafraichir_titres_spotify.py`
+        compare à la dernière lecture de la page de l'ID. Lecture seule."""
+        with self.engine.connect() as conn:
+            return [
+                dict(r)
+                for r in conn.execute(
+                    text(
+                        "SELECT t.id AS track_id, t.title AS titre, a.name AS artiste, "
+                        "t.spotify_id, t.spotify_page_title AS page "
+                        "FROM tracks t JOIN artists a ON a.id = t.artist_id "
+                        "WHERE t.spotify_id IS NOT NULL AND t.spotify_id != '' "
+                        "ORDER BY a.name, t.id"
+                    )
+                ).mappings()
+            ]
+
+    def poser_titres_pages_spotify(self, ecarts: list[dict[str, Any]]) -> int:
+        """Pose `spotify_page_title` = `neuf` sur chaque fiche de `ecarts`, si
+        son ID principal est toujours `spotify_id` (le titre décrit la page de
+        CET ID). Aucune colonne dérivée n'en dépend : pas de `_toucher`. Rend
+        le nombre de fiches écrites."""
+        ecrites = 0
+        with self._ecrire() as conn:
+            for e in ecarts:
+                ecrites += conn.execute(
+                    update(tracks)
+                    .where(tracks.c.id == e["track_id"], tracks.c.spotify_id == e["spotify_id"])
+                    .values(spotify_page_title=e["neuf"], updated_at=datetime.now())
+                ).rowcount
+        return ecrites
+
     # ──────────────────────────────────────────────────────────────────────────
     # Vidéos YouTube d'un morceau (table `track_videos`, e20)
     # ──────────────────────────────────────────────────────────────────────────

@@ -396,6 +396,29 @@ def _autre_que_la_page_deezer_de_la_fiche(track, piste) -> str | None:
     )
 
 
+def _seconde_page_du_meme_enregistrement(track, piste, vote, meme_titre) -> str | None:
+    """La fiche a déjà SA page Deezer ; la candidate est une AUTRE page au même
+    titre (deux originaux), dont le vote des catalogues SOUTIENT la durée par
+    deux voix indépendantes de Deezer (MC Solaar « Clic clic » : single 2011
+    à 175 s, Apple et Spotify à 172 s ; 2026-10-31). Une seconde page du même
+    enregistrement est une ÉDITION, avec sa durée (décision utilisateur
+    2026-10-19) — exactement ce que le motif du cas annonçait (« rattachement
+    sûr », `revue._vote_de_parution`). La raison, sinon None."""
+    if not (meme_titre and vote and vote.nature == SOUTENUE and track.deezer_id):
+        return None
+    if str(track.deezer_id) == str(piste.get("id")):
+        return None
+    if not (titre_d_original(track.title) and titre_d_original(piste.get("title"))):
+        return None
+    voix = sorted(s for s in vote.pour if famille(s) != famille("deezer"))
+    if len(voix) < 2:
+        return None
+    return (
+        f"page {piste.get('id')} ({piste.get('duration')} s) soutenue par "
+        f"{', '.join(voix)} ; la fiche garde sa page {track.deezer_id}"
+    )
+
+
 def politique_liens_deezer(cas, track, _ctx):
     """Parution à confirmer : rattacher si l'ISRC est celui de la fiche, ou si
     une durée indépendante la confirme à 2 s ET que les titres désignent le
@@ -448,6 +471,9 @@ def politique_liens_deezer(cas, track, _ctx):
         return Arbitrage(
             "rattacher", "deezer_appliquer", f"{duree} s = {', '.join(accord)}, même titre"
         )
+    seconde = _seconde_page_du_meme_enregistrement(track, piste, vote, meme_titre)
+    if seconde:
+        return Arbitrage("rattacher en ÉDITION (sa durée propre)", "deezer_appliquer", seconde)
     autre_version = _autre_que_la_page_deezer_de_la_fiche(track, piste)
     if autre_version:
         return Arbitrage("autre version : ne pas rattacher", "normal", autre_version)
@@ -1069,6 +1095,10 @@ REGLES_DEEZER = frozenset(
         ("deezer_apparition", "deezer_rattacher_isrc"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
+        # 2026-10-31 : édition de diffusion d'une fiche au sous-titre omis par
+        # Deezer (Kid Cudi) ; simulée sur la copie, 3 / 4 `deezer_absent`.
+        ("deezer_absent", "deezer_edition"),
+        ("deezer_album_absent", "deezer_edition"),
         # 2026-10-31 (DV1) : l'instrumental / a cappella Deezer d'un morceau
         # connu, sans page : pas de fiche. 3 / 15 sur la copie (Flynt).
         ("deezer_version", "normal"),
@@ -1136,6 +1166,32 @@ def _version_d_un_disque_de_versions(cas, ctx) -> Arbitrage | None:
     )
 
 
+def _edition_d_une_fiche(cas, ctx, ids_artiste: set) -> Arbitrage | None:
+    """La piste Deezer « absente » d'un disque PROPRE est une édition de
+    diffusion (« Album Version Edited », « Explicit ») d'une fiche dont Deezer
+    omet le sous-titre Genius, à la durée de la fiche ou d'une de ses
+    éditions (`editions.socle_au_sous_titre_pres`) : le même enregistrement,
+    noté en ÉDITION avec sa durée (décision utilisateur 2026-10-19), pas une
+    fiche à créer (Kid Cudi, 2026-10-31)."""
+    from src.services.editions import socle_au_sous_titre_pres
+
+    if cas.detecteur not in ("deezer_absent", "deezer_album_absent") or ctx is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    if album.get("artist_id") not in ids_artiste:
+        return None
+    titre = piste.get("title") or cas.morceau
+    socle = socle_au_sous_titre_pres(titre, piste.get("duration"), ctx.disco)
+    if socle is None:
+        return None
+    return Arbitrage(
+        f"ÉDITION de « {socle.title} » (sa durée propre), pas de fiche",
+        "deezer_edition",
+        f"« {titre} » {piste.get('duration')} s ; « {socle.title} » {socle.duration} s",
+    )
+
+
 def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     """L'arbitrage de la famille « écarts Deezer », restreint aux originaux
     sans ambiguïté — le titre de la PISTE Deezer et celui de la fiche."""
@@ -1144,6 +1200,9 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     par_isrc = _rattacher_par_isrc(cas, ctx, isrcs_connus, ids_artiste)
     if par_isrc is not None:
         return par_isrc
+    edition = _edition_d_une_fiche(cas, ctx, ids_artiste)
+    if edition is not None:
+        return edition
     if cas.detecteur == "deezer_version":
         # Une version n'est jamais un original : seul le « ✓ Normal » de
         # l'instrumental / a cappella (aucune fiche créée) passe (DV1).
@@ -1678,6 +1737,26 @@ def politique_kworb_tiers(cas, _track, ctx):
     )
 
 
+_CATALOGUES_LUS_PAR_ID = ("deezer", "spotify_web", "apple_music")
+
+
+def _autre_fichier(version, d_id: int) -> bool:
+    """La version nommée (`version`, sa fiche) n'est pas le fichier de l'ID
+    (`d_id` s) : plus de `ECART_VERSION_S` d'écart, ou plus
+    d'`ECART_FICHIER_S` quand deux catalogues lus par leur ID confirment sa
+    durée à `ECART_FICHIER_S` près."""
+    ecart = abs(int(version.duration) - d_id)
+    if ecart > ECART_VERSION_S:
+        return True
+    durees = _durees(version)
+    confirmee = sum(
+        1
+        for s in _CATALOGUES_LUS_PAR_ID
+        if durees.get(s) and abs(int(durees[s]) - int(version.duration)) <= ECART_FICHIER_S
+    )
+    return ecart > ECART_FICHIER_S and confirmee >= 2
+
+
 def politique_id_spotify_version(cas, track, ctx):
     """La page Spotify de l'ID nomme une AUTRE version (« Deep Diving - me n ü
     Remix » pour « Deep Diving », « K-POP » pour « K-POP (Chopped &
@@ -1689,7 +1768,13 @@ def politique_id_spotify_version(cas, track, ctx):
       · un catalogue de la fiche lu par SON identifiant (Deezer, Apple) donne
         la durée de l'ID, à `ECART_FICHIER_S` près.
     ✓ Normal : aucune donnée ne change. Deux versions à la même durée
-    (instrumental, édition) restent à l'humain."""
+    (instrumental, édition) restent à l'humain.
+
+    L'écart suffit au-delà d'`ECART_FICHIER_S` quand la durée de la version
+    nommée est elle-même confirmée par deux catalogues lus par leur ID : deux
+    fichiers distincts, sûrement (Travis « FRANCHISE (REMIX) » 207 s, Deezer du
+    remix 207 s ; « FRANCHISE » 202 s chez Deezer, Spotify et ReccoBeats ;
+    2026-10-31). Rien n'est modifié, l'action n'est pas destructive."""
     from src.services.revue import _titre_sans_feat
 
     preuves = cas.preuves or {}
@@ -1715,7 +1800,7 @@ def politique_id_spotify_version(cas, track, ctx):
         t.spotify_id
         and t.spotify_id not in ids_de_la_fiche
         and t.duration
-        and abs(int(t.duration) - int(d_id)) > ECART_VERSION_S
+        and _autre_fichier(t, int(d_id))
         for t in nommees
     ):
         return None

@@ -127,8 +127,11 @@ class TestAutrePageDeezer:
         assert arb.action == "normal"
         assert "FRZ029800460" in arb.raison
 
-    def test_un_petit_ecart_reste_a_l_humain(self):
-        """« Clic clic » : 175 s contre 172 s, peut-être une édition."""
+    def test_un_petit_ecart_soutenu_est_une_edition(self):
+        """« Clic clic » : 175 s contre 172 s — pas une autre version. Laissée à
+        l'humain par DL1 (« peut-être une édition ») ; depuis le 2026-10-31, le
+        vote la soutient par Apple et Spotify : rattachée en ÉDITION
+        (`_seconde_page_du_meme_enregistrement`). Une seule voix : l'humain."""
         t = _t(
             "Clic Clic",
             deezer_id=209376,
@@ -138,6 +141,9 @@ class TestAutrePageDeezer:
         cas = _cas(
             "deezer_link_candidate", t, _candidate(15003630, "FR43Q0700005", 175, "Clic clic")
         )
+        arb = pol.arbitrage_deezer(cas, t, _ctx(t), {}, set())
+        assert arb.action == "deezer_appliquer" and "ÉDITION" in arb.sens
+        t.durations_observees = {"deezer": 172, "spotify_web": 172}
         assert pol.arbitrage_deezer(cas, t, _ctx(t), {}, set()) is None
 
     def test_sans_catalogue_qui_confirme_la_page_de_la_fiche(self):

@@ -43,7 +43,7 @@ from src.utils.version_descriptors import (
     doublons_evidents,
     est_remix_nomme,
     est_une_rendition,
-    meme_famille_de_version,
+    libelle_de_la_version,
     meme_prise_du_morceau,
     meme_version_stricte,
     nature_de_version,
@@ -673,6 +673,74 @@ def lien_tranche(entry, track, decisions: dict) -> bool:
     return decision.get("kind") not in (None, "ignore", "rendition") and (
         decision.get("track_id") == track.id
     )
+
+
+#: Kworb coupe les titres longs à 99 caractères (« … - Lucky Date VIP Dru ») :
+#: un titre de cette longueur ne se lit que par son début.
+TITRE_KWORB_MAX = 99
+
+
+def variante_suspecte(entry, track, decisions: dict) -> bool:
+    """La ligne trouvée par l'ID de `track` porte-t-elle le titre d'une AUTRE
+    version ? Pas quand le lien est tranché à la main (`lien_tranche`), ni
+    quand le libellé désigne la version de la fiche au qualificatif près
+    (Diam's « La Gamberge - Live 2006 » : fiche « (Live 2006; Version EP) »)
+    ou par son seul début, coupé par Kworb (« Cudi the Kid (Lucky Date VIP
+    Drumstep Edit) », 2026-10-31)."""
+    titre = entry["title"]
+    if lien_tranche(entry, track, decisions):
+        return False
+    tronque = len(titre) >= TITRE_KWORB_MAX
+    return not libelle_de_la_version(titre, track.title, tronque=tronque)
+
+
+#: Signalements Kworb qu'une décision PRISE DEPUIS LE RUN peut avoir réglés.
+CODES_DECIDABLES = (
+    "kworb_a_confirmer",
+    "kworb_proposition",
+    "kworb_ecartee",
+    "kworb_flou",
+    "kworb_variante",
+)
+
+
+def signalement_resolu(detecteur: str, preuves: dict, track, decisions: dict) -> bool:
+    """Un signalement Kworb d'un run que les décisions PRÉSENTES règlent : il
+    ne vit que jusqu'au run suivant, et une décision prise entre-temps le
+    laissait au panneau (SCH « Solvable », confirmé le 2026-10-30 après le run
+    du matin ; 2026-10-31). « Même morceau ? » : le titre a une décision,
+    quelle qu'elle soit. Variante à classer : une décision de la taxonomie
+    seulement — un rejet de l'ancienne question ne la classe pas (le run la
+    repropose exprès : Kanye « Birthday Song - Chopped Not Slopped »). Ligne
+    écartée ou rapprochée au flou : son lien vers la fiche est tranché, ou le
+    titre rejeté. Variante d'ID : `variante_suspecte` ne la retient plus."""
+    if detecteur in ("kworb_a_confirmer", "kworb_proposition"):
+        norm = _normalize_title(preuves.get("kworb_title") or "")
+        if norm in (decisions.get("decisions") or {}):
+            return bool(norm)
+        return (
+            detecteur == "kworb_a_confirmer"
+            and bool(norm)
+            and (
+                norm in (decisions.get("confirmed") or {})
+                or norm in (decisions.get("rejected") or [])
+            )
+        )
+    if track is None:
+        return False
+    if detecteur in ("kworb_ecartee", "kworb_flou"):
+        titre = preuves.get("titre_kworb")
+        if not titre:
+            return False
+        entree = {"title": titre, "spotify_id": None}
+        return lien_tranche(entree, track, decisions) or _normalize_title(titre) in (
+            decisions.get("rejected") or []
+        )
+    if detecteur == "kworb_variante":
+        titre = preuves.get("titre_spotify")
+        entree = {"title": titre, "spotify_id": preuves.get("spotify_id")}
+        return bool(titre) and not variante_suspecte(entree, track, decisions)
+    return False
 
 
 def _revient_au_titre(entry, fiche, page) -> bool:
@@ -1340,6 +1408,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             via in ("title", "title+artistes", "fuzzy", "sous_titre")
             and sid
             and autre_upload_que_la_fiche(track, sid, entry["streams"], ids_page, lus_web)
+            and not lien_tranche(entry, track, _decisions)
         ):
             refusees_titre.add(track.id)
             result["lignes_ecartees"].append((entry["title"], entry["streams"], track.title))
@@ -1406,11 +1475,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 f"🔀 ID {entry.get('spotify_id')} posé sur « {r.motif} » : la ligne Kworb "
                 f"« {entry['title']} » va à la fiche « {track.title} »"
             )
-        if (
-            via == "id"
-            and not meme_famille_de_version(entry["title"], track.title)
-            and not lien_tranche(entry, track, _decisions)
-        ):
+        if via == "id" and variante_suspecte(entry, track, _decisions):
             # L'ID en base dit « ce morceau », son titre Spotify dit une AUTRE
             # version : c'est la signature d'un ID mal attribué (« Heartless
             # (Remix) » qui porte l'ID de « Heartless »). On écrit ce que l'ID
@@ -1452,6 +1517,11 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
     for track_id, lignes in agg.items():
         track = index.by_id[track_id]
         retenues, ecartees = _departager_homonymes(lignes, track, lire_identite)
+        # Une ligne dont le lien est tranché à la main reste à la fiche
+        # (Kanye « Marvin & Chardonnay (10th Anniversary) », confirmée le
+        # 2026-10-12, écartée à chaque run jusqu'au 2026-10-31).
+        retenues += [ligne for ligne in ecartees if lien_tranche(ligne, track, _decisions)]
+        ecartees = [ligne for ligne in ecartees if not lien_tranche(ligne, track, _decisions)]
         for ligne in ecartees:
             result["lignes_ecartees"].append((ligne["title"], ligne["streams"], track.title))
             _ligne_ecartee(result, track, ligne["title"], ligne["streams"])

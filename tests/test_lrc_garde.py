@@ -381,6 +381,74 @@ class TestDebordeSonAudio:
         assert lrc(data_manager, t.id) is None
 
 
+class TestAudioDementiParLesCatalogues:
+    """LD2 (décision utilisateur 2026-10-31) : un LRC LRCLIB dont l'audio est
+    contredit de plus de 10 s par deux catalogues concordants lus par ID n'est
+    pas recevable — règle de VERDICT de la colonne (« On My Vibe » : audio
+    234 s, Deezer 252, Spotify 251, YouTube 252 ; 6 colonnes sur la base)."""
+
+    _LRC = "[00:00.00] ♪\n[03:40.00] fin"
+
+    def test_pur(self):
+        from src.utils.lrc_garde import audio_dementi_par_les_catalogues as dementi
+
+        assert dementi(234, {"deezer": 252, "spotify_web": 251, "youtube": 252})
+        # Un seul catalogue, ou une seule voix (Spotify + ReccoBeats) : rien.
+        assert not dementi(234, {"deezer": 252})
+        assert not dementi(234, {"spotify_web": 252, "reccobeats": 252})
+        # Des sources lues par le TITRE ne témoignent pas.
+        assert not dementi(234, {"songbpm": 252, "youtube_video": 252, "legacy": 252})
+        # Catalogues qui ne concordent pas entre eux, ou écart de 10 s au plus.
+        assert not dementi(234, {"deezer": 252, "apple_music": 262})
+        assert not dementi(242, {"deezer": 252, "apple_music": 252})
+        # L'un des concordants confirme l'audio : rien.
+        assert not dementi(234, {"deezer": 234, "apple_music": 235, "spotify_web": 252})
+        assert not dementi(None, {"deezer": 252, "apple_music": 252})
+
+    def _obs(self, audio, **durees):
+        from datetime import datetime
+
+        vu = datetime(2026, 10, 31, 1, 0)
+        return [
+            Observation("lyrics_synced", self._LRC, "lrclib", seen_at=vu),
+            Observation("lrc_duree_audio", audio, "lrclib", seen_at=vu),
+            *(Observation("duration", d, s, seen_at=vu) for s, d in durees.items()),
+        ]
+
+    def test_verdict_de_lecture(self):
+        from src.enrichment.reconcile import reconcile
+
+        res = reconcile(self._obs(234, deezer=252, spotify_web=251), track_duration=252)
+        assert res["lyrics_synced"].value is None
+        res = reconcile(self._obs(250, deezer=252, spotify_web=251), track_duration=252)
+        assert res["lyrics_synced"].value == self._LRC
+
+    def test_le_lrc_youtube_music_n_est_pas_juge(self):
+        from datetime import datetime
+
+        from src.enrichment.reconcile import reconcile
+
+        vu = datetime(2026, 10, 31, 1, 0)
+        obs = [
+            Observation("lyrics_synced", self._LRC, "ytmusic", seen_at=vu),
+            Observation("lrc_duree_audio", 234, "ytmusic", seen_at=vu),
+            Observation("duration", 252, "deezer", seen_at=vu),
+            Observation("duration", 251, "spotify_web", seen_at=vu),
+        ]
+        assert reconcile(obs, track_duration=252)["lyrics_synced"].value == self._LRC
+
+    def test_en_colonne(self, data_manager):
+        a = Artist(name="Kanye West")
+        a.id = data_manager.save_artist(a)
+        t = Track(title="On My Vibe", artist=a)
+        data_manager.save_track(t)
+        data_manager.upsert_observations(t.id, self._obs(250, deezer=252, apple_music=251))
+        lrc = TestTropLongEnColonne()._lrc
+        assert lrc(data_manager, t.id) == self._LRC
+        data_manager.upsert_observations(t.id, self._obs(234, deezer=252, apple_music=251))
+        assert lrc(data_manager, t.id) is None
+
+
 class TestTropLongPourUneVersion:
     """Décision utilisateur 2026-10-20 : pour une VERSION d'un autre
     enregistrement, sa durée même isolée suffit — un LRC plus long que la

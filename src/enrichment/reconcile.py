@@ -580,6 +580,7 @@ def _reconcile_lyrics_synced(
     duree_confirmee: int | None = None,
     titre: str | None = None,
     audios: dict[str, int] | None = None,
+    catalogues: dict | None = None,
 ) -> Resolution | None:
     """Départage les LRC synchronisés par source (réutilise `compare_synced`).
 
@@ -611,14 +612,28 @@ def _reconcile_lyrics_synced(
     lequel chaque source a calé SON LRC. Un LRC qui court au-delà est écarté
     (`deborde_son_audio`, 2026-10-27) — une règle de verdict, qui rejuge donc
     aussi les LRC déjà posés.
+
+    `catalogues` (`{source: durée}` des durées observées de la fiche) : LD2
+    (décision utilisateur 2026-10-31) — un LRC LRCLIB dont l'audio est contredit
+    de plus de 10 s par deux catalogues concordants lus par ID n'est pas
+    recevable (`lrc_garde.audio_dementi_par_les_catalogues` ; « On My Vibe »).
     """
     from src.utils.concordance_paroles import lrc_dementi
-    from src.utils.lrc_garde import deborde_son_audio, depasse, limite_du_lrc
+    from src.utils.lrc_garde import (
+        audio_dementi_par_les_catalogues,
+        deborde_son_audio,
+        depasse,
+        limite_du_lrc,
+    )
 
     limite = limite_du_lrc(titre, track_duration, duree_confirmee)
     audios = audios or {}
 
     def trop_long(o) -> bool:
+        if o.source == "lrclib" and audio_dementi_par_les_catalogues(
+            audios.get("lrclib"), catalogues
+        ):
+            return True
         return depasse(o.value, limite) is not None or deborde_son_audio(
             o.value, audios.get(o.source)
         )
@@ -801,6 +816,7 @@ def reconcile(
             paroles,
             instrumental,
             audios=audios_des_lrc(lyrics_obs + by_field.get(CHAMP_DUREE_AUDIO, [])),
+            catalogues={o.source: o.value for o in by_field.get("duration", [])},
         )
         if lyrics_res is not None:
             resolutions[LYRICS_SYNCED_FIELD] = lyrics_res

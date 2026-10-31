@@ -3342,7 +3342,7 @@ class TrackRepository:
             for r in conn.execute(
                 text(
                     "SELECT field, source, value, seen_at FROM observations "
-                    "WHERE track_id = :t AND field IN ('lyrics_synced', :audio)"
+                    "WHERE track_id = :t AND field IN ('lyrics_synced', 'duration', :audio)"
                 ),
                 {"t": track_id, "audio": CHAMP_DUREE_AUDIO},
             )
@@ -3371,6 +3371,7 @@ class TrackRepository:
             duree_confirmee=self._duree_confirmee(conn, track_id, ligne["duration"]),
             titre=ligne["title"],
             audios=audios_des_lrc(lues),
+            catalogues={o.source: o.value for o in lues if o.field == "duration"},
         )
         if res is None:
             return

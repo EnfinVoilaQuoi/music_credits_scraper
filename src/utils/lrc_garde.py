@@ -155,6 +155,43 @@ def deborde_son_audio(lrc: str | None, duree_audio: int | None) -> bool:
     return bool(fin and fin > duree_audio + ECART_DUREE_S)
 
 
+#: Catalogues dont la durée est lue par l'IDENTIFIANT de la fiche (jamais par
+#: une recherche de titre) : les seuls témoins de LD2.
+CATALOGUES_PAR_ID = ("deezer", "spotify_web", "apple_music", "youtube")
+
+#: LD2 (2026-10-31) : écart au-delà duquel deux catalogues concordants
+#: démentent l'audio d'un LRC LRCLIB, et accord de ces deux catalogues.
+ECART_AUDIO_DEMENTI_S = 10
+ACCORD_CATALOGUES_S = 2
+
+
+def audio_dementi_par_les_catalogues(duree_audio: int | None, durees: dict) -> str | None:
+    """PUR. LD2 (décision utilisateur 2026-10-31) : l'audio sur lequel LRCLIB a
+    calé son LRC est contredit de plus de `ECART_AUDIO_DEMENTI_S` par au moins
+    deux catalogues INDÉPENDANTS (`vote_durees.famille`) lus par ID et
+    concordants entre eux à `ACCORD_CATALOGUES_S` près : ce LRC minute un autre
+    audio (« On My Vibe » : audio 234 s, Deezer 252, Spotify 251, YouTube 252).
+    `durees` : `{source: secondes}` des durées observées. Le motif, sinon None."""
+    if not duree_audio:
+        return None
+    lues = {}
+    for s, d in (durees or {}).items():
+        try:
+            if s in CATALOGUES_PAR_ID and d:
+                lues[s] = int(float(d))
+        except (TypeError, ValueError):
+            continue
+    for v in sorted(set(lues.values())):
+        accord = {s: d for s, d in lues.items() if abs(d - v) <= ACCORD_CATALOGUES_S}
+        if len({famille(s) for s in accord}) < 2:
+            continue
+        if all(abs(d - int(duree_audio)) > ECART_AUDIO_DEMENTI_S for d in accord.values()):
+            return f"audio LRCLIB {duree_audio} s ≠ " + ", ".join(
+                f"{s} {d} s" for s, d in sorted(accord.items())
+            )
+    return None
+
+
 def depasse(lrc: str | None, limite: int | None) -> int | None:
     """PUR. La fin du LRC si elle dépasse `limite` de plus de `ECART_DUREE_S`."""
     fin = fin_du_lrc(lrc) if limite else None

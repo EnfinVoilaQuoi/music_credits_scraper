@@ -69,7 +69,7 @@ class TestLrcCaleSurLesCatalogues:
         assert pol.arbitrage_etendu(_cas("lrc_douteux", t), t, ctx) is None
 
     def test_audio_d_une_autre_duree_reste_a_l_humain(self):
-        """« On My Vibe » : audio LRCLIB 234 s, catalogues 251-252 s (LD2, pas branchée)."""
+        """« On My Vibe » : audio LRCLIB 234 s, catalogues 251-252 s (LD2 : verdict de colonne)."""
         t = _lrc(
             _t(
                 "On My Vibe",

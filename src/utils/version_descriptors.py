@@ -1192,6 +1192,29 @@ def porte_une_version(titre: str | None) -> bool:
     return cle_titre(titre).variant.kind != Kind.NONE
 
 
+#: Mots d'un titre AMBIGU (version, prise, titre générique) — en mots entiers.
+_MOTS_AMBIGUS = re.compile(
+    r"\b(?:intro|outro|interlude|skit|prelude|prélude|remix|rmx|mix|live|edit|version|"
+    r"demo|démo|acoustic|acoustique|instrumental|chopped|screwed|slowed|sped|reprise|"
+    r"freestyle|session|snippet|extended|radio)\b",
+    re.IGNORECASE,
+)
+
+
+def titre_d_original(titre: str | None) -> bool:
+    """PUR. Le titre est celui d'un ORIGINAL sans ambiguïté — PRUDENT à
+    dessein : un groupe entre parenthèses ou crochets, un « - » suffixe, un mot
+    de version ou de titre générique suffisent à le rendre à l'humain (« Nuit
+    (Interlude) », « … [ChoppedNotSlopped] » que `parse_variant` ne lit pas).
+    Les règles du panneau (`politiques_revue`) et le verdict de durée le
+    partagent (déplacé ici le 2026-10-31)."""
+    if not titre:
+        return False
+    if re.search(r"[\(\[]| - ", titre) or _MOTS_AMBIGUS.search(titre):
+        return False
+    return not porte_une_version(titre) and not titre_generique(titre)
+
+
 def meme_famille_de_version(a: str | None, b: str | None) -> bool:
     """PUR. Les DESCRIPTEURS des deux titres désignent la même version
     (`meme_famille`) ; le reste du titre n'est pas jugé ici."""

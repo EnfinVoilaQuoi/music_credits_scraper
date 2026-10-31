@@ -23,6 +23,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from src.services import revue
+
+# `titre_d_original` vit chez le juge des titres depuis le 2026-10-31 : le
+# verdict de durée (`reconcile`) le consulte aussi.
+from src.utils.version_descriptors import titre_d_original
 from src.utils.vote_durees import FRAGILES, ISOLEE, SOUTENUE, TOLERANCE_S, famille, voter
 
 #: Écart au-delà duquel deux durées ne sont plus une édition du même fichier :
@@ -231,6 +235,69 @@ def politique_durees(minimum: int) -> Callable:
 # ── ID Spotify proposé par SongBPM ──────────────────────────────────────────
 
 
+#: Mots qui ne font pas un autre titre (articles, liaison, crédit).
+_MOTS_VIDES = frozenset(
+    {"the", "a", "an", "le", "la", "les", "de", "du", "des", "of", "and", "et", "feat", "ft"}
+)
+
+
+def _mots_de(texte: str | None) -> set[str]:
+    import unicodedata
+
+    t = unicodedata.normalize("NFKD", texte or "").encode("ascii", "ignore").decode().casefold()
+    return set(re.findall(r"[a-z0-9]+", t))
+
+
+def refus_id_propose(track, identite: dict) -> Arbitrage | None:
+    """Refus À LA POSE d'un ID proposé (2026-10-31), quand les preuves
+    MONTRENT qu'il n'est pas celui de la fiche :
+      · IP2 — un catalogue lu par son identifiant (Apple, Deezer) s'écarte de
+        la durée de l'ID de plus de `ECART_VERSION_S`, et aucune durée
+        indépendante ne la confirme (« Pursuit of Happiness [Steve Aoki
+        Remix] [Mixed] » : Apple 165 s, l'ID sert l'« Extended » de 374 s) ;
+      · IP1 — Spotify sert un AUTRE titre (des mots en plus, « Je n'oublie
+        pas » pour « Oublie », « Jacques Chirac 2.0 »), aucune durée
+        indépendante (clip compris) ne confirme celle de l'ID, et les mots en
+        plus ne sont pas dans l'album de la fiche (« Heartless - The Voice
+        Performance » d'une fiche de *The Voice: Season 1* : sans doute juste).
+    None : rien de montré, l'humain."""
+    from src.services.revue import _titre_sans_feat
+    from src.utils.version_descriptors import titres_equivalents
+
+    nom, servie = identite.get("name") or "", identite.get("duration")
+    durees = _durees(track)
+    confirment = [
+        s
+        for s, d in durees.items()
+        if s not in FRAGILES and s not in ("heritage", "reccobeats") and d and servie
+        if abs(int(d) - int(servie)) <= ECART_FICHIER_S
+    ]
+    if confirment:
+        return None
+    contre = [
+        f"{s} {durees[s]} s"
+        for s in ("apple_music", "deezer")
+        if durees.get(s) and servie and abs(int(durees[s]) - int(servie)) > ECART_VERSION_S
+    ]
+    servi = f"Spotify sert « {nom} » ({servie} s)"
+    if contre:
+        return Arbitrage(
+            "un catalogue dément la durée de l'ID : refuser",
+            "refuser_id",
+            f"{servi} ; {', '.join(contre)}",
+        )
+    if not nom or titres_equivalents(_titre_sans_feat(nom), _titre_sans_feat(track.title)):
+        return None
+    en_plus = _mots_de(nom) - _mots_de(track.title) - _MOTS_VIDES
+    if not en_plus or en_plus & _mots_de(track.album):
+        return None
+    return Arbitrage(
+        "Spotify sert un autre titre : refuser l'ID",
+        "refuser_id",
+        f"{servi} ; mots en plus : {', '.join(sorted(en_plus))} ; aucune durée indépendante",
+    )
+
+
 def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
     """Une fiche SANS ID (une fiche à un AUTRE ID n'est jamais tranchée : autre
     édition ou ID faux, l'humain). `lire(sid)` rend l'identité de la page embed
@@ -285,7 +352,7 @@ def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
             and abs(d - duree_id) <= ECART_FICHIER_S
         )
         if not accord:
-            return None
+            return refus_id_propose(track, identite)
         return Arbitrage(
             "poser l'ID",
             "poser_id",
@@ -297,6 +364,36 @@ def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
 
 
 # ── Liens Deezer ────────────────────────────────────────────────────────────
+
+
+def _autre_que_la_page_deezer_de_la_fiche(track, piste) -> str | None:
+    """La fiche a déjà SA page Deezer, dont la durée est confirmée par un
+    autre catalogue lu par son ID (Spotify, Apple) ; la piste candidate, une
+    AUTRE page au même titre, a un autre ISRC et s'en écarte de plus de
+    `ECART_VERSION_S` : c'est une autre version (2026-10-31, DL1). Le vote
+    général ne le voyait pas : il remplace la durée Deezer de la fiche par
+    celle de la candidate, et il ne reste que Spotify, une voix. La raison,
+    sinon None."""
+    duree, isrc = piste.get("duration"), (piste.get("isrc") or "").upper()
+    if not (duree and isrc and track.isrc and track.deezer_id):
+        return None
+    if str(track.deezer_id) == str(piste.get("id")) or isrc == str(track.isrc).upper():
+        return None
+    if not titre_d_original(track.title):
+        return None
+    durees = _durees(track)
+    sienne = durees.get("deezer")
+    temoins = [
+        s
+        for s in ("spotify_web", "apple_music")
+        if sienne and durees.get(s) and abs(int(durees[s]) - int(sienne)) <= ECART_FICHIER_S
+    ]
+    if not temoins or abs(int(duree) - int(sienne)) <= ECART_VERSION_S:
+        return None
+    return (
+        f"page de la fiche {track.deezer_id} : {sienne} s = {', '.join(temoins)} ; "
+        f"candidate {piste.get('id')} : {duree} s, ISRC {isrc} ≠ {track.isrc}"
+    )
 
 
 def politique_liens_deezer(cas, track, _ctx):
@@ -351,6 +448,9 @@ def politique_liens_deezer(cas, track, _ctx):
         return Arbitrage(
             "rattacher", "deezer_appliquer", f"{duree} s = {', '.join(accord)}, même titre"
         )
+    autre_version = _autre_que_la_page_deezer_de_la_fiche(track, piste)
+    if autre_version:
+        return Arbitrage("autre version : ne pas rattacher", "normal", autre_version)
     if duree and _dementie({**durees, "deezer": duree}, "deezer", editions, 2) is not None:
         return Arbitrage(
             "autre version : ne pas rattacher",
@@ -477,6 +577,34 @@ def _part_du_lrc_dans_la_page(track) -> float | None:
     return len(paires & bigrammes(ref)) / len(paires) if paires else None
 
 
+#: Catalogues lus par un IDENTIFIANT (ou le lien) : témoins de l'audio d'un LRC.
+#: Ni YTM (le hit d'une recherche de paroles), ni les sources lues au titre.
+_CATALOGUES_PAR_ID = ("deezer", "spotify_web", "apple_music", "youtube")
+
+
+def _lrc_cale_sur_les_catalogues(track, ctx) -> str | None:
+    """Le LRC LRCLIB de la colonne est calé sur un audio que deux catalogues
+    lus par ID donnent à `ECART_FICHIER_S` près : c'est le LRC de CET
+    enregistrement, et l'écart de mots avec la page tient à la transcription
+    (2026-10-31, mesuré : « Haaland », « Alors on danse », « If I Ain't Got
+    You (Kanye West Remix) »). La raison, sinon None."""
+    from src.utils.lrc_garde import audios_des_lrc
+
+    if ctx is None or (track.lyrics.synced_source or "").casefold() != "lrclib":
+        return None
+    audio = audios_des_lrc(ctx.obs.get(track.id, [])).get("lrclib")
+    if not audio:
+        return None
+    accord = {
+        s: d
+        for s, d in _durees(track).items()
+        if s in _CATALOGUES_PAR_ID and d and abs(int(d) - audio) <= ECART_FICHIER_S
+    }
+    if len({famille(s) for s in accord}) < 2:
+        return None
+    return f"audio LRCLIB {audio} s = " + ", ".join(f"{s} {d} s" for s, d in sorted(accord.items()))
+
+
 def politique_lrc(cas, track, ctx):
     """LRC douteux : celui d'une AUTRE fiche (≥ 90 % de ses paires de mots,
     quelle que soit la part des siennes) se retire ; un LRC minuté au-delà de
@@ -536,6 +664,10 @@ def politique_lrc(cas, track, ctx):
             "retirer_lrc",
             f"LRC jusqu'à {fin} s, fiche {track.duration} s",
         )
+    if cas.detecteur == "lrc_douteux":
+        cale = _lrc_cale_sur_les_catalogues(track, ctx)
+        if cale:
+            return Arbitrage("LRC calé sur l'audio de la fiche : ✓ Normal", "normal", cale)
     return None
 
 
@@ -616,6 +748,16 @@ def politique_ecarts_deezer(
                     "deezer_appliquer",
                     f"disque de {album.get('artist_name')}",
                 )
+            # DA2 (2026-10-31) : sans page Genius, Deezer crédite l'artiste
+            # par SON identifiant (vérifié) parmi les contributeurs : un
+            # featuring réel (« 600K » de Heuss L'enfoiré avec PLK).
+            credite = [nom for cid, nom in piste.get("contributors") or [] if cid in ids_artiste]
+            if credite:
+                return Arbitrage(
+                    "créer la fiche (Deezer crédite l'artiste par son ID)",
+                    "deezer_appliquer",
+                    f"disque de {album.get('artist_name')} ; contributeur {credite[0]}",
+                )
             return None
         return None
 
@@ -659,25 +801,26 @@ def politique_kworb(cas, _track, _ctx, rejoues: dict | None = None):
 
 
 def politique_alias(cas, _track, ctx):
-    """Un ALIAS proposé (jamais une formation : sa nature groupe / collectif se
-    tranche dans la fenêtre Groupes) est confirmé quand MusicBrainz ET Discogs
-    le donnent, ou quand MusicBrainz le type « nom d'artiste ». Une page
-    d'alias Discogs sans type reste à l'humain : nom civil (« Eli Yaffa ») ou
-    nom douteux (« Global » chez Médine), rien ne les distingue. Prudence : un
-    alias confirmé devient un nom de RECHERCHE (certifications, collectifs) et
-    un profil Spotify connu."""
+    """Un ALIAS proposé est confirmé quand MusicBrainz ET Discogs le donnent,
+    quand MusicBrainz le type « nom d'artiste », ou quand Genius le crédite
+    comme auteur sur `FICHES_MIN_LIEN` fiches de l'artiste (L1, 2026-10-31).
+    Une page d'alias Discogs sans autre trace reste à l'humain : nom civil mal
+    graphié (« Eli Yaffa » ; Genius écrit « Elie Yaffa ») ou nom douteux
+    (« Global » chez Médine). Une formation n'est confirmée que si sa nature
+    est connue (L2) ; sinon elle se tranche dans la fenêtre Groupes.
+    Prudence : un alias confirmé devient un nom de RECHERCHE (certifications,
+    collectifs) et un profil Spotify connu."""
     preuves = cas.preuves or {}
-    if preuves.get("kind") != "alias":
-        return None
+    kind, nom = preuves.get("kind"), preuves.get("nom")
     rel = next(
-        (
-            r
-            for r in ctx.relations_proposees
-            if r.kind == "alias" and r.related_name == preuves.get("nom")
-        ),
+        (r for r in ctx.relations_proposees if r.kind == kind and r.related_name == nom),
         None,
     )
     if rel is None:
+        return None
+    if kind == "member_of":
+        return _formation_par_ses_morceaux(rel, ctx)
+    if kind != "alias":
         return None
     sources = set((rel.source or "").split("+"))
     if {"discogs", "musicbrainz"} <= sources:
@@ -686,7 +829,71 @@ def politique_alias(cas, _track, ctx):
         return Arbitrage(
             "confirmer l'alias", "confirmer_lien", "MusicBrainz : nom d'artiste (Artist name)"
         )
+    creditees = _fiches_ou_il_ecrit(nom, ctx)
+    if len(creditees) >= FICHES_MIN_LIEN:
+        return Arbitrage(
+            "confirmer l'alias",
+            "confirmer_lien",
+            f"Genius le crédite (auteur, compositeur, producteur) sur {len(creditees)} "
+            f"fiches de l'artiste : {', '.join(creditees[:3])}…",
+        )
     return None
+
+
+#: Fiches de l'artiste où Genius nomme un alias ou une formation proposés,
+#: au-dessous desquelles le lien reste à l'humain (L1 / L2, 2026-10-31).
+FICHES_MIN_LIEN = 3
+
+_ROLES_D_AUTEUR = frozenset({"Writer", "Composer", "Lyricist", "Producer"})
+
+
+def _fiches_ou_il_ecrit(nom: str, ctx) -> list[str]:
+    """Titres des fiches dont les crédits Genius nomment `nom` (nom normalisé
+    égal, jamais une sous-chaîne) dans un rôle d'auteur : le témoin d'un nom
+    civil ou d'un nom de producteur (« Claude M'Barali », 22 fiches de MC
+    Solaar)."""
+    from src.utils.title_matching import normalize_name
+
+    cle = normalize_name(nom)
+    return [
+        t.title
+        for t in ctx.disco
+        if any(
+            c.role.value in _ROLES_D_AUTEUR and normalize_name(c.name) == cle
+            for c in t.credits or []
+        )
+    ]
+
+
+def _interpretes(track) -> set[str]:
+    from src.utils.title_matching import normalize_name
+
+    noms = f"{track.primary_artist_name or ''},{track.featured_artists or ''}"
+    return {
+        normalize_name(n)
+        for n in re.split(r",|&|\band\b|\bx\b|\bfeat\.?", noms, flags=re.IGNORECASE)
+        if n.strip()
+    }
+
+
+def _formation_par_ses_morceaux(rel, ctx) -> Arbitrage | None:
+    """Une formation proposée dont la NATURE (groupe / collectif) est déjà
+    connue, et que Genius donne pour interprète d'au moins `FICHES_MIN_LIEN`
+    fiches de l'artiste (L2, 2026-10-31 : « Hustle Gang », collectif, 4
+    fiches de Travis Scott). Sans nature, la fenêtre « Groupes » décide."""
+    from src.utils.title_matching import normalize_name
+
+    if not rel.formation:
+        return None
+    cle = normalize_name(rel.related_name)
+    fiches = [t.title for t in ctx.disco if cle in _interpretes(t)]
+    if len(fiches) < FICHES_MIN_LIEN:
+        return None
+    return Arbitrage(
+        f"confirmer la formation ({rel.formation})",
+        "confirmer_lien",
+        f"interprète de {len(fiches)} fiches de l'artiste : {', '.join(fiches[:3])}…",
+    )
 
 
 # ── Règles VALIDÉES (décisions utilisateur 2026-10-20) ─────────────────────
@@ -712,29 +919,6 @@ REGLES_VALIDEES = frozenset(
 #: « ✓ Normal », qui ne change aucune donnée, 2.
 _DUREES_POUR_RETIRER = politique_durees(3)
 _DUREES_POUR_NORMAL = politique_durees(2)
-
-
-#: Mots d'un titre AMBIGU (version, prise, titre générique) — en mots entiers.
-_MOTS_AMBIGUS = re.compile(
-    r"\b(?:intro|outro|interlude|skit|prelude|prélude|remix|rmx|mix|live|edit|version|"
-    r"demo|démo|acoustic|acoustique|instrumental|chopped|screwed|slowed|sped|reprise|"
-    r"freestyle|session|snippet|extended|radio)\b",
-    re.IGNORECASE,
-)
-
-
-def titre_d_original(titre: str | None) -> bool:
-    """Le titre est celui d'un ORIGINAL sans ambiguïté — PRUDENT à dessein : un
-    groupe entre parenthèses ou crochets, un « - » suffixe, un mot de version
-    ou de titre générique suffisent à le rendre à l'humain (« Nuit
-    (Interlude) », « … [ChoppedNotSlopped] » que `parse_variant` ne lit pas)."""
-    from src.utils.version_descriptors import porte_une_version, titre_generique
-
-    if not titre:
-        return False
-    if re.search(r"[\(\[]| - ", titre) or _MOTS_AMBIGUS.search(titre):
-        return False
-    return not porte_une_version(titre) and not titre_generique(titre)
 
 
 def arbitrage_valide(cas, track, ctx) -> Arbitrage | None:
@@ -816,10 +1000,13 @@ def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | N
     lue (réseau, gardée au brut) et le gate est celui des runs."""
     if cas.detecteur != "id_spotify_propose" or track is None:
         return None
-    if not titre_d_original(track.title):
-        return None
     if lire is None:
         from src.utils.spotify_identity import lire_identite_http as lire
+    if not titre_d_original(track.title):
+        # Une version ne reçoit jamais d'ID par règle ; un refus MONTRÉ (IP1 /
+        # IP2), si : il ne pose rien et se rétablit.
+        identite = None if track.spotify_id else lire(cas.preuves.get("spotify_id_propose"))
+        return refus_id_propose(track, identite) if identite else None
     if gate is None:
         from src.utils.spotify_identity import valider_identite
 
@@ -854,6 +1041,9 @@ REGLES_DEEZER = frozenset(
         ("deezer_apparition", "deezer_rattacher_isrc"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
+        # 2026-10-31 (DV1) : l'instrumental / a cappella Deezer d'un morceau
+        # connu, sans page : pas de fiche. 3 / 15 sur la copie (Flynt).
+        ("deezer_version", "normal"),
     }
 )
 
@@ -895,6 +1085,13 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     par_isrc = _rattacher_par_isrc(cas, ctx, isrcs_connus, ids_artiste)
     if par_isrc is not None:
         return par_isrc
+    if cas.detecteur == "deezer_version":
+        # Une version n'est jamais un original : seul le « ✓ Normal » de
+        # l'instrumental / a cappella (aucune fiche créée) passe (DV1).
+        arbitrage = politique_ecarts_deezer(isrcs_connus, ids_artiste)(cas, track, ctx)
+        if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_DEEZER:
+            return arbitrage
+        return None
     piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
     if not titre_d_original(piste.get("title") or cas.morceau):
         return None
@@ -1301,6 +1498,15 @@ REGLES_ETENDUES = frozenset(
         # morceau (concert, émission, compilation) ; simulée sur la copie,
         # 4 liens, chacun confronté à son titre (aucun n'est le morceau).
         ("video_trop_longue", "retirer_video_recherche"),
+        # 2026-10-31 (LD1, rapport panneau-familles) : LRC LRCLIB calé sur un
+        # audio que 2 catalogues lus par ID confirment ; 3 / 22 sur la copie.
+        ("lrc_douteux", "normal"),
+        # 2026-10-31 (SP1) : ID Spotify confirmé par Apple ou Deezer lus par
+        # leur ID ; 2 / 8 sur la copie (Take 'Em High, Ghetto).
+        ("duree_spotify", "normal"),
+        # 2026-10-31 (D1) : deux pages au même titre, artistes crédités
+        # différents (adresse Genius) et paroles communes < 0,9 ; 6 / 13.
+        ("doublon", "normal"),
     }
 )
 
@@ -1511,6 +1717,140 @@ def politique_songbpm_version(cas, track, ctx):
     return _SONGBPM_PAR_LE_VOTE(cas, track, ctx)
 
 
+#: Au-delà de cette part de paires de mots communes, deux pages au même titre
+#: peuvent être la même transcription : la fusion se décide à la main (D1).
+PAROLES_DEUX_ENREGISTREMENTS_MAX = 0.9
+
+
+def artistes_de_la_page(track) -> str | None:
+    """Les artistes que la page Genius crédite, tels que son ADRESSE les écrit
+    (« kanye-west-and-lauryn-hill » dans `…/Kanye-west-and-lauryn-hill-i-
+    cant-wait-lyrics`) : Genius compose l'adresse des interprètes, puis du
+    titre. None quand l'adresse ne finit pas par le titre de la fiche."""
+    import unicodedata
+
+    m = re.search(r"genius\.com/([^/?#]+)-lyrics", track.genius_url or "", re.I)
+    if not m or not track.title:
+        return None
+    titre = unicodedata.normalize("NFKD", track.title).encode("ascii", "ignore").decode()
+    titre = re.sub(r"[^a-z0-9]+", "-", re.sub(r"['’.]", "", titre.lower())).strip("-")
+    adresse = m.group(1).lower()
+    if not titre or not adresse.endswith("-" + titre):
+        return None
+    return adresse[: -len(titre) - 1] or None
+
+
+def politique_doublon(cas, track, ctx):
+    """D1 (2026-10-31) : deux pages Genius au même titre sont deux
+    ENREGISTREMENTS quand Genius leur crédite des artistes différents (son
+    adresse) ET que leurs paroles, présentes des deux côtés, ont moins de
+    `PAROLES_DEUX_ENREGISTREMENTS_MAX` de paires de mots communes (« I CAN'T
+    WAIT » avec et sans Lauryn Hill, 0,78). ✓ Normal ; des paroles quasi
+    identiques ou les mêmes artistes : une fusion possible, l'humain."""
+    from src.utils.concordance_paroles import paroles_de_reference, recouvrement_bigrammes
+
+    if cas.detecteur != "doublon" or track is None:
+        return None
+    ids = set((cas.preuves or {}).get("autres") or ())
+    autres = [t for t in ctx.disco if t.id in ids]
+    if not autres or len(autres) != len(ids):
+        return None
+    mes_artistes = artistes_de_la_page(track)
+    mes_paroles = paroles_de_reference(track.lyrics.text, track.lyrics.source)
+    preuves = []
+    for autre in autres:
+        siens = artistes_de_la_page(autre)
+        if not mes_artistes or not siens or siens == mes_artistes:
+            return None
+        part = recouvrement_bigrammes(
+            mes_paroles, paroles_de_reference(autre.lyrics.text, autre.lyrics.source)
+        )
+        if part is None or part >= PAROLES_DEUX_ENREGISTREMENTS_MAX:
+            return None
+        preuves.append(f"« {siens} » contre « {mes_artistes} », paroles communes {part:.2f}")
+    return Arbitrage("deux enregistrements : ✓ Normal", "normal", " ; ".join(preuves))
+
+
+#: Catalogues lus par un identifiant dont l'accord avec SongBPM le protège.
+_SOUTIENS_SONGBPM = ("deezer", "spotify_web", "apple_music", "reccobeats")
+
+
+def _audios_de_la_page(track) -> list:
+    """Les vidéos AUDIO que la page Genius lie elle-même, publiées par une
+    chaîne « X - Topic » (le fichier du distributeur) et de durée connue."""
+    return [
+        v
+        for v in track.videos or []
+        if v.source == "genius_media"
+        and v.kind == "audio"
+        and v.duration
+        and (v.channel or "").endswith(" - Topic")
+    ]
+
+
+def politique_songbpm_audio_de_la_page(cas, track, _ctx):
+    """SB1 (2026-10-31) : la durée SongBPM d'un ORIGINAL est démentie, de plus
+    de `ECART_VERSION_S`, par l'audio Topic que la page Genius lie elle-même,
+    et aucun catalogue lu par ID ne la soutient à `ECART_FICHIER_S` : la page
+    SongBPM est celle d'une autre version, ses mesures partent (« Cash
+    Money » 161 s contre l'audio de la page 138 s). Versions et medleys
+    restent à l'humain (décision du 2026-10-20)."""
+    if cas.detecteur != "duree_songbpm" or track is None:
+        return None
+    if not titre_d_original(track.title) or re.search(r"\bmedley\b", track.title, re.I):
+        return None
+    durees = _durees(track)
+    sb = durees.get("songbpm")
+    audios = _audios_de_la_page(track)
+    if not sb or not audios or any(abs(v.duration - sb) <= ECART_VERSION_S for v in audios):
+        return None
+    if any(
+        durees.get(s) and abs(int(durees[s]) - int(sb)) <= ECART_FICHIER_S
+        for s in _SOUTIENS_SONGBPM
+    ):
+        return None
+    a = audios[0]
+    return Arbitrage(
+        "SongBPM d'une autre version : retirer ses mesures",
+        "retirer_songbpm",
+        f"SongBPM {sb} s ; audio de la page Genius ({a.channel}) {a.duration} s",
+    )
+
+
+def politique_duree_songbpm(cas, track, ctx):
+    """Une version démentie par 3 catalogues, ou un original démenti par
+    l'audio de sa page."""
+    return politique_songbpm_version(cas, track, ctx) or politique_songbpm_audio_de_la_page(
+        cas, track, ctx
+    )
+
+
+def politique_spotify_confirme(cas, track, _ctx):
+    """La durée de l'ID Spotify, démentie par un témoin, est CONFIRMÉE par un
+    autre catalogue lu par SON identifiant (Apple, Deezer) à `ECART_FICHIER_S`
+    près : l'ID est le bon, le témoin contraire décrit une autre édition
+    (2026-10-31, SP1 : « Take 'Em High » Spotify 179 = Apple 179 contre Deezer
+    207 ; « Ghetto » Spotify 219 = Apple 220 contre Deezer 204). ✓ Normal."""
+    if cas.detecteur != "duree_spotify" or track is None:
+        return None
+    durees = _durees(track)
+    d = durees.get("spotify_web")
+    if not d:
+        return None
+    temoins = [
+        f"{s} {durees[s]} s"
+        for s in ("apple_music", "deezer")
+        if durees.get(s) and abs(int(durees[s]) - int(d)) <= ECART_FICHIER_S
+    ]
+    if not temoins:
+        return None
+    return Arbitrage(
+        "ID Spotify confirmé par un autre catalogue : ✓ Normal",
+        "normal",
+        f"spotify_web {d} s = {', '.join(temoins)}",
+    )
+
+
 def politique_video_autre_chaine(cas, track, _ctx):
     """Le détecteur exige déjà les deux témoins (chaîne d'un artiste étranger,
     durée contredite par toutes celles de la fiche) : le lien part, par un
@@ -1539,10 +1879,12 @@ def politique_video_trop_longue(cas, track, _ctx):
 
 
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "doublon": politique_doublon,
+    "duree_spotify": politique_spotify_confirme,
     "video_trop_longue": politique_video_trop_longue,
     "video_autre_chaine": politique_video_autre_chaine,
     "generique_duree": politique_generique_distincts,
-    "duree_songbpm": politique_songbpm_version,
+    "duree_songbpm": politique_duree_songbpm,
     "id_spotify_version": politique_id_spotify_version,
     "bpm": politique_bpm,
     "tonalite": politique_tonalite,

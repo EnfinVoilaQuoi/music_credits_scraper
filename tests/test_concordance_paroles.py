@@ -124,7 +124,7 @@ class _YTM:
     def __init__(self, lrc):
         self.lrc, self.appels = lrc, []
 
-    def get_lyrics(self, artist, title, exiger_titre=False, video_ids=()):
+    def get_lyrics(self, artist, title, exiger_titre=False, video_ids=(), album=None):
         self.appels.append(exiger_titre)
         return {"lyrics": "x", "lyrics_synced": self.lrc, "source": "YouTube Music"}
 

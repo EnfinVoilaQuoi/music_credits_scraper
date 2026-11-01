@@ -34,7 +34,12 @@ from src.observability.issues import IssueKind
 from src.utils.duree_youtube import iso8601_secondes
 from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words
-from src.utils.version_descriptors import meme_socle, titres_equivalents
+from src.utils.version_descriptors import (
+    meme_disque,
+    meme_socle,
+    titre_generique,
+    titres_equivalents,
+)
 
 logger = get_logger(__name__)
 
@@ -379,7 +384,12 @@ class YTMusicAPI:
         return "\n".join(out) if any_ts else None
 
     def get_lyrics(
-        self, artist: str, title: str, exiger_titre: bool = False, video_ids=()
+        self,
+        artist: str,
+        title: str,
+        exiger_titre: bool = False,
+        video_ids=(),
+        album: str | None = None,
     ) -> dict | None:
         """
         Récupère les paroles via YTMusic : search(songs) → videoId →
@@ -403,25 +413,35 @@ class YTMusicAPI:
         `video_ids` : vidéos DÉJÀ rattachées au morceau, essayées AVANT toute
         recherche (`track_videos`, par ordre de confiance) — l'identité est
         acquise, la recherche n'est plus qu'un repli.
+
+        `album` : le disque de la fiche — un titre générique (« Intro ») ne
+        déclare la durée du hit que si le hit est sur ce disque (`_duree_du_hit`).
         """
         # `attempt` autour de chaque appel à ytmusicapi : la lib fait ses
         # requêtes elle-même, ni le shim `requests_get` ni l'AsyncHttpSession ne
         # les voient. Sans ça, l'observation conclurait `indeterminate`.
         with source_usage.observe(_SOURCE, label=f"{artist} — {title}") as obs:
-            return self._get_lyrics_body(obs, artist, title, exiger_titre, video_ids)
+            return self._get_lyrics_body(obs, artist, title, exiger_titre, video_ids, album)
 
     @staticmethod
-    def _duree_du_hit(hit: dict, title: str) -> int | None:
+    def _duree_du_hit(hit: dict, title: str, album: str | None = None) -> int | None:
         """`duration_seconds` du hit, si son TITRE est bien celui cherché.
 
         Le hit n'est confirmé que par l'artiste (mots entiers) — assez pour
         des paroles qu'on relit, pas pour une durée qui entre en arbitrage
-        (`ytmusic` est 2ᵉ de l'ordre, devant SongBPM et ReccoBeats).
+        (`ytmusic` est 2ᵉ de l'ordre, devant SongBPM et ReccoBeats). Un titre
+        générique exige en plus le même disque (2026-11-01 : les deux « Intro »
+        de JeanJass, 44 s chez Deezer, Spotify et Apple, recevaient les 184 s
+        d'un troisième « Intro »).
         """
         secondes = hit.get("duration_seconds")
         if not isinstance(secondes, int) or secondes <= 0:
             return None
-        return secondes if titres_equivalents(title, hit.get("title")) else None
+        if not titres_equivalents(title, hit.get("title")):
+            return None
+        if titre_generique(title) and not meme_disque(album, (hit.get("album") or {}).get("name")):
+            return None
+        return secondes
 
     @staticmethod
     def _duree_dans_la_playlist(watch, video_id: str) -> int | None:
@@ -481,7 +501,13 @@ class YTMusicAPI:
         return str(text).strip(), synced, source, duree_audio
 
     def _get_lyrics_body(
-        self, obs, artist: str, title: str, exiger_titre: bool = False, video_ids=()
+        self,
+        obs,
+        artist: str,
+        title: str,
+        exiger_titre: bool = False,
+        video_ids=(),
+        album: str | None = None,
     ) -> dict | None:
         """Corps de `get_lyrics`, sous l'observation ouverte par elle."""
         try:
@@ -541,7 +567,7 @@ class YTMusicAPI:
                 logger.debug(f"YTM lyrics: {motif} non confirmé pour '{artist} - {title}'")
                 obs.absent(f"{motif} non confirmé sur les résultats")
                 return None
-            duree = self._duree_du_hit(chosen, title)
+            duree = self._duree_du_hit(chosen, title, album)
             sans_paroles = (
                 {
                     "lyrics": None,

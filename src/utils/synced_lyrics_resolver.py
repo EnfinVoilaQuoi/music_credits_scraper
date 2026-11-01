@@ -154,6 +154,7 @@ def resolve_track_synced_lyrics(
                 track.title,
                 exiger_titre=not jugeable(paroles),
                 video_ids=videos_connues(track),
+                album=track.album,
             )
         except (AttributeError, TypeError) as e:
             # Le client YTM gère déjà son réseau (YTMusicError/requests) → ici on ne

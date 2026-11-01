@@ -209,6 +209,19 @@ class TestDureeDeclaree:
         api.yt = _YTLyrics(search=[_resultat()], watch={})
         assert api.get_lyrics("ISHA", "Titre") is None
 
+    def test_un_titre_generique_exige_le_meme_disque(self, api):
+        """2026-11-01 : les deux « Intro » de JeanJass (44 s chez Deezer,
+        Spotify, Apple) recevaient les 184 s d'un troisième « Intro »."""
+        hit = {**self._hit("Intro", 184), "album": {"name": "Autre disque"}}
+        hit["artists"] = [{"name": "JeanJass"}]
+        api.yt = _YTLyrics(search=[hit], watch={})
+        assert api.get_lyrics("JeanJass", "Intro", album="Tous ces ongles rongés") is None
+        assert api.get_lyrics("JeanJass", "Intro") is None
+        hit["album"]["name"] = "Tous ces ongles rongés"
+        assert (
+            api.get_lyrics("JeanJass", "Intro", album="Tous ces ongles rongés")["duration"] == 184
+        )
+
     def test_artiste_non_confirme(self, api):
         api.yt = _YTLyrics(search=[_resultat(artiste="Un Autre Rappeur")])
         assert api.get_lyrics("ISHA", "Titre") is None

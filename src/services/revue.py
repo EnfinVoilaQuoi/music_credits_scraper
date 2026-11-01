@@ -1959,6 +1959,50 @@ def video_d_une_autre_chaine(track, ctx=None):
     return None
 
 
+def recherche_dementie(track, ctx=None):
+    """Une vidéo posée par la RECHERCHE, que la fiche porte seule, dont le titre
+    VU n'est pas celui de la fiche (titre contenu, mot en plus : « Final
+    Disconnect » de Seven sur « Disconnect ») ET dont la durée (e62) est
+    démentie de plus de `_ECART_LIEN_ETRANGER_S` par au moins deux catalogues
+    lus par ID, d'accord entre eux à `TOLERANCE_S` : un autre morceau, dont la
+    durée prenait la colonne et les vues comptaient (2026-11-01 : simulé sur la
+    base, 6 vidéos sur 59 titres non équivalents, toutes un autre morceau ou
+    une autre partie — « I Want Your Love » sur « I Want You », l'« Article 2 »
+    sur l'« Article 3 »). Le gate Spotify et SongBPM exigent déjà une durée
+    pour un titre contenu (2026-10-15, `cccebc7`) ; la recherche YouTube non."""
+    from src.utils.version_descriptors import titres_equivalents
+
+    if not track.videos:
+        return None
+    observees = track.durations_observees or {}
+    catalogues = sorted(int(d) for s in _DUREES_PAR_ID if (d := observees.get(s)))
+    if len(catalogues) < 2 or catalogues[-1] - catalogues[0] > TOLERANCE_S:
+        return None
+    proprietaires = _proprietaires_des_videos(ctx) if ctx is not None else {}
+    for v in sorted(track.videos, key=lambda x: -(x.views or 0)):
+        if v.source != "search_auto" or not v.recherche or not v.duration:
+            continue
+        vu = v.recherche.get("titre") or ""
+        if titres_equivalents(track.title, vu):
+            continue
+        if len({_page(t) for t in proprietaires.get(v.video_id, [track])}) > 1:
+            continue  # partagée : `video_partagee` la juge
+        if any(abs(d - v.duration) <= _ECART_LIEN_ETRANGER_S for d in catalogues):
+            continue
+        return (
+            f"la recherche a posé « {vu} » ({v.duration} s) : ni le titre ni la durée "
+            f"des catalogues ({', '.join(f'{d} s' for d in sorted(set(catalogues)))})",
+            {
+                "video_id": v.video_id,
+                "track_ids": [track.id],
+                "titre_vu": vu,
+                "duree_video": v.duration,
+                "impact": v.views or 0,
+            },
+        )
+    return None
+
+
 #: Une vidéo Genius qui ne NOMME pas le morceau et dure plus de 3 fois sa
 #: durée n'est pas le morceau : concert, émission, compilation. Mesuré sur la
 #: copie du 2026-10-30 (7 877 vidéos `genius_media` à durée connue) : les
@@ -3278,6 +3322,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "Vidéo Genius bien plus longue que le morceau",
         "📏",
         video_trop_longue,
+    ),
+    Detecteur(
+        "recherche_dementie",
+        "Vidéo de la recherche : ni le titre ni la durée",
+        "🔎",
+        recherche_dementie,
     ),
     # Pour INFORMATION (décision utilisateur 2026-10-26, « la vérif manuelle,
     # c'est pour les cas que le code ne peut pas trancher ») : une page qui ne

@@ -1648,6 +1648,10 @@ REGLES_ETENDUES = frozenset(
         # morceau (concert, émission, compilation) ; simulée sur la copie,
         # 4 liens, chacun confronté à son titre (aucun n'est le morceau).
         ("video_trop_longue", "retirer_video_recherche"),
+        # 2026-11-01 : vidéo de la recherche au titre non équivalent, démentie
+        # de plus de 10 s par 2 catalogues lus par ID ; simulée sur la base,
+        # 6 vidéos, chacune un autre morceau ou une autre partie.
+        ("recherche_dementie", "retirer_video_recherche"),
         # 2026-10-31 (LD1, rapport panneau-familles) : LRC LRCLIB calé sur un
         # audio que 2 catalogues lus par ID confirment ; 3 / 22 sur la copie.
         ("lrc_douteux", "normal"),
@@ -2058,7 +2062,21 @@ def politique_video_trop_longue(cas, track, _ctx):
     )
 
 
+def politique_recherche_dementie(cas, track, _ctx):
+    """Le détecteur exige déjà les deux témoins (titre vu non équivalent, durée
+    démentie par deux catalogues d'accord) : le lien part, par un refus de
+    règle (« ↩ Rétablir » le rend)."""
+    if cas.detecteur != "recherche_dementie" or track is None:
+        return None
+    return Arbitrage(
+        "vidéo d'un autre morceau (titre et durée) : retirer le lien",
+        "retirer_video_recherche",
+        cas.motif,
+    )
+
+
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "recherche_dementie": politique_recherche_dementie,
     "doublon": politique_doublon,
     "duree_spotify": politique_spotify_confirme,
     "video_trop_longue": politique_video_trop_longue,

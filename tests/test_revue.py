@@ -862,6 +862,31 @@ class TestMemoireDesVerdicts:
         assert data_manager.annuler_verdict(a.id, cas.detecteur, cas.cle)
         assert len(revue.analyser(data_manager, a).actifs) == 1
 
+    def test_un_verdict_vaut_chez_la_ligne_soeur(self, data_manager):
+        """2026-11-01 : « Freestyle France - Belgique », tranché chez Isha,
+        revenait au panneau chez JeanJass, nouvelle ligne sœur de la page."""
+        lignes = []
+        for nom in ("Isha", "JeanJass"):
+            a = Artist(name=nom)
+            a.id = data_manager.save_artist(a)
+            t = Track(title="Lunatic", artist=a)
+            t.genius_id = 4218624
+            t.observations += [
+                Observation("bpm", 83, "reccobeats"),
+                Observation("bpm", 130, "songbpm"),
+            ]
+            data_manager.save_track(t)
+            a.tracks = data_manager.get_artist_tracks(a.id)
+            lignes.append(a)
+        isha, jeanjass = lignes
+        (cas,) = revue.analyser(data_manager, isha).actifs
+        data_manager.trancher_cas(isha.id, cas.detecteur, cas.cle)
+        assert revue.analyser(data_manager, jeanjass).actifs == []
+        # Rétabli depuis la sœur : le cas revient chez les deux.
+        assert data_manager.annuler_verdict(jeanjass.id, cas.detecteur, cas.cle)
+        assert len(revue.analyser(data_manager, isha).actifs) == 1
+        assert len(revue.analyser(data_manager, jeanjass).actifs) == 1
+
     def test_de_nouvelles_preuves_font_revenir_le_cas(self, data_manager):
         a = _booba_lunatic(data_manager)
         (cas,) = revue.analyser(data_manager, a).actifs
@@ -1384,6 +1409,42 @@ class TestVideoPartagee:
         assert cas(durees={"youtube_video": 303}) is None  # aucun catalogue lu par ID
         assert cas(duree=295) is None  # 8 s : pas assez pour un retrait
         assert cas(durees={"deezer": 303, "discogs": 258}) is None  # une source d'accord
+
+    def test_une_video_de_la_recherche_ni_au_titre_ni_a_la_duree(self):
+        """« Disconnect » de Seven (feat. JeanJass) : la recherche avait posé
+        « Final Disconnect » (366 s), Apple et Spotify à 266 s (2026-11-01)."""
+        from src.services import politiques_revue
+
+        def fiche(vu="Final Disconnect", duree=366, durees=None, source="search_auto"):
+            v = TrackVideo(
+                video_id="F",
+                title=vu,
+                source=source,
+                recherche={"titre": vu, "artistes": ["Seven"], "album": "End of the Circle"},
+            )
+            v.duration = duree
+            t = _t("Disconnect", 1, videos=[v], genius_id=11)
+            t.durations_observees = (
+                durees if durees is not None else {"apple_music": 266, "spotify_web": 266}
+            )
+            return t
+
+        t = fiche()
+        motif, preuves = revue.recherche_dementie(t, _ctx(t))
+        assert "Final Disconnect" in motif and preuves["video_id"] == "F"
+        cas = revue.Cas("recherche_dementie", 1, "M", motif, 0, preuves, "k")
+        assert politiques_revue.arbitrage_etendu(cas, t, _ctx(t)).action == (
+            "retirer_video_recherche"
+        )
+        for t in (
+            fiche(vu="Disconnect"),  # le titre de la fiche
+            fiche(duree=270),  # la durée des catalogues
+            fiche(durees={"apple_music": 266}),  # un seul catalogue
+            fiche(durees={"apple_music": 266, "spotify_web": 280}),  # en désaccord
+            fiche(source="genius_media"),  # pas la recherche
+            fiche(duree=None),
+        ):
+            assert revue.recherche_dementie(t, _ctx(t)) is None
 
     def test_la_recherche_dit_l_interprete_principal(self):
         vue = TrackVideo(

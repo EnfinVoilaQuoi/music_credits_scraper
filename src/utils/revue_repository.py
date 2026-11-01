@@ -19,7 +19,12 @@ from datetime import datetime
 
 from sqlalchemy import delete, insert, select, update
 
-from src.persistence.schema import revue_corrections, revue_signalements, revue_verdicts
+from src.persistence.schema import (
+    revue_corrections,
+    revue_signalements,
+    revue_verdicts,
+    tracks,
+)
 
 VERDICT_NORMAL = "normal"
 #: « Aucune donnée ne tranche » (décision utilisateur 2026-10-31) : le cas quitte
@@ -38,12 +43,40 @@ class RevueRepository:
             return marques_par_fiche(conn, artist_id)
 
     def verdicts_revue(self, artist_id: int) -> dict[tuple[str, str], dict]:
-        """`{(détecteur, clé): {verdict, note, morceau, motif, decided_at}}`."""
+        """`{(détecteur, clé): {verdict, note, morceau, motif, decided_at}}`.
+
+        Avec ceux des LIGNES SŒURS : la clé d'un cas sur une fiche à page
+        Genius est « g<page>|<empreinte des preuves> », la même pour chaque
+        artiste crédité ; un verdict y vaut pour tout l'enregistrement, sauf
+        les certifs, jugées par ligne (2026-11-01 : « Freestyle France -
+        Belgique », tranché chez Isha, revenait chez JeanJass)."""
         with self.engine.connect() as conn:
             rows = conn.execute(
                 select(revue_verdicts).where(revue_verdicts.c.artist_id == artist_id)
             ).mappings()
-            return {(r["detecteur"], r["cle"]): dict(r) for r in rows}
+            verdicts = {(r["detecteur"], r["cle"]): dict(r) for r in rows}
+            pages = {
+                f"g{g}"
+                for (g,) in conn.execute(
+                    select(tracks.c.genius_id).where(
+                        (tracks.c.artist_id == artist_id) & tracks.c.genius_id.is_not(None)
+                    )
+                )
+            }
+            if not pages:
+                return verdicts
+            soeurs = conn.execute(
+                select(revue_verdicts).where(
+                    (revue_verdicts.c.artist_id != artist_id)
+                    & revue_verdicts.c.cle.like("g%")
+                    & revue_verdicts.c.detecteur.not_like("certif%")
+                )
+            ).mappings()
+            for r in soeurs:
+                cle = (r["detecteur"], r["cle"])
+                if cle not in verdicts and r["cle"].partition("|")[0] in pages:
+                    verdicts[cle] = dict(r)
+            return verdicts
 
     def trancher_cas(
         self,
@@ -79,18 +112,13 @@ class RevueRepository:
             )
 
     def annuler_verdict(self, artist_id: int, detecteur: str, cle: str) -> bool:
-        """Retire un verdict : le cas redevient à trancher."""
+        """Retire un verdict : le cas redevient à trancher — chez les lignes
+        sœurs aussi, dont le verdict vaut pour la fiche (`verdicts_revue`)."""
+        condition = (revue_verdicts.c.detecteur == detecteur) & (revue_verdicts.c.cle == cle)
+        if not (cle.startswith("g") and not detecteur.startswith("certif")):
+            condition &= revue_verdicts.c.artist_id == artist_id
         with self.engine.begin() as conn:
-            return (
-                conn.execute(
-                    delete(revue_verdicts).where(
-                        (revue_verdicts.c.artist_id == artist_id)
-                        & (revue_verdicts.c.detecteur == detecteur)
-                        & (revue_verdicts.c.cle == cle)
-                    )
-                ).rowcount
-                > 0
-            )
+            return conn.execute(delete(revue_verdicts).where(condition)).rowcount > 0
 
     def remplacer_signalements(self, artist_id: int, detecteur: str, cas) -> int:
         """Remplace TOUS les signalements d'un détecteur de run pour l'artiste

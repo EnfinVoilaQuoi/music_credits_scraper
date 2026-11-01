@@ -46,6 +46,7 @@ EXCEPTIONS: dict[str, str] = {
     "noter_parution_apple": _PARUTIONS,
     "noter_parution_musicbrainz": _PARUTIONS,
     "oublier_parution_apple": _PARUTIONS,
+    "poser_upc_parution": _PARUTIONS,
     "record_release_observations": _PARUTIONS,
     # ── Albums ──
     "set_album_record_type": _ALBUMS,

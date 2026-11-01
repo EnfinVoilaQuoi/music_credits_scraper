@@ -3976,6 +3976,42 @@ class TrackRepository:
             ).scalar()
         return (str(album) if album is not None else None), vu
 
+    def parutions_sans_musicbrainz(self, artiste: str | None = None) -> list[dict]:
+        """Les parutions à album Deezer que MusicBrainz n'a jamais jugées (ni
+        `mb_checked_at`, ni `mb_live`) : `[{id, artist_id, artiste, title, upc,
+        deezer_album_id}]`, par artiste puis parution
+        (`scripts/completer_parutions_musicbrainz.py`)."""
+        sql = (
+            "SELECT r.id, r.artist_id, a.name AS artiste, r.title, r.upc, r.deezer_album_id "
+            "FROM releases r JOIN artists a ON a.id = r.artist_id "
+            "WHERE r.deezer_album_id IS NOT NULL "
+            "AND r.mb_checked_at IS NULL AND r.mb_live IS NULL"
+        )
+        params: dict = {}
+        if artiste:
+            sql += " AND a.name = :nom"
+            params["nom"] = artiste
+        with self.engine.connect() as conn:
+            lignes = conn.execute(text(sql + " ORDER BY a.name, r.id"), params).mappings()
+            return [dict(r) for r in lignes]
+
+    def poser_upc_parution(self, release_id: int, upc: str) -> bool:
+        """Pose le code-barres d'une parution qui n'en a pas (lu chez Deezer).
+        Une parution qui en a un le garde : un code-barres ne se remplace pas.
+        Rend True si la ligne a changé."""
+        if not cle_upc(upc):
+            return False
+        with self.engine.begin() as conn:
+            return bool(
+                conn.execute(
+                    text(
+                        "UPDATE releases SET upc = :u, updated_at = :now "
+                        "WHERE id = :r AND upc IS NULL"
+                    ),
+                    {"u": str(upc), "r": release_id, "now": datetime.now()},
+                ).rowcount
+            )
+
     def noter_parution_musicbrainz(
         self,
         release_id: int,

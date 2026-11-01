@@ -19,6 +19,7 @@ from sqlalchemy import text
 
 from src.services import historique
 from src.utils.data_manager import DataManager
+from src.utils.liens_sources import adresse_de_piste
 from src.utils.logger import configurer_journaux
 from src.utils.lrc_garde import fin_du_lrc
 from src.utils.title_matching import normalize_title
@@ -61,6 +62,14 @@ def _etat(conn, tid: int) -> list[str]:
         {"t": tid},
     ).all()
     fin = fin_du_lrc(t["lyrics_synced"]) if t["lyrics_synced"] else None
+    parutions = conn.execute(
+        text(
+            "SELECT r.title, rt.source, rt.external_track_id FROM release_tracks rt "
+            "JOIN releases r ON r.id = rt.release_id WHERE rt.track_id = :t "
+            "ORDER BY rt.source, r.title"
+        ),
+        {"t": tid},
+    ).all()
     return [
         f"#{tid} « {t['title']} » — {t['artiste']} — {t['album'] or 'sans album'}",
         f"   page : {t['genius_url'] or '—'} ; Spotify {t['spotify_id'] or '—'} ; "
@@ -68,6 +77,13 @@ def _etat(conn, tid: int) -> list[str]:
         f"   durée : {t['duration']} s ; " + ", ".join(f"{f} {s} {v}" for f, s, v in durees),
         f"   LRC : {t['lyrics_synced_source'] or '—'}" + (f", jusqu'à {fin} s" if fin else ""),
         f"   lien : {t['youtube_url'] or '—'} ({t['youtube_url_source'] or '—'})",
+        *(
+            # L'adresse se lit avec la source : l'ID d'un lien `genius` est
+            # celui de la page Genius (`adresse_de_piste`).
+            f"   parution « {titre} » ({source}) : "
+            f"{adresse_de_piste(source, ident) or ident or '—'}"
+            for titre, source, ident in parutions
+        ),
     ]
 
 

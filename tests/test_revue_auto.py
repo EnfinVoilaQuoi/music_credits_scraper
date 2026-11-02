@@ -722,3 +722,51 @@ def test_page_songbpm_retiree_par_regle_refusee_puis_levee_au_retablissement(dat
     ref = _charger(data_manager, artiste)["All Day (Kendrick Lamar Reference)"]
     assert pages_songbpm_refusees(ref) == set()
     assert ref.duration == 311
+
+
+def test_l_isrc_et_l_apple_de_l_autre_page_partent_avec_l_id_refuse(data_manager, artiste):
+    """« Higher » de The Game & Dr. Dre gardait l'ISRC, l'ID Apple et la durée
+    Apple du « Higher » d'Eminem après le retrait (et le refus) de ses ID
+    Spotify / Deezer par `id_catalogue_partage` (2026-11-02)."""
+    from src.utils.corrections_fiches import memoriser_id_refuse
+
+    eminem = Track(title="Higher", artist=artiste, genius_id=1, album="MTBMB Side B")
+    eminem.spotify_id = "3eMs"
+    eminem.observations += [
+        Observation("isrc", "USUM72024267", "deezer"),
+        Observation("duration", "222", "deezer"),
+    ]
+    data_manager.save_track(eminem)
+    game = Track(title="Higher", artist=artiste, genius_id=2, album="Sirius Bizzness")
+    game.observations += [
+        Observation("isrc", "USUM72024267", "deezer"),
+        Observation("duration", "222", "apple_music"),
+    ]
+    data_manager.save_track(game)
+    _charger(data_manager, artiste)
+    ids = {t.genius_id: t.id for t in artiste.tracks}
+    for gid in (1, 2):
+        data_manager.record_apple_music(ids[gid], "1545468585")
+    _charger(data_manager, artiste)
+    game = next(t for t in artiste.tracks if t.genius_id == 2)
+    assert game.isrc == "USUM72024267" and game.apple_music_id == "1545468585"
+    # Sans le refus : rien (deux pages au même ISRC restent à `id_partage`).
+    assert revue.identite_derivee(game, revue.charger_contexte(data_manager, artiste)) is None
+
+    memoriser_id_refuse(game, "3eMs", origine="regle:id_catalogue_partage")
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert any("ISRC USUM72024267" in a for a in bilan.appliquees), bilan.appliquees
+    _charger(data_manager, artiste)
+    game = next(t for t in artiste.tracks if t.genius_id == 2)
+    eminem = next(t for t in artiste.tracks if t.genius_id == 1)
+    assert game.isrc is None and game.apple_music_id is None and game.duration is None
+    assert eminem.isrc == "USUM72024267" and eminem.apple_music_id == "1545468585"
+
+    (correction,) = [
+        c for c in data_manager.corrections_revue(artiste.id) if c["track_id"] == game.id
+    ]
+    revue_auto.retablir(data_manager, artiste, correction)
+    _charger(data_manager, artiste)
+    game = next(t for t in artiste.tracks if t.genius_id == 2)
+    assert game.isrc == "USUM72024267" and game.apple_music_id == "1545468585"
+    assert game.duration == 222

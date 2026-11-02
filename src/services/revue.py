@@ -535,6 +535,63 @@ def id_catalogue_partage(track, ctx):
     return None
 
 
+def identite_derivee(track, ctx):
+    """L'ISRC ou l'ID Apple d'une AUTRE page, restés après le retrait de l'ID
+    de catalogue qui les avait apportés : la fiche REFUSE un ID Spotify ou
+    Deezer que l'autre page porte (`id_catalogue_partage`, ou à la main), elle
+    n'est donc pas cet enregistrement — ce qui en dérive part avec lui
+    (2026-11-02 : « Higher » de The Game & Dr. Dre gardait l'ISRC, l'ID Apple
+    et la durée du « Higher » d'Eminem, et l'enrichissement relisait ReccoBeats
+    par cet ISRC). Rien sans ce refus : deux pages au même ISRC sans autre
+    preuve restent à `id_partage`."""
+    from src.utils.corrections_fiches import deezer_refuses, ids_refuses
+
+    isrc = (track.isrc or "").upper() or None
+    apple = str(track.apple_music_id) if track.apple_music_id else None
+    if not isrc and not apple:
+        return None
+    autres = [
+        t
+        for t in ctx.disco
+        if t is not track
+        and not (t.genius_id and t.genius_id == track.genius_id)
+        and (
+            (isrc and (t.isrc or "").upper() == isrc)
+            or (apple and t.apple_music_id and str(t.apple_music_id) == apple)
+        )
+    ]
+    if not autres:
+        return None
+    refuses_spotify, refuses_deezer = ids_refuses(track), deezer_refuses(track)
+    for autre in autres:
+        preuve = (
+            f"ID Spotify {autre.spotify_id}"
+            if autre.spotify_id and autre.spotify_id in refuses_spotify
+            else (
+                f"ID Deezer {autre.deezer_id}"
+                if autre.deezer_id and int(autre.deezer_id) in refuses_deezer
+                else None
+            )
+        )
+        if preuve is None:
+            continue
+        preuves = {"autre": autre.id, "autre_titre": autre.title, "refus": preuve}
+        if isrc and (autre.isrc or "").upper() == isrc:
+            preuves["isrc"] = isrc
+        if apple and autre.apple_music_id and str(autre.apple_music_id) == apple:
+            preuves["apple_music_id"] = apple
+        portes = " et ".join(
+            f"{nom} {preuves[cle]}"
+            for nom, cle in (("ISRC", "isrc"), ("ID Apple", "apple_music_id"))
+            if cle in preuves
+        )
+        return (
+            f"{portes} de « {autre.title} » (#{autre.id}), dont la fiche refuse l'{preuve}",
+            preuves,
+        )
+    return None
+
+
 #: Fenêtre de recherche des paires : deux compteurs lus à quelques semaines
 #: d'écart restent à 5 % l'un de l'autre ; `meme_compteur` juge ensuite.
 _FENETRE_COMPTEUR = 1.05
@@ -3246,6 +3303,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
     Detecteur("id_spotify_partage", "Même ID Spotify, deux pages", "👯", id_spotify_partage),
     Detecteur(
         "id_catalogue_partage", "Même ID de catalogue, deux pages", "🪪", id_catalogue_partage
+    ),
+    Detecteur(
+        "identite_derivee",
+        "ISRC ou ID Apple d'une page dont l'ID est refusé",
+        "🪪",
+        identite_derivee,
     ),
     Detecteur("compteur_partage", "Même compteur Spotify, deux fiches", "🧮", compteur_partage),
     Detecteur(

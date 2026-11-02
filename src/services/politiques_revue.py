@@ -1522,6 +1522,9 @@ REGLES_CATALOGUE = frozenset(
         ("id_catalogue_partage", "normal"),
         ("id_catalogue_partage", "retirer_spotify"),
         ("id_catalogue_partage", "delier_deezer"),
+        # 2026-11-02 (décision utilisateur) : ce qui dérive d'un ID retiré part
+        # avec lui — ISRC et ID Apple de l'autre page (« Higher » de The Game).
+        ("identite_derivee", "retirer_identite_derivee"),
     }
 )
 
@@ -1581,6 +1584,13 @@ def politique_catalogue_designe(lire_spotify: Callable, lire_deezer: Callable) -
 def arbitrage_catalogue(cas, track, ctx, lire_spotify=None, lire_deezer=None) -> Arbitrage | None:
     """L'arbitrage de la famille « même ID de catalogue ». Lecteurs injectables ;
     par défaut, l'embed Spotify (gardé au brut) et `GET /track` de Deezer."""
+    if cas.detecteur == "identite_derivee" and track is not None:
+        # Le détecteur exige déjà la preuve : l'ID de l'autre page est refusé ici.
+        return Arbitrage(
+            "ISRC / ID Apple de l'autre page : retirer",
+            "retirer_identite_derivee",
+            cas.motif,
+        )
     if cas.detecteur != "id_catalogue_partage":
         return None
     if lire_spotify is None:

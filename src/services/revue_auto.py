@@ -649,8 +649,53 @@ def _partager_compteur(dm, track, cas: Cas) -> tuple[str, dict]:
     )
 
 
+def _retirer_identite_derivee(dm, track, cas: Cas) -> tuple[str, dict]:
+    """L'ISRC et / ou l'ID Apple de l'autre page partent (`identite_derivee`),
+    avec ce qui a été lu par eux (mesures ReccoBeats par l'ISRC, durée Apple) ;
+    les observations sont lues AVANT, de quoi rétablir."""
+    isrc, apple = cas.preuves.get("isrc"), cas.preuves.get("apple_music_id")
+    if isrc and (track.isrc or "").upper() != isrc:
+        isrc = None
+    if apple and str(track.apple_music_id or "") != apple:
+        apple = None
+    if not isrc and not apple:
+        raise LookupError("la fiche ne porte plus cet ISRC ni cet ID Apple")
+    # `clear_track_isrc` emporte les observations `isrc` et les mesures
+    # ReccoBeats lues par l'ISRC ; `clear_track_apple_music_id` la durée Apple.
+    sources = ({"apple_music"} if apple else set()) | ({"reccobeats"} if isrc else set())
+    retirees = [
+        {
+            "track_id": track.id,
+            "field": o.field,
+            "source": o.source,
+            "value": o.value,
+            "confidence": o.confidence,
+            "seen_at": str(o.seen_at) if o.seen_at else None,
+        }
+        for o in dm.get_artist_observations(track.artist.id).get(track.id, [])
+        if o.source in sources or (isrc and o.field == "isrc")
+    ]
+    retraits = []
+    if isrc:
+        dm.clear_track_isrc(track.id)
+        retraits.append(f"ISRC {isrc}")
+    if apple:
+        dm.clear_track_apple_music_id(track.id)
+        retraits.append(f"ID Apple {apple}")
+    return (
+        f"{' et '.join(retraits)} retiré(s) de « {track.title} » — {cas.motif}",
+        {
+            "type": "identite_derivee",
+            "isrc": isrc,
+            "apple_music_id": apple,
+            "observations": retirees,
+        },
+    )
+
+
 #: Correcteurs des RÈGLES, par action de la politique.
 _CORRECTEURS_DE_REGLE = {
+    "retirer_identite_derivee": _retirer_identite_derivee,
     "retirer_lrc": _corriger_lrc,
     "confirmer_lien": _confirmer_lien,
     "kworb_tiers": _kworb_tiers,
@@ -857,6 +902,13 @@ def retablir(dm, artiste, correction: dict) -> str:
         dm.update_track_spotify_id(track.id, sid, source="retabli")
         dm.restaurer_observations(annulation.get("observations") or [])
         compte_rendu = f"ID Spotify {sid} rétabli sur « {track.title} »"
+    elif annulation.get("type") == "identite_derivee":
+        if annulation.get("isrc"):
+            dm.fill_track_identities(track.id, isrc=annulation["isrc"])
+        if annulation.get("apple_music_id"):
+            dm.record_apple_music(track.id, annulation["apple_music_id"])
+        dm.restaurer_observations(annulation.get("observations") or [])
+        compte_rendu = f"ISRC / ID Apple rétablis sur « {track.title} »"
     elif annulation.get("type") == "pose_spotify":
         from src.utils.spotify_audit import rejeter_spotify_id
 

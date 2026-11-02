@@ -1191,6 +1191,13 @@ REGLES_DEEZER = frozenset(
         # 2026-10-31 (DV1) : l'instrumental / a cappella Deezer d'un morceau
         # connu, sans page : pas de fiche. 3 / 15 sur la copie (Flynt).
         ("deezer_version", "normal"),
+        # A1 (décision utilisateur 2026-10-31) : l'édition de SUPPORT d'une
+        # fiche (même ISRC, « Clean », BO) lui est rattachée ; la version
+        # d'un autre enregistrement (live, remix, démo) devient une fiche
+        # secondaire — le geste de DA1.
+        ("deezer_version", "deezer_rattacher_edition"),
+        ("deezer_album_absent", "deezer_rattacher_edition"),
+        ("deezer_version", "deezer_appliquer"),
     }
 )
 
@@ -1232,10 +1239,20 @@ def _version_d_un_disque_de_versions(cas, ctx) -> Arbitrage | None:
     fiche SECONDAIRE : version de l'original (relation `version_of`, posée par
     `creer_lignes`), ses streams jamais sommés à ceux de l'original — comme les
     15 fiches C&S de Freeze déjà créées. Instrumental et a cappella restent
-    sans fiche (DV1)."""
+    sans fiche (DV1).
+
+    A1 (décision utilisateur 2026-10-31) : le même geste pour la version
+    Deezer (`deezer_version` : live, remix, démo, mix) d'une fiche sur un
+    disque de l'artiste, quand aucune fiche ne la porte déjà — ni par son
+    ISRC, ni par son titre (même version), ni comme édition d'une fiche
+    (`titre_sans_edition`, le « (Remix) (Album Version Explicit) » d'une
+    fiche de remix) — et que sa durée n'est pas celle du socle (± 2 s : une
+    autre prise a sa durée ; à la même, un libellé de version peut être une
+    mention de support)."""
+    from src.utils.version_descriptors import meme_version, titre_sans_edition
     from src.utils.version_heritage import famille_de
 
-    if cas.detecteur != "deezer_apparition":
+    if cas.detecteur not in ("deezer_apparition", "deezer_version"):
         return None
     ecart = (cas.preuves or {}).get("ecart") or {}
     if ecart.get("genius") or not ecart.get("socle_id"):
@@ -1243,15 +1260,103 @@ def _version_d_un_disque_de_versions(cas, ctx) -> Arbitrage | None:
     socle = next((t for t in ctx.disco if t.id == ecart["socle_id"]), None) if ctx else None
     if socle is None:
         return None
-    titre = (ecart.get("piste") or {}).get("title") or cas.morceau
+    piste = ecart.get("piste") or {}
+    titre = piste.get("title") or cas.morceau
     album = (ecart.get("album") or {}).get("title") or ""
     fam = famille_de(titre)
-    if fam in (None, "edition", "instrumental", "a_cappella") or famille_de(album) != fam:
+    if fam in (None, "edition", "instrumental", "a_cappella"):
         return None
+    if cas.detecteur == "deezer_apparition":
+        if famille_de(album) != fam:
+            return None
+        sens = "disque de versions d'un tiers"
+    else:
+        isrc, duree = str(piste.get("isrc") or "").upper(), piste.get("duration")
+        if not duree or titre_sans_edition(titre) is not None:
+            return None
+        if any(
+            (isrc and t.isrc and str(t.isrc).upper() == isrc) or meme_version(t.title, titre)
+            for t in ctx.disco
+        ):
+            return None
+        if socle.duration and abs(int(socle.duration) - int(duree)) <= ECART_FICHIER_S:
+            return None
+        sens = "aucune fiche ne la porte"
     return Arbitrage(
-        "créer la fiche secondaire (version d'une fiche, disque de versions d'un tiers)",
+        f"créer la fiche secondaire (version d'une fiche, {sens})",
         "deezer_appliquer",
         f"« {album} » ({fam}) ; version de « {socle.title} »",
+    )
+
+
+def _duree_lue_par_id(fiche, duree, deezer_id) -> str | None:
+    """Le catalogue de la fiche, lu par SON identifiant, qui a `duree` à
+    `ECART_FICHIER_S` près — la durée Deezer de la fiche ne compte que si elle
+    a une AUTRE page Deezer que la piste jugée (sinon, une durée trouvée au
+    titre)."""
+    durees = _durees(fiche)
+    for s in _CATALOGUES_LUS_PAR_ID:
+        if s == "deezer" and (not fiche.deezer_id or int(fiche.deezer_id) == int(deezer_id or 0)):
+            continue
+        if durees.get(s) and abs(int(durees[s]) - int(duree)) <= ECART_FICHIER_S:
+            return s
+    return None
+
+
+def fiche_de_l_edition_de_support(piste: dict, fiches) -> tuple[object, str] | None:
+    """PUR. A1 (décision utilisateur 2026-10-31) : la fiche UNIQUE dont la
+    piste Deezer est une édition de SUPPORT — même enregistrement sur un autre
+    disque (best-of, bande originale, single « Clean »). Deux témoins :
+      · l'identité : le même ISRC, sinon le même titre de base
+        (`titre_de_base` : ni sous-titre, ni édition de diffusion, ni mention
+        de bande originale ; une version n'en a pas) ;
+      · la durée : un catalogue de la fiche lu par son identifiant
+        (`_duree_lue_par_id`) l'a à ± 2 s.
+    Rend `(fiche, preuve)`, ou None (aucune, ou plusieurs : l'humain)."""
+    from src.utils.version_descriptors import meme_titre_normalise, titre_de_base
+
+    duree, isrc = piste.get("duration"), str(piste.get("isrc") or "").upper()
+    if not duree:
+        return None
+    par_isrc = [t for t in fiches if isrc and t.isrc and str(t.isrc).upper() == isrc]
+    if len(par_isrc) > 1:
+        return None
+    if par_isrc:
+        candidates, preuve = par_isrc, f"ISRC {isrc}"
+    else:
+        base = titre_de_base(piste.get("title"))
+        if not base:
+            return None
+        # Homonymes au titre de base : la durée lue par ID les départage.
+        candidates = [
+            t
+            for t in fiches
+            if not t.secondary_role and meme_titre_normalise(titre_de_base(t.title), base)
+        ]
+        preuve = f"titre de base « {base} »"
+    temoins = [(t, s) for t in candidates if (s := _duree_lue_par_id(t, duree, piste.get("id")))]
+    if len(temoins) != 1:
+        return None
+    fiche, source = temoins[0]
+    return fiche, f"{preuve} ; {source} {_durees(fiche)[source]} s pour {duree} s"
+
+
+def _edition_de_support(cas, ctx) -> Arbitrage | None:
+    """A1 : la piste « version » ou d'un disque absent est l'édition de
+    support d'une fiche (`fiche_de_l_edition_de_support`) : rattacher — une
+    seconde page Deezer, une édition de diffusion, notées en ÉDITION de la
+    fiche (`ecarts_deezer._renseigner_fiche`), jamais une fiche."""
+    if cas.detecteur not in ("deezer_version", "deezer_album_absent") or ctx is None:
+        return None
+    piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
+    trouvee = fiche_de_l_edition_de_support(piste, ctx.disco)
+    if trouvee is None:
+        return None
+    fiche, preuve = trouvee
+    return Arbitrage(
+        f"édition de support de « {fiche.title} » : rattacher, ne pas créer",
+        "deezer_rattacher_edition",
+        f"« {piste.get('title')} » ; #{fiche.id} ; {preuve}",
     )
 
 
@@ -1323,10 +1428,28 @@ def _rattacher_a_la_fiche_du_disque(cas, ctx) -> Arbitrage | None:
     )
 
 
+def _piste_nue_d_un_disque_live(cas) -> bool:
+    """La piste d'un disque LIVE (MusicBrainz, e64, ou le titre du disque)
+    au titre sans version : Deezer omet « (Live) » (*Le tour de la question*
+    de MC Solaar, 2026-11-02 : 7 pistes `deezer_absent` qu'une règle aurait
+    créées ou rattachées au titre des fiches studio). Ni fiche, ni lien par
+    règle : l'humain (`studio_sur_disque_live`)."""
+    from src.utils.deezer_identity import album_live
+    from src.utils.version_descriptors import porte_une_version, prise_live
+
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    album = ecart.get("album") or {}
+    if not (album_live({"album": album}) or prise_live(album.get("title"))):
+        return False
+    return not porte_une_version((ecart.get("piste") or {}).get("title") or cas.morceau)
+
+
 def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     """L'arbitrage de la famille « écarts Deezer », restreint aux originaux
     sans ambiguïté — le titre de la PISTE Deezer et celui de la fiche."""
     if not any(cas.detecteur == d for d, _ in REGLES_DEEZER):
+        return None
+    if _piste_nue_d_un_disque_live(cas):
         return None
     par_isrc = _rattacher_par_isrc(cas, ctx, isrcs_connus, ids_artiste)
     if par_isrc is not None:
@@ -1337,13 +1460,17 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     du_disque = _rattacher_a_la_fiche_du_disque(cas, ctx)
     if du_disque is not None:
         return du_disque
+    de_support = _edition_de_support(cas, ctx)
+    if de_support is not None:
+        return de_support
     if cas.detecteur == "deezer_version":
-        # Une version n'est jamais un original : seul le « ✓ Normal » de
-        # l'instrumental / a cappella (aucune fiche créée) passe (DV1).
+        # Une version n'est jamais un original : le « ✓ Normal » de
+        # l'instrumental / a cappella (aucune fiche créée, DV1), ou la fiche
+        # secondaire d'une version qu'aucune fiche ne porte (A1).
         arbitrage = politique_ecarts_deezer(isrcs_connus, ids_artiste)(cas, track, ctx)
-        if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_DEEZER:
+        if arbitrage is not None and arbitrage.action == "normal":
             return arbitrage
-        return None
+        return _version_d_un_disque_de_versions(cas, ctx)
     piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
     disque_de_versions = _version_d_un_disque_de_versions(cas, ctx)
     if disque_de_versions is not None:

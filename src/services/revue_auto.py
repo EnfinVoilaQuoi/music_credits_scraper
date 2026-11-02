@@ -119,6 +119,7 @@ _SANS_FICHE = frozenset(
         "deezer_appliquer",
         "deezer_rattacher_isrc",
         "deezer_rattacher_fiche",
+        "deezer_rattacher_edition",
         "deezer_edition",
         "confirmer_lien",
         "kworb_tiers",
@@ -567,7 +568,6 @@ def _deezer_rattacher_fiche(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict
     """Rattache la piste « absente » à la fiche de son disque
     (`politiques_revue.fiche_du_meme_disque`) — le geste de
     `_deezer_rattacher_isrc`, la fiche désignée par le disque."""
-    from src.services import ecarts_deezer
     from src.services.politiques_revue import fiche_du_meme_disque
 
     preuve = cas.preuves["ecart"]
@@ -578,9 +578,32 @@ def _deezer_rattacher_fiche(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict
     )
     if fiche is None:
         raise LookupError("la fiche du disque n'est plus identifiable")
+    return _rattacher_a(dm, artiste, preuve, fiche, "meme_disque")
+
+
+def _deezer_rattacher_edition(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """A1 : rattache l'édition de support à sa fiche
+    (`politiques_revue.fiche_de_l_edition_de_support`) — seconde page ou
+    édition de diffusion notées en ÉDITION par `_renseigner_fiche`."""
+    from src.services.politiques_revue import fiche_de_l_edition_de_support
+
+    preuve = cas.preuves["ecart"]
+    trouvee = fiche_de_l_edition_de_support(
+        preuve.get("piste") or {}, charger_contexte(dm, artiste).disco
+    )
+    if trouvee is None:
+        raise LookupError("la fiche de l'édition n'est plus identifiable")
+    return _rattacher_a(dm, artiste, preuve, trouvee[0], "edition_de_support")
+
+
+def _rattacher_a(dm, artiste, preuve: dict, fiche, matched_by: str) -> tuple[str, dict]:
+    """Le lien de la piste Deezer à `fiche` (`creer_lignes`), défait par
+    `retablir` (type `lien_deezer`)."""
+    from src.services import ecarts_deezer
+
     ctx = _contexte_action(dm, artiste)
     ecart = ecarts_deezer.ecart_depuis(preuve, ctx.tracks)
-    ecart.nature, ecart.existing_track, ecart.matched_by = "link", fiche, "meme_disque"
+    ecart.nature, ecart.existing_track, ecart.matched_by = "link", fiche, matched_by
     (compte_rendu,) = ecarts_deezer.creer_lignes(dm, artiste, [ecart]) or ["rien"]
     return compte_rendu, {"type": "lien_deezer", "track_id": fiche.id, "ecart": preuve}
 
@@ -769,6 +792,7 @@ _CORRECTEURS_DE_REGLE = {
     "deezer_appliquer": _deezer_appliquer,
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,
     "deezer_rattacher_fiche": _deezer_rattacher_fiche,
+    "deezer_rattacher_edition": _deezer_rattacher_edition,
     "deezer_edition": _deezer_edition,
     "retirer_songbpm": _corriger_songbpm,
     "retirer_champs_songbpm": _corriger_champs_songbpm,
@@ -1011,7 +1035,11 @@ def retablir(dm, artiste, correction: dict) -> str:
             raise LookupError("la fiche rattachée n'est plus dans la discographie")
         e = ecarts_deezer.ecart_depuis(annulation["ecart"], {fiche.id: fiche})
         e.nature, e.existing_track = "link_review", fiche
-        compte_rendu = ecarts_deezer.delier(dm, artiste, e)
+        notee = any(
+            ed.get("deezer_id") is not None and int(ed["deezer_id"]) == int(e.piste.id)
+            for ed in dm.get_track_editions(fiche.id)
+        )
+        compte_rendu = ecarts_deezer.delier(dm, artiste, e, oublier_la_duree=not notee)
         # Le rattachement a pu noter la page en « autre édition Deezer »
         # (`_renseigner_fiche`) : elle n'est pas plus une édition de la fiche
         # que sa parution — #8199, 2026-10-27, l'édition restait.

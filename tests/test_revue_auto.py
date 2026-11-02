@@ -475,6 +475,43 @@ def test_deezer_edition_au_sous_titre_omis_notee_puis_retablie(data_manager, art
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
 
 
+def test_deezer_piste_de_la_fiche_du_disque_rattachee_puis_retablie(
+    data_manager, artiste, monkeypatch
+):
+    """Eminem « Em Calls Paul (Skit) [2004] » (2026-11-02) : Genius ajoute
+    l'année au titre d'un skit récurrent ; la piste « absente » d'*Encore*,
+    à la durée de la fiche du même disque, est la sienne — rattachée, pas
+    créée."""
+    from src.services import ecarts_deezer as ed
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    _fiche_durees(
+        data_manager,
+        artiste,
+        "Em Calls Paul (Skit) [2004]",
+        40,
+        {"youtube": 72},
+        album="Hourvari (Deluxe)",
+        duration=72,
+    )
+    _ecarts_deezer(
+        data_manager, artiste, ed.PisteDeezer(id=9, title="Em Calls Paul (Skit)", duration=72)
+    )
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1, bilan
+    fiches = _charger(data_manager, artiste)
+    assert set(fiches) == {"Em Calls Paul (Skit) [2004]"}
+    assert fiches["Em Calls Paul (Skit) [2004]"].deezer_id == 9
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:deezer_rattacher_fiche"
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert _charger(data_manager, artiste)["Em Calls Paul (Skit) [2004]"].deezer_id is None
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
 def test_retablir_un_rattachement_retire_l_autre_edition_deezer(data_manager, artiste):
     """#8199, corrections 679/680 du 2026-10-26 : le rattachement « autre
     édition Deezer » avait noté la page en édition de la fiche. Rétablir délie

@@ -192,6 +192,120 @@ class TestLiensDeezer:
         assert arb is None or arb.action != "deezer_appliquer"
 
 
+class TestFicheDuMemeDisque:
+    """`deezer_absent` d'Eminem (2026-11-02) : la piste « absente » est celle
+    d'une fiche de son disque — mention de bande originale, année que Genius
+    ajoute à un skit récurrent, deux éditions de diffusion."""
+
+    def _cas(self, titre, duree, disque):
+        ecart = {"piste": {"title": titre, "duration": duree}, "album": {"title": disque}}
+        return revue.Cas("deezer_absent", None, titre, "", 0, {"ecart": ecart}, "k")
+
+    def _juger(self, cas, *fiches):
+        return pol._rattacher_a_la_fiche_du_disque(cas, revue.contexte(list(fiches), {}))
+
+    def test_annee_de_genius_entre_crochets(self):
+        encore = _t("Em Calls Paul (Skit) [2004]", 13897, album="Encore", duration=72)
+        kamikaze = _t("Em Calls Paul (Skit) [2018]", 13261, album="Kamikaze", duration=50)
+        arb = self._juger(
+            self._cas("Em Calls Paul (Skit)", 72, "Encore (Deluxe Version)"), encore, kamikaze
+        )
+        assert arb.action == "deezer_rattacher_fiche" and "#13897" in arb.raison
+        arb = self._juger(self._cas("Em Calls Paul (Skit)", 49, "Kamikaze"), encore, kamikaze)
+        assert "#13261" in arb.raison
+
+    def test_mention_de_bande_originale(self):
+        t = _t("The King and I", 13122, album="Curtain Call 2", duration=192)
+        titre = "The King and I (From the Original Motion Picture Soundtrack ELVIS)"
+        assert self._juger(self._cas(titre, 193, "Curtain Call 2"), t) is not None
+
+    def test_deux_editions_de_diffusion(self):
+        t = _t(
+            "Billion Bucks (Bonus Track)", 14733, album="Eminem Presents the Re-Up", duration=222
+        )
+        cas = self._cas("Billion Bucks (Album Version Explicit)", 222, "Eminem Presents The Re-Up")
+        assert self._juger(cas, t) is not None
+
+    def test_autre_disque_ou_autre_duree_ou_version_jamais(self):
+        bad_guys = _t("Bad Guys Always Die", 1, album="The Next Episode", duration=280)
+        titre = 'Bad Guys Always Die (From "Wild Wild West" Soundtrack)'
+        assert (
+            self._juger(self._cas(titre, 279, "The Slim Shady LP (Expanded Edition)"), bad_guys)
+            is None
+        )
+        encore = _t("Em Calls Paul (Skit) [2004]", 2, album="Encore", duration=72)
+        assert self._juger(self._cas("Em Calls Paul (Skit)", 68, "Encore"), encore) is None
+        live = _t("Lose Yourself", 3, album="Curtain Call", duration=321)
+        assert self._juger(self._cas("Lose Yourself (Live)", 321, "Curtain Call"), live) is None
+
+    def test_deux_fiches_possibles_l_humain(self):
+        a = _t("Paul Rosenberg (Skit)", 1, album="The Eminem Show", duration=22)
+        b = _t("Paul Rosenberg (Skit) [2002]", 2, album="The Eminem Show", duration=23)
+        assert self._juger(self._cas("Paul Rosenberg (Skit)", 22, "The Eminem Show"), a, b) is None
+
+
+class TestLienHorsDuDisque:
+    """Skits récurrents d'Eminem (2026-11-02) : la parution d'un AUTRE disque,
+    au même ISRC que l'ID déjà posé (lui-même celui de l'autre disque), avait
+    été rattachée en édition — « Steve Berman (Skit) » de *The Eminem Show*
+    sur celui de *Relapse*."""
+
+    def _cas(self, t, titre, duree, disque, isrc=None, par="title_generique"):
+        ecart = {
+            "piste": {"title": titre, "duration": duree, "isrc": isrc},
+            "album": {"title": disque},
+            "matched_by": par,
+        }
+        return _cas("deezer_link_candidate", t, {"ecart": ecart})
+
+    def _relapse(self):
+        return _t(
+            "Steve Berman (Skit)",
+            13653,
+            album="Relapse",
+            isrc="USIR10211064",
+            durations_observees={"deezer": 33, "reccobeats": 33},
+        )
+
+    def test_piste_d_une_autre_fiche_du_disque(self):
+        t = self._relapse()
+        autre = _t("Steve Berman (Skit) [2002]", 14107, album="The Eminem Show", duration=34)
+        cas = self._cas(t, "Steve Berman (Skit)", 33, "The Eminem Show (Expanded Edition)")
+        arb = pol.politique_liens_deezer(cas, t, revue.contexte([t, autre], {}))
+        assert arb.action == "normal" and "#14107" in arb.raison
+
+    def test_meme_isrc_ne_rattache_pas_un_generique_d_un_autre_disque(self):
+        t = self._relapse()
+        cas = self._cas(t, "Steve Berman (Skit)", 33, "The Eminem Show", "USIR10211064")
+        arb = pol.politique_liens_deezer(cas, t, revue.contexte([t], {}))
+        assert arb.action == "normal" and "autre disque" in arb.sens
+
+    def test_titre_non_generique_d_un_autre_disque_sans_autre_fiche(self):
+        """« Ken Kaniff » (non générique) sans fiche du disque : le reste de la
+        politique juge, comme avant."""
+        t = _t("Ken Kaniff", 14319, album="The Slim Shady LP", isrc="X1")
+        cas = self._cas(t, "Ken Kaniff", 62, "The Marshall Mathers LP", "x1", par="title")
+        assert pol.politique_liens_deezer(cas, t, revue.contexte([t], {})).sens == "rattacher"
+
+    def test_titre_non_generique_d_une_autre_fiche_du_disque(self):
+        t = _t("Ken Kaniff", 14319, album="The Slim Shady LP", duration=76)
+        mmlp = _t("Ken Kaniff (Skit)", 14234, album="The Marshall Mathers LP", duration=62)
+        mmlp2 = _t("Ken Kaniff (MMLP2)", 13405, album="The Marshall Mathers LP 2", duration=454)
+        cas = self._cas(t, "Ken Kaniff", 62, "The Marshall Mathers LP", par="title")
+        arb = pol.politique_liens_deezer(cas, t, revue.contexte([t, mmlp, mmlp2], {}))
+        assert arb.action == "normal" and "#14234" in arb.raison
+
+    def test_meme_disque_juge_comme_avant(self):
+        t = _t("Paul (Skit)", 14323, album="The Slim Shady LP", isrc="X2")
+        cas = self._cas(t, "Paul (Skit)", 15, "The Slim Shady LP (Expanded Edition)", "x2")
+        assert pol.politique_liens_deezer(cas, t, revue.contexte([t], {})).sens == "rattacher"
+
+    def test_generique_sans_album_de_la_fiche_reste_a_l_humain(self):
+        t = _t("Paul (Skit)", 1, isrc="X3")
+        cas = self._cas(t, "Paul (Skit)", 19, "Relapse", "x3")
+        assert pol.politique_liens_deezer(cas, t, revue.contexte([t], {})) is None
+
+
 def _ctx_mesures(track, champ, valeurs):
     from src.enrichment.observation import Observation
 

@@ -118,6 +118,7 @@ _SANS_FICHE = frozenset(
     {
         "deezer_appliquer",
         "deezer_rattacher_isrc",
+        "deezer_rattacher_fiche",
         "deezer_edition",
         "confirmer_lien",
         "kworb_tiers",
@@ -557,6 +558,28 @@ def _deezer_rattacher_isrc(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]
     }
 
 
+def _deezer_rattacher_fiche(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Rattache la piste « absente » à la fiche de son disque
+    (`politiques_revue.fiche_du_meme_disque`) — le geste de
+    `_deezer_rattacher_isrc`, la fiche désignée par le disque."""
+    from src.services import ecarts_deezer
+    from src.services.politiques_revue import fiche_du_meme_disque
+
+    preuve = cas.preuves["ecart"]
+    fiche = fiche_du_meme_disque(
+        preuve.get("piste") or {},
+        (preuve.get("album") or {}).get("title"),
+        charger_contexte(dm, artiste).disco,
+    )
+    if fiche is None:
+        raise LookupError("la fiche du disque n'est plus identifiable")
+    ctx = _contexte_action(dm, artiste)
+    ecart = ecarts_deezer.ecart_depuis(preuve, ctx.tracks)
+    ecart.nature, ecart.existing_track, ecart.matched_by = "link", fiche, "meme_disque"
+    (compte_rendu,) = ecarts_deezer.creer_lignes(dm, artiste, [ecart]) or ["rien"]
+    return compte_rendu, {"type": "lien_deezer", "track_id": fiche.id, "ecart": preuve}
+
+
 def _deezer_edition(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
     """Note la piste « absente » en ÉDITION de sa fiche (`_edition_d_une_fiche`)."""
     from src.services import editions
@@ -705,6 +728,7 @@ _CORRECTEURS_DE_REGLE = {
     "delier_deezer": _delier_deezer,
     "deezer_appliquer": _deezer_appliquer,
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,
+    "deezer_rattacher_fiche": _deezer_rattacher_fiche,
     "deezer_edition": _deezer_edition,
     "retirer_songbpm": _corriger_songbpm,
     "retirer_champs_songbpm": _corriger_champs_songbpm,

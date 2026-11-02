@@ -424,6 +424,58 @@ def _seconde_page_du_meme_enregistrement(track, piste, vote, meme_titre) -> str 
     )
 
 
+def _hors_du_disque_de_la_fiche(track, ecart: dict, ctx):
+    """La parution proposée est-elle sur un AUTRE disque que celui de la fiche
+    (2026-11-02, skits récurrents d'Eminem : « Steve Berman (Skit) » de *The
+    Eminem Show* rattaché en édition à celui de *Relapse*, « Paul (Skit) »
+    d'*Encore* à celui du *Slim Shady LP*) ? Rend False si rien ne l'écarte,
+    sinon l'arbitrage (None = l'humain) :
+
+    - une AUTRE fiche de l'artiste, du disque de la piste, au même titre de
+      base et à sa durée (± 2 s), unique : la piste est la sienne → ✓ Normal ;
+    - un titre générique hors du disque de la fiche ne se rattache jamais
+      (règle des titres génériques) → ✓ Normal ;
+    - un titre générique dont la fiche n'a pas d'album : l'humain.
+
+    Les deux fiches doivent être jugées sur le disque : la règle « même ISRC »
+    ou une durée lue par l'ID déjà posé ne prouvent rien si cet ID est celui
+    de l'autre disque."""
+    from src.utils.version_descriptors import meme_disque, meme_titre_normalise, titre_de_base
+
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    disque, titre = album.get("title"), piste.get("title") or ""
+    if not disque or meme_disque(track.album, disque):
+        return False
+    base, duree = titre_de_base(titre), piste.get("duration")
+    if base and duree and ctx is not None:
+        siennes = [
+            t
+            for t in ctx.disco
+            if t.id != track.id
+            and meme_disque(t.album, disque)
+            and meme_titre_normalise(titre_de_base(t.title), base)
+            and t.duration
+            and abs(int(t.duration) - int(duree)) <= ECART_FICHIER_S
+        ]
+        if len(siennes) == 1:
+            return Arbitrage(
+                "piste d'une autre fiche (même disque) : ne pas rattacher",
+                "normal",
+                f"« {titre} » de « {disque} » ({duree} s) = « {siennes[0].title} » "
+                f"#{siennes[0].id} ({siennes[0].duration} s)",
+            )
+    generique = titre_generique(titre) or ecart.get("matched_by") == "title_generique"
+    if not generique:
+        return False
+    if not track.album:
+        return None
+    return Arbitrage(
+        "titre générique d'un autre disque : ne pas rattacher",
+        "normal",
+        f"« {titre} » de « {disque} », fiche sur « {track.album} »",
+    )
+
+
 def politique_liens_deezer(cas, track, _ctx):
     """Parution à confirmer : rattacher si l'ISRC est celui de la fiche, ou si
     une durée indépendante la confirme à 2 s ET que les titres désignent le
@@ -439,6 +491,10 @@ def politique_liens_deezer(cas, track, _ctx):
         return None
     ecart = cas.preuves.get("ecart") or {}
     piste = ecart.get("piste") or {}
+    if cas.detecteur == "deezer_link_candidate":
+        hors_disque = _hors_du_disque_de_la_fiche(track, ecart, _ctx)
+        if hors_disque is not False:
+            return hors_disque
     duree, isrc = piste.get("duration"), (piste.get("isrc") or "").upper()
     durees = {s: d for s, d in _durees(track).items() if s != "deezer"}
     editions = tuple(track.durees_editions or ())
@@ -1128,6 +1184,10 @@ REGLES_DEEZER = frozenset(
         # Deezer (Kid Cudi) ; simulée sur la copie, 3 / 4 `deezer_absent`.
         ("deezer_absent", "deezer_edition"),
         ("deezer_album_absent", "deezer_edition"),
+        # 2026-11-02 : la piste d'une fiche de son disque, au titre de base et
+        # à la durée de la fiche (Eminem, 9 / 16 `deezer_absent`).
+        ("deezer_absent", "deezer_rattacher_fiche"),
+        ("deezer_album_absent", "deezer_rattacher_fiche"),
         # 2026-10-31 (DV1) : l'instrumental / a cappella Deezer d'un morceau
         # connu, sans page : pas de fiche. 3 / 15 sur la copie (Flynt).
         ("deezer_version", "normal"),
@@ -1221,6 +1281,48 @@ def _edition_d_une_fiche(cas, ctx, ids_artiste: set) -> Arbitrage | None:
     )
 
 
+def fiche_du_meme_disque(piste: dict, disque: str | None, fiches) -> object | None:
+    """PUR. La fiche UNIQUE de l'artiste qu'est la piste Deezer « absente » :
+    du même disque (`meme_disque`), au même titre de base (`titre_de_base` :
+    ni sous-titre, ni édition de diffusion — « (From "8 Mile" Soundtrack) »,
+    « (Album Version Explicit) » / « (Bonus Track) », l'année que Genius ajoute
+    à un skit récurrent, « Em Calls Paul (Skit) [2004] ») et à sa durée
+    (± 2 s, la colonne de la fiche). Une version (live, remix…) n'a pas de
+    titre de base : jamais (2026-11-02, Eminem : 9 / 16 `deezer_absent`)."""
+    from src.utils.version_descriptors import meme_disque, meme_titre_normalise, titre_de_base
+
+    base, duree = titre_de_base(piste.get("title")), piste.get("duration")
+    if not base or not duree or not disque:
+        return None
+    candidates = [
+        t
+        for t in fiches
+        if meme_disque(t.album, disque)
+        and meme_titre_normalise(titre_de_base(t.title), base)
+        and t.duration
+        and abs(int(t.duration) - int(duree)) <= ECART_FICHIER_S
+    ]
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _rattacher_a_la_fiche_du_disque(cas, ctx) -> Arbitrage | None:
+    """La piste « absente » est celle d'une fiche existante de son disque
+    (`fiche_du_meme_disque`) : rattacher, pas créer."""
+    if cas.detecteur not in ("deezer_absent", "deezer_album_absent") or ctx is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    fiche = fiche_du_meme_disque(piste, album.get("title"), ctx.disco)
+    if fiche is None:
+        return None
+    return Arbitrage(
+        f"piste de « {fiche.title} » (même disque, même durée) : rattacher, ne pas créer",
+        "deezer_rattacher_fiche",
+        f"« {piste.get('title')} » {piste.get('duration')} s de « {album.get('title')} » ; "
+        f"#{fiche.id} {fiche.duration} s sur « {fiche.album} »",
+    )
+
+
 def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     """L'arbitrage de la famille « écarts Deezer », restreint aux originaux
     sans ambiguïté — le titre de la PISTE Deezer et celui de la fiche."""
@@ -1232,6 +1334,9 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     edition = _edition_d_une_fiche(cas, ctx, ids_artiste)
     if edition is not None:
         return edition
+    du_disque = _rattacher_a_la_fiche_du_disque(cas, ctx)
+    if du_disque is not None:
+        return du_disque
     if cas.detecteur == "deezer_version":
         # Une version n'est jamais un original : seul le « ✓ Normal » de
         # l'instrumental / a cappella (aucune fiche créée) passe (DV1).

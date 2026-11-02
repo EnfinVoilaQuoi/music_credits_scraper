@@ -512,6 +512,99 @@ def test_deezer_piste_de_la_fiche_du_disque_rattachee_puis_retablie(
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
 
 
+def _ecart_deezer(dm, artiste, nature, piste, album_titre="Hourvari", socle=None):
+    from src.services import ecarts_deezer as ed
+
+    artiste.deezer_id = 77
+    alb = ed.AlbumDeezer(id=501, title=album_titre, artist_id=77, artist_name=artiste.name)
+    bilan = ed.BilanEcarts(deezer_id=77, artiste=artiste.name)
+    bilan.ecarts = [ed.Ecart(nature, alb, piste, socle=socle)]
+    ed.enregistrer_signalements(dm, artiste, bilan)
+
+
+def test_deezer_edition_de_support_rattachee_puis_retablie(data_manager, artiste, monkeypatch):
+    """A1, Eminem « The King and I (From the Original Motion Picture
+    Soundtrack ELVIS) » (2026-11-02) : le single de la bande originale, au
+    même ISRC et à la durée de la page Deezer de la fiche, est une ÉDITION de
+    la fiche. Rétablir retire l'édition et garde la durée de la page de la
+    fiche (même valeur : `delier` l'emportait)."""
+    from src.services import ecarts_deezer as ed
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    _fiche_durees(
+        data_manager,
+        artiste,
+        "The King and I",
+        40,
+        {"deezer": 193},
+        duration=193,
+        isrc="USUG12105254",
+        deezer_id=100,
+    )
+    titre = "The King and I (From the Original Motion Picture Soundtrack ELVIS)"
+    _ecart_deezer(
+        data_manager,
+        artiste,
+        "album_absent",
+        ed.PisteDeezer(id=9, title=titre, duration=193, isrc="USUG12105254"),
+        album_titre=titre,
+    )
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1 and not bilan.echecs, bilan
+    fiches = _charger(data_manager, artiste)
+    assert set(fiches) == {"The King and I"}
+    fiche = fiches["The King and I"]
+    assert fiche.deezer_id == 100
+    assert 9 in data_manager.get_artist_edition_deezer_ids(artiste.id)
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:deezer_rattacher_edition"
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert 9 not in data_manager.get_artist_edition_deezer_ids(artiste.id)
+    fiche = _charger(data_manager, artiste)["The King and I"]
+    assert fiche.deezer_id == 100 and fiche.durations_observees.get("deezer") == 193
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
+def test_deezer_version_sans_fiche_creee_en_secondaire_puis_retablie(
+    data_manager, artiste, monkeypatch
+):
+    """A1 : le live Deezer d'une fiche, qu'aucune fiche ne porte (MC Solaar,
+    *Le tour de la question*), devient une fiche, version de l'original."""
+    from src.services import ecarts_deezer as ed
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    _fiche_durees(data_manager, artiste, "Caroline", 40, {"deezer": 260}, duration=260)
+    socle = _charger(data_manager, artiste)["Caroline"]
+    _ecart_deezer(
+        data_manager,
+        artiste,
+        "version",
+        ed.PisteDeezer(id=9, title="Caroline (Live)", duration=301, isrc="FRZ1"),
+        album_titre="Le tour de la question",
+        socle=socle,
+    )
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1 and not bilan.echecs, bilan
+    fiches = _charger(data_manager, artiste)
+    live = fiches["Caroline (Live)"]
+    assert live.deezer_id == 9
+    assert any(
+        r.get("type") == "version_of" and r.get("track_id") == socle.id
+        for r in live.relationships or []
+    )
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:deezer_appliquer"
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert set(_charger(data_manager, artiste)) == {"Caroline"}
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
 def test_pages_non_musique_desactivee_supprimee_puis_retablies(data_manager, artiste):
     """Pages « Non-Music » sans trace (décision utilisateur 2026-11-01) : un
     sketch jamais sorti est désactivé, un texte supprimé et noté supprimé ;

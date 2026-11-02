@@ -1208,7 +1208,7 @@ def rattacher_liens_confirmes(dm, artist, bilan: BilanEcarts, *, should_stop=lam
     return rattaches
 
 
-def delier(dm, artist, e: Ecart) -> str:
+def delier(dm, artist, e: Ecart, *, oublier_la_duree: bool = True) -> str:
     """Défait un lien de parution jugé faux (❓ `link_review` coché).
 
     Le lien part ; si l'id Deezer de la fiche est celui de cette piste, il
@@ -1237,12 +1237,16 @@ def delier(dm, artist, e: Ecart) -> str:
             f" — id Deezer {e.piste.id} retiré, "
             f"{len(rapport['observations_retirees'])} observation(s) deezer purgée(s)"
         )
-    elif e.piste.duration and dm.forget_discography_observation(
-        track.id, "duration", "deezer", e.piste.duration
+    elif (
+        oublier_la_duree
+        and e.piste.duration
+        and dm.forget_discography_observation(track.id, "duration", "deezer", e.piste.duration)
     ):
         # La fiche garde SON id Deezer, mais la durée écrite par ce lien (au
         # titre seul, `_renseigner_fiche`) gagnait l'arbitrage — c'est elle que
-        # la revue contestait. Elle part avec le lien.
+        # la revue contestait. Elle part avec le lien. Un lien noté en ÉDITION
+        # n'a écrit aucune durée : `oublier_la_duree=False`, sinon celle de la
+        # page de la fiche partirait à sa place (même valeur, King and I).
         compte += f" — durée Deezer {e.piste.duration} s retirée"
     return compte
 

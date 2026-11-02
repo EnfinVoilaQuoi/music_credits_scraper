@@ -515,6 +515,124 @@ class TestEcartsDeezer:
         assert arb.action == "deezer_appliquer"
 
 
+class TestRegleA1:
+    """A1 (décision utilisateur 2026-10-31) : l'édition de SUPPORT d'une fiche
+    lui est rattachée ; la version Deezer d'un autre enregistrement qu'aucune
+    fiche ne porte devient une fiche secondaire (geste de DA1)."""
+
+    def _socle(self, titre="The King and I", tid=1, isrc="USUG12105254", **kw):
+        kw.setdefault("durations_observees", {"deezer": 193})
+        kw.setdefault("deezer_id", 100)
+        return _t(titre, tid, isrc=isrc, duration=193, album="Curtain Call 2", **kw)
+
+    def _juger(self, detecteur, titre, fiches, isrc=None, duree=193, socle_id=1, genius=None):
+        ecart = {
+            "piste": {"id": 9, "title": titre, "isrc": isrc, "duration": duree},
+            "album": {"id": 5, "title": "D", "artist_id": 7, "artist_name": "Eminem"},
+            "socle_id": socle_id,
+            "genius": genius,
+        }
+        cas = _cas(detecteur, None, {"ecart": ecart})
+        return pol.arbitrage_deezer(cas, None, SimpleNamespace(disco=list(fiches)), {}, {7})
+
+    def test_meme_isrc_et_duree_lue_par_id_rattache(self):
+        """Eminem, « The King and I (From the Original Motion Picture
+        Soundtrack ELVIS) » : le single de la bande originale."""
+        titre = "The King and I (From the Original Motion Picture Soundtrack ELVIS)"
+        arb = self._juger("deezer_album_absent", titre, [self._socle()], isrc="usug12105254")
+        assert arb.action == "deezer_rattacher_edition" and "ISRC" in arb.raison
+
+    def test_sans_duree_lue_par_id_l_humain(self):
+        socle = self._socle(durations_observees={"legacy": 193, "youtube": 193})
+        titre = "The King and I (From the Original Motion Picture Soundtrack ELVIS)"
+        assert self._juger("deezer_album_absent", titre, [socle], isrc="USUG12105254") is None
+
+    def test_la_duree_de_la_meme_page_deezer_n_est_pas_un_temoin(self):
+        """La durée Deezer d'une fiche sans page Deezer à elle (ou de LA page
+        jugée) a pu être trouvée au titre : pas un témoin."""
+        titre = "The King and I (From the Original Motion Picture Soundtrack ELVIS)"
+        for deezer_id in (None, 9):
+            socle = self._socle(deezer_id=deezer_id)
+            assert self._juger("deezer_album_absent", titre, [socle], isrc="USUG12105254") is None
+
+    def test_isrc_sur_deux_fiches_l_humain(self):
+        fiches = [self._socle(), self._socle("The King and I (Remix)", tid=2)]
+        titre = "The King and I (From the Original Motion Picture Soundtrack ELVIS)"
+        assert self._juger("deezer_album_absent", titre, fiches, isrc="USUG12105254") is None
+
+    def test_sans_isrc_le_titre_de_base_et_la_duree(self):
+        """Deux fiches « Shake That » : la durée lue par ID désigne la bonne."""
+        a = self._socle("Shake That", isrc="X1", durations_observees={"spotify_web": 275})
+        b = _t("Shake That", 2)
+        arb = self._juger("deezer_version", "Shake That (Radio Edit)", [a, b], isrc="X2", duree=274)
+        assert arb.action == "deezer_rattacher_edition" and "#1" in arb.raison
+
+    def test_une_version_n_a_pas_de_titre_de_base(self):
+        socle = self._socle("Shake That", isrc="X1", durations_observees={"spotify_web": 275})
+        arb = self._juger("deezer_version", "Shake That (Live)", [socle], isrc="X2", duree=275)
+        assert arb is None or arb.action != "deezer_rattacher_edition"
+
+    def test_live_qu_aucune_fiche_ne_porte_devient_fiche_secondaire(self):
+        arb = self._juger("deezer_version", "The King and I (Live)", [self._socle()], duree=240)
+        assert arb.action == "deezer_appliquer" and "secondaire" in arb.sens
+
+    def test_version_deja_portee_l_humain(self):
+        """Par l'ISRC (« The Way I Am (Danny Lohner Remix Version) », porté par
+        la fiche « … (Danny Lohner Remix) »), ou par le titre."""
+        remix = _t("The King and I (Live)", 2, isrc="USIR1", duration=240)
+        fiches = [self._socle(), remix]
+        assert self._juger("deezer_version", "The King and I (Live)", fiches, duree=240) is None
+        isrc = self._juger("deezer_version", "The King and I (Live 2005)", fiches, isrc="USIR1")
+        assert isrc is None or isrc.action != "deezer_appliquer"
+
+    def test_version_a_la_duree_du_socle_l_humain(self):
+        assert self._juger("deezer_version", "The King and I (Live)", [self._socle()]) is None
+
+    def test_edition_d_une_version_pas_de_fiche(self):
+        """« Shake That (Remix) (Album Version Explicit) » : l'édition d'un
+        remix, jamais une nouvelle fiche."""
+        titre = "The King and I (Remix) (Album Version Explicit)"
+        assert self._juger("deezer_version", titre, [self._socle()], duree=240) is None
+
+    def test_sans_socle_ou_avec_page_genius_l_humain(self):
+        socle = self._socle()
+        titre = "The King and I (Live)"
+        assert self._juger("deezer_version", titre, [socle], duree=240, socle_id=None) is None
+        page = self._juger("deezer_version", titre, [socle], duree=240, genius={"id": 1})
+        assert page is None
+
+    def test_instrumental_reste_sans_fiche(self):
+        arb = self._juger("deezer_version", "The King and I (Instrumental)", [self._socle()])
+        assert arb.action == "normal"
+
+    def test_piste_nue_d_un_disque_live_l_humain(self, monkeypatch):
+        """MC Solaar, *Le tour de la question* : Deezer omet « (Live) » ; la
+        règle des pistes absentes aurait créé ou rattaché « Bouge de là » au
+        titre de la fiche studio."""
+        from src.utils import deezer_identity
+
+        def juger(album):
+            ecart = {
+                "piste": {"id": 9, "title": "Bouge de là", "isrc": "FR1", "duration": 186},
+                "album": {"id": 43852, "title": album, "artist_id": 7, "artist_name": "MC"},
+            }
+            cas = _cas("deezer_absent", None, {"ecart": ecart})
+            return pol.arbitrage_deezer(cas, None, SimpleNamespace(disco=[]), {}, {7})
+
+        assert juger("Le tour de la question").action == "deezer_appliquer"
+        assert juger("Le tour de la question (Live)") is None
+        monkeypatch.setattr(deezer_identity, "fournisseur_albums_live", lambda: {43852})
+        assert juger("Le tour de la question") is None
+
+    def test_regles_listees(self):
+        for regle in (
+            ("deezer_version", "deezer_rattacher_edition"),
+            ("deezer_album_absent", "deezer_rattacher_edition"),
+            ("deezer_version", "deezer_appliquer"),
+        ):
+            assert regle in pol.REGLES_DEEZER
+
+
 def test_kworb_seules_les_voies_qui_ne_creent_rien():
     rendition = _cas("kworb_proposition", None, {"proposition": "rendition", "parent_track_id": 3})
     tiers = _cas("kworb_proposition", None, {"proposition": "tiers"})

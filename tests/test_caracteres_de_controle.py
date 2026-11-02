@@ -36,6 +36,11 @@ SUFFIXES = {
 
 _PERMIS = {"\t", "\n", "\r"}
 
+#: Le CODE et la configuration, tenus en CRLF. Ni les notes ni les données
+#: (.md, .json, .txt : écrits par des outils, LF sans risque), ni les scripts
+#: shell (un CRLF casserait bash).
+SUFFIXES_CRLF = {".py", ".toml", ".yml", ".yaml", ".ini", ".cfg", ".mako", ".ps1", ".bat"}
+
 
 def _fichiers_versionnes() -> list[Path]:
     if shutil.which("git") is None:
@@ -68,5 +73,37 @@ def test_aucun_caractere_de_controle():
             if mauvais:
                 fautifs.append(f"{chemin.relative_to(RACINE)}:{numero} {', '.join(mauvais)}")
     assert not fautifs, "Caractères de contrôle (un `\\b` ou `\\n` abîmé ?) :\n" + "\n".join(
+        fautifs
+    )
+
+
+def test_fins_de_ligne_crlf_dans_la_copie_de_travail():
+    """Règle « Outillage » (fichiers en CRLF), mécanisée le 2026-11-02 : `sed -i`
+    de Git Bash repasse un fichier en LF (récidive le jour même sur
+    `tests/test_revue_auto.py`), et 278 fichiers étaient en LF ou mixtes sans que
+    rien ne le dise. L'index reste en LF (`core.autocrlf=true`) : la règle ne
+    porte que sur la copie de travail, et ne vaut que là où git y écrit du CRLF."""
+    if shutil.which("git") is None:
+        pytest.skip("git indisponible")
+    autocrlf = subprocess.run(
+        ["git", "-C", str(RACINE), "config", "core.autocrlf"], capture_output=True, text=True
+    ).stdout.strip()
+    if autocrlf != "true":
+        pytest.skip("core.autocrlf n'est pas « true » : la copie de travail suit l'index (LF)")
+    sortie = subprocess.run(
+        ["git", "-c", "core.quotepath=off", "-C", str(RACINE), "ls-files", "--eol", "-z"],
+        capture_output=True,
+        check=False,
+    )
+    fautifs = []
+    for ligne in sortie.stdout.decode("utf-8").split("\0"):
+        if not ligne:
+            continue
+        meta, chemin = ligne.split("\t", 1)
+        if Path(chemin).suffix.lower() in SUFFIXES_CRLF and ("w/lf" in meta or "w/mixed" in meta):
+            fautifs.append(f"{chemin} ({meta.split()[1]})")
+    assert (
+        not fautifs
+    ), "Fichiers à remettre en CRLF (`sed -i` ? passer par l'outil d'édition) :\n" + "\n".join(
         fautifs
     )

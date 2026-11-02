@@ -15,6 +15,8 @@ dit. Le fichier est donc relu par les PRODUCTEURS, à trois endroits :
   · `deezer_refuses` — même chose pour une piste Deezer DÉLIÉE (écarts Deezer,
     provider par morceau) : sans elle, « L.U.N.A.T.I.C. » et « Par Amour »
     reprenaient au run suivant l'ID qu'on venait de leur retirer (2026-10-10) ;
+  · `discogs_refuses` — la recherche Discogs saute un disque retiré de la fiche
+    (piste d'une autre version ou d'un homonyme, 2026-11-02) ;
   · `credits_refuses` — `save_track` n'écrit pas un crédit retiré (Genius
     ressert « Matthieu Cabaret — Composer », qui est le compositing du clip) ;
   · `genius_ids_absorbes` — une page Genius FUSIONNÉE dans une autre fiche n'est
@@ -139,7 +141,7 @@ NATURES = {
 #: même la mesure SongBPM refusée champ par champ (`mesure_songbpm`).
 PAR_ENREGISTREMENT = frozenset(
     set(NATURES.values()) - {"certif"}
-    | {"compteur_spotify", "page_songbpm", "mesure_songbpm", "contenu"}
+    | {"compteur_spotify", "page_songbpm", "mesure_songbpm", "contenu", "id_discogs"}
 )
 
 #: Champ d'observation (source `songbpm`, DÉCLARÉ, jamais arbitré) qui garde la
@@ -171,7 +173,7 @@ def _cle(nature: str, valeur) -> str:
         return json.dumps(list(cle_certif(valeur)), ensure_ascii=False)
     if nature == "credit":
         return json.dumps([normalize_name(valeur["nom"]), valeur["role"]], ensure_ascii=False)
-    if nature == "id_deezer":
+    if nature in ("id_deezer", "id_discogs"):
         return str(int(valeur))
     return str(valeur)
 
@@ -407,6 +409,12 @@ def deezer_refuses(track) -> set[int]:
     return {int(r["valeur"]) for r in _lignes(track, "id_deezer")}
 
 
+def discogs_refuses(track) -> set[int]:
+    """Les disques Discogs (`tracks.discogs_id`) refusés pour la fiche : la
+    recherche Discogs les saute (`DiscogsAPI._search_track_body`)."""
+    return {int(r["valeur"]) for r in _lignes(track, "id_discogs")}
+
+
 def credits_refuses(track) -> set[tuple[str, str]]:
     """{(nom normalisé, rôle)} — le rôle est la valeur de `CreditRole`."""
     return {tuple(json.loads(r["valeur"])) for r in _lignes(track, "credit")}
@@ -591,6 +599,18 @@ def memoriser_deezer_refuse(track, deezer_id: int, origine: str | None = None) -
     """Consigne une piste Deezer DÉLIÉE : relue par les écarts Deezer et le
     provider par morceau (`deezer_refuses`)."""
     _memoriser(track, "id_deezer", int(deezer_id), origine=origine)
+
+
+def memoriser_discogs_refuse(track, discogs_id: int, origine: str | None = None) -> None:
+    """Consigne un disque Discogs retiré de la fiche (`clear_track_discogs_release`) :
+    relu par la recherche Discogs (`discogs_refuses`), qui sinon reprendrait la
+    même piste au prochain run."""
+    _memoriser(track, "id_discogs", int(discogs_id), origine=origine)
+
+
+def oublier_discogs_refuse(track, discogs_id: int) -> bool:
+    """Pendant : le disque peut de nouveau être rapproché (le run suivant le relit)."""
+    return _oublier(track, "id_discogs", int(discogs_id))
 
 
 def memoriser_credit_refuse(track, nom: str, role: str) -> None:

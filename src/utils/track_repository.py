@@ -4296,6 +4296,183 @@ class TrackRepository:
             logger.error(f"Erreur clear_track_deezer_id (track_id={track_id}): {e}")
             return rapport
 
+    @staticmethod
+    def _rapport_discogs() -> dict:
+        return {
+            "id_retire": None,
+            "lignes": [],
+            "observations_retirees": [],
+            "credits_retires": 0,
+            "places_retirees": 0,
+            "liens_parution_retires": 0,
+            "parution_reperee": None,
+        }
+
+    def _retirer_disque_discogs(
+        self, conn, track_id: int, discogs_id, rapport: dict, *, soeur: bool = False
+    ) -> dict:
+        """Les gestes de `clear_track_discogs_release` sur UNE ligne, dans la
+        transaction de l'appelant (la ligne visée, puis chacune de ses sœurs,
+        le même `rapport` cumulant). Une `soeur` sans disque en colonne perd
+        quand même ce que l'union lui a donné du disque (genre, observations,
+        crédits, place)."""
+        ligne = (
+            conn.execute(
+                text("SELECT discogs_id, album FROM tracks WHERE id = :tid"), {"tid": track_id}
+            )
+            .mappings()
+            .first()
+        )
+        if ligne is None or (ligne["discogs_id"] is None and not soeur):
+            return rapport
+        if ligne["discogs_id"] is not None:
+            if discogs_id is not None and int(ligne["discogs_id"]) != int(discogs_id):
+                return rapport
+            rapport["id_retire"] = int(ligne["discogs_id"])
+        # `genre` : Discogs en est le SEUL écrivain, depuis le même disque.
+        conn.execute(
+            text(
+                "UPDATE tracks SET discogs_id = NULL, genre = NULL, updated_at = :now "
+                "WHERE id = :tid"
+            ),
+            {"tid": track_id, "now": datetime.now()},
+        )
+        rapport["lignes"].append(track_id)
+
+        # Tout ce que Discogs a observé vient de CETTE piste (durée, place) :
+        # une seule lecture par fiche.
+        champs = [
+            r[0]
+            for r in conn.execute(
+                text("SELECT field FROM observations WHERE track_id = :tid AND source = 'discogs'"),
+                {"tid": track_id},
+            )
+        ]
+        if champs:
+            conn.execute(
+                text("DELETE FROM observations WHERE track_id = :tid AND source = 'discogs'"),
+                {"tid": track_id},
+            )
+        rapport["observations_retirees"].extend((f, "discogs") for f in champs)
+        # Ré-arbitrage sur ce qui reste ; rien ⇒ NULL (une colonne ne garde pas
+        # une valeur sans provenance).
+        touches = set(champs) & set(self.COLONNES_DISCOGRAPHIE)
+        if touches:
+            self._ecrire_colonnes_discographie(
+                conn, track_id, self._arbitrer_discographie(conn, track_id, touches)
+            )
+
+        rapport["credits_retires"] += conn.execute(
+            text("DELETE FROM credits WHERE track_id = :tid AND source = 'discogs'"),
+            {"tid": track_id},
+        ).rowcount
+
+        # La place Discogs sur une parution de la base (même code-barres) : la
+        # preuve part ; le lien aussi s'il n'en a plus d'autre (sauf l'album
+        # repère, signalé), sinon la place qu'il tenait de Discogs se vide.
+        liens = (
+            conn.execute(
+                text(
+                    "SELECT rt.id AS rt_id, rt.position_source, r.title FROM release_tracks rt "
+                    "JOIN releases r ON r.id = rt.release_id WHERE rt.track_id = :tid AND ("
+                    "rt.position_source = 'discogs' OR EXISTS (SELECT 1 FROM "
+                    "release_track_sources s WHERE s.release_track_id = rt.id "
+                    "AND s.source = 'discogs'))"
+                ),
+                {"tid": track_id},
+            )
+            .mappings()
+            .all()
+        )
+        for lien in liens:
+            conn.execute(
+                text(
+                    "DELETE FROM release_track_sources WHERE release_track_id = :rt "
+                    "AND source = 'discogs'"
+                ),
+                {"rt": lien["rt_id"]},
+            )
+            reste = conn.execute(
+                text("SELECT COUNT(*) FROM release_track_sources WHERE release_track_id = :rt"),
+                {"rt": lien["rt_id"]},
+            ).scalar()
+            if not reste and not _est_album_repere(ligne["album"], lien["title"]):
+                conn.execute(
+                    text("DELETE FROM release_tracks WHERE id = :rt"), {"rt": lien["rt_id"]}
+                )
+                rapport["liens_parution_retires"] += 1
+                continue
+            if not reste:
+                rapport["parution_reperee"] = lien["title"]
+            if lien["position_source"] == "discogs":
+                conn.execute(
+                    text(
+                        "UPDATE release_tracks SET disc_number = NULL, track_number = NULL, "
+                        "position_source = NULL, position_brute = NULL, updated_at = :now "
+                        "WHERE id = :rt"
+                    ),
+                    {"rt": lien["rt_id"], "now": datetime.now()},
+                )
+                rapport["places_retirees"] += 1
+        return rapport
+
+    def clear_track_discogs_release(self, track_id: int, discogs_id: int | None = None) -> dict:
+        """Rejette le DISQUE Discogs d'un morceau — pendant de
+        `clear_track_deezer_id` pour ce que `DiscogsClient.enrich_track_data`
+        écrit à partir d'un disque. Un disque d'un autre artiste (Django
+        « Nuages » : celui de Django Reinhardt, 2026-09-23), ou la piste d'une
+        autre version ou d'un homonyme (avant le juge de la piste,
+        `discogs_identity.piste_concorde`, 2026-10-30 : un remix recevait le
+        disque, la place et les crédits de l'original — 2026-11-02) :
+
+        1. **effacer** `tracks.discogs_id` s'il vaut `discogs_id` (ou quel qu'il
+           soit, sans `discogs_id`), et `genre` — Discogs en est le SEUL
+           écrivain, depuis le même disque ;
+        2. **retirer** toutes les observations `source='discogs'` (durée,
+           `discogs_position`), colonnes ré-arbitrées sur ce qui reste (rien ⇒
+           NULL) ;
+        3. **retirer** les crédits `source='discogs'` ;
+        4. **délier la place** : la preuve `release_track_sources` Discogs part,
+           le lien avec elle s'il n'en a plus d'autre (sauf l'album repère),
+           sinon la place que le lien tenait de Discogs se vide.
+
+        Chez les lignes SŒURS aussi (même `genius_id`) qui portent ce disque ou
+        aucun — l'union de fin de transaction les rendrait. Une sœur qui porte
+        un AUTRE disque garde le sien. Le REFUS (`memoriser_discogs_refuse`)
+        est à la charge de l'appelant, comme pour les ID Spotify et Deezer
+        (crible `tests/test_retrait_d_id_refuse.py`).
+        """
+        rapport = self._rapport_discogs()
+        try:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
+                self._retirer_disque_discogs(conn, track_id, discogs_id, rapport)
+                vise = rapport["id_retire"]
+                if vise is None:
+                    return rapport
+
+                def chez_la_soeur(jumelle):
+                    propre = conn.execute(
+                        text("SELECT discogs_id FROM tracks WHERE id = :tid"), {"tid": jumelle}
+                    ).scalar()
+                    if propre is not None and int(propre) != vise:
+                        return
+                    self._toucher(conn, jumelle)
+                    self._retirer_disque_discogs(conn, jumelle, vise, rapport, soeur=True)
+
+                effacer_chez_les_soeurs(conn, track_id, chez_la_soeur)
+
+            logger.info(
+                f"🧹 Disque Discogs {vise} retiré de {len(rapport['lignes'])} ligne(s) "
+                f"({len(rapport['observations_retirees'])} observation(s), "
+                f"{rapport['credits_retires']} crédit(s), "
+                f"{rapport['liens_parution_retires'] + rapport['places_retirees']} place(s))"
+            )
+            return rapport
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur clear_track_discogs_release (track_id={track_id}): {e}")
+            return rapport
+
     def clear_orphan_reccobeats_measures(self, track_id: int) -> dict:
         """Rattrapage du troisième geste pour un morceau réparé AVANT qu'il
         n'existe (2026-09-22 → 2026-09-23) : `deezer_id`/`isrc` ont déjà été
@@ -4496,73 +4673,6 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur remplacer_isrc (track_id={track_id}): {e}")
             return []
-
-    def clear_track_discogs_release(self, track_id: int, discogs_id: int | None = None) -> dict:
-        """Rejette le DISQUE Discogs d'un morceau (2026-09-23) — pendant de
-        `clear_track_deezer_id` pour ce que `DiscogsClient.enrich_track_data`
-        écrit à partir d'un disque :
-
-          1. `discogs_id` (l'id du DISQUE où la recherche a trouvé la piste) ;
-          2. `genre` — Discogs en est le SEUL écrivain, et il ne l'écrit que
-             quand il est vide, depuis le même disque que `discogs_id` : il en
-             découle, il part avec lui ;
-          3. les crédits `source='discogs'` — importés du disque étranger
-             (Django « Nuages » : un crédit photo du disque de Django Reinhardt).
-
-        Appliqué aux lignes SŒURS (même `genius_id`) qui portent ce disque ou
-        aucun : `discogs_id`, `genre` et les crédits y sont propagés
-        (`track_soeurs`), et les y laisser les ferait revenir à la première
-        synchronisation. Une sœur qui porte un AUTRE disque garde le sien.
-        """
-        rapport = {"id_retire": None, "lignes": [], "credits_retires": 0}
-        try:
-            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
-                self._toucher(conn, track_id)
-                ligne = (
-                    conn.execute(
-                        text("SELECT discogs_id FROM tracks WHERE id = :tid"), {"tid": track_id}
-                    )
-                    .mappings()
-                    .first()
-                )
-                if ligne is None:
-                    logger.warning(f"clear_track_discogs_release : morceau {track_id} introuvable")
-                    return rapport
-                vise = discogs_id if discogs_id is not None else ligne["discogs_id"]
-                if vise is None:
-                    return rapport
-                vise = int(vise)
-                rapport["id_retire"] = vise
-
-                def effacer(tid: int) -> None:
-                    actuel = conn.execute(
-                        text("SELECT discogs_id FROM tracks WHERE id = :tid"), {"tid": tid}
-                    ).scalar()
-                    if actuel is not None and int(actuel) != vise:
-                        return
-                    conn.execute(
-                        text(
-                            "UPDATE tracks SET discogs_id = NULL, genre = NULL, "
-                            "updated_at = :now WHERE id = :tid"
-                        ),
-                        {"tid": tid, "now": datetime.now()},
-                    )
-                    rapport["credits_retires"] += conn.execute(
-                        text("DELETE FROM credits WHERE track_id = :tid AND source = 'discogs'"),
-                        {"tid": tid},
-                    ).rowcount
-                    rapport["lignes"].append(tid)
-
-                effacer(track_id)
-                effacer_chez_les_soeurs(conn, track_id, effacer)
-            logger.info(
-                f"🧹 Disque Discogs {vise} retiré de {len(rapport['lignes'])} ligne(s) "
-                f"({rapport['credits_retires']} crédit(s) Discogs)"
-            )
-            return rapport
-        except SQLAlchemyError as e:
-            logger.error(f"Erreur clear_track_discogs_release (track_id={track_id}): {e}")
-            return rapport
 
     def update_track_spotify_id(
         self, track_id: int, spotify_id: str, source: str = "kworb"

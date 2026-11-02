@@ -18,64 +18,8 @@ départage pas reste en place et figure au rapport.
 
 import argparse
 import sys
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
-
-from sqlalchemy import text
-
-
-def lire_fiches(dm):
-    """Les fiches de la base, avec leurs durées observées et leur place Discogs."""
-    from src.utils.discogs_durees import Fiche
-
-    with dm.engine.connect() as conn:
-        durees: dict[int, dict] = defaultdict(dict)
-        for tid, source, valeur in conn.execute(
-            text("SELECT track_id, source, value FROM observations WHERE field = 'duration'")
-        ):
-            durees[tid][source] = valeur
-        places = dict(
-            conn.execute(
-                text(
-                    "SELECT track_id, value FROM observations "
-                    "WHERE field = 'discogs_position' AND source = 'discogs'"
-                )
-            ).all()
-        )
-        lignes = conn.execute(
-            text(
-                "SELECT t.id, t.artist_id, a.name AS artiste, t.title, t.album, t.genius_id, "
-                "t.discogs_id, t.duration, t.primary_artist_name "
-                "FROM tracks t JOIN artists a ON a.id = t.artist_id"
-            )
-        ).mappings()
-        lignes = list(lignes)
-    noms: dict[int, frozenset] = {}
-    for r in lignes:
-        if r["artist_id"] not in noms:
-            noms[r["artist_id"]] = frozenset(
-                dm.noms_de_lartiste(r["artist_id"], r["artiste"])
-                | dm.noms_des_formations(r["artist_id"])
-            )
-    fiches, colonnes = [], {}
-    for r in lignes:
-        colonnes[r["id"]] = r["duration"]
-        fiches.append(
-            Fiche(
-                id=r["id"],
-                artist_id=r["artist_id"],
-                artiste=r["artiste"],
-                title=r["title"] or "",
-                album=r["album"],
-                genius_id=r["genius_id"],
-                discogs_id=r["discogs_id"],
-                position=places.get(r["id"]),
-                durations_observees=dict(durees.get(r["id"], {})),
-                principal=r["primary_artist_name"] or r["artiste"],
-                noms_de_l_artiste=noms[r["artist_id"]],
-            )
-        )
-    return fiches, colonnes
 
 
 def _ligne(v, colonnes) -> str:
@@ -97,6 +41,7 @@ def main(argv=None) -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
     import src.utils.data_manager as module_dm
+    from src.services.discogs_pistes import lire_fiches
     from src.utils.database_backup import DatabaseBackupManager, get_backup_manager
     from src.utils.discogs_durees import juger
     from src.utils.logger import configurer_journaux

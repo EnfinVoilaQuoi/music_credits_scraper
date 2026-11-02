@@ -40,6 +40,7 @@ AIDES = {
     "_retirer_id_deezer",
     "_retirer_isrc",
     "_retirer_id_spotify",
+    "_retirer_disque_discogs",
 }
 
 

@@ -28,9 +28,11 @@ Discogs). Des témoins en désaccord ne départagent rien. Le témoin MONTRE
 l'erreur à plus de `SEUIL_ERREUR` ; sans témoin propre, la durée Discogs est
 celle de la page d'origine (`designe`). Sinon le cas reste, au rapport.
 
-Fonctions PURES : le script `scripts/retirer_durees_discogs.py` lit la base
-et écrit par le DataManager (`forget_discography_observation`, sœurs comprises,
-colonne ré-arbitrée par `_ecrire`).
+Fonctions PURES : les scripts lisent la base par `services.discogs_pistes`
+et écrivent par le DataManager — `retirer_durees_discogs.py` la durée
+(`forget_discography_observation`), `retirer_pistes_discogs.py` le disque, la
+place et les crédits de la piste (`clear_track_discogs_release`,
+`pistes_a_retirer`), sœurs comprises, colonnes ré-arbitrées par `_ecrire`.
 """
 
 from __future__ import annotations
@@ -113,6 +115,9 @@ class Verdict:
     #: « indecis » (rien ne départage).
     etat: str
     motif: str
+    #: « retirer » montré par un témoin PROPRE de la fiche (sa durée lue
+    #: ailleurs), et non par la seule page d'origine.
+    temoin_propre: bool = False
 
     @property
     def retirer(self) -> bool:
@@ -328,6 +333,28 @@ def juger(fiches: list[Fiche]) -> list[Verdict]:
         raison, origines = s
         etat_, motif, origine = etat(f, raison, origines)
         verdicts.append(
-            Verdict(f, raison, origine or (origines[0] if origines else None), etat_, motif)
+            Verdict(
+                f,
+                raison,
+                origine or (origines[0] if origines else None),
+                etat_,
+                motif,
+                # Seule l'étape 1 d'`etat` (témoin propre) rend « retirer » sans origine.
+                temoin_propre=etat_ == "retirer" and origine is None,
+            )
         )
     return verdicts
+
+
+def pistes_a_retirer(verdicts: list[Verdict]) -> tuple[list[Verdict], list[Verdict]]:
+    """`(à retirer, à l'humain)` parmi les durées que le juge refuse et dont
+    l'erreur est montrée, pour la PISTE entière (disque, place, crédits —
+    `clear_track_discogs_release`). Seul un témoin PROPRE de la fiche montre
+    que la piste n'est pas la sienne ; la seule durée de la page d'origine ne
+    dit pas que la fiche diffère : ces cas restent à l'humain. Une fiche sans
+    disque en colonne n'a rien à retirer. PUR."""
+    montres = [v for v in verdicts if v.retirer and v.fiche.discogs_id is not None]
+    return (
+        [v for v in montres if v.temoin_propre],
+        [v for v in montres if not v.temoin_propre],
+    )

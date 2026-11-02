@@ -8,8 +8,9 @@ candidat ; ce script rejoue le MÊME prédicat sur ce qui est déjà en base.
 
 Un disque est relu une fois (cache par id, 1 req/s). Ce que le retrait efface
 (`DataManager.clear_track_discogs_release`) : `discogs_id`, `genre` (Discogs en
-est le seul écrivain) et les crédits `source='discogs'`, chez le morceau et ses
-lignes sœurs qui portent ce disque.
+est le seul écrivain), les observations, la place et les crédits
+`source='discogs'`, chez le morceau et ses lignes sœurs qui portent ce disque ;
+le disque est refusé (`memoriser_discogs_refuse`).
 
 Usage :
     python scripts/audit_discogs_releases.py                 # dry-run (défaut)
@@ -75,9 +76,15 @@ def imprimer(ecarts: list[dict]) -> None:
 def appliquer(dm: DataManager, ecarts: list[dict]) -> None:
     sauvegarde = get_backup_manager().create_backup("before_audit_discogs_releases")
     print(f"\n💾 Backup : {sauvegarde}")
+    from src.utils.corrections_fiches import fiches_par_id, memoriser_discogs_refuse
+
+    fiches = fiches_par_id(e["track_id"] for e in ecarts)
     lignes = credits = 0
     for e in ecarts:
         r = dm.clear_track_discogs_release(e["track_id"], e["discogs_id"])
+        # Refusé, sinon la recherche suivante le reprend (2026-11-02).
+        if r["id_retire"] is not None and e["track_id"] in fiches:
+            memoriser_discogs_refuse(fiches[e["track_id"]], e["discogs_id"])
         lignes += len(r["lignes"])
         credits += r["credits_retires"]
     print(f"\n✅ {len(ecarts)} disque(s) retiré(s) — {lignes} ligne(s) (sœurs comprises)")

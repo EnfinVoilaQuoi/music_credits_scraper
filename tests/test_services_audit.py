@@ -343,6 +343,31 @@ def test_paroles_identiques_sur_deux_titres_non_equivalents():
     cas = au.paroles_identiques(par)
     assert {tuple(c.pistes) for c in cas} == {(1, 2), (1, 3), (2, 4), (3, 4)}
     assert all(c.famille == "paroles_identiques" for c in cas)
+    assert all(c.nature == au.ERREUR for c in cas)
+
+
+def test_deux_versions_aux_memes_paroles_pour_information():
+    """« Any Man (Acapella) » / « Fucking Crazy (Any Man Demo Version) » d'Eminem
+    (2026-11-02) : deux versions d'un morceau ont ses paroles."""
+    texte = "\n".join(
+        f"[Couplet {i}]\nligne numéro {i} du texte qui parle de la ville et du temps qui passe"
+        for i in range(12)
+    )
+    par = {
+        1: [
+            {
+                "id": i,
+                "title": titre,
+                "genius_id": i,
+                "lyrics": texte,
+                "lyrics_source": "genius",
+                "artiste": "Eminem",
+            }
+            for i, titre in ((1, "Any Man (Acapella)"), (2, "Fucking Crazy (Any Man Demo Version)"))
+        ]
+    }
+    (cas,) = au.paroles_identiques(par)
+    assert cas.nature == au.INFORMATION
 
 
 def test_lrc_minute_au_dela_de_la_duree(data_manager, isha):
@@ -638,3 +663,33 @@ def test_un_cas_tranche_indecidable_reste_compte_hors_critere(isha, data_manager
 
     assert [(c.famille, c.nature) for c in cas] == [("revue:lrc_douteux", au.INDECIDABLE)]
     assert au.INDECIDABLE not in au.NATURES_DU_CRITERE
+
+
+def test_une_version_au_meme_lrc_et_a_la_meme_duree_est_indecidable():
+    """« Just Don't Give A Fuck (EP Version) » 244 s / l'original 242 s : peut-être
+    le même audio — le juge de la pose (`lrc_de_l_original`) ne juge pas, l'audit
+    ne compte pas d'erreur (2026-11-02). Une durée différente reste une erreur."""
+    lrc = "\n".join(f"[00:{i:02d}.00]ligne {i} du couplet" for i in range(40))
+
+    def fiche(id_, titre, duree):
+        return {
+            "id": id_,
+            "title": titre,
+            "duration": duree,
+            "lyrics": None,
+            "lyrics_source": None,
+            "lyrics_synced": lrc,
+            "lyrics_synced_source": "YouTube Music",
+            "genius_id": id_,
+            "artiste": "Eminem",
+        }
+
+    for duree, nature in ((244, au.INDECIDABLE), (300, au.ERREUR)):
+        par = {
+            1: [
+                fiche(1, "Just Don't Give a Fuck", 242),
+                fiche(2, "Just Don't Give A Fuck (EP Version)", duree),
+            ]
+        }
+        (cas,) = [c for c in au.lrc(par) if c.famille == "lrc_version"]
+        assert cas.nature == nature

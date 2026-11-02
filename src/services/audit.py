@@ -314,12 +314,22 @@ def lrc(par) -> list[Cas]:
                             and not porte_une_version(o["title"])
                             and meme_socle(t["title"], o["title"])
                         ):
+                            # Deux durées à ± 2 s peuvent être le même audio : le
+                            # juge de la pose (`revue.lrc_de_l_original`) ne les
+                            # juge pas, l'audit ne les compte pas en erreur
+                            # (« Just Don't Give A Fuck (EP Version) », 2026-11-02).
+                            meme_audio = (
+                                t["duration"]
+                                and o["duration"]
+                                and abs(int(t["duration"]) - int(o["duration"])) <= 2
+                            )
                             cas.append(
                                 Cas(
                                     "lrc_version",
                                     t["artiste"],
                                     [t["id"], o["id"]],
                                     f"{_lib(t)} {t['duration']}s = LRC de {_lib(o)} {o['duration']}s",
+                                    INDECIDABLE if meme_audio else ERREUR,
                                 )
                             )
                             break
@@ -368,12 +378,20 @@ def paroles_identiques(par) -> list[Cas]:
                         or _sans_groupes(a["title"]) == _sans_groupes(b["title"])
                     ):
                         continue
+                    # Deux VERSIONS (acapella, démo, `[V1]`) d'un même morceau
+                    # ont ses paroles : expliqué, pour information (« Any Man
+                    # (Acapella) » / « Fucking Crazy (Any Man Demo Version) »,
+                    # 2026-11-02). Une seule version : rien ne dit que c'est la
+                    # sienne (« Tous Les Jours (Remix) » aux paroles de « Fais le
+                    # vide ») — une erreur, comme deux pages sans version.
+                    version = porte_une_version(a["title"]) and porte_une_version(b["title"])
                     cas.append(
                         Cas(
                             "paroles_identiques",
                             a["artiste"],
                             [a["id"], b["id"]],
                             f"{_lib(a)} et {_lib(b)} : mêmes paroles",
+                            INFORMATION if version else ERREUR,
                         )
                     )
     return cas

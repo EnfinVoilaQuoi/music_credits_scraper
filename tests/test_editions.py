@@ -80,6 +80,28 @@ def test_absorber_garde_l_original_et_note_l_edition(data_manager):
     assert data_manager.get_artist_edition_genius_ids(a.id) == {2}
 
 
+def test_absorber_les_editions_de_la_discographie(data_manager):
+    """Branché en fin d'étape discographie (2026-11-02) : 40 pages d'édition
+    chez Eminem. Un original absent n'est jamais deviné ; à blanc, rien ne bouge."""
+    a = Artist(name="Eminem")
+    a.id = data_manager.save_artist(a)
+    for gid, titre in ((1, "Stan"), (2, "Stan (Clean)"), (3, "Crushed (Clean Radio Edit)")):
+        t = Track(title=titre, artist=a)
+        t.genius_id = gid
+        data_manager.save_track(t)
+    fiches = data_manager.get_artist_tracks(a.id)
+
+    absorbees, sans = editions.absorber_les_editions(data_manager, fiches, appliquer=False)
+    assert [(f.title, s.title) for f, s in absorbees] == [("Stan (Clean)", "Stan")]
+    assert [f.title for f in sans] == ["Crushed (Clean Radio Edit)"]
+    assert len(data_manager.get_artist_tracks(a.id)) == 3
+
+    editions.absorber_les_editions(data_manager, fiches)
+    restantes = {t.title for t in data_manager.get_artist_tracks(a.id)}
+    assert restantes == {"Stan", "Crushed (Clean Radio Edit)"}
+    assert data_manager.get_artist_edition_genius_ids(a.id) == {2}
+
+
 def test_une_seconde_source_complete_l_edition(data_manager):
     a = Artist(name="Kanye West")
     a.id = data_manager.save_artist(a)

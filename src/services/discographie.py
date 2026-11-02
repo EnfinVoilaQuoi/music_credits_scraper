@@ -68,6 +68,8 @@ class BilanDisco(Bilan):
     titres_album: int = 0
     #: Doublons « X (Unreleased) » / « X » fusionnés (même morceau inédit).
     fusions_inedits: list = field(default_factory=list)
+    #: Pages d'édition de diffusion absorbées par leur original (`editions`).
+    fusions_editions: list = field(default_factory=list)
     #: Medleys liés à leurs fiches par la règle des titres joints.
     medleys: list = field(default_factory=list)
     albums_api: int = 0
@@ -496,6 +498,15 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     bilan.fusions_inedits = fusionner_doublons_inedits(dm, artist, artist.tracks)
     if bilan.fusions_inedits:
         artist.tracks = dm.get_artist_tracks(artist.id)
+    # Les pages d'ÉDITION de diffusion (radio edit, clean, single version)
+    # rejoignent leur original AVANT l'identité, qui leur poserait les ID de
+    # l'original (Eminem, 2026-11-02).
+    from src.services.editions import absorber_les_editions
+
+    absorbees, _ = absorber_les_editions(dm, artist.tracks)
+    bilan.fusions_editions = [f"{f.title} → {s.title}" for f, s in absorbees]
+    if absorbees:
+        artist.tracks = dm.get_artist_tracks(artist.id)
     from src.services.versions import (
         constater_instrumentaux,
         crediter_remixeurs,
@@ -605,6 +616,9 @@ def resume(bilan: BilanDisco, artist: Artist) -> str:
     if bilan.fusions_inedits:
         msg += f"\n🔁 {len(bilan.fusions_inedits)} doublon(s) inédit(s) fusionné(s) : "
         msg += ", ".join(bilan.fusions_inedits[:5])
+    if bilan.fusions_editions:
+        msg += f"\n🎚️ {len(bilan.fusions_editions)} page(s) d'édition absorbée(s) : "
+        msg += ", ".join(bilan.fusions_editions[:5])
     if bilan.medleys:
         msg += f"\n🧩 {len(bilan.medleys)} medley(s) lié(s) à leurs fiches : "
         msg += ", ".join(bilan.medleys[:5])

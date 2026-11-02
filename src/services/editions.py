@@ -114,6 +114,31 @@ def absorber(dm, socle, fiche) -> bool:
     return dm.merge_tracks(socle.id, fiche.id)
 
 
+def absorber_les_editions(dm, fiches, *, appliquer: bool = True) -> tuple[list, list]:
+    """Les fiches d'ÉDITION de diffusion (« Stan (Clean) », « POWER (Album
+    Version (Edited)) », « Like Toy Soldiers (Single Version) ») absorbées par
+    leur original (décision utilisateur 2026-09-24 : un morceau). Rend
+    `(absorbées, sans_original)` : `[(fiche, socle)]` et `[fiche]` — un
+    original absent ou ambigu n'est jamais deviné. `appliquer=False` : à blanc.
+    Branché en fin d'étape discographie le 2026-11-02 (40 pages d'édition chez
+    Eminem, qui partageaient l'ISRC de l'original) ; `scripts/fusionner_editions.py`
+    rattrape une base entière."""
+    absorbees, sans_original = [], []
+    for fiche in fiches:
+        if not edition_de_diffusion(fiche.title):
+            continue
+        socle = socle_de(fiche.title, fiches)
+        if socle is None:
+            sans_original.append(fiche)
+            continue
+        if appliquer and not absorber(dm, socle, fiche):
+            continue
+        absorbees.append((fiche, socle))
+        if appliquer:
+            logger.info(f"🎚️ Édition absorbée : « {fiche.title} » → « {socle.title} »")
+    return absorbees, sans_original
+
+
 def rattacher(dm, socle, titre: str, source: str, label: str | None = None, **identifiants) -> bool:
     """Une source a vu une édition de l'original : notée sur sa fiche. `label`
     distingue une édition au MÊME titre (le disque Deezer d'une autre page du

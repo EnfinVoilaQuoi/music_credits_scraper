@@ -46,19 +46,14 @@ def main() -> int:
         artiste = dm.get_artist_by_name(nom)
         fiches = dm.get_artist_tracks(artiste.id)
         lignes = []
+        absorbees, sans_original = editions.absorber_les_editions(dm, fiches, appliquer=args.apply)
+        for fiche in sans_original:
+            compte["sans_original"] += 1
+            lignes.append(f"   ❓ « {fiche.title} » : original absent ou ambigu — gardée")
+        for fiche, socle in absorbees:
+            compte["absorbees"] += 1
+            lignes.append(f"   🎚️ « {fiche.title} » ({fiche.id}) → « {socle.title} » ({socle.id})")
         for fiche in fiches:
-            if parse_variant(fiche.title).edition:
-                socle = editions.socle_de(fiche.title, fiches)
-                if socle is None:
-                    compte["sans_original"] += 1
-                    lignes.append(f"   ❓ « {fiche.title} » : original absent ou ambigu — gardée")
-                    continue
-                if args.apply:
-                    editions.absorber(dm, socle, fiche)
-                compte["absorbees"] += 1
-                lignes.append(
-                    f"   🎚️ « {fiche.title} » ({fiche.id}) → « {socle.title} » ({socle.id})"
-                )
             for entree in fiche.spotify_id_entries or []:
                 if not entree.est_rendition or not entree.label:
                     continue

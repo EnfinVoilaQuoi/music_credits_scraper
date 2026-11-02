@@ -280,7 +280,12 @@ def noms_de_recherche_pour(runtime: Runtime, artist: Artist) -> list[str]:
     indice de recherche est une faute de frappe — les deux fabriquent des faux
     positifs. Ils restent lus ailleurs (présence dans un collectif : les
     crédits d'écriture portent l'état civil).
+
+    Un alias de moins de `ALIAS_LETTRES_MIN` lettres ou chiffres (« Em »,
+    « M&M ») non plus : la RIAA balayait « Em » sans fin (2026-11-02). Une
+    FORMATION au nom court (« MZ ») reste interrogée.
     """
+    from src.utils.artist_repository import ALIAS_LETTRES_MIN
     from src.utils.cert_artist import noms_de_recherche
     from src.utils.formations import NATURES_DE_RECHERCHE, nature_alias
 
@@ -294,6 +299,7 @@ def noms_de_recherche_pour(runtime: Runtime, artist: Artist) -> list[str]:
                 or (
                     rel.kind == "alias"
                     and nature_alias(rel.detail, rel.source) in NATURES_DE_RECHERCHE
+                    and sum(c.isalnum() for c in rel.related_name or "") >= ALIAS_LETTRES_MIN
                 )
             ]
         except Exception:

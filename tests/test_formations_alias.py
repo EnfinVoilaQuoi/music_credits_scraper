@@ -413,3 +413,24 @@ def test_recherche_de_certifs_sans_etat_civil_ni_indice(data_manager):
     # La présence dans un collectif lit TOUS les alias confirmés : les crédits
     # d'écriture portent l'état civil.
     assert "Jacques Webster" in data_manager.noms_de_lartiste(artist.id, artist.name)
+
+
+def test_recherche_de_certifs_sans_alias_trop_court(data_manager):
+    """« Em » et « M&M » d'Eminem (Artist name, MusicBrainz ET Discogs) : la
+    RIAA balayait « Em » sans fin (2026-11-02). Une formation courte reste."""
+    from src.services.certifs import noms_de_recherche_pour
+
+    artist = Artist(name="Eminem")
+    artist.id = data_manager.save_artist(artist)
+    data_manager.record_artist_relations(
+        artist.id,
+        [
+            ArtistRelation(
+                related_name=nom, kind="alias", source="discogs+musicbrainz", detail="Artist name"
+            )
+            for nom in ("Em", "M&M", "Slim Shady")
+        ]
+        + [ArtistRelation(related_name="MZ", kind="member_of", formation="groupe")],
+    )
+    noms = noms_de_recherche_pour(SimpleNamespace(data_manager=data_manager), artist)
+    assert set(noms) == {"Eminem", "Slim Shady", "MZ"}

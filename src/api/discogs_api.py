@@ -14,6 +14,7 @@ from src.models import Artist, ArtistRelation, Credit, CreditRole, ReleaseObserv
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.utils.codes_barres import code_barres_discogs
+from src.utils.corrections_fiches import discogs_refuses
 from src.utils.discogs_identity import (
     homonymes_de,
     nom_sans_suffixe,
@@ -240,12 +241,25 @@ class DiscogsClient:
             # We can't use len() or slice directly
             logger.info("📊 Discogs: Résultats trouvés, analyse des premiers...")
 
+            # Un disque retiré de la fiche (`clear_track_discogs_release`) est
+            # refusé : la recherche le retrouverait au même rang.
+            refuses = (
+                discogs_refuses(fiche)
+                if fiche is not None and isinstance(fiche.artist, Artist)
+                else set()
+            )
+
             # Analyser les premiers résultats (max 5)
             checked_count = 0
             for i, release in enumerate(results, 1):
                 if checked_count >= 5:
                     break
                 checked_count += 1
+                if getattr(release, "id", None) in refuses:
+                    logger.info(
+                        f"↪️ Discogs : disque {release.id} refusé pour '{track_title}' — écarté"
+                    )
+                    continue
                 try:
                     logger.debug(f"Vérification résultat #{i}: {release.title}")
 

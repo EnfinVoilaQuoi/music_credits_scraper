@@ -24,6 +24,7 @@ _REFUS_ATTENDU = {
     "clear_track_spotify_id": "memoriser_id_refuse",
     "rejeter_spotify_id": "memoriser_id_refuse",
     "clear_track_deezer_id": "memoriser_deezer_refuse",
+    "clear_track_discogs_release": "memoriser_discogs_refuse",
 }
 
 #: (fichier, fonction) qui retirent un ID SANS le refuser. Liste FERMÉE : une

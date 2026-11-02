@@ -14,6 +14,7 @@ Une fiche dont l'original est absent ou ambigu est LISTÉE, jamais touchée.
 
     python scripts/fusionner_editions.py            # dry-run
     python scripts/fusionner_editions.py --apply    # backup + écriture
+    python scripts/fusionner_editions.py --artiste Eminem --apply   # un seul artiste
 """
 
 import argparse
@@ -29,6 +30,7 @@ from src.utils.version_descriptors import Kind, parse_variant
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="écrire (défaut : dry-run)")
+    parser.add_argument("--artiste", action="append", help="limiter à cet artiste (répétable)")
     args = parser.parse_args()
 
     from src.utils.data_manager import DataManager
@@ -40,7 +42,7 @@ def main() -> int:
         print(f"💾 Backup : {get_backup_manager().create_backup('before_fusionner_editions')}")
 
     compte = {"absorbees": 0, "sans_original": 0, "renditions": 0}
-    for nom in dm.get_artist_names():
+    for nom in args.artiste or dm.get_artist_names():
         artiste = dm.get_artist_by_name(nom)
         fiches = dm.get_artist_tracks(artiste.id)
         lignes = []

@@ -512,6 +512,45 @@ def test_deezer_piste_de_la_fiche_du_disque_rattachee_puis_retablie(
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
 
 
+def test_pages_non_musique_desactivee_supprimee_puis_retablies(data_manager, artiste):
+    """Pages « Non-Music » sans trace (décision utilisateur 2026-11-01) : un
+    sketch jamais sorti est désactivé, un texte supprimé et noté supprimé ;
+    les deux se rétablissent, et la règle ne les reprend pas."""
+    from src.utils.deleted_tracks_manager import DeletedTracksManager
+    from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+    for titre, gid, texte in (
+        ("Kim’s New Man (Skit)", 50, "[Skit: Eminem mocking Kim]\nIt’s alright, just come out!"),
+        (
+            "Berzerk Explained",
+            51,
+            "I had met Paul, Em's manager, a few years ago and we always talked about"
+            " the possibility of getting together to work on something down the line",
+        ),
+    ):
+        t = Track(title=titre, artist=artiste, genius_id=gid)
+        t.genius_url = f"https://genius.com/page-{gid}-annotated"
+        t.lyrics.text, t.lyrics.source, t.lyrics.present = texte, "genius", True
+        t.anecdotes = "Une note de la page."
+        data_manager.save_track(t)
+    fiches = _charger(data_manager, artiste)
+    skit = fiches["Kim’s New Man (Skit)"]
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 2, bilan
+    assert skit.id in DisabledTracksManager().load_disabled_tracks(artiste.name)
+    assert DeletedTracksManager().load_deleted_ids(artiste.name) == {51}
+    assert set(_charger(data_manager, artiste)) == {"Kim’s New Man (Skit)"}
+
+    for correction in data_manager.corrections_revue(artiste.id):
+        _charger(data_manager, artiste)
+        revue_auto.retablir(data_manager, artiste, correction)
+    assert skit.id not in DisabledTracksManager().load_disabled_tracks(artiste.name)
+    assert DeletedTracksManager().load_deleted_ids(artiste.name) == set()
+    _charger(data_manager, artiste)
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
 def test_retablir_un_rattachement_retire_l_autre_edition_deezer(data_manager, artiste):
     """#8199, corrections 679/680 du 2026-10-26 : le rattachement « autre
     édition Deezer » avait noté la page en édition de la fiche. Rétablir délie

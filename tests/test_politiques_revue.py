@@ -192,6 +192,50 @@ class TestLiensDeezer:
         assert arb is None or arb.action != "deezer_appliquer"
 
 
+class TestNonMusique:
+    """Pages Genius « Non-Music » sans trace (décision utilisateur 2026-11-01) :
+    témoin les pages tranchées à la main le 2026-10-31 et les 16 d'Eminem."""
+
+    @pytest.mark.parametrize(
+        ("titre", "paroles", "nature"),
+        [
+            ("Come As You Are", "[Verse 1 : Sunday Service Choir]\nCome as you are", "chant"),
+            ("Last Freestyle (I Met Oprah)", "[Intro: Kanye West]\nThis my last", "chant"),
+            ("Brighten Rehab (Skit)", "*Crickets chirping, running, dogs barking*", "sketch"),
+            ("Alfred (Outro) (Alternative Version)", "[Intro: Alfred Hitchcock]\nYou", "sketch"),
+            ("2 Strong Men", "[Skit: Ken Kaniff]\nYes, um, yes, this is Ken", "sketch"),
+            ("Graduation (Skit)", "", "sketch"),
+            ("TAKEME2RIVER", "", "sans_texte"),
+            ("Yam", "[Sample : Prynce Geno]\nLove\nLove\nLove", "texte"),
+            ("I Know, I Know (Love Everyone)", " ".join(["Know, I know,"] * 24), "texte"),
+            (
+                "Rolling Stone Q/A Exclusive 2013",
+                "Are you feeling good about the album at this point, now that it is done?\n"
+                "Um, that's a tough question, man. For the most part, yeah. But I don't know.",
+                "texte",
+            ),
+            # Des lignes courtes sans section : peut-être des paroles — l'humain.
+            ("Untitled", "Yeah, I'm up three\nDouble cup and Rémy\nWe've been outside", None),
+        ],
+    )
+    def test_nature(self, titre, paroles, nature):
+        assert pol.nature_non_musique(titre, paroles) == nature
+
+    def test_politique(self):
+        t = _t("Kim’s New Man (Skit)")
+        t.lyrics.text = "[Skit: Eminem mocking Kim]\nIt’s alright, just come out!"
+        arb = pol.politique_non_musique(_cas("annotee", t), t, None)
+        assert arb.action == "desactiver_non_musique"
+        t = _t("Berzerk Explained")
+        t.lyrics.text = (
+            "I had met Paul, Em's manager, a few years ago and we always talked about the"
+            " possibility of getting together to work on something at some point down the line"
+        )
+        arb = pol.politique_non_musique(_cas("annotee", t), t, None)
+        assert arb.action == "supprimer_non_musique"
+        assert ("annotee", arb.action) in pol.REGLES_ETENDUES
+
+
 class TestFicheDuMemeDisque:
     """`deezer_absent` d'Eminem (2026-11-02) : la piste « absente » est celle
     d'une fiche de son disque — mention de bande originale, année que Genius

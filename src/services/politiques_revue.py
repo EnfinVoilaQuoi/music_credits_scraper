@@ -1743,6 +1743,11 @@ REGLES_ETENDUES = frozenset(
         # 2026-10-29 : 3 cas sur 6 ; témoins la fiche de la version que Spotify
         # nomme (son propre ID, sa durée) et Deezer / Apple de la fiche.
         ("id_spotify_version", "normal"),
+        # 2026-11-02 : pages « Non-Music » (décision utilisateur 2026-11-01),
+        # témoin les 10 pages tranchées à la main ; Eminem, 16 / 16.
+        ("annotee", "normal"),
+        ("annotee", "desactiver_non_musique"),
+        ("annotee", "supprimer_non_musique"),
         # 2026-10-29, décision utilisateur (« si on est sûr avec les data […]
         # au moindre doute, on tranche pas ») : versions et titres génériques
         # entrent quand les catalogues suffisent à la preuve.
@@ -2190,7 +2195,76 @@ def politique_recherche_dementie(cas, track, _ctx):
     )
 
 
+# ── Pages Genius « Non-Music » sans trace — décision utilisateur 2026-11-01 ──
+
+#: Sections d'une CHANSON (le chant ou le freestyle se garde).
+_SECTIONS_CHANT = frozenset(
+    {"verse", "couplet", "chorus", "refrain", "hook", "bridge", "pont", "pre-chorus", "post-chorus"}
+)
+#: Sections et mots de titre d'un SKETCH (désactivé s'il n'est jamais sorti).
+_MOTS_SKETCH = ("skit", "interlude", "intro", "outro")
+#: Une prose : au moins autant de mots par ligne, en moyenne (un couplet en a
+#: 6 à 10 ; « I Know, I Know (Love Everyone) », 71 mots sur une ligne).
+_MOTS_PAR_LIGNE_PROSE = 12
+
+_EN_TETE = re.compile(r"^\s*\[([^\]:]*)")
+
+
+def nature_non_musique(titre: str | None, paroles: str | None) -> str | None:
+    """PUR. Ce qu'est une page Genius « Non-Music » sans trace de plateforme
+    (règle décidée par l'utilisateur le 2026-11-01, sur 10 pages tranchées à
+    la main) : « chant » (couplets, refrain ; un freestyle) → gardée ;
+    « sketch » (skit, interlude, intro, outro, au titre ou en section) et
+    « sans_texte » → désactivées ; « texte » (un sample, une prose : entretien,
+    article, liste, notes de pochette) → supprimée ; None → l'humain (des
+    lignes courtes sans section : peut-être des paroles)."""
+    from src.utils.paroles_genius import texte_utile
+    from src.utils.title_matching import contains_as_words
+
+    sections = {
+        m.group(1).strip().lower()
+        for ligne in (paroles or "").splitlines()
+        if (m := _EN_TETE.match(ligne))
+    }
+    mots_de_section = {mot for s in sections for mot in re.findall(r"[\w-]+", s)}
+    titre_bas = (titre or "").lower()  # `contains_as_words` veut des chaînes normalisées
+    if mots_de_section & _SECTIONS_CHANT or contains_as_words("freestyle", titre_bas):
+        return "chant"
+    if any(contains_as_words(m, titre_bas) for m in _MOTS_SKETCH) or (
+        mots_de_section & set(_MOTS_SKETCH)
+    ):
+        return "sketch"
+    texte = texte_utile(paroles)
+    lignes = [ligne for ligne in texte.splitlines() if ligne.strip()]
+    if not lignes:
+        return "sans_texte"
+    if "sample" in mots_de_section:
+        return "texte"
+    if sum(len(ligne.split()) for ligne in lignes) / len(lignes) >= _MOTS_PAR_LIGNE_PROSE:
+        return "texte"
+    return None
+
+
+def politique_non_musique(cas, track, _ctx):
+    """🏷️ `annotee` : le sens de `nature_non_musique`."""
+    if cas.detecteur != "annotee" or track is None:
+        return None
+    nature = nature_non_musique(track.title, track.lyrics.text)
+    if nature == "chant":
+        return Arbitrage("chant ou freestyle : garder", "normal", "sections d'une chanson")
+    if nature in ("sketch", "sans_texte"):
+        return Arbitrage(
+            "jamais sorti : désactiver",
+            "desactiver_non_musique",
+            "sketch" if nature == "sketch" else "page sans texte",
+        )
+    if nature == "texte":
+        return Arbitrage("un texte, pas un morceau : supprimer", "supprimer_non_musique", "prose")
+    return None
+
+
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
+    "annotee": politique_non_musique,
     "recherche_dementie": politique_recherche_dementie,
     "doublon": politique_doublon,
     "duree_spotify": politique_spotify_confirme,

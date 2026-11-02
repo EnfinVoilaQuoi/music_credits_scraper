@@ -151,9 +151,12 @@ def _brut_isole(tmp_path, monkeypatch):
 def _pages_desactivees_isolees(tmp_path, monkeypatch):
     """AUCUN test ne lit `data/disabled_tracks/` réel : le panneau les relit
     (`revue.fiches_actives`, 2026-10-31)."""
-    from src.utils import disabled_tracks_manager
+    from src.utils import deleted_tracks_manager, disabled_tracks_manager
 
     monkeypatch.setattr(disabled_tracks_manager, "DATA_DIR", tmp_path)
+    # Ni `data/deleted_tracks/` : une règle du panneau y écrit (pages
+    # « Non-Music » supprimées, 2026-11-02).
+    monkeypatch.setattr(deleted_tracks_manager, "DATA_DIR", tmp_path)
 
 
 @pytest.fixture(autouse=True)

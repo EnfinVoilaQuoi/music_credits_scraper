@@ -128,7 +128,12 @@ _SANS_FICHE = frozenset(
 )
 
 #: Correcteurs qui reçoivent l'artiste (ils rejouent l'action du panneau).
-_AVEC_ARTISTE = _SANS_FICHE | {"delier_deezer", "retirer_video_recherche"}
+_AVEC_ARTISTE = _SANS_FICHE | {
+    "delier_deezer",
+    "retirer_video_recherche",
+    "desactiver_non_musique",
+    "supprimer_non_musique",
+}
 
 #: Préfixe de la note d'un « ✓ Normal » posé par une règle (et de l'origine
 #: d'un refus) — un humain n'en pose jamais.
@@ -716,8 +721,43 @@ def _retirer_identite_derivee(dm, track, cas: Cas) -> tuple[str, dict]:
     )
 
 
+#: Motif d'une page « Non-Music » désactivée (celui des désactivations à la main).
+MOTIF_NON_MUSIQUE = "non_musique"
+
+
+def _desactiver_non_musique(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Page « Non-Music » jamais sortie (sketch, page sans texte) : désactivée,
+    motif `non_musique`, origine de règle — réversible."""
+    from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+    DisabledTracksManager().desactiver(
+        artiste.name, [track.id], MOTIF_NON_MUSIQUE, f"{PREFIXE_REGLE}{cas.detecteur}"
+    )
+    return f"« {track.title} » désactivée", {"type": "page_desactivee", "track_id": track.id}
+
+
+def _supprimer_non_musique(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Page « Non-Music » qui est un TEXTE (entretien, article, liste, sample) :
+    supprimée et notée supprimée, comme dans l'IHM — la discographie ne la
+    recrée pas. Rétablir l'ôte de la liste : la discographie suivante la
+    recrée depuis Genius."""
+    from src.utils.deleted_tracks_manager import DeletedTracksManager
+
+    if not track.genius_id:
+        raise LookupError("page sans ID Genius : rien ne la ferait revenir")
+    DeletedTracksManager().add_deleted(artiste.name, track.genius_id, track.title)
+    dm.delete_track(track.id)
+    return f"« {track.title} » supprimée (texte, pas un morceau)", {
+        "type": "page_supprimee",
+        "genius_id": track.genius_id,
+        "titre": track.title,
+    }
+
+
 #: Correcteurs des RÈGLES, par action de la politique.
 _CORRECTEURS_DE_REGLE = {
+    "desactiver_non_musique": _desactiver_non_musique,
+    "supprimer_non_musique": _supprimer_non_musique,
     "retirer_identite_derivee": _retirer_identite_derivee,
     "retirer_lrc": _corriger_lrc,
     "confirmer_lien": _confirmer_lien,
@@ -882,6 +922,9 @@ def retablir(dm, artiste, correction: dict) -> str:
         "videos",
         # Un « ✓ Normal » ne touche aucune fiche (DV1 : version Deezer sans page).
         "verdict",
+        # Désactivée, la page n'est plus chargée ; supprimée, elle n'est plus là.
+        "page_desactivee",
+        "page_supprimee",
     ):
         raise LookupError("la fiche n'est plus dans la discographie chargée")
     if annulation.get("type") == "lrc":
@@ -1052,6 +1095,19 @@ def retablir(dm, artiste, correction: dict) -> str:
         compte_rendu = f"« {correction['morceau']} » rendu à l'humain (règle défaite)"
         logger.info(f"À trancher — {compte_rendu}")
         return compte_rendu
+    elif annulation.get("type") == "page_desactivee":
+        from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+        DisabledTracksManager().reactiver(artiste.name, [annulation["track_id"]])
+        compte_rendu = f"« {correction['morceau']} » réactivée"
+    elif annulation.get("type") == "page_supprimee":
+        from src.utils.deleted_tracks_manager import DeletedTracksManager
+
+        DeletedTracksManager().remove_deleted(artiste.name, annulation["genius_id"])
+        compte_rendu = (
+            f"« {annulation['titre']} » n'est plus notée supprimée : "
+            "la prochaine discographie la recrée"
+        )
     else:
         raise ValueError(f"correction de type inconnu : {annulation.get('type')!r}")
     dm.marquer_correction_retablie(correction["id"])

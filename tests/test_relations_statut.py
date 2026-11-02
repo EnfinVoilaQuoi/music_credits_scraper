@@ -126,6 +126,14 @@ class TestArbitrer:
         data_manager.record_artist_relations(a.id, [_rel("ISHA Officiel")])
         assert data_manager.noms_de_lartiste(a.id, "Isha") == {"Isha", "ISHA Officiel"}
 
+    def test_un_alias_trop_court_n_est_pas_un_nom_de_recherche(self, data_manager):
+        """« Em » et « M&M » d'Eminem : la RIAA balayait « Em » sans fin (2026-11-02)."""
+        a = _artiste(data_manager, "Eminem")
+        data_manager.record_artist_relations(
+            a.id, [_rel("Em"), _rel("M&M"), _rel("Slim Shady"), _rel("MNM")]
+        )
+        assert data_manager.noms_de_lartiste(a.id, "Eminem") == {"Eminem", "Slim Shady", "MNM"}
+
     def test_nature_connue_ignores_non_confirmed(self, data_manager):
         a = _artiste(data_manager, "Swing")
         data_manager.propose_artist_relations(

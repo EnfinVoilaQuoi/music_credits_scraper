@@ -23,6 +23,10 @@ from src.utils.title_matching import names_match_as_words, normalize_name
 
 logger = get_logger(__name__)
 
+#: Lettres ou chiffres en deçà desquels un alias n'est pas un nom de recherche
+#: (`noms_de_lartiste`) : « Em », « M&M ».
+ALIAS_LETTRES_MIN = 3
+
 #: Preuve de présence par le DISQUE, sur une année charnière d'appartenance à
 #: un groupe (2026-09-24). 50 % plutôt que 70 % : le défaut visé, ce sont des
 #: crédits incomplets (le groupe crédité à la place de ses membres). À MESURER
@@ -1144,12 +1148,19 @@ class ArtistRepository:
         Un membre est crédité tantôt sous son nom, tantôt sous un alias : ne
         chercher que le premier raterait les morceaux du collectif signés de
         l'autre.
+
+        Un alias de moins de `ALIAS_LETTRES_MIN` lettres ou chiffres (« Em »,
+        « M&M » d'Eminem, confirmés par MusicBrainz ET Discogs) n'est pas un nom
+        sous lequel chercher : la RIAA balayait « Em » sans fin (2026-11-02, run
+        figé), et tout crédit « Em … » le rapprocherait par mots entiers.
         """
         noms = {nom} if nom else set()
         noms |= {
             rel.related_name
             for rel in self.get_artist_relations(artist_id)
-            if rel.kind == "alias" and rel.related_name
+            if rel.kind == "alias"
+            and rel.related_name
+            and sum(c.isalnum() for c in rel.related_name) >= ALIAS_LETTRES_MIN
         }
         return noms
 

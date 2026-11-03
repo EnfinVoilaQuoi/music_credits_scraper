@@ -74,3 +74,47 @@ def identity_key(name: str | None) -> str:
     text = unicodedata.normalize("NFD", text)
     text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
     return text.casefold()
+
+
+def cle_de_doublon(name: str | None) -> str:
+    """Clé « même personne » d'un crédit sur UN morceau : `identity_key` sans
+    ponctuation ni espaces (lettres et chiffres seuls, tous scripts).
+
+    Plus lâche que `identity_key`, qui reste la clé du graphe du studio : sur
+    un seul morceau et un seul rôle, « Lucci » = « Lucci’ (FRA) », « Babz
+    Beats » = « Babzbeats », « Shurik'n » = « Shurik’n » (mesuré le 2026-11-03 :
+    55 crédits YouTube doublaient ainsi un crédit déjà là). Vide si le nom n'a
+    ni lettre ni chiffre."""
+    return "".join(ch for ch in identity_key(name) if ch.isalnum())
+
+
+#: Sources des crédits lus dans une description YouTube : ils ne s'AJOUTENT
+#: qu'à ce que la fiche n'a pas déjà (`services.credits._phase_youtube`).
+SOURCES_YOUTUBE = ("youtube_topic", "youtube_clip")
+
+
+def credits_youtube_en_double(credits) -> list:
+    """Les crédits YouTube qui redisent un crédit déjà porté (même rôle, même
+    `cle_de_doublon`) : par une autre source, ou par une ligne YouTube qui les
+    précède. Le juge commun de l'écrivain, de l'audit (`credit_doublon`) et de
+    la réparation (`scripts/retirer_credits_youtube_doublons.py`)."""
+    vus = {
+        (cle_de_doublon(c.name), _role(c))
+        for c in credits
+        if c.source not in SOURCES_YOUTUBE and cle_de_doublon(c.name)
+    }
+    en_double = []
+    for c in credits:
+        if c.source not in SOURCES_YOUTUBE:
+            continue
+        cle = (cle_de_doublon(c.name), _role(c))
+        if cle in vus:
+            en_double.append(c)
+        else:
+            vus.add(cle)
+    return en_double
+
+
+def _role(credit) -> str:
+    role = credit.role
+    return role if isinstance(role, str) else role.value

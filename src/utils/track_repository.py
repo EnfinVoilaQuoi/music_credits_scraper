@@ -2743,6 +2743,55 @@ class TrackRepository:
             logger.error(f"Erreur forget_discogs_credits({track_id}): {e}")
             return 0
 
+    def remplacer_credits_youtube(self, track_id: int, retirer, ajouter=()) -> tuple[int, int]:
+        """Retire des crédits YOUTUBE précis `(nom, rôle, source)` et ajoute
+        `ajouter` (`(nom, rôle, source)`) — sur la fiche ET ses lignes sœurs, que
+        `synchroniser_soeurs` unit (un crédit laissé chez une sœur reviendrait).
+        Réparation des doublons et des noms composés (audit `credit_doublon`,
+        `scripts/retirer_credits_youtube_doublons.py`). Rend `(retirés, ajoutés)`."""
+        from src.utils.credit_normalize import SOURCES_YOUTUBE
+
+        retires = ajoutes = 0
+        try:
+            with self.engine.begin() as conn:
+                gid = conn.execute(
+                    text("SELECT genius_id FROM tracks WHERE id = :t"), {"t": track_id}
+                ).scalar()
+                jumelles, _ = ids_soeurs(conn, track_id, gid)
+                for tid in [track_id, *jumelles]:
+                    for nom, role, source in retirer:
+                        if source not in SOURCES_YOUTUBE:
+                            continue
+                        retires += conn.execute(
+                            text(
+                                "DELETE FROM credits WHERE track_id = :t AND name = :n "
+                                "AND role = :r AND source = :s"
+                            ),
+                            {"t": tid, "n": nom, "r": role, "s": source},
+                        ).rowcount
+                    for nom, role, source in ajouter:
+                        deja = conn.execute(
+                            text(
+                                "SELECT 1 FROM credits WHERE track_id = :t AND name = :n "
+                                "AND role = :r"
+                            ),
+                            {"t": tid, "n": nom, "r": role},
+                        ).first()
+                        if deja:
+                            continue
+                        conn.execute(
+                            text(
+                                "INSERT INTO credits (track_id, name, role, source) "
+                                "VALUES (:t, :n, :r, :s)"
+                            ),
+                            {"t": tid, "n": nom, "r": role, "s": source},
+                        )
+                        ajoutes += 1
+            return retires, ajoutes
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur remplacer_credits_youtube({track_id}): {e}")
+            return 0, 0
+
     def record_secondary_role(self, track_id: int, role: str | None) -> bool:
         """Écrit VERBATIM le rôle secondaire (`save_track` le passe en COALESCE :
         il ne sait pas le remplacer par un rôle plus juste, « Writer » → « Cover »)."""

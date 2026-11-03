@@ -302,6 +302,14 @@ class TestLignesDeCredits:
         )
         assert len(lignes) == 1
 
+    def test_le_suffixe_regional_ne_s_affiche_pas(self):
+        """« Lucci’ (FRA) » (Genius) et « Lucci » (clip) : une personne,
+        affichée sans la désambiguïsation de Genius (2026-11-03)."""
+        lignes = helpers.lignes_de_credits(
+            [self._C("Lucci’ (FRA)", "genius"), self._C("Lucci", "youtube_clip")]
+        )
+        assert lignes == ["🎤🎬 Lucci’"]
+
     def test_les_details_des_deux_sources_sont_REUNIS(self):
         lignes = helpers.lignes_de_credits(
             [

@@ -253,12 +253,16 @@ def lignes_de_credits(credits) -> list[str]:
     Les personnes gardent l'ordre d'arrivée ; leurs émojis sont triés pour que
     deux morceaux affichent la même paire dans le même ordre.
     """
-    from src.utils.credit_normalize import identity_key
+    from src.utils.credit_normalize import cle_de_doublon, display_name
 
     par_personne: dict[str, dict] = {}
     for credit in credits:
-        cle = identity_key(credit.name) or (credit.name or "").lower()
-        entree = par_personne.setdefault(cle, {"nom": credit.name, "emojis": [], "details": []})
+        # « Lucci » et « Lucci’ (FRA) » : une personne, affichée « Lucci’ » —
+        # le suffixe régional de Genius n'est qu'une désambiguïsation (2026-11-03).
+        cle = cle_de_doublon(credit.name) or (credit.name or "").lower()
+        entree = par_personne.setdefault(
+            cle, {"nom": display_name(credit.name) or credit.name, "emojis": [], "details": []}
+        )
         emoji = EMOJI_SOURCE.get(credit.source, "🔗")
         if emoji not in entree["emojis"]:
             entree["emojis"].append(emoji)

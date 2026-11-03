@@ -277,6 +277,16 @@ def _clip_lisible(track: Track, options: OptionsCredits) -> bool:
     return options.tout_youtube or not (_roles_directs(track) & _WRITER_ROLES)
 
 
+def _cle_youtube(credit) -> tuple[str, str]:
+    """Clé « même personne, même rôle » : un crédit YouTube n'est ajouté que si
+    la fiche ne l'a pas déjà SOUS UNE AUTRE GRAPHIE (« Lucci » contre
+    « Lucci’ (FRA) » : 55 doublons mesurés le 2026-11-03). Même clé que l'audit
+    `credit_doublon` (`credit_normalize.cle_de_doublon`)."""
+    from src.utils.credit_normalize import cle_de_doublon
+
+    return (cle_de_doublon(credit.name) or credit.name.lower().strip(), credit.role.value)
+
+
 def _phase_youtube(
     tracks: list[Track],
     options: OptionsCredits,
@@ -329,7 +339,7 @@ def _phase_youtube(
 
         tid = track.id or id(track)
         if tid not in existing_credits:
-            existing_credits[tid] = {(c.name.lower().strip(), c.role.value) for c in track.credits}
+            existing_credits[tid] = {_cle_youtube(c) for c in track.credits}
         seen = existing_credits[tid]
 
         new_credits = []
@@ -341,7 +351,7 @@ def _phase_youtube(
             parsed = parse_description_topic(desc)
             if parsed:
                 for c in parsed:
-                    key = (c.name.lower().strip(), c.role.value)
+                    key = _cle_youtube(c)
                     if key not in seen:
                         seen.add(key)
                         new_credits.append(c)
@@ -357,7 +367,7 @@ def _phase_youtube(
 
             if parsed_clip:
                 for c in parsed_clip:
-                    key = (c.name.lower().strip(), c.role.value)
+                    key = _cle_youtube(c)
                     if key not in seen:
                         seen.add(key)
                         new_credits.append(c)

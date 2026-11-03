@@ -178,6 +178,23 @@ class TestPhaseYouTube:
         ]
         assert len(producer_tykso) == 1
 
+    def test_une_autre_graphie_n_est_pas_un_nouveau_credit(self):
+        """Josman, « Mort Ce soir » (2026-11-03) : « Prod : Chilea's / Lucci » du
+        clip à côté de « Lucci’ (FRA) » de Genius — seul Chilea's s'ajoute."""
+        vid = "CLIPlucci12"
+        t = _track(
+            "Mort Ce soir",
+            youtube_url=f"https://youtube.com/watch?v={vid}",
+            creds=[Credit(name="Lucci’ (FRA)", role=CreditRole.PRODUCER, source="genius")],
+        )
+        cl, _ = _clients_yt({vid: {"description": "Prod : Chilea's / Lucci"}})
+        credits.run(_rt(), Artist(name="Josman"), [t], _opts(tout_youtube=True), Hooks(), cl)
+
+        assert [(c.name, c.source) for c in t.credits] == [
+            ("Lucci’ (FRA)", "genius"),
+            ("Chilea's", "youtube_clip"),
+        ]
+
     def test_stop_during_youtube(self):
         vid = "TopicVid5678"
         t = _track(

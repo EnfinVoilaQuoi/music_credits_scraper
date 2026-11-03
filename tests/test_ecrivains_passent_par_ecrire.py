@@ -55,6 +55,7 @@ EXCEPTIONS: dict[str, str] = {
     # ── Crédits ──
     "forget_credit": _CREDITS,
     "forget_discogs_credits": _CREDITS,
+    "remplacer_credits_youtube": _CREDITS,
     "purger_credits_relations_deguisees": _CREDITS + " (purge par lots)",
     "reclasser_credits": _CREDITS + " (reclassement par lots)",
     # ── Données propres à la ligne ──

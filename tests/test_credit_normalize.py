@@ -9,7 +9,13 @@ cause : la fusion des nœuds producteurs en dépend.
 
 import pytest
 
-from src.utils.credit_normalize import display_name, identity_key
+from src.models.track import Credit, CreditRole
+from src.utils.credit_normalize import (
+    cle_de_doublon,
+    credits_youtube_en_double,
+    display_name,
+    identity_key,
+)
 
 # ── display_name : nettoyage léger, garde casse/accents/apostrophes ──────────
 
@@ -87,3 +93,42 @@ def test_identity_key_idempotent():
     for brut, _ in IDENTITY_CASES:
         once = identity_key(brut)
         assert identity_key(once) == once
+
+
+# ── cle_de_doublon / credits_youtube_en_double (2026-11-03) ──────────────────
+
+
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ("Lucci", "Lucci’ (FRA)"),
+        ("Babzbeats", "Babz Beats"),
+        ("Shurik'n", "Shurik’n"),
+        ("wavyvaye", "WAVYVAYÉ"),
+        ("Anh Ninh Garret", "Anh-Ninh Garret"),
+    ],
+)
+def test_cle_de_doublon_fusionne_les_graphies(a, b):
+    assert cle_de_doublon(a) == cle_de_doublon(b) != ""
+
+
+def test_cle_de_doublon_distingue_deux_personnes():
+    assert cle_de_doublon("Lucci") != cle_de_doublon("Chilea's")
+    assert cle_de_doublon("日本") == "日本"
+
+
+def test_seul_le_credit_youtube_en_double_est_signale():
+    """« Lucci » du clip redit « Lucci’ (FRA) » de Genius (Josman, « Intro ») ;
+    deux sources hors YouTube aux graphies voisines restent deux lignes
+    (une par source, fondues à l'affichage)."""
+    genius = Credit(name="Lucci’ (FRA)", role=CreditRole.PRODUCER, source="genius")
+    discogs = Credit(name="LUCCI", role=CreditRole.PRODUCER, source="discogs")
+    clip = Credit(name="Lucci", role=CreditRole.PRODUCER, source="youtube_clip")
+    autre_role = Credit(name="Lucci", role=CreditRole.MIXING_ENGINEER, source="youtube_topic")
+    assert credits_youtube_en_double([genius, discogs, clip, autre_role]) == [clip]
+
+
+def test_deux_credits_youtube_de_la_meme_personne():
+    topic = Credit(name="RDB (FRA)", role=CreditRole.PRODUCER, source="youtube_topic")
+    clip = Credit(name="RDB", role=CreditRole.PRODUCER, source="youtube_clip")
+    assert credits_youtube_en_double([topic, clip]) == [clip]

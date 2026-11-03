@@ -166,8 +166,13 @@ _CLIP_PATTERNS: list[tuple[re.Pattern[str], CreditRole]] = [
 ]
 
 #: « x » sépare deux noms seulement entre deux espaces : « Apex Martin » était
-#: coupé en « Ape » et « Martin » (Travis Scott, Fire).
-_NAME_SPLIT_RE = re.compile(r"\s*[,&]\s+|\s+x\s+|\s+(?:et|and|feat\.?)\s+", re.IGNORECASE)
+#: coupé en « Ape » et « Martin » (Travis Scott, Fire). « / » aussi, entre deux
+#: espaces (« Prod : Chilea's / Lucci » entrait comme UN producteur, 2026-11-03 ;
+#: « AC/DC » reste entier).
+_NAME_SPLIT_RE = re.compile(r"\s*[,&]\s+|\s+[x/]\s+|\s+(?:et|and|feat\.?)\s+", re.IGNORECASE)
+#: Un morceau découpé qui annonce un AUTRE crédit (« Réalisation : FLYNT /
+#: Instrumental par YABU ») n'est pas un nom.
+_AUTRE_CREDIT_RE = re.compile(r"\b(?:par|by)\b", re.IGNORECASE)
 _NAME_CLEAN_RE = re.compile(r"[(\[@#].*$")
 
 
@@ -181,9 +186,25 @@ def _split_names(raw: str) -> list[str]:
             cleaned = cleaned[:-1].rstrip()
         # « Prod : https://youtu.be/… » (Jazzy Bazz, 1989 Freestyle) : le beat
         # est un LIEN, pas un nom — il sortait en Producer.
-        if cleaned and len(cleaned) > 1 and not _URL_RE.search(cleaned):
+        if (
+            cleaned
+            and len(cleaned) > 1
+            and not _URL_RE.search(cleaned)
+            and not _AUTRE_CREDIT_RE.search(cleaned)
+        ):
             result.append(cleaned)
     return result
+
+
+def noms_d_un_credit_de_clip(name: str, source: str | None) -> list[str]:
+    """Les personnes qu'un crédit DÉJÀ ÉCRIT désigne, au découpage d'aujourd'hui.
+    Seul un crédit de clip se découpe : une Topic est structurée par le
+    distributeur, son « Tefa & Masta » est le nom d'un duo. Un résultat autre que
+    `[name]` = un crédit composé écrit avant le découpage du « / » (audit
+    `credit_doublon`)."""
+    if source != "youtube_clip":
+        return [name]
+    return _split_names(name) or [name]
 
 
 #: Postes de l'ÉQUIPE DE TOURNAGE dont l'intitulé contient « production »,

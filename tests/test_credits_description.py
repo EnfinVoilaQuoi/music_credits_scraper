@@ -325,3 +325,31 @@ class TestClipDecoupage:
 
     def test_parenthese_fermante_orpheline(self):
         assert [c.name for c in parse_description_clip("2. Raw (Prod. by RZA)")] == ["RZA"]
+
+    def test_barre_oblique_separe_seulement_entre_espaces(self):
+        """« Prod : Chilea's / Lucci » entrait comme UN producteur (Josman,
+        « Mort Ce soir », 2026-11-03) ; « AC/DC » reste entier."""
+        assert [c.name for c in parse_description_clip("Prod : Chilea's / Lucci")] == [
+            "Chilea's",
+            "Lucci",
+        ]
+        assert [c.name for c in parse_description_clip("Prod : AC/DC")] == ["AC/DC"]
+
+    def test_un_autre_credit_n_est_pas_un_nom(self):
+        """« Réalisation : FLYNT / Instrumental par YABU » : seul FLYNT réalise."""
+        assert [
+            c.name for c in parse_description_clip("Réalisation : FLYNT / Instrumental par YABU")
+        ] == ["FLYNT"]
+
+
+class TestNomsDUnCreditDeClip:
+    def test_seul_un_credit_de_clip_se_decoupe(self):
+        from src.utils.credits_description import noms_d_un_credit_de_clip
+
+        assert noms_d_un_credit_de_clip("Chilea's / Lucci", "youtube_clip") == [
+            "Chilea's",
+            "Lucci",
+        ]
+        # Une Topic est structurée par le distributeur : « Tefa & Masta » est un duo.
+        assert noms_d_un_credit_de_clip("Tefa & Masta", "youtube_topic") == ["Tefa & Masta"]
+        assert noms_d_un_credit_de_clip("Lucci", "youtube_clip") == ["Lucci"]

@@ -172,6 +172,7 @@ FAMILLES = {
     "refus_vivant": "INVARIANT — valeur refusée à la main encore portée par la fiche ou une sœur",
     "isrc_edition_autre_fiche": "INVARIANT — ISRC d'une édition = celui d'une AUTRE fiche",
     "spotify_principal": "INVARIANT — ID Spotify principal sans sa ligne `track_spotify_ids` principale",
+    "credit_doublon": "INVARIANT — crédit YouTube qui redit un crédit déjà porté, ou nom composé",
 }
 
 #: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
@@ -188,6 +189,7 @@ INVARIANTS = (
     "refus_vivant",
     "isrc_edition_autre_fiche",
     "spotify_principal",
+    "credit_doublon",
 )
 
 _FEAT = re.compile(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", re.IGNORECASE)
@@ -1069,6 +1071,55 @@ def ids_spotify_principaux_desalignes(c, pistes) -> list[Cas]:
     return cas
 
 
+def credits_en_double(c, pistes) -> list[Cas]:
+    """Un crédit YouTube qui redit, sous une autre graphie, un crédit que la
+    fiche porte déjà au même rôle (« Lucci » à côté de « Lucci’ (FRA) »), ou un
+    crédit de clip qui colle plusieurs personnes (« Chilea's / Lucci »).
+    L'écrivain (`services.credits._phase_youtube`) et le lecteur de description
+    les refusent depuis le 2026-11-03 (55 doublons, 3 noms composés) ;
+    rattrapage : `scripts/retirer_credits_youtube_doublons.py`."""
+    from src.utils.credit_normalize import SOURCES_YOUTUBE, credits_youtube_en_double
+    from src.utils.credits_description import noms_d_un_credit_de_clip
+
+    fiches = {t["id"]: t for t in pistes}
+    par_fiche = collections.defaultdict(list)
+    for r in c.execute("SELECT id, track_id, name, role, source FROM credits ORDER BY id"):
+        if r["track_id"] in fiches:
+            par_fiche[r["track_id"]].append(_LigneDeCredit(r["name"], r["role"], r["source"]))
+    cas = []
+    for tid, credits in par_fiche.items():
+        f = fiches[tid]
+        for x in credits_youtube_en_double(credits):
+            cas.append(
+                Cas(
+                    "credit_doublon",
+                    f["artiste"],
+                    [tid],
+                    f"{_lib(f)} {x.role} « {x.name} » en double",
+                )
+            )
+        for x in credits:
+            if x.source in SOURCES_YOUTUBE and noms_d_un_credit_de_clip(x.name, x.source) != [
+                x.name
+            ]:
+                cas.append(
+                    Cas(
+                        "credit_doublon",
+                        f["artiste"],
+                        [tid],
+                        f"{_lib(f)} {x.role} « {x.name} » composé",
+                    )
+                )
+    return cas
+
+
+@dataclass
+class _LigneDeCredit:
+    name: str
+    role: str
+    source: str | None
+
+
 def ecarts_de_schema(db_path) -> list[Cas]:
     from src.persistence.bootstrap import ecarts_au_schema
 
@@ -1168,6 +1219,7 @@ def auditer(
             audit.cas += refus_vivants(c, pistes)
             audit.cas += isrc_d_une_autre_fiche(c, pistes)
             audit.cas += ids_spotify_principaux_desalignes(c, pistes)
+            audit.cas += credits_en_double(c, pistes)
             if not noms:
                 audit.cas += orphelins(c)
     if persistance:

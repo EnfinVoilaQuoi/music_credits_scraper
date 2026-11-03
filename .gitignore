@@ -202,6 +202,8 @@ scripts/*
 !scripts/retirer_durees_discogs.py
 # Et le disque, la place et les crédits de la même piste (2026-11-02).
 !scripts/retirer_pistes_discogs.py
+!scripts/retirer_photos_par_defaut.py
+!scripts/retirer_pochettes_photo_artiste.py
 # Crédits YouTube en double et noms composés de clip (2026-11-03).
 !scripts/retirer_credits_youtube_doublons.py
 # Titre de la page Spotify relu dans le brut (2026-10-31).

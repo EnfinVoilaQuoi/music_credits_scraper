@@ -319,8 +319,9 @@ class GeniusAPI:
                 metadata["popularity"] = stats["pageviews"]
 
             # URL de l'artwork
-            if raw_data.get("song_art_image_url"):
-                metadata["artwork_url"] = raw_data["song_art_image_url"]
+            art, _ = self._extract_song_art(raw_data)
+            if art:
+                metadata["artwork_url"] = art
 
         except (KeyError, IndexError, TypeError, ValueError, AttributeError) as e:
             logger.warning(f"Erreur lors de l'extraction des métadonnées: {e}")
@@ -1138,7 +1139,24 @@ class GeniusAPI:
         art = song.get("song_art_image_url") or song.get("song_art_image_thumbnail_url")
         album = song.get("album")
         cover = album.get("cover_art_url") if isinstance(album, dict) else None
-        return art, cover
+        # Sans pochette, Genius sert la PHOTO de l'artiste à sa place : ce n'est
+        # pas une pochette (2 827 morceaux sur 10 730 du brut, 2026-11-03).
+        photos = GeniusAPI._photos_des_artistes(song)
+        return (None if art in photos else art), (None if cover in photos else cover)
+
+    @staticmethod
+    def _photos_des_artistes(song: dict) -> set[str]:
+        """Les photos (profil et bandeau) des artistes crédités d'un song Genius."""
+        artistes = [song.get("primary_artist")]
+        for cle in ("primary_artists", "featured_artists"):
+            artistes += song.get(cle) or []
+        return {
+            url
+            for artiste in artistes
+            if isinstance(artiste, dict)
+            for url in (artiste.get("image_url"), artiste.get("header_image_url"))
+            if url
+        }
 
     def get_artist_image(self, genius_id) -> str | None:
         """URL de la photo de profil d'un artiste (`GET /artists/{id}` → image_url).

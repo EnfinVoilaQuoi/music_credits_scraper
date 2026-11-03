@@ -87,6 +87,22 @@ def test_extract_song_art_fallback_thumbnail_et_sans_album():
     assert cover is None
 
 
+def test_extract_song_art_ignore_la_photo_de_l_artiste():
+    """Sans pochette, Genius sert la photo de l'artiste : ce n'est pas une
+    pochette (2 827 morceaux sur 10 730, 691 pochettes de Kanye identiques)."""
+    song = {
+        "song_art_image_url": "kanye.jpg",
+        "primary_artist": {"image_url": "kanye.jpg", "header_image_url": "bandeau.jpg"},
+        "featured_artists": [{"image_url": "invite.jpg"}],
+        "album": {"cover_art_url": "bandeau.jpg"},
+    }
+    assert GeniusAPI._extract_song_art(song) == (None, None)
+    song["song_art_image_url"] = "invite.jpg"
+    assert GeniusAPI._extract_song_art(song) == (None, None)
+    song["song_art_image_url"] = "vraie_pochette.jpg"
+    assert GeniusAPI._extract_song_art(song) == ("vraie_pochette.jpg", None)
+
+
 def test_extract_song_art_entree_invalide():
     assert GeniusAPI._extract_song_art(None) == (None, None)
 

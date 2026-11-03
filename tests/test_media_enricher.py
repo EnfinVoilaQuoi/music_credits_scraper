@@ -129,6 +129,26 @@ def test_artist_photo_fallback_genius(media_env):
     assert report.downloaded["artist"] == 1
 
 
+def test_artist_photo_fallback_genius_quand_deezer_ne_sert_que_sa_silhouette(
+    media_env, monkeypatch
+):
+    """Deezer rend une URL, mais c'est sa silhouette par défaut (refusée par
+    `download_image`) : Genius est essayé (Freeze Corleone, Népal, Sadek)."""
+
+    def download(url, dest, *, timeout=15):
+        return None if url == "http://cdn/silhouette.jpg" else _fake_download(url, dest)
+
+    monkeypatch.setattr(me, "download_image", download)
+    artist = _artist(genius_id=999)
+    genius = FakeGenius(artist_image="http://genius/jul.jpg")
+    report = _apply(
+        artist, [], deezer=FakeDeezer(artist_pic="http://cdn/silhouette.jpg"), genius=genius
+    )
+    assert genius.calls == [999]
+    assert artist.image_path == "artistes/Jul.jpg"
+    assert report.downloaded["artist"] == 1
+
+
 def test_artist_photo_echec_si_aucune_source(media_env):
     artist = _artist(genius_id=None)
     report = _apply(artist, [], deezer=FakeDeezer(artist_pic=None), genius=None)

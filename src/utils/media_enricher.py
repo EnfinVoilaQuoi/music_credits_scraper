@@ -166,12 +166,14 @@ class _MediaRun:
                 self._sleep()
             if found:
                 url = found.get("picture_xl")
-        # Fallback Genius (nécessite le genius_id de l'artiste principal)
-        if not url and self.genius and artist.genius_id:
+        result = download_image(url, base)
+        # Fallback Genius (nécessite le genius_id de l'artiste principal) : aussi
+        # quand Deezer n'a servi que sa silhouette par défaut, refusée au
+        # téléchargement (Freeze Corleone, Népal, Sadek, 2026-11-03).
+        if not result and self.genius and artist.genius_id:
             url = self.genius.get_artist_image(artist.genius_id)
             self._sleep()
-
-        result = download_image(url, base)
+            result = download_image(url, base)
         if result:
             artist.image_path = self._rel(result)
             self.report.downloaded[CAT_ARTIST] += 1

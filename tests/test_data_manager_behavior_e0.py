@@ -476,6 +476,29 @@ class TestTrackAlbumEtRename:
         assert lu.album is None
         assert lu.album_override == 1
 
+    def test_oublier_pochettes_vide_les_lignes_soeurs(self, data_manager):
+        """La pochette se partage entre sœurs : toutes les lignes qui désignent le
+        fichier retiré la perdent, les autres la gardent (photo d'artiste servie
+        par Genius, 2026-11-03)."""
+        kanye = _artiste(data_manager, "Kanye")
+        cudi = _artiste(data_manager, "Cudi")
+        ids = []
+        for artist in (kanye, cudi):
+            track = Track(title="Reborn", artist=artist, genius_id=42)
+            track.media.cover_path = "covers/Kanye - Reborn.jpg"
+            ids.append(data_manager.save_track(track))
+        autre = Track(title="Autre", artist=kanye)
+        autre.media.cover_path = "covers/Kanye - Autre.jpg"
+        autre_id = data_manager.save_track(autre)
+
+        assert data_manager.oublier_pochettes({"covers/Kanye - Reborn.jpg"}) == 2
+        assert _lire_track(data_manager, kanye.id, ids[0]).media.cover_path is None
+        assert _lire_track(data_manager, cudi.id, ids[1]).media.cover_path is None
+        assert _lire_track(data_manager, kanye.id, autre_id).media.cover_path == (
+            "covers/Kanye - Autre.jpg"
+        )
+        assert data_manager.oublier_pochettes(set()) == 0
+
     def test_rename_track(self, data_manager):
         artist = _artiste(data_manager)
         track_id = _sauve_track(data_manager, artist, "Ancien")

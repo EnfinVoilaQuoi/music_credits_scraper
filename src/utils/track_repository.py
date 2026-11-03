@@ -4773,6 +4773,36 @@ class TrackRepository:
             logger.error(f"Erreur clear_track_album (track_id={track_id}): {e}")
             return False
 
+    def oublier_pochettes(self, chemins) -> int:
+        """Vide `cover_path` de TOUTES les lignes qui désignent un de ces fichiers
+        (relatifs à IMAGES_DIR), lignes sœurs comprises : la colonne est
+        partagée, une sœur qui le garderait le rendrait. `save_track` ne le peut
+        pas (`COALESCE`). Sert au retrait des photos d'artiste que Genius sert à
+        la place d'une pochette (2026-11-03). Renvoie le nombre de lignes."""
+        chemins = sorted(set(chemins))
+        if not chemins:
+            return 0
+        try:
+            with self._ecrire() as conn:
+                ids = [
+                    r[0]
+                    for r in conn.execute(
+                        select(tracks.c.id).where(tracks.c.cover_path.in_(chemins))
+                    )
+                ]
+                for track_id in ids:
+                    self._toucher(conn, track_id)
+                if ids:
+                    conn.execute(
+                        update(tracks)
+                        .where(tracks.c.id.in_(ids))
+                        .values(cover_path=None, updated_at=datetime.now())
+                    )
+            return len(ids)
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur oublier_pochettes ({len(chemins)} fichiers): {e}")
+            return 0
+
     # ── Catalogue des parutions (e31) ───────────────────────────────────────
 
     @staticmethod

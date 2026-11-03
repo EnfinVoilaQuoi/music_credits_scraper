@@ -10,6 +10,7 @@ Règle couche ③ (frontière réseau) : ``download_image`` intercepte
 ``None`` — il NE LÈVE JAMAIS (un CDN qui tombe ne doit pas casser un batch).
 """
 
+import hashlib
 import os
 import re
 from pathlib import Path
@@ -35,6 +36,25 @@ _CONTENT_TYPE_EXT = {
 }
 
 _DEFAULT_SLUG_LEN = 120
+
+# Silhouette grise que Deezer sert pour un artiste SANS photo (deux encodages
+# du même dessin). Ce n'est pas une photo : la garder ferait d'un cercle vide un
+# cercle « avec photo » (545 des 6 228 photos d'artistes le 2026-11-03).
+IMAGES_PAR_DEFAUT_SHA256 = frozenset(
+    {
+        "0d659e802c2d9c13e8cf4e0fab3f85b176173a649b60d9ddc03af2397fb43275",
+        "bd8dae144dc585a7eb090e2071fe386bbe0df6ebcc47ee0d96d5ec5c23274530",
+    }
+)
+
+
+def est_image_par_defaut(path: Path) -> bool:
+    """Vrai si le fichier est l'image par défaut d'une source (silhouette Deezer)."""
+    try:
+        empreinte = hashlib.sha256(Path(path).read_bytes()).hexdigest()
+    except OSError:
+        return False
+    return empreinte in IMAGES_PAR_DEFAUT_SHA256
 
 
 def slugify_filename(name: str, *, max_len: int = _DEFAULT_SLUG_LEN) -> str:
@@ -71,8 +91,8 @@ def download_image(url: str | None, dest: Path, *, timeout: int = 15) -> Path | 
     ``photo.png``).
 
     Renvoie le ``Path`` réellement écrit (truthy → ``if download_image(...)``
-    reste valide) ou ``None`` en cas d'échec (URL vide, réponse non-image, erreur
-    réseau). Ne lève jamais.
+    reste valide) ou ``None`` en cas d'échec (URL vide, réponse non-image, image
+    par défaut d'une source, erreur réseau). Ne lève jamais.
     """
     if not url:
         return None
@@ -94,6 +114,10 @@ def download_image(url: str | None, dest: Path, *, timeout: int = 15) -> Path | 
                     for chunk in resp.iter_content(chunk_size=8192):
                         if chunk:
                             fh.write(chunk)
+                if est_image_par_defaut(tmp):
+                    logger.info(f"Image par défaut de la source, pas de photo : {url}")
+                    tmp.unlink(missing_ok=True)
+                    return None
                 os.replace(tmp, final)
             except OSError as exc:
                 logger.warning(f"Écriture image échouée ({final}): {exc}")

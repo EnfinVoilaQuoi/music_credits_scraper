@@ -128,3 +128,24 @@ def test_download_image_pas_de_fichier_part_residuel(tmp_path, monkeypatch):
     download_image("http://x/img", dest)
     # L'écriture atomique ne doit pas laisser de .part traîner
     assert not (tmp_path / "photo.jpg.part").exists()
+
+
+def test_download_image_refuse_l_image_par_defaut_de_la_source(tmp_path, monkeypatch):
+    """La silhouette Deezer d'un artiste sans photo n'est pas une photo : rien
+    n'est écrit, le cercle reste vide (2026-11-03, Crayon et THESCAM sur M.A.N)."""
+    import hashlib
+
+    silhouette = b"SILHOUETTE"
+    monkeypatch.setattr(
+        dl, "IMAGES_PAR_DEFAUT_SHA256", frozenset({hashlib.sha256(silhouette).hexdigest()})
+    )
+    _patch_get(monkeypatch, _FakeResponse(content=silhouette))
+    dest = tmp_path / "photo.jpg"
+    assert download_image("http://x/img", dest) is None
+    assert not dest.exists()
+    assert not (tmp_path / "photo.jpg.part").exists()
+
+
+def test_les_empreintes_des_silhouettes_sont_des_sha256():
+    assert dl.IMAGES_PAR_DEFAUT_SHA256
+    assert all(len(e) == 64 and int(e, 16) >= 0 for e in dl.IMAGES_PAR_DEFAUT_SHA256)

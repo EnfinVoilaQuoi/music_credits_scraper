@@ -21,7 +21,7 @@ import pytest
 
 # module -> {nom: paramètres attendus (None = existence seule : classe, constante, module)}
 CONTRAT: dict[str, dict[str, list[str] | None]] = {
-    "src.config": {"IMAGES_DIR": None, "EXPORTS_DIR": None},
+    "src.config": {"IMAGES_DIR": None},
     "src.api.deezer_api": {"DeezerAPI": None},
     "src.concurrency.lifecycle": {
         "start_worker": ["target", "name"],

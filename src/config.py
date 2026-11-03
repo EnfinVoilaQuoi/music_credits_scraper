@@ -73,9 +73,6 @@ class Settings(BaseSettings):
     # --- Application ---
     debug: bool = False
     log_level: str = "INFO"  # piloté par l'env LOG_LEVEL (fin du « DEBUG » en dur)
-    # Dossier des exports « studio » (SVG Bubble Prod…). Vide → BASE_DIR/exports.
-    # Pas de mkdir à l'import : création lazy dans dataviz.bubble_prod (gitignoré).
-    exports_dir: str = ""
     # Dossier de la sauvegarde VERSIONNÉE des décisions humaines (refus,
     # acceptations, corrections, décisions Kworb, verdicts de revue), écrite en
     # fin de run CLI et par `scripts/exporter_decisions.py` (décision
@@ -296,10 +293,6 @@ BPI_MAX_PAGES = settings.bpi_max_pages
 # Chemins dérivés (non configurables par l'environnement)
 DATABASE_URL = f"sqlite:///{DATA_DIR}/music_credits.db"
 DATA_PATH = str(DATA_DIR)
-
-# Dossier des exports studio (SVG Bubble Prod…). PAS de mkdir ici : la création
-# est lazy (dataviz.bubble_prod.default_output_path). Dossier gitignoré.
-EXPORTS_DIR = Path(settings.exports_dir) if settings.exports_dir else (BASE_DIR / "exports")
 
 # Sauvegarde versionnée des décisions (`src/services/decisions.py`) ; None = pas
 # d'export automatique en fin de run.

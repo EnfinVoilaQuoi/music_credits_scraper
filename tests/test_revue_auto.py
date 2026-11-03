@@ -420,6 +420,45 @@ def test_deezer_fiche_absente_creee_puis_retablie(data_manager, artiste, monkeyp
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
 
 
+def test_deezer_piste_d_un_autre_artiste_normale_puis_retablie(data_manager, artiste, monkeypatch):
+    """The Game, *G-Code* (2026-11-03) : Deezer crédite « Sahnewal (G-Code) »
+    au seul Garry — pas de fiche ; « Dope Shit » crédite l'artiste et suit la
+    règle des fiches absentes. Rétablie, la règle ne la refait pas."""
+    from src.services import ecarts_deezer as ed
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    credits = {9: [{"id": 4680956, "name": "Garry"}], 10: [{"id": 77, "name": "Kanye West"}]}
+    monkeypatch.setattr(
+        "src.utils.deezer_identity.lire_piste_http",
+        lambda i: {"id": i, "contributors": credits[i]},
+    )
+    _ecarts_deezer(
+        data_manager,
+        artiste,
+        ed.PisteDeezer(id=9, title="Sahnewal", duration=151, isrc="ZA41"),
+        ed.PisteDeezer(id=10, title="Dope Shit", duration=212, isrc="ZA42"),
+    )
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 2 and not bilan.echecs, bilan
+    assert set(_charger(data_manager, artiste)) == {"Dope Shit"}
+    actives = {c.morceau for c in revue.analyser(data_manager, artiste).actifs}
+    assert "Sahnewal" not in actives
+
+    (normal,) = [
+        c for c in data_manager.corrections_revue(artiste.id) if c["action"] == "regle:normal"
+    ]
+    revue_auto.retablir(data_manager, artiste, normal)
+    # Le run Deezer suivant le signale de nouveau : à l'humain, la règle défaite.
+    _ecarts_deezer(
+        data_manager, artiste, ed.PisteDeezer(id=9, title="Sahnewal", duration=151, isrc="ZA41")
+    )
+    _charger(data_manager, artiste)
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+    assert "Sahnewal" in {c.morceau for c in revue.analyser(data_manager, artiste).actifs}
+
+
 def test_deezer_isrc_connu_rattache_malgre_le_descripteur(data_manager, artiste, monkeypatch):
     """« Love64 (Interlude) » n'est pas un titre d'original, mais son ISRC est
     celui de « Love64 » et les autres catalogues de la fiche soutiennent sa

@@ -329,6 +329,21 @@ class TestPartiesDuMorceau:
     def test_numeros(self, titre, parties):
         assert parties_du_morceau(titre) == frozenset(parties)
 
+    @pytest.mark.parametrize(
+        "titres, attendu",
+        [
+            (["A Week Ago, Part 2", "A Week Ago (Part 1)"], 1),
+            (["Father Stretch My Hands, Pt. 1", "Pt. 2"], None),
+            (["A Week Ago, Part 2", "Another Week, Part 1"], None),
+            (["Keep My Spirit Alive", "Keep My Spirit Alive pt 2"], None),
+            (["La Boulette - Pt. 2", "La Boulette - Pt. 2"], None),
+        ],
+    )
+    def test_premiere_partie(self, titres, attendu):
+        from src.utils.version_descriptors import premiere_partie
+
+        assert premiere_partie(titres) == attendu
+
     def test_deux_parties_ne_sont_pas_le_meme_morceau(self):
         a, b = "La Boulette - Pt. 1- Live 2006", "La Boulette - Pt. 2 - Live 2006"
         assert not titres_equivalents(a, b)

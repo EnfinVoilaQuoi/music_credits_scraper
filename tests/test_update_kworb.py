@@ -460,18 +460,148 @@ class TestFlouConfirme:
         )
         assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
 
-    @pytest.mark.parametrize("duree", [None, 230])
-    def test_sans_duree_qui_concorde_le_cas_reste(self, duree):
+    @pytest.mark.parametrize("duree", [None, 222])
+    def test_sans_duree_qui_tranche_le_cas_reste(self, duree):
+        """Sans durée de l'ID, ou à 3-10 s de la fiche : rien n'est prouvé."""
         res, _ = self._run(
             self._fiche(), _entry("Don't Like.1", 5000, 50, "KWORB"), lambda s: {"duration": duree}
         )
         assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
 
-    def test_une_coquille_n_est_pas_confirmee(self):
-        t = _track(1, "Rythm is love")
-        t.duration = 200
-        res, _ = self._run(t, _entry("Rhythm is love", spotify_id="K"), lambda s: {"duration": 200})
-        assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
+    def test_une_coquille_a_la_meme_duree_est_confirmee(self):
+        """The Game « Gangbangin' 101 » / la fiche « Gangbangn 101 », 243 s des
+        deux côtés (2026-11-03) : la durée de l'ID prouve ce que le titre
+        laisse deviner."""
+        t = _track(1, "Gangbangn 101")
+        t.duration = 243
+        res, dm = self._run(
+            t, _entry("Gangbangin' 101", 900, spotify_id="K"), lambda s: {"duration": 243}
+        )
+        assert res["flous_confirmes"] == [("Gangbangin' 101", "Gangbangn 101")]
+        assert "kworb_flou" not in self._codes(res)
+        assert dm.streams_writes[0][:2] == (1, 900)
+
+    def test_une_autre_duree_n_est_pas_la_fiche(self):
+        """The Game « Celebration L.A. » (318 s) n'est pas la fiche « Celebration »
+        (289 s, cinq catalogues) : ni streams, ni signalement ; la ligne reste
+        sans fiche (« Kworb : introuvable en base »)."""
+        t = _track(1, "Celebration")
+        t.duration = 289
+        entree = _entry("Celebration L.A. (feat. Bone Thugs & Harmony)", spotify_id="K")
+        res, dm = self._run(t, entree, lambda s: {"duration": 318})
+        assert dm.streams_writes == [] and "kworb_flou" not in self._codes(res)
+        assert res["unmatched_titles"] == [entree["title"]]
+
+    def test_un_titre_equivalent_a_une_autre_duree_reste_a_l_humain(self):
+        """Eminem « Just Don't Give a F** » (227 s) / la fiche « Just Don’t Give
+        a Fuck » (242 s) : une autre édition du même morceau, peut-être."""
+        t = _track(1, "Just Don’t Give a Fuck")
+        t.duration = 242
+        entree = _entry("Just Don't Give a F**", spotify_id="K")
+        res, dm = self._run(t, entree, lambda s: {"duration": 227})
+        assert "kworb_flou" in self._codes(res) and dm.streams_writes
+
+    def test_une_decision_memorisee_rattache_quand_meme(self, monkeypatch):
+        """Une confirmation humaine passe avant la règle : elle la défait."""
+        from src.utils.title_matching import normalize_title
+
+        class _Memoire:
+            def load(self, artist_name):
+                return {"confirmed": {normalize_title("Don't Like"): 1}, "rejected": []}
+
+        monkeypatch.setattr("src.utils.kworb_links_manager.KworbLinksManager", _Memoire)
+        _, dm = self._run(
+            self._fiche(), _entry("Don't Like.1", 5000, 50, "KWORB"), lambda s: {"duration": 230}
+        )
+        assert dm.streams_writes[0][:2] == (1, 5000)
+
+
+class TestMemeMorceauParLaDuree:
+    """« Kworb : même morceau ? » (titre proche, 55-87 %) : la durée de l'ID
+    de la ligne répond quand elle le peut (panneau de The Game, 2026-11-03 :
+    « DRAKE with the BRAIDS - Interlude » à 84 s comme la fiche ; « Better » à
+    336 s contre 132 s pour la fiche « Gutter »)."""
+
+    def _run(self, fiche, entree, duree, memoire=None, monkeypatch=None):
+        if memoire is not None:
+
+            class _Memoire:
+                def load(self, artist_name):
+                    return memoire
+
+            monkeypatch.setattr("src.utils.kworb_links_manager.KworbLinksManager", _Memoire)
+        dm = _DataManager([fiche])
+        scraper = _Scraper(songs=_page([entree]))
+        res = update_kworb_streams(
+            _Artist(), dm, scraper=scraper, lire_identite=lambda sid: {"duration": duree}
+        )
+        return res, dm
+
+    def _fiche(self, titre="Le Temps Passe", duree=200):
+        t = _track(1, titre)
+        t.duration = duree
+        return t
+
+    def test_meme_duree_rattachee(self):
+        res, dm = self._run(self._fiche(), _entry("Le Temps", 900, spotify_id="K"), 201)
+        assert res["suggestions"] == []
+        assert dm.streams_writes[0][:2] == (1, 900)
+        assert res["flous_confirmes"] == [("Le Temps", "Le Temps Passe")]
+
+    def test_autre_duree_pas_la_fiche(self):
+        res, dm = self._run(self._fiche(), _entry("Le Temps", 900, spotify_id="K"), 336)
+        assert res["suggestions"] == [] and dm.streams_writes == []
+        assert res["unmatched_titles"] == ["Le Temps"]
+
+    @pytest.mark.parametrize("duree", [None, 206])
+    def test_sans_duree_qui_tranche_la_question_reste(self, duree):
+        res, dm = self._run(self._fiche(), _entry("Le Temps", 900, spotify_id="K"), duree)
+        assert len(res["suggestions"]) == 1 and dm.streams_writes == []
+
+    def test_meme_duree_mais_autre_version_reste(self):
+        """MC Solaar « Lost Horse » (258 s) / la fiche « Lost Horse (Remix) »
+        (258 s) : rejeté à la main — une autre version n'est pas confirmée."""
+        res, dm = self._run(
+            self._fiche("Lost Horse (Remix)", 258), _entry("Lost Horse", spotify_id="K"), 258
+        )
+        assert dm.streams_writes == [] and res["flous_confirmes"] == []
+
+    @pytest.mark.parametrize(
+        "titre_kworb, titre_fiche",
+        [
+            ("Le Temps - Radio Edit", "Le Temps Passe"),
+            # Kid Cudi, confirmé à la main (225 s / 365 s) : même remix, monté.
+            ("Memories - F*** Me I'm Famous ! Remix Edit", "Memories [F*** Me I’m Famous ! Remix]"),
+        ],
+    )
+    def test_une_edition_n_est_pas_dementie_par_sa_duree(self, titre_kworb, titre_fiche):
+        from src.utils.update_kworb import duree_de_la_ligne
+
+        fiche = self._fiche(titre_fiche, 365)
+        entree = _entry(titre_kworb, spotify_id="K")
+        assert duree_de_la_ligne(entree, fiche, lambda sid: {"duration": 225}) is None
+
+    def test_id_refuse_jamais_confirme(self, monkeypatch):
+        from src.utils import corrections_fiches
+
+        monkeypatch.setattr(corrections_fiches, "ids_refuses", lambda track: {"K"})
+        res, dm = self._run(self._fiche(), _entry("Le Temps", 900, spotify_id="K"), 200)
+        assert dm.streams_writes == [] and len(res["suggestions"]) == 1
+
+    def test_confirme_a_la_main_malgre_une_autre_duree(self, monkeypatch):
+        """La décision humaine passe avant la règle : elle la défait."""
+        memoire = {"confirmed": {"le temps": 1}, "rejected": []}
+        _, dm = self._run(
+            self._fiche(), _entry("Le Temps", 900, spotify_id="K"), 336, memoire, monkeypatch
+        )
+        assert dm.streams_writes[0][:2] == (1, 900)
+
+    def test_rejete_a_la_main_malgre_la_meme_duree(self, monkeypatch):
+        memoire = {"confirmed": {}, "rejected": ["le temps"]}
+        res, dm = self._run(
+            self._fiche(), _entry("Le Temps", 900, spotify_id="K"), 200, memoire, monkeypatch
+        )
+        assert dm.streams_writes == [] and res["suggestions"] == []
 
 
 class TestDecisionsMemorisees:

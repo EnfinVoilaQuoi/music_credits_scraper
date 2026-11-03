@@ -1198,6 +1198,10 @@ REGLES_DEEZER = frozenset(
         ("deezer_version", "deezer_rattacher_edition"),
         ("deezer_album_absent", "deezer_rattacher_edition"),
         ("deezer_version", "deezer_appliquer"),
+        # 2026-11-03 : la piste d'un autre que Deezer ne crédite pas à l'artiste,
+        # sur un disque crédité à l'artiste (The Game, *G-Code*, BO de *Bosco*).
+        ("deezer_absent", "normal"),
+        ("deezer_album_absent", "normal"),
     }
 )
 
@@ -1249,7 +1253,7 @@ def _version_d_un_disque_de_versions(cas, ctx) -> Arbitrage | None:
     fiche de remix) — et que sa durée n'est pas celle du socle (± 2 s : une
     autre prise a sa durée ; à la même, un libellé de version peut être une
     mention de support)."""
-    from src.utils.version_descriptors import meme_version, titre_sans_edition
+    from src.utils.version_descriptors import titre_sans_edition, titres_equivalents
     from src.utils.version_heritage import famille_de
 
     if cas.detecteur not in ("deezer_apparition", "deezer_version"):
@@ -1275,7 +1279,10 @@ def _version_d_un_disque_de_versions(cas, ctx) -> Arbitrage | None:
         if not duree or titre_sans_edition(titre) is not None:
             return None
         if any(
-            (isrc and t.isrc and str(t.isrc).upper() == isrc) or meme_version(t.title, titre)
+            # Le même MORCEAU dans la même version : `meme_version` ne jugeait que
+            # le descripteur — « Crack Music (Live at Abbey Road Studios) »
+            # écartait « Dreams (Live from Dublin Version) » (The Game, 2026-11-03).
+            (isrc and t.isrc and str(t.isrc).upper() == isrc) or titres_equivalents(t.title, titre)
             for t in ctx.disco
         ):
             return None
@@ -1393,8 +1400,17 @@ def fiche_du_meme_disque(piste: dict, disque: str | None, fiches) -> object | No
     « (Album Version Explicit) » / « (Bonus Track) », l'année que Genius ajoute
     à un skit récurrent, « Em Calls Paul (Skit) [2004] ») et à sa durée
     (± 2 s, la colonne de la fiche). Une version (live, remix…) n'a pas de
-    titre de base : jamais (2026-11-02, Eminem : 9 / 16 `deezer_absent`)."""
-    from src.utils.version_descriptors import meme_disque, meme_titre_normalise, titre_de_base
+    titre de base : jamais (2026-11-02, Eminem : 9 / 16 `deezer_absent`).
+    Le titre de base se lit aux lettres masquées près (`meme_titre_de_base` :
+    « Da S*** (Album Version) » = « Da Shit ») et sans le nom du disque que
+    Genius ajoute à un générique (« Intro (LAX) », `titre_sans_son_disque`) —
+    The Game, 2026-11-03."""
+    from src.utils.version_descriptors import (
+        meme_disque,
+        meme_titre_de_base,
+        titre_de_base,
+        titre_sans_son_disque,
+    )
 
     base, duree = titre_de_base(piste.get("title")), piste.get("duration")
     if not base or not duree or not disque:
@@ -1403,11 +1419,45 @@ def fiche_du_meme_disque(piste: dict, disque: str | None, fiches) -> object | No
         t
         for t in fiches
         if meme_disque(t.album, disque)
-        and meme_titre_normalise(titre_de_base(t.title), base)
+        and meme_titre_de_base(titre_sans_son_disque(t.title, t.album), piste.get("title"))
         and t.duration
         and abs(int(t.duration) - int(duree)) <= ECART_FICHIER_S
     ]
     return candidates[0] if len(candidates) == 1 else None
+
+
+def _generique_de_son_disque(cas, track, ctx) -> Arbitrage | None:
+    """Parution à confirmer d'un titre GÉNÉRIQUE (« Intro », « Outro ») sur le
+    disque même de la fiche : pas d'ambiguïté quand la fiche est la SEULE de
+    ce disque à ce titre de base et à sa durée (`fiche_du_meme_disque`), et
+    qu'un catalogue lu par un autre identifiant que Deezer la confirme à ± 2 s
+    (The Game, *LAX* : « Intro (LAX) » 80 s et « Outro (LAX) » 88 s, Spotify
+    de la fiche = Deezer ; 2026-11-03). Un générique d'un AUTRE disque est
+    jugé par `_hors_du_disque_de_la_fiche`."""
+    if cas.detecteur != "deezer_link_candidate" or track is None or ctx is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    if ecart.get("matched_by") != "title_generique":
+        return None
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    if fiche_du_meme_disque(piste, album.get("title"), ctx.disco) is not track:
+        return None
+    duree = piste.get("duration")
+    accord = sorted(
+        s
+        for s, d in _durees(track).items()
+        if s not in FRAGILES
+        and s not in ("deezer", "heritage", "manual", "youtube_video")
+        and d
+        and abs(int(d) - int(duree)) <= ECART_FICHIER_S
+    )
+    if not accord:
+        return None
+    return Arbitrage(
+        "rattacher (titre générique de son disque)",
+        "deezer_appliquer",
+        f"« {piste.get('title')} » de « {album.get('title')} » {duree} s = {', '.join(accord)}",
+    )
 
 
 def _rattacher_a_la_fiche_du_disque(cas, ctx) -> Arbitrage | None:
@@ -1444,13 +1494,53 @@ def _piste_nue_d_un_disque_live(cas) -> bool:
     return not porte_une_version((ecart.get("piste") or {}).get("title") or cas.morceau)
 
 
-def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
+def _piste_d_un_autre_artiste(cas, ids_artiste: set, lire_deezer: Callable) -> Arbitrage | None:
+    """La piste « absente » d'un disque PROPRE que Deezer ne crédite pas à
+    l'artiste — ni par l'ID de l'artiste ou de ses formations, ni par son nom
+    sous un autre profil : la piste d'un autre sur une compilation, un EP
+    partagé, une bande originale (The Game, 2026-11-03 : *G-Code*, les quatre
+    pistes de Garry ; « Shoot First » de Big Kuza sur la BO de *Bosco*). Pas de
+    fiche. Les crédits se lisent à la piste (`GET /track/{id}`, `contributors`) ;
+    illisibles ou vides, rien n'est prouvé : l'humain."""
+    from src.utils.title_matching import names_match_as_words
+
+    if cas.detecteur not in ("deezer_absent", "deezer_album_absent"):
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    if album.get("artist_id") not in ids_artiste or not piste.get("id"):
+        return None
+    lue = lire_deezer(int(piste["id"])) or {}
+    credits = [c for c in lue.get("contributors") or [] if isinstance(c, dict)]
+    if not credits:
+        return None
+    nom = album.get("artist_name") or ""
+    if any(
+        c.get("id") in ids_artiste or (nom and names_match_as_words(nom, c.get("name") or ""))
+        for c in credits
+    ):
+        return None
+    return Arbitrage(
+        "piste d'un autre artiste (crédits Deezer) : pas de fiche",
+        "normal",
+        f"« {piste.get('title')} » de « {album.get('title')} » créditée à "
+        + ", ".join(c.get("name") or "?" for c in credits),
+    )
+
+
+def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set, lire_deezer=None):
     """L'arbitrage de la famille « écarts Deezer », restreint aux originaux
-    sans ambiguïté — le titre de la PISTE Deezer et celui de la fiche."""
+    sans ambiguïté — le titre de la PISTE Deezer et celui de la fiche.
+    `lire_deezer` (`id -> GET /track`) : par défaut, Deezer."""
     if not any(cas.detecteur == d for d, _ in REGLES_DEEZER):
         return None
     if _piste_nue_d_un_disque_live(cas):
         return None
+    if lire_deezer is None:
+        from src.utils.deezer_identity import lire_piste_http as lire_deezer
+    d_un_autre = _piste_d_un_autre_artiste(cas, ids_artiste, lire_deezer)
+    if d_un_autre is not None:
+        return d_un_autre
     par_isrc = _rattacher_par_isrc(cas, ctx, isrcs_connus, ids_artiste)
     if par_isrc is not None:
         return par_isrc
@@ -1475,6 +1565,9 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set):
     disque_de_versions = _version_d_un_disque_de_versions(cas, ctx)
     if disque_de_versions is not None:
         return disque_de_versions
+    generique = _generique_de_son_disque(cas, track, ctx)
+    if generique is not None:
+        return generique
     if not titre_d_original(piste.get("title") or cas.morceau):
         return None
     if track is not None and not titre_d_original(track.title):

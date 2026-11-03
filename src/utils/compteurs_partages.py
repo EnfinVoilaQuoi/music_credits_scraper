@@ -28,7 +28,11 @@ from collections.abc import Iterable, Sequence
 from datetime import date, datetime
 
 from src.utils.title_matching import contains_as_words, normalize_title
-from src.utils.version_descriptors import porte_une_version, rendition_instrumentale
+from src.utils.version_descriptors import (
+    porte_une_version,
+    premiere_partie,
+    rendition_instrumentale,
+)
 
 #: Spotify ne met pas ses compteurs à jour en continu : un écart d'un jour et
 #: demi d'écoutes entre deux lectures reste « la même courbe ».
@@ -145,6 +149,10 @@ def page_du_compteur(pages: Sequence, rattachees_par_kworb: set) -> tuple[str, o
     avec_paroles = [p for p in pages if not _instrumental(p)]
     if len(avec_paroles) == 1:
         return "avec paroles", avec_paroles[0]
+    # Parties d'un même morceau : l'original est la première (The Game « A Week
+    # Ago » Part 1 / Part 2, même disque, même compteur, 2026-11-03).
+    if (i := premiere_partie([p.title for p in pages])) is not None:
+        return "première partie", pages[i]
     sorties = [(s, p) for p in pages if (s := _sortie(p))]
     if len(sorties) == len(pages):
         premiere = min(s for s, _ in sorties)

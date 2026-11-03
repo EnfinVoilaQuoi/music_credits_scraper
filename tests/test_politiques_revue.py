@@ -282,10 +282,109 @@ class TestFicheDuMemeDisque:
         live = _t("Lose Yourself", 3, album="Curtain Call", duration=321)
         assert self._juger(self._cas("Lose Yourself (Live)", 321, "Curtain Call"), live) is None
 
+    def test_lettres_masquees_et_disque_d_un_generique(self):
+        """The Game (2026-11-03) : l'édition « clean » de *Doctor's Advocate*
+        masque « Shit » ; Genius nomme l'intro de *LAX* « Intro (LAX) »."""
+        da_shit = _t("Da Shit", 15717, album="Doctor’s Advocate", duration=323)
+        arb = self._juger(self._cas("Da S*** (Album Version)", 323, "Doctor's Advocate"), da_shit)
+        assert arb.action == "deezer_rattacher_fiche" and "#15717" in arb.raison
+        intro = _t("Intro (LAX)", 15622, album="LAX", duration=81)
+        arb = self._juger(self._cas("Intro (Album Version)", 81, "LAX (iTunes Edited)"), intro)
+        assert "#15622" in arb.raison
+        # Le nom d'un AUTRE disque n'est pas retiré : l'intro d'ailleurs reste.
+        autre = _t("Intro (The Documentary 2)", 15206, album="LAX", duration=81)
+        assert self._juger(self._cas("Intro", 81, "LAX"), autre) is None
+
     def test_deux_fiches_possibles_l_humain(self):
         a = _t("Paul Rosenberg (Skit)", 1, album="The Eminem Show", duration=22)
         b = _t("Paul Rosenberg (Skit) [2002]", 2, album="The Eminem Show", duration=23)
         assert self._juger(self._cas("Paul Rosenberg (Skit)", 22, "The Eminem Show"), a, b) is None
+
+
+class TestPisteDUnAutreArtiste:
+    """The Game (2026-11-03) : *G-Code*, EP crédité à The Game, Garry et Karam
+    Brar — Deezer ne crédite pas The Game sur « Sahnewal », « Lost In You »… ;
+    « Shoot First » est de Big Kuza (BO de *Bosco*). Aucune fiche à créer."""
+
+    def _cas(self, detecteur="deezer_album_absent", titre="Sahnewal (G-Code)"):
+        ecart = {
+            "piste": {"id": 9, "title": titre, "duration": 151},
+            "album": {"id": 5, "title": "G-Code", "artist_id": 393, "artist_name": "The Game"},
+        }
+        return revue.Cas(detecteur, None, titre, "", 0, {"ecart": ecart}, "k")
+
+    def _juger(self, cas, contributeurs):
+        piste = {"id": 9, "contributors": [{"id": i, "name": n} for i, n in contributeurs]}
+        return pol._piste_d_un_autre_artiste(cas, {393}, lambda _id: piste)
+
+    def test_pas_creditee_pas_de_fiche(self):
+        arb = self._juger(self._cas(), [(4680956, "Garry")])
+        assert arb.action == "normal" and "Garry" in arb.raison
+
+    def test_creditee_par_l_id_ou_le_nom(self):
+        dope = [(393, "The Game"), (4680956, "Garry")]
+        assert self._juger(self._cas(titre="Dope Shit [G-Code]"), dope) is None
+        # Sous un autre profil Deezer, mais à son nom : crédité.
+        assert self._juger(self._cas(), [(1, "Garry"), (2, "The Game")]) is None
+
+    def test_sans_credits_lus_l_humain(self):
+        assert self._juger(self._cas(), []) is None
+        assert pol._piste_d_un_autre_artiste(self._cas(), {393}, lambda _id: None) is None
+
+    def test_seulement_les_pistes_absentes(self):
+        cas = self._cas(detecteur="deezer_version")
+        assert self._juger(cas, [(4680956, "Garry")]) is None
+
+
+class TestGeneriqueDeSonDisque:
+    """The Game, *LAX* (2026-11-03) : « Intro » / « Outro » proposées sur LE
+    disque de la fiche, seule fiche de ce titre, à la durée que l'ID Spotify
+    de la fiche donne aussi — le panneau écrivait déjà « rattachement sûr »."""
+
+    def _cas(self, t, titre, duree, disque, par="title_generique"):
+        ecart = {
+            "piste": {"title": titre, "duration": duree},
+            "album": {"title": disque},
+            "matched_by": par,
+        }
+        return _cas("deezer_link_candidate", t, {"ecart": ecart})
+
+    def _intro(self, **durees):
+        return _t(
+            "Intro (LAX)",
+            15622,
+            album="LAX",
+            duration=81,
+            durations_observees=durees or {"spotify_web": 80, "youtube": 81},
+        )
+
+    def test_rattachee(self):
+        t = self._intro()
+        arb = pol._generique_de_son_disque(
+            self._cas(t, "Intro", 80, "LAX"), t, revue.contexte([t], {})
+        )
+        assert arb.action == "deezer_appliquer" and "spotify_web" in arb.raison
+
+    def test_sans_catalogue_qui_confirme_l_humain(self):
+        """« Intro (The Documentary 2) » : seule la vidéo (59 s) témoigne."""
+        t = self._intro(youtube_video=81)
+        assert (
+            pol._generique_de_son_disque(
+                self._cas(t, "Intro", 80, "LAX"), t, revue.contexte([t], {})
+            )
+            is None
+        )
+
+    def test_deux_intros_du_disque_l_humain(self):
+        t = self._intro()
+        autre = _t("Intro", 2, album="LAX", duration=80)
+        cas = self._cas(t, "Intro", 80, "LAX")
+        assert pol._generique_de_son_disque(cas, t, revue.contexte([t, autre], {})) is None
+
+    def test_rapprochement_par_le_titre_hors_regle(self):
+        t = self._intro()
+        cas = self._cas(t, "Intro", 80, "LAX", par="title")
+        assert pol._generique_de_son_disque(cas, t, revue.contexte([t], {})) is None
 
 
 class TestLienHorsDuDisque:
@@ -584,6 +683,16 @@ class TestRegleA1:
         assert self._juger("deezer_version", "The King and I (Live)", fiches, duree=240) is None
         isrc = self._juger("deezer_version", "The King and I (Live 2005)", fiches, isrc="USIR1")
         assert isrc is None or isrc.action != "deezer_appliquer"
+
+    def test_le_live_d_un_autre_morceau_ne_porte_pas_la_version(self):
+        """The Game (2026-11-03) : « Crack Music (Live at Abbey Road Studios) »
+        bloquait « Dreams (Live from Dublin Version) » — même VERSION, pas le
+        même morceau."""
+        autre = _t("Lose Yourself (Live)", 3, duration=300)
+        arb = self._juger(
+            "deezer_version", "The King and I (Live)", [self._socle(), autre], duree=240
+        )
+        assert arb.action == "deezer_appliquer" and "secondaire" in arb.sens
 
     def test_version_a_la_duree_du_socle_l_humain(self):
         assert self._juger("deezer_version", "The King and I (Live)", [self._socle()]) is None

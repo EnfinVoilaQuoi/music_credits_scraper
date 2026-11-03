@@ -127,6 +127,14 @@ class TestPageDuCompteur:
         reprise = _f("The Corner (Last Poet Reprise)", 2)
         assert page_du_compteur([instru, reprise], set())[1] is reprise
 
+    def test_premiere_partie(self):
+        """The Game « A Week Ago » : deux parties, même disque, même compteur,
+        deux lignes Kworb — le compteur compte sur la première (2026-11-03)."""
+        p2, p1 = _f("A Week Ago, Part 2", 1), _f("A Week Ago (Part 1)", 2)
+        assert page_du_compteur([p2, p1], {1, 2}) == ("première partie", p1)
+        autre = _f("One Week Ago, Part 3", 3)
+        assert page_du_compteur([p2, autre], set()) is None
+
     def test_premiere_parution(self):
         a = _f("CHAMPIONS", 1, release_date=datetime(2016, 6, 1))
         b = _f("Champions", 2, release_date=datetime(2017, 1, 1))
@@ -187,6 +195,16 @@ class TestPolitique:
         ctx.obs = {2: [SimpleNamespace(field="spotify_streams", source="kworb")]}
         juger = pol.politique_compteur_partage(servis.get)
         assert juger(cas, a, ctx).action == "partager_compteur"
+
+    def test_deux_parties_chacune_son_titre(self):
+        """« A Week Ago » Part 1 / Part 2 (paroles 0,39) : chaque ID sert sa
+        partie ; la Part 2 ne compte plus le compteur partagé, la Part 1 le garde."""
+        p2, p1, ctx, cas = self._paire("A Week Ago, Part 2", "A Week Ago (Part 1)", paroles=0.39)
+        servis = {"SA": {"name": "A Week Ago, Part 2"}, "SB": {"name": "A Week Ago, Part 1"}}
+        ctx.obs = {i: [SimpleNamespace(field="spotify_streams", source="kworb")] for i in (1, 2)}
+        juger = pol.politique_compteur_partage(servis.get)
+        arbitrage = juger(cas, p2, ctx)
+        assert arbitrage.action == "partager_compteur" and "première partie" in arbitrage.raison
 
     def test_une_fiche_qui_a_change_d_id_n_est_pas_jugee(self):
         a, _b, ctx, cas = self._paire("Keep My Spirit Alive pt 2", "Keep My Spirit Alive")

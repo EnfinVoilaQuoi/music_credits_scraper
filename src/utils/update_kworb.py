@@ -43,6 +43,7 @@ from src.utils.spotify_identity import (
 from src.utils.version_descriptors import (
     MOTS_DE_MEME_MORCEAU,
     doublons_evidents,
+    edition_de_diffusion,
     est_remix_nomme,
     est_une_rendition,
     libelle_de_la_version,
@@ -438,7 +439,7 @@ class Rapprochement:
     rendition_de: object = None
     #: Proposition pour le dialogue (remix, ou suggestion floue) — rien n'est écrit.
     suggestion: dict | None = None
-    #: Pourquoi rien : id_partage | ambigu | rejete | ignore | aucun.
+    #: Pourquoi rien : id_partage | ambigu | rejete | ignore | aucun | autre_duree.
     motif: str | None = None
 
 
@@ -671,24 +672,62 @@ def _identite_embed(sid: str, lire_identite) -> dict | None:
     return lire_identite(sid)
 
 
-def flou_confirme(entry, track, score: float, lire_identite) -> bool:
-    """Un rapprochement FLOU qui n'en est pas un : identique après
-    normalisation (100 %), et la durée de l'ID de la ligne, lue à son embed, à
-    ± 2 s d'une durée INDÉPENDANTE de la fiche (`duree_temoin`) — le même
-    morceau, rien à soumettre. Cas d'origine (2026-10-31, confirmé à la main) :
-    Kanye « Don't Like.1 » (apostrophe droite) / la fiche « Don’t Like.1 ».
+#: Au-delà, la ligne n'est pas l'enregistrement de la fiche (même seuil que
+#: les démentis de durée du panneau).
+ECART_AUTRE_ENREGISTREMENT = 10
 
-    Jamais un ID REFUSÉ sur la fiche (« New God Flow.1 » : l'ID de la ligne
-    y est refusé à la main) ; sans durée de l'un ou l'autre côté, rien n'est
-    prouvé : le cas reste au panneau."""
+
+def duree_de_la_ligne(entry, track, lire_identite) -> str | None:
+    """La durée de l'ID de la ligne, lue à son embed, contre une durée
+    INDÉPENDANTE de la fiche (`duree_temoin`) : « meme » à ± 2 s, « autre »
+    au-delà de 10 s, None quand elle ne tranche pas.
+
+    Juge des lignes rapprochées par la seule RESSEMBLANCE des titres (flou,
+    « même morceau ? »). Cas d'origine : Kanye « Don't Like.1 » / « Don’t
+    Like.1 » (2026-10-31) ; panneau de The Game (2026-11-03) — « Gangbangin'
+    101 » / « Gangbangn 101 » à 243 s des deux côtés, « Better » / « Gutter »
+    à 336 / 132 s. Témoin : les verdicts humains du panneau (« Slow Jamz »
+    de Twista écartée à 212 / 316 s ; « Narco skit » / « Abso skit » et « Did
+    It Again » rejetés, à 52 / 89 s et 227 / 193 s).
+
+    Gardes : jamais un ID REFUSÉ sur la fiche (« New God Flow.1 ») ;
+    « meme » exige la même version (« Lost Horse » à la durée de la fiche
+    « Lost Horse (Remix) », rejeté à la main) ; « autre » ne vaut ni pour une
+    édition de diffusion ni entre deux versions de même famille, dont la durée
+    diffère par nature (« Memories … Remix Edit » confirmé à la main sur le
+    remix, 225 / 365 s), ni entre deux titres ÉQUIVALENTS : une autre durée y
+    désigne une autre édition du même morceau, peut-être à sommer (Eminem
+    « Just Don't Give a F** », 227 s, contre 242 s pour la fiche) — l'humain.
+    Sans durée de l'un ou l'autre côté, rien n'est prouvé."""
     sid = entry.get("spotify_id")
-    if score < 1.0 or not sid or sid in corrections_fiches.ids_refuses(track):
-        return False
+    if not sid or sid in corrections_fiches.ids_refuses(track):
+        return None
     temoin = duree_temoin(track)
     if not temoin:
-        return False
+        return None
     duree = (_identite_embed(sid, lire_identite) or {}).get("duration")
-    return bool(duree) and abs(temoin - duree) <= TOLERANCE_MEME_FICHIER
+    if not duree:
+        return None
+    titre = _SUFFIXE_UPLOAD.sub("", entry["title"])
+    meme_version = meme_version_stricte(titre, track.title)
+    ecart = abs(temoin - duree)
+    if ecart <= TOLERANCE_MEME_FICHIER:
+        return "meme" if meme_version else None
+    if (
+        ecart <= ECART_AUTRE_ENREGISTREMENT
+        or edition_de_diffusion(titre)
+        or titres_equivalents(titre, _SUFFIXE_UPLOAD.sub("", track.title))
+    ):
+        return None
+    if meme_version and (porte_une_version(titre) or porte_une_version(track.title)):
+        return None
+    return "autre"
+
+
+def flou_confirme(entry, track, lire_identite) -> bool:
+    """Un rapprochement FLOU qui n'en est pas un : la durée de l'ID de la
+    ligne est celle de la fiche (`duree_de_la_ligne`) — rien à soumettre."""
+    return duree_de_la_ligne(entry, track, lire_identite) == "meme"
 
 
 def lien_tranche(entry, track, decisions: dict) -> bool:
@@ -891,7 +930,14 @@ def rapprocher(
         return Rapprochement(track=fiche, via="sous_titre")
 
     ftrack, fscore = _fuzzy_unique(entry["title"], index.tracks)
-    if ftrack and _recevable(ftrack, sid, lire_identite):
+    # Un titre qui ressemble, mais dont l'ID dure autre chose que la fiche, n'est
+    # pas la fiche (`duree_de_la_ligne`) : une décision mémorisée peut encore
+    # la rattacher, sinon la ligne reste sans fiche.
+    if (
+        ftrack
+        and _recevable(ftrack, sid, lire_identite)
+        and duree_de_la_ligne(entry, ftrack, lire_identite) != "autre"
+    ):
         return Rapprochement(track=ftrack, via="fuzzy", score=fscore)
 
     confirmed = decisions.get("confirmed", {})
@@ -917,6 +963,13 @@ def rapprocher(
         if rejete:
             return Rapprochement(motif="rejete")
         cand, score = _best_candidate(entry["title"], index.tracks)
+        # « Même morceau ? » : la durée de l'ID répond quand elle le peut
+        # (`duree_de_la_ligne`, panneau de The Game, 2026-11-03).
+        verdict = duree_de_la_ligne(entry, cand, lire_identite) if cand else None
+        if verdict == "meme" and _recevable(cand, sid, lire_identite):
+            return Rapprochement(track=cand, via="duree", score=score)
+        if verdict == "autre":
+            return Rapprochement(motif="autre_duree")
         if cand:
             return Rapprochement(
                 suggestion={
@@ -1167,9 +1220,13 @@ def relier_ids_kworb(artist, data_manager, scraper=None, lire_identite=None) -> 
         if r.via == "rendition_id":
             continue
         track, via = r.track, r.via
-        if via in ("title", "title+artistes", "fuzzy", "sous_titre") and autre_upload_que_la_fiche(
-            track, sid, entry["streams"], ids_page, lus_web
-        ):
+        if via in (
+            "title",
+            "title+artistes",
+            "fuzzy",
+            "duree",
+            "sous_titre",
+        ) and autre_upload_que_la_fiche(track, sid, entry["streams"], ids_page, lus_web):
             continue
         if via == "edition":
             # L'ID de l'édition est noté SUR l'édition, jamais comme ID principal
@@ -1270,7 +1327,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         "matched_by_title": 0,
         "matched_by_fuzzy": 0,
         "fuzzy_matched": [],  # [(titre kworb, titre base, score)] — à vérifier côté GUI
-        # Flous à 100 % que la durée de l'ID confirme (`flou_confirme`) : non soumis.
+        # Flous et « même morceau ? » que la durée de l'ID confirme : non soumis.
         "flous_confirmes": [],  # [(titre kworb, titre base)]
         # Rapprochements INCERTAINS (bande sous le seuil auto) : NON écrits,
         # à confirmer/rejeter par l'utilisateur (mémorisé ensuite).
@@ -1442,7 +1499,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         track, via = r.track, r.via
         sid = entry.get("spotify_id")
         if (
-            via in ("title", "title+artistes", "fuzzy", "sous_titre")
+            via in ("title", "title+artistes", "fuzzy", "duree", "sous_titre")
             and sid
             and autre_upload_que_la_fiche(track, sid, entry["streams"], ids_page, lus_web)
             and not lien_tranche(entry, track, _decisions)
@@ -1477,10 +1534,10 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                     label=entry["title"],
                     variant_track_id=track.id,
                 )
-        if via == "fuzzy" and flou_confirme(entry, track, r.score, lire_identite):
+        if via == "duree" or (via == "fuzzy" and flou_confirme(entry, track, lire_identite)):
             result["flous_confirmes"].append((entry["title"], track.title))
             logger.info(
-                f"🔗 Kworb '{entry['title']}' → '{track.title}' : même titre normalisé, "
+                f"🔗 Kworb '{entry['title']}' → '{track.title}' : titre proche, "
                 f"même durée — confirmé"
             )
         elif via == "fuzzy":

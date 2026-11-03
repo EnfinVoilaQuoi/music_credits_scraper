@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from functools import lru_cache
@@ -1009,6 +1010,21 @@ def cle_de_socle(titre: str | None) -> str:
     if not k.socle:
         return ""
     return f"{k.socle}|{','.join(str(n) for n in sorted(k.parties))}"
+
+
+def premiere_partie(titres: Sequence[str]) -> int | None:
+    """PUR. L'indice, dans `titres`, de la PREMIÈRE partie d'un même morceau :
+    même souche, un seul numéro de partie chacun, tous différents (« A Week
+    Ago (Part 1) » / « A Week Ago, Part 2 » → 0). None sinon."""
+    cles = [cle_titre(t) for t in titres]
+    if len(cles) < 2 or not cles[0].socle or len({k.socle for k in cles}) != 1:
+        return None
+    if any(len(k.parties) != 1 for k in cles):
+        return None
+    numeros = [next(iter(k.parties)) for k in cles]
+    if len(set(numeros)) != len(numeros):
+        return None
+    return numeros.index(min(numeros))
 
 
 def meme_enregistrement(a: CleTitre, b: CleTitre) -> bool:

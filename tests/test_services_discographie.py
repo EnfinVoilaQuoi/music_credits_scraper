@@ -218,6 +218,9 @@ class _DM:
     def get_artist_edition_genius_ids(self, artist_id):
         return set()
 
+    def deezer_ids_des_artistes(self):
+        return {"Booba": 2}
+
     def get_artist_tracks(self, aid):
         return self.existants + [t for t in self.saved_new()]
 

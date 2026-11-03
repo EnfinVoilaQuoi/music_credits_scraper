@@ -12,6 +12,7 @@ from src.models.track import Credit, CreditRole
 from tests import test_media_enricher as _tme
 
 FakeDeezer, _apply, _artist, _track = _tme.FakeDeezer, _tme._apply, _tme._artist, _tme._track
+_contributeur = _tme._contributeur
 media_env = _tme.media_env  # fixture du module voisin, réexposée sous son nom
 
 
@@ -58,30 +59,30 @@ class TestPersonnes:
 
     def test_arret_demande_coupe_les_personnes(self, media_env):
         artist = _artist()
-        t = _track("T", artist, featured_artists="A,B")
+        t = _track("T", artist, featured_artists="A,B", deezer_id=1)
         n = {"v": 0}
 
         def stop():
             n["v"] += 1
             return n["v"] > 3  # laisse passer artiste, coupe dans les feats
 
-        deezer = FakeDeezer()
+        deezer = FakeDeezer(contributeurs={1: [_contributeur(2, "A"), _contributeur(3, "B")]})
         report = _apply(artist, [t], deezer=deezer, should_stop=stop)
         assert report.downloaded["feat"] < 2
 
     def test_producteurs_dedup_par_identite(self, media_env):
         artist = _artist()
-        t1 = _track("A", artist)
+        t1 = _track("A", artist, deezer_id=1)
         t1.credits = [
             Credit(name="Kore", role=CreditRole.PRODUCER),
             Credit(name="Mix", role=CreditRole.MIXING_ENGINEER),
         ]
-        t2 = _track("B", artist)
+        t2 = _track("B", artist, deezer_id=2)
         t2.credits = [Credit(name="KORE", role=CreditRole.PRODUCER)]
-        deezer = FakeDeezer()
+        deezer = FakeDeezer(contributeurs={1: [_contributeur(5, "Kore")]})
         report = _apply(artist, [t1, t2], deezer=deezer)
-        prods = [n for n in deezer.search_artist_calls if n.lower() == "kore"]
-        assert prods == ["Kore"] and report.downloaded["producteur"] == 1
+        assert deezer.track_calls == [1]  # une seule personne, trouvée d'emblée
+        assert report.downloaded["producteur"] == 1
 
 
 class TestCovers:

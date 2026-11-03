@@ -978,3 +978,40 @@ def test_l_isrc_et_l_apple_de_l_autre_page_partent_avec_l_id_refuse(data_manager
     game = next(t for t in artiste.tracks if t.genius_id == 2)
     assert game.isrc == "USUM72024267" and game.apple_music_id == "1545468585"
     assert game.duration == 222
+
+
+def test_l_edition_a_l_isrc_de_l_autre_page_lui_est_rendue(data_manager, artiste):
+    """« Cellphone » de The Game gardait l'édition Bonus (Deezer 102718188)
+    notée avec la page Deezer 87204097, partie ensuite chez « Cellphone ft.
+    Dubb » par `id_catalogue_partage` : son ISRC est celui de l'autre page
+    (invariant `isrc_edition_autre_fiche`, 2026-11-03)."""
+    from src.utils.corrections_fiches import memoriser_deezer_refuse
+
+    dubb = Track(title="Cellphone ft. Dubb", artist=artiste, genius_id=1)
+    dubb.deezer_id = 87204097
+    dubb.observations += [Observation("isrc", "USKO11401324", "deezer")]
+    data_manager.save_track(dubb)
+    cell = Track(title="Cellphone", artist=artiste, genius_id=2, album="Blood Moon")
+    data_manager.save_track(cell)
+    _charger(data_manager, artiste)
+    ids = {t.genius_id: t.id for t in artiste.tracks}
+    label = "Blood Moon: Year Of The Wolf (Bonus Edition)"
+    data_manager.record_track_edition(
+        ids[2], label, source="deezer", deezer_id=102718188, isrc="USKO11401324", duration=239
+    )
+    cell = next(t for t in artiste.tracks if t.genius_id == 2)
+    # Sans le refus : rien.
+    assert revue.identite_derivee(cell, revue.charger_contexte(data_manager, artiste)) is None
+
+    memoriser_deezer_refuse(cell, 87204097, origine="regle:id_catalogue_partage")
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert any(label in a for a in bilan.appliquees), bilan.appliquees
+    assert data_manager.get_track_editions(ids[2]) == []
+    assert [e["label"] for e in data_manager.get_track_editions(ids[1])] == [label]
+
+    (correction,) = [
+        c for c in data_manager.corrections_revue(artiste.id) if c["track_id"] == ids[2]
+    ]
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert [e["label"] for e in data_manager.get_track_editions(ids[2])] == [label]
+    assert data_manager.get_track_editions(ids[1]) == []

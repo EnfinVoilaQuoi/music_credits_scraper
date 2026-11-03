@@ -1078,6 +1078,7 @@ def test_fenetre_se_construit(racine_tk):
     dm = SimpleNamespace(
         get_artist_observations=lambda _id: {},
         get_artist_edition_durations=lambda _id: {},
+        get_artist_edition_isrcs=lambda _id: {},
         get_artist_edition_deezer_ids=lambda _id: frozenset(),
         get_artist_relations=lambda _id, status: [],
         divergences_identite_soeurs=lambda _id: [],

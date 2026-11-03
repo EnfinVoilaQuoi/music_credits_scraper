@@ -205,6 +205,9 @@ class Contexte:
     #: Places des fiches sur leurs disques (`get_artist_positions`), lues par
     #: `analyser` : preuve d'appoint des 👯.
     positions: dict = field(default_factory=dict)
+    #: ISRC des éditions par fiche (`get_artist_edition_isrcs`), lus par
+    #: `analyser` : `identite_derivee` rend celles d'une autre page.
+    isrc_editions: dict = field(default_factory=dict)
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -543,13 +546,17 @@ def identite_derivee(track, ctx):
     (2026-11-02 : « Higher » de The Game & Dr. Dre gardait l'ISRC, l'ID Apple
     et la durée du « Higher » d'Eminem, et l'enrichissement relisait ReccoBeats
     par cet ISRC). Rien sans ce refus : deux pages au même ISRC sans autre
-    preuve restent à `id_partage`."""
+    preuve restent à `id_partage`. Une ÉDITION notée avec l'ID refusé, à
+    l'ISRC de l'autre page, est la sienne (2026-11-03 : « Cellphone » de
+    The Game gardait l'édition Bonus de « Cellphone ft. Dubb »)."""
     from src.utils.corrections_fiches import deezer_refuses, ids_refuses
 
     isrc = (track.isrc or "").upper() or None
     apple = str(track.apple_music_id) if track.apple_music_id else None
-    if not isrc and not apple:
+    editions = ctx.isrc_editions.get(track.id, {})
+    if not isrc and not apple and not editions:
         return None
+    isrcs_editions = set(editions.values())
     autres = [
         t
         for t in ctx.disco
@@ -558,6 +565,7 @@ def identite_derivee(track, ctx):
         and (
             (isrc and (t.isrc or "").upper() == isrc)
             or (apple and t.apple_music_id and str(t.apple_music_id) == apple)
+            or (t.isrc and t.isrc.upper() in isrcs_editions)
         )
     ]
     if not autres:
@@ -580,10 +588,18 @@ def identite_derivee(track, ctx):
             preuves["isrc"] = isrc
         if apple and autre.apple_music_id and str(autre.apple_music_id) == apple:
             preuves["apple_music_id"] = apple
+        a_rendre = sorted(
+            label for label, i in editions.items() if autre.isrc and i == autre.isrc.upper()
+        )
+        if a_rendre:
+            preuves["editions"] = a_rendre
         portes = " et ".join(
-            f"{nom} {preuves[cle]}"
-            for nom, cle in (("ISRC", "isrc"), ("ID Apple", "apple_music_id"))
-            if cle in preuves
+            [
+                f"{nom} {preuves[cle]}"
+                for nom, cle in (("ISRC", "isrc"), ("ID Apple", "apple_music_id"))
+                if cle in preuves
+            ]
+            + [f"l'édition « {label} »" for label in a_rendre]
         )
         return (
             f"{portes} de « {autre.title} » (#{autre.id}), dont la fiche refuse l'{preuve}",
@@ -3735,6 +3751,7 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     )
     ctx.soeurs = data_manager.divergences_identite_soeurs(artiste.id)
     ctx.positions = data_manager.get_artist_positions(artiste.id)
+    ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
     return ctx
 
 

@@ -7381,6 +7381,26 @@ class TrackRepository:
             return frozenset()
         return frozenset(int(d) for (d,) in rows)
 
+    def get_artist_edition_isrcs(self, artist_id: int) -> dict[int, dict[str, str]]:
+        """`{track_id: {libellé: ISRC}}` des éditions à ISRC des fiches de l'artiste."""
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        "SELECT e.track_id, e.label, e.isrc FROM track_editions e "
+                        "JOIN tracks t ON t.id = e.track_id "
+                        "WHERE t.artist_id = :a AND e.isrc IS NOT NULL AND e.isrc != ''"
+                    ),
+                    {"a": artist_id},
+                ).fetchall()
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_artist_edition_isrcs({artist_id}): {e}")
+            return {}
+        isrcs: dict[int, dict[str, str]] = {}
+        for tid, label, isrc in rows:
+            isrcs.setdefault(tid, {})[label] = isrc.strip().upper()
+        return isrcs
+
     def get_track_editions(self, track_id: int) -> list[dict]:
         try:
             with self.engine.connect() as conn:

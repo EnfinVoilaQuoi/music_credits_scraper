@@ -709,8 +709,12 @@ def _retirer_identite_derivee(dm, track, cas: Cas) -> tuple[str, dict]:
         isrc = None
     if apple and str(track.apple_music_id or "") != apple:
         apple = None
-    if not isrc and not apple:
-        raise LookupError("la fiche ne porte plus cet ISRC ni cet ID Apple")
+    # Les éditions à l'ISRC de l'autre page lui sont RENDUES (`deplacer_edition`).
+    autre = cas.preuves.get("autre")
+    labels = {e["label"] for e in dm.get_track_editions(track.id)}
+    editions = [lab for lab in cas.preuves.get("editions") or () if lab in labels]
+    if not isrc and not apple and not editions:
+        raise LookupError("la fiche ne porte plus cet ISRC, cet ID Apple ni ces éditions")
     # `clear_track_isrc` emporte les observations `isrc` et les mesures
     # ReccoBeats lues par l'ISRC ; `clear_track_apple_music_id` la durée Apple.
     sources = ({"apple_music"} if apple else set()) | ({"reccobeats"} if isrc else set())
@@ -733,6 +737,10 @@ def _retirer_identite_derivee(dm, track, cas: Cas) -> tuple[str, dict]:
     if apple:
         dm.clear_track_apple_music_id(track.id)
         retraits.append(f"ID Apple {apple}")
+    deplacees = [lab for lab in editions if dm.deplacer_edition(track.id, lab, autre)]
+    retraits += [f"édition « {lab} »" for lab in deplacees]
+    if not retraits:
+        raise LookupError("édition déjà notée sur l'autre fiche : rien ne bouge")
     return (
         f"{' et '.join(retraits)} retiré(s) de « {track.title} » — {cas.motif}",
         {
@@ -740,6 +748,8 @@ def _retirer_identite_derivee(dm, track, cas: Cas) -> tuple[str, dict]:
             "isrc": isrc,
             "apple_music_id": apple,
             "observations": retirees,
+            "editions": deplacees,
+            "autre": autre,
         },
     )
 
@@ -999,7 +1009,9 @@ def retablir(dm, artiste, correction: dict) -> str:
         if annulation.get("apple_music_id"):
             dm.record_apple_music(track.id, annulation["apple_music_id"])
         dm.restaurer_observations(annulation.get("observations") or [])
-        compte_rendu = f"ISRC / ID Apple rétablis sur « {track.title} »"
+        for label in annulation.get("editions") or ():
+            dm.deplacer_edition(annulation["autre"], label, track.id)
+        compte_rendu = f"ISRC / ID Apple / éditions rétablis sur « {track.title} »"
     elif annulation.get("type") == "pose_spotify":
         from src.utils.spotify_audit import rejeter_spotify_id
 

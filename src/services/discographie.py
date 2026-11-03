@@ -456,6 +456,10 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
                 deezer=DeezerAPI(),
                 genius=runtime.genius_api,
                 should_stop=hooks.should_stop,
+                deezer_ids_connus=dm.deezer_ids_des_artistes(),
+                # Une fiche refaite par Genius n'a pas d'ID Deezer : `fusionner`
+                # lui a repris son `id`, qui désigne sa piste en base.
+                pistes_des_fiches={t.id: t.deezer_id for t in existants if t.deezer_id},
             )
             if artist.image_path:
                 dm.set_artist_image_path(artist.id, artist.image_path)

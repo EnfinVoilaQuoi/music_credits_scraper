@@ -138,9 +138,12 @@ class TestErreursConsignees:
         journal = []
         monkeypatch.setattr("src.api.deezer_api.DeezerAPI", lambda: "deezer")
 
-        def apply_images(artist, tracks, *, deezer, genius, should_stop):
+        def apply_images(
+            artist, tracks, *, deezer, genius, should_stop, deezer_ids_connus, pistes_des_fiches
+        ):
             artist.image_path = "img/a.jpg"
             journal.append(("images", deezer, len(tracks)))
+            assert deezer_ids_connus == {"Booba": 2} and pistes_des_fiches == {}
             return SimpleNamespace(total_downloaded=lambda: 3)
 
         monkeypatch.setattr("src.utils.media_enricher.apply_images", apply_images)

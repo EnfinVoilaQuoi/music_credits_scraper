@@ -243,6 +243,15 @@ class ArtistRepository:
         with self.engine.connect() as conn:
             return [r[0] for r in conn.execute(select(artists.c.name)).fetchall()]
 
+    def deezer_ids_des_artistes(self) -> dict[str, int]:
+        """Nom → ID Deezer tranché (`artists.deezer_id`), pour les artistes qui en
+        ont un : la preuve d'identité d'un invité qu'on suit aussi."""
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                select(artists.c.name, artists.c.deezer_id).where(artists.c.deezer_id.is_not(None))
+            ).fetchall()
+        return {nom: deezer_id for nom, deezer_id in lignes}
+
     def resume_des_artistes(self) -> list[dict[str, Any]]:
         """Chaque artiste en base avec son nombre de titres, de crédits, et la
         date de sa dernière écriture (`MAX(tracks.updated_at)` — le dernier run

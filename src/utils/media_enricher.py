@@ -17,11 +17,12 @@ avalent leurs exceptions et renvoient None/False — `apply_images` ne lève pas
 """
 
 import time
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from src.config import DELAY_BETWEEN_REQUESTS, IMAGES_DIR
-from src.utils.credit_normalize import display_name, identity_key
+from src.utils.credit_normalize import cle_de_doublon, display_name, identity_key
 from src.utils.image_downloader import (
     artist_image_path,
     cover_image_path,
@@ -52,6 +53,24 @@ _PRODUCER_ROLE_VALUES = {"Producer"}
 # Relations amont dont on cherche une pochette (mêmes types que genius_api).
 _SAMPLE_REL_TYPES = {"samples", "interpolates", "cover_of", "remix_of"}
 
+# Fiches `/track/<id>` NOUVELLES lues au plus pour une personne : Deezer crédite
+# rarement un beatmaker, et une personne sans fichier repasse à chaque run (les
+# fiches déjà lues pendant le passage ne comptent pas).
+_MAX_PISTES_PAR_PERSONNE = 3
+
+
+def _index_des_ids(ids: Mapping[str, int] | None) -> dict[str, int]:
+    """`{identity_key(nom): id Deezer}` ; deux ID sous une même clé ne prouvent rien."""
+    index: dict[str, int] = {}
+    ambigues: set[str] = set()
+    for nom, deezer_id in (ids or {}).items():
+        cle = identity_key(nom)
+        if not cle or not deezer_id:
+            continue
+        if index.setdefault(cle, deezer_id) != deezer_id:
+            ambigues.add(cle)
+    return {cle: i for cle, i in index.items() if cle not in ambigues}
+
 
 @dataclass
 class MediaReport:
@@ -80,7 +99,19 @@ class MediaReport:
 class _MediaRun:
     """Un passage d'enrichissement (porte l'état : clients, rapport, drapeaux)."""
 
-    def __init__(self, artist, tracks, *, deezer, genius, force, should_stop, progress):
+    def __init__(
+        self,
+        artist,
+        tracks,
+        *,
+        deezer,
+        genius,
+        force,
+        should_stop,
+        progress,
+        deezer_ids_connus,
+        pistes_des_fiches,
+    ):
         self.artist = artist
         self.tracks = tracks
         self.deezer = deezer
@@ -90,6 +121,9 @@ class _MediaRun:
         self.progress = progress or (lambda _msg: None)
         self.report = MediaReport()
         self.classifier = TrackClassifier()
+        self.deezer_ids_connus = _index_des_ids(deezer_ids_connus)
+        self.pistes_des_fiches = pistes_des_fiches or {}
+        self._contributeurs_lus: dict[int, list[dict]] = {}
 
     # ── Utilitaires ──────────────────────────────────────────────────────────
     def _rel(self, path: Path) -> str:
@@ -181,15 +215,74 @@ class _MediaRun:
             self.report.failed[CAT_ARTIST] += 1
 
     # ── 2. Photos des personnes créditées (pas de ligne DB : fichier = état) ──
-    def _person_photos(self, names: set[str], category: str, label: str) -> None:
-        """Télécharge la photo Deezer de chaque nom manquant.
+    def _contributeurs(self, track_id: int, label: str) -> list[dict]:
+        """Les `contributors` de la piste Deezer, lus une fois par passage."""
+        if track_id in self._contributeurs_lus:
+            return self._contributeurs_lus[track_id]
+        contributeurs: list[dict] = []
+        try:
+            fiche = self.deezer.get_track_by_id(track_id)
+            contributeurs = [c for c in (fiche or {}).get("contributors") or [] if c.get("name")]
+        # `DeezerAPI._make_request` avale deja reseau et JSON et rend None :
+        # ce qui peut encore remonter est une FORME de reponse inattendue.
+        except (AttributeError, KeyError, TypeError) as e:
+            self.report.errors.append(f"Deezer track ({label}) {track_id}: {e}")
+        finally:
+            self._sleep()
+        self._contributeurs_lus[track_id] = contributeurs
+        return contributeurs
 
-        Aucune ligne en base pour ces personnes : c'est l'EXISTENCE DU FICHIER
-        qui fait état. Conséquence utile — une photo déposée à la main sous
-        `data/images/artistes/` est reprise telle quelle et jamais réécrasée
-        (hors `force`), ce qui rattrape les noms que Deezer ne connaît pas.
+    def _profils_prouves(self, name: str, tracks: list, label: str) -> Iterator[dict]:
+        """Les profils Deezer dont une PREUVE dit qu'ils sont cette personne.
+
+        D'abord le contributeur de la piste Deezer d'une fiche qui la crédite,
+        au même nom sur ce morceau (`cle_de_doublon`) ; puis l'ID déjà tranché
+        pour ce nom (`artists.deezer_id`). Jamais une recherche par nom : son
+        premier résultat est souvent un homonyme (« Laylow » 12755051, 22 fans,
+        à la place de 4510044, crédité sur « Brûle », 2026-11-03). Paresseux :
+        la seconde preuve n'est lue que si la photo de la première manque.
         """
-        for name in sorted(names):
+        cle = cle_de_doublon(name)
+        pistes = (t.deezer_id or self.pistes_des_fiches.get(t.id) for t in tracks)
+        ids = list(dict.fromkeys(p for p in pistes if p))
+        deja_lues = [i for i in ids if i in self._contributeurs_lus]
+        a_lire = [i for i in ids if i not in self._contributeurs_lus]
+        for track_id in deja_lues + a_lire[:_MAX_PISTES_PAR_PERSONNE]:
+            contributeur = next(
+                (
+                    c
+                    for c in self._contributeurs(track_id, label)
+                    if cle and cle_de_doublon(c["name"]) == cle
+                ),
+                None,
+            )
+            if contributeur:
+                yield contributeur
+                break
+        connu = self.deezer_ids_connus.get(identity_key(name))
+        if connu:
+            try:
+                profil = self.deezer.get_artist(connu)
+            except (AttributeError, KeyError, TypeError) as e:
+                self.report.errors.append(f"Deezer artist ({label}) {connu}: {e}")
+                profil = None
+            finally:
+                self._sleep()
+            if profil:
+                yield profil
+
+    def _person_photos(self, personnes: dict[str, list], category: str, label: str) -> None:
+        """Télécharge la photo Deezer PROUVÉE de chaque personne sans fichier.
+
+        `personnes` : nom → les fiches qui le créditent. Aucune ligne en base
+        pour ces personnes : c'est l'EXISTENCE DU FICHIER qui fait état.
+        Conséquence utile — une photo déposée à la main sous
+        `data/images/artistes/` est reprise telle quelle et jamais réécrasée
+        (hors `force`), ce qui rattrape les noms que Deezer ne connaît pas. Sans
+        preuve, aucune photo : le visuel retombe sur un cercle plein, ce qui vaut
+        mieux que le visage d'un homonyme.
+        """
+        for name, tracks in sorted(personnes.items()):
             if self.should_stop():
                 return
             name = name.strip()
@@ -199,27 +292,25 @@ class _MediaRun:
             if not self.force and existing_image(base):
                 self.report.skipped[category] += 1
                 continue
-            url = None
+            telechargee = False
             if self.deezer:
-                try:
-                    found = self.deezer.search_artist(name)
-                except (AttributeError, KeyError, TypeError) as e:
-                    self.report.errors.append(f"Deezer search_artist ({label}) '{name}': {e}")
-                    found = None
-                finally:
-                    self._sleep()
-                if found:
-                    url = found.get("picture_xl")
-            if download_image(url, base):
+                for profil in self._profils_prouves(name, tracks, label):
+                    # La silhouette d'un profil sans photo est refusée au
+                    # téléchargement : la preuve suivante a sa chance.
+                    if download_image(profil.get("picture_xl"), base):
+                        telechargee = True
+                        break
+            if telechargee:
                 self.report.downloaded[category] += 1
             else:
                 self.report.failed[category] += 1
 
     def _feat_photos(self) -> None:
-        feat_names: set[str] = set()
+        personnes: dict[str, list] = {}
         for track in self.tracks:
-            feat_names.update(track.featured_artists_list)
-        self._person_photos(feat_names, CAT_FEAT, "feat")
+            for name in track.featured_artists_list:
+                personnes.setdefault(name, []).append(track)
+        self._person_photos(personnes, CAT_FEAT, "feat")
 
     def _producer_photos(self) -> None:
         """Photos des producteurs — elles peuplent les cercles de « Bubble Prod ».
@@ -229,15 +320,15 @@ class _MediaRun:
         mal les beatmakers : beaucoup d'échecs sont NORMAUX ici, le visuel
         retombe alors sur un cercle plein.
         """
-        by_key: dict[str, str] = {}
+        par_cle: dict[str, tuple[str, list]] = {}
         for track in self.tracks:
             for credit in track.credits:
                 if credit.role.value not in _PRODUCER_ROLE_VALUES:
                     continue
                 key = identity_key(credit.name)
-                if key and key not in by_key:
-                    by_key[key] = display_name(credit.name)
-        self._person_photos(set(by_key.values()), CAT_PRODUCER, "prod")
+                if key:
+                    par_cle.setdefault(key, (display_name(credit.name), []))[1].append(track)
+        self._person_photos(dict(par_cle.values()), CAT_PRODUCER, "prod")
 
     # ── 3 & 4. Covers d'albums (groupées) + singles/morceaux isolés ───────────
     def _album_and_single_covers(self) -> None:
@@ -377,6 +468,8 @@ def apply_images(
     force: bool = False,
     should_stop=None,
     progress=None,
+    deezer_ids_connus: Mapping[str, int] | None = None,
+    pistes_des_fiches: Mapping[int, int] | None = None,
 ) -> MediaReport:
     """Télécharge les images de `artist`/`tracks` et MUTE les objets (pas de save).
 
@@ -390,6 +483,10 @@ def apply_images(
         force: re-télécharge même si le champ est rempli et le fichier présent.
         should_stop: callable ``() -> bool`` testé entre chaque unité.
         progress: callable ``(str) -> None`` pour remonter l'avancement.
+        deezer_ids_connus: nom → ID Deezer tranché (``artists.deezer_id``), seconde
+            preuve d'identité d'une personne créditée, après les contributeurs.
+        pistes_des_fiches: ``track.id`` → piste Deezer en base, pour une fiche dont
+            l'objet ne la porte pas (fraîchement relue par Genius).
 
     Returns:
         Un :class:`MediaReport` (compteurs par catégorie + erreurs).
@@ -402,4 +499,6 @@ def apply_images(
         force=force,
         should_stop=should_stop,
         progress=progress,
+        deezer_ids_connus=deezer_ids_connus,
+        pistes_des_fiches=pistes_des_fiches,
     ).run()

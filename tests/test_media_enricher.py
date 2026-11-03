@@ -16,15 +16,34 @@ from src.models import Artist, Track
 
 # ── Fakes ────────────────────────────────────────────────────────────────────
 class FakeDeezer:
-    def __init__(self, artist_pic="http://cdn/artist.jpg", track_cover="http://cdn/cover.jpg"):
+    def __init__(
+        self,
+        artist_pic="http://cdn/artist.jpg",
+        track_cover="http://cdn/cover.jpg",
+        contributeurs=None,
+        profils=None,
+    ):
         self.artist_pic = artist_pic
         self.track_cover = track_cover
+        self.contributeurs = contributeurs or {}
+        self.profils = profils or {}
         self.search_artist_calls = []
         self.search_track_calls = []
+        self.track_calls = []
+        self.artist_calls = []
 
     def search_artist(self, name):
         self.search_artist_calls.append(name)
         return {"id": 1, "picture_xl": self.artist_pic} if self.artist_pic else None
+
+    def get_track_by_id(self, track_id):
+        self.track_calls.append(track_id)
+        contributeurs = self.contributeurs.get(track_id)
+        return {"id": track_id, "contributors": contributeurs} if contributeurs else None
+
+    def get_artist(self, artist_id):
+        self.artist_calls.append(artist_id)
+        return self.profils.get(artist_id)
 
     def search_track(self, artist, title, strict=False):
         self.search_track_calls.append((artist, title))
@@ -81,6 +100,10 @@ _MEDIA_ATTRS = {
     "youtube_video_views",
     "youtube_video_views_updated",
 }
+
+
+def _contributeur(deezer_id, name, picture=None):
+    return {"id": deezer_id, "name": name, "picture_xl": picture or f"http://cdn/{deezer_id}.jpg"}
 
 
 def _track(title, artist, **kw):
@@ -160,12 +183,19 @@ def test_artist_photo_echec_si_aucune_source(media_env):
 def test_feat_photos_dedupliquees(media_env):
     artist = _artist()
     tracks = [
-        _track("A", artist, featured_artists="Alpha, Beta"),
-        _track("B", artist, featured_artists="Beta, Gamma"),
+        _track("A", artist, featured_artists="Alpha, Beta", deezer_id=1),
+        _track("B", artist, featured_artists="Beta, Gamma", deezer_id=2),
     ]
-    report = _apply(artist, tracks, deezer=FakeDeezer())
+    deezer = FakeDeezer(
+        contributeurs={
+            1: [_contributeur(11, "Alpha"), _contributeur(12, "Beta")],
+            2: [_contributeur(12, "Beta"), _contributeur(13, "Gamma")],
+        }
+    )
+    report = _apply(artist, tracks, deezer=deezer)
     # Alpha, Beta, Gamma → 3 fichiers (Beta dédupliqué)
     assert report.downloaded["feat"] == 3
+    assert sorted(deezer.track_calls) == [1, 2]  # chaque piste lue une fois
     for name in ("Alpha", "Beta", "Gamma"):
         assert (media_env / "artistes" / f"{name}.jpg").exists()
 

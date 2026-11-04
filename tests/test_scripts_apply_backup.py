@@ -31,6 +31,9 @@ EXCEPTIONS: dict[str, str] = {
     "scripts/mark_latin_awards.py": "écrit le CSV brut RIAA (copie propre avant), pas la base",
     # Même famille : corrige le brut CSV RIAA, copie du CSV avant, pas la base.
     "scripts/repair_riaa_digital_singles.py": "écrit le CSV brut RIAA (copie propre avant)",
+    # Remplace des fichiers de `data/images/artistes/`, chacun archivé avant ; la base n'est
+    # pas ouverte (`artists.image_path` désigne le même chemin).
+    "scripts/remplacer_photos_homonymes.py": "écrit des photos (archivées avant), pas la base",
 }
 
 NOMS_APPLY = {"apply", "appliquer"}

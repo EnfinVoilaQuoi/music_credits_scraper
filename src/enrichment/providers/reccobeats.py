@@ -15,6 +15,7 @@ from src.enrichment.context import EnrichmentContext
 from src.enrichment.observation import Observation
 from src.models import Track
 from src.utils.bpm_vote import sanitize_bpm
+from src.utils.corrections_fiches import isrcs_refuses
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -111,6 +112,25 @@ class ReccoBeatsProvider:
 
         return applied
 
+    @staticmethod
+    def _isrc_d_un_autre_morceau(track: Track, info: dict) -> bool:
+        """L'ISRC mène ReccoBeats à un autre morceau : un distributeur le réemploie
+        (Vald : Deezer sert le même ISRC pour « Taga » 315 s et le single « Compas »
+        169 s, qui recevait les 314 s, le BPM et la tonalité de « Taga » ; 2026-11-04).
+        TOUS les catalogues lus par l'ID de la fiche le démentent de plus de 10 s."""
+        duree = info.get("duration")
+        temoins = [
+            d
+            for s, d in (track.durations_observees or {}).items()
+            if s in ("deezer", "spotify_web", "apple_music") and d
+        ]
+        return bool(
+            isinstance(duree, (int, float))
+            and duree > 0
+            and temoins
+            and all(abs(int(d) - int(duree)) > 10 for d in temoins)
+        )
+
     async def try_by_isrc_async(
         self, track: Track, ctx: EnrichmentContext, artist_name: str | None = None
     ) -> bool:
@@ -126,6 +146,8 @@ class ReccoBeatsProvider:
         if not isrc and self._deezer:
             try:
                 isrc = await self._deezer.get_isrc_async(ctx.http, artist_name, track.title)
+                if isrc and str(isrc).upper() in isrcs_refuses(track):
+                    isrc = None
                 if isrc:
                     track.isrc = isrc
                     logger.info(f"🔑 ISRC récupéré via Deezer: {isrc}")
@@ -139,6 +161,13 @@ class ReccoBeatsProvider:
             info = await client.get_track_info_by_isrc_async(ctx.http, isrc)
         except (AttributeError, TypeError, KeyError) as e:
             logger.error(f"❌ ReccoBeats ISRC API: {e}")
+            info = None
+
+        if info and self._isrc_d_un_autre_morceau(track, info):
+            logger.warning(
+                f"ReccoBeats: ISRC {isrc} de « {track.title} » : sert {info.get('duration')} s, "
+                "démenti par les catalogues de la fiche — un autre morceau, ignoré"
+            )
             info = None
 
         if info and info.get("success") and self._apply_result(track, info, ctx, resolution="isrc"):

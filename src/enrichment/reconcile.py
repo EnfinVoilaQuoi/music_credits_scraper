@@ -646,6 +646,7 @@ def _reconcile_lyrics_synced(
     from src.utils.concordance_paroles import lrc_dementi
     from src.utils.lrc_garde import (
         audio_dementi_par_les_catalogues,
+        cale_sur_un_autre_audio,
         deborde_son_audio,
         depasse,
         limite_du_lrc,
@@ -658,6 +659,8 @@ def _reconcile_lyrics_synced(
         if o.source == "lrclib" and audio_dementi_par_les_catalogues(
             audios.get("lrclib"), catalogues
         ):
+            return True
+        if cale_sur_un_autre_audio(o.source, audios, track_duration):
             return True
         return depasse(o.value, limite) is not None or deborde_son_audio(
             o.value, audios.get(o.source)

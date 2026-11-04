@@ -141,7 +141,7 @@ NATURES = {
 #: même la mesure SongBPM refusée champ par champ (`mesure_songbpm`).
 PAR_ENREGISTREMENT = frozenset(
     set(NATURES.values()) - {"certif"}
-    | {"compteur_spotify", "page_songbpm", "mesure_songbpm", "contenu", "id_discogs"}
+    | {"compteur_spotify", "page_songbpm", "mesure_songbpm", "contenu", "id_discogs", "isrc"}
 )
 
 #: Champ d'observation (source `songbpm`, DÉCLARÉ, jamais arbitré) qui garde la
@@ -599,6 +599,80 @@ def memoriser_deezer_refuse(track, deezer_id: int, origine: str | None = None) -
     """Consigne une piste Deezer DÉLIÉE : relue par les écarts Deezer et le
     provider par morceau (`deezer_refuses`)."""
     _memoriser(track, "id_deezer", int(deezer_id), origine=origine)
+
+
+def isrcs_refuses(track) -> set[str]:
+    """Les ISRC qu'un catalogue sert pour cette fiche à tort : un distributeur le
+    réemploie (Vald, Deezer sert à « Compas » celui de « Taga », 2026-11-04)."""
+    return {r["valeur"].upper() for r in _lignes(track, "isrc")}
+
+
+def memoriser_isrc_refuse(track, isrc: str, origine: str | None = None) -> None:
+    _memoriser(track, "isrc", str(isrc).strip().upper(), origine=origine)
+
+
+def oublier_isrc_refuse(track, isrc: str) -> bool:
+    return _oublier(track, "isrc", str(isrc).strip().upper())
+
+
+def memoriser_disque_refuse(
+    artiste: str, album_deezer: int, titre: str, origine: str | None = None
+) -> bool:
+    """Consigne un disque Deezer entier qui n'est pas celui de l'artiste (un
+    homonyme sur le même profil : Anton Serra le flûtiste, 2026-11-04). La
+    désignation est le disque, pas une fiche : ses fiches n'existent plus, et
+    le refus empêche les écarts Deezer de les recréer (`disques_refuses`)."""
+    from datetime import datetime
+
+    if moteur is None or not artiste:
+        return False
+    return _inserer(
+        {"titre": titre, "album": None},
+        artiste,
+        titre,
+        None,
+        "disque_deezer",
+        int(album_deezer),
+        datetime.now().isoformat(timespec="seconds"),
+        origine=origine,
+    )
+
+
+def disques_refuses(artiste: str | None) -> set[int]:
+    """Les disques Deezer refusés pour cet artiste."""
+    if moteur is None or not artiste:
+        return set()
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        with moteur.connect() as conn:
+            lignes = conn.execute(
+                text("SELECT valeur FROM refus WHERE nature = 'disque_deezer' AND artiste = :a"),
+                {"a": artiste},
+            ).all()
+    except SQLAlchemyError as e:
+        logger.warning(f"Refus de disques illisibles : {e} — rien d'appliqué")
+        return set()
+    return {int(v) for (v,) in lignes}
+
+
+def oublier_disque_refuse(artiste: str, album_deezer: int) -> bool:
+    """Pendant : le disque redevient proposable au prochain run Deezer."""
+    if moteur is None:
+        return False
+    from sqlalchemy import text
+
+    with moteur.begin() as conn:
+        return bool(
+            conn.execute(
+                text(
+                    "DELETE FROM refus WHERE nature = 'disque_deezer' AND artiste = :a "
+                    "AND valeur = :v"
+                ),
+                {"a": artiste, "v": str(int(album_deezer))},
+            ).rowcount
+        )
 
 
 def memoriser_discogs_refuse(track, discogs_id: int, origine: str | None = None) -> None:

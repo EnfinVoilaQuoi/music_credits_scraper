@@ -164,6 +164,7 @@ FAMILLES = {
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
+    "disque_homonyme": "disque d'au moins 3 fiches, aucune avec page Genius ni ID Spotify (homonyme ?)",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
     "soeurs_divergentes": "INVARIANT — lignes sœurs aux valeurs d'enregistrement différentes",
@@ -920,6 +921,8 @@ def refus_vivants(c, pistes) -> list[Cas]:
             return str(t["deezer_id"] or "") == valeur
         if nature == "id_discogs":
             return str(t["discogs_id"] or "") == valeur
+        if nature == "isrc":
+            return str(t["isrc"] or "").upper() == valeur.upper()
         if nature == "video":
             return valeur in videos[t["id"]]
         if nature == "lrc":
@@ -937,7 +940,7 @@ def refus_vivants(c, pistes) -> list[Cas]:
     cas = []
     for r in c.execute(
         "SELECT genius_id, artiste, titre, album, nature, valeur FROM refus "
-        "WHERE nature IN ('id_spotify', 'id_deezer', 'id_discogs', 'video', 'lrc', 'paroles', "
+        "WHERE nature IN ('id_spotify', 'id_deezer', 'id_discogs', 'isrc', 'video', 'lrc', 'paroles', "
         "'page_songbpm', "
         "'page_getsongbpm', 'mesure_songbpm')"
     ):
@@ -1006,6 +1009,38 @@ def isrc_d_une_autre_fiche(c, pistes) -> list[Cas]:
                     f"ISRC {e['isrc']} de " + " | ".join(_lib(t) for t in autres),
                 )
             )
+    return cas
+
+
+#: Nombre de fiches à partir duquel un disque sans aucun lien fait soupçonner
+#: un homonyme (2026-11-04 : 2 disques sur toute la base, ceux du flûtiste Anton
+#: Serra ; à 2 fiches, un single de Kid Cudi).
+FICHES_MIN_DISQUE_HOMONYME = 3
+
+
+def disques_homonymes(pistes) -> list[Cas]:
+    """Un disque dont aucune fiche n'a de page Genius ni d'ID Spotify : posé par
+    le seul Deezer, dont un profil peut mêler deux homonymes. Les données d'un
+    autre artiste, que rien d'autre ne signalait (le flûtiste Anton Serra n'est
+    apparu que par des désaccords de BPM, 22 fiches)."""
+    disques = collections.defaultdict(list)
+    for t in pistes:
+        if t["album"]:
+            disques[t["artist_id"], t["album"]].append(t)
+    cas = []
+    for (_, album), fiches in sorted(disques.items(), key=lambda x: str(x[0])):
+        if len(fiches) < FICHES_MIN_DISQUE_HOMONYME:
+            continue
+        if any(f["genius_id"] or f["spotify_id"] for f in fiches):
+            continue
+        cas.append(
+            Cas(
+                "disque_homonyme",
+                fiches[0]["artiste"],
+                [f["id"] for f in fiches],
+                f"« {album} » : {len(fiches)} fiches, aucune avec page Genius ni ID Spotify",
+            )
+        )
     return cas
 
 
@@ -1214,6 +1249,7 @@ def auditer(
         audit.cas += streams(c, par)
         audit.cas += echecs(c, pistes)
         audit.cas += studio_sur_live(c, pistes)
+        audit.cas += disques_homonymes(pistes)
         if persistance:
             audit.cas += soeurs_divergentes(c, pistes)
             audit.cas += refus_vivants(c, pistes)

@@ -386,8 +386,13 @@ def meme_enregistrement_pour(track, titre_servi: str | None, *, graphie: bool = 
     """Le titre servi par une plateforme désigne-t-il l'enregistrement de la
     fiche ? Titres équivalents (`titres_confondus` avec `graphie`, pour
     reconnaître une fiche sous une autre graphie), et pas le remix d'un autre
-    remixeur (`remixeur_etranger_a_la_fiche`, 2026-10-26)."""
+    remixeur (`remixeur_etranger_a_la_fiche`, 2026-10-26), ni le segment d'un DJ
+    mix (« … [Mixed] ») pour une fiche qui n'en est pas un (2026-11-04)."""
+    from src.utils.duree_youtube import segment_de_dj_mix
+
     egaux = (titres_confondus if graphie else titres_equivalents)(track.title, titre_servi)
+    if egaux and segment_de_dj_mix(titre_servi, None):
+        egaux = segment_de_dj_mix(track.title, track.album)
     return egaux and remixeur_etranger_a_la_fiche(track, titre_servi) is None
 
 

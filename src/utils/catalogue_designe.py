@@ -106,6 +106,36 @@ def _criteres(servi: Servi) -> list[tuple[str, Callable]]:
     return criteres
 
 
+#: Paroles Genius communes (bigrammes) à partir desquelles deux pages disent le
+#: même texte, et écart de durée d'un même fichier.
+PAROLES_MEME_ENREGISTREMENT = 0.9
+ECART_MEME_ENREGISTREMENT_S = 2
+
+
+def meme_enregistrement_prouve(a, b) -> bool:
+    """PUR. Deux pages Genius sont UN enregistrement, preuves prises hors de
+    l'ID qu'elles partagent : le même ISRC sur deux pages Deezer DIFFÉRENTES,
+    les mêmes paroles Genius, la même durée (décision utilisateur 2026-11-04 :
+    « Real Niggas Stand Up » et « Real n***** stand up », dont la règle du
+    catalogue avait retiré l'ID et l'ISRC à l'une). Ni « à quelle page est cet
+    ID ? », ni retrait : à fusionner, décision humaine."""
+    from src.utils.concordance_paroles import paroles_de_reference, recouvrement_bigrammes
+
+    if not a.isrc or str(a.isrc).strip().upper() != str(b.isrc or "").strip().upper():
+        return False
+    if not a.deezer_id or not b.deezer_id or int(a.deezer_id) == int(b.deezer_id):
+        return False
+    if not a.duration or not b.duration:
+        return False
+    if abs(int(a.duration) - int(b.duration)) > ECART_MEME_ENREGISTREMENT_S:
+        return False
+    communes = recouvrement_bigrammes(
+        paroles_de_reference(a.lyrics.text, a.lyrics.source),
+        paroles_de_reference(b.lyrics.text, b.lyrics.source),
+    )
+    return communes is not None and communes >= PAROLES_MEME_ENREGISTREMENT
+
+
 def page_designee(servi: Servi | None, pages: Sequence) -> tuple[str, object] | None:
     """PUR. `(critère, page)` : la SEULE page que ce que sert le catalogue
     retient, au premier critère qui n'en retient qu'une ; None sinon."""

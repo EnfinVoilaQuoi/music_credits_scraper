@@ -45,7 +45,12 @@ from src.models.track import Credit, CreditRole, Track
 from src.services.deezer_identite import cle_album
 from src.services.runtime import Bilan
 from src.utils import version_heritage
-from src.utils.corrections_fiches import deezer_refuses, memoriser_deezer_refuse
+from src.utils.corrections_fiches import (
+    deezer_refuses,
+    disques_refuses,
+    isrcs_refuses,
+    memoriser_deezer_refuse,
+)
 from src.utils.logger import etape_de_flux, get_logger
 from src.utils.spotify_identity import meme_enregistrement_pour
 from src.utils.title_matching import (
@@ -173,6 +178,8 @@ class AlbumDeezer:
     #: Paroles explicites (`explicit_lyrics` de l'album) : départage une édition
     #: « clean » d'une explicite au même code-barres (`apple_parutions`).
     explicit_lyrics: bool | None = None
+    #: Genres de l'album (`genres.data[].name`) : `marquer_disques_etrangers`.
+    genres: list[str] = field(default_factory=list)
 
     @classmethod
     def depuis(cls, fiche: dict, pistes: list[dict]) -> AlbumDeezer:
@@ -198,6 +205,11 @@ class AlbumDeezer:
             explicit_lyrics=(
                 bool(fiche["explicit_lyrics"]) if fiche.get("explicit_lyrics") is not None else None
             ),
+            genres=[
+                g.get("name")
+                for g in (fiche.get("genres") or {}).get("data") or []
+                if g.get("name")
+            ],
         )
 
 
@@ -220,6 +232,8 @@ class Ecart:
     matched_by: str | None = None
     #: Ce que le lien a apporté à la fiche (« id Deezer », « durée 203 s »…).
     apports: list[str] = field(default_factory=list)
+    #: Disque entier inconnu, d'un genre que l'artiste n'a pas (`marquer_disques_etrangers`).
+    disque_etranger: bool = False
 
     @property
     def titre(self) -> str:
@@ -798,6 +812,39 @@ def accrocher_genius(ecarts: list[Ecart], artist, genius_api) -> None:
 # ── Détection (async) ────────────────────────────────────────────────────────
 
 
+#: Un disque se juge étranger à partir de ce nombre de pistes : un single d'un
+#: autre genre n'est pas un homonyme.
+PISTES_MIN_DISQUE_ETRANGER = 3
+
+
+def marquer_disques_etrangers(albums: list[AlbumDeezer], ecarts: list[Ecart]) -> None:
+    """Un profil Deezer peut mêler deux homonymes (Anton Serra, 1666208 : le
+    rappeur et le flûtiste, 22 fiches créées d'office le 2026-11-04). Un disque
+    dont AUCUNE piste n'est connue, d'un genre qu'aucun disque connu de l'artiste
+    n'a, ne crée rien seul : il va à l'humain, décoché."""
+    absentes = {(e.album.id, e.piste.id) for e in ecarts if e.nature in ("absent", "album_absent")}
+    entiers = {
+        a.id
+        for a in albums
+        if len(a.pistes) >= PISTES_MIN_DISQUE_ETRANGER
+        and all((a.id, p.id) in absentes for p in a.pistes)
+    }
+    connus = {g for a in albums if a.id not in entiers for g in a.genres}
+    if not connus:
+        return
+    etrangers = {
+        a.id: a for a in albums if a.id in entiers and a.genres and not connus & set(a.genres)
+    }
+    for e in ecarts:
+        if e.album.id in etrangers and (e.album.id, e.piste.id) in absentes:
+            e.disque_etranger = True
+            e.coche = False
+            e.motifs.append(
+                f"disque entier inconnu, genre {', '.join(etrangers[e.album.id].genres)} : "
+                "un homonyme sur le même profil ?"
+            )
+
+
 def discographie_de_classement(dm, artist) -> list[Track]:
     """Les fiches que le classement lit : la discographie réunie, et les durées
     de leurs ÉDITIONS (`track_editions`). Sans elles, un lien vers la radio
@@ -824,11 +871,14 @@ async def detecter_async(
     base = discographie_de_classement(dm, artist)
     albums_base = dm.get_albums_for_artist(artist.id)
     albums: list[AlbumDeezer] = []
+    refuses = disques_refuses(artist.name)
     try:
         for brut in await client.get_artist_albums_async(http, deezer_id):
             if should_stop():
                 bilan.interrompu("arrêt demandé")
                 break
+            if int(brut["id"]) in refuses:
+                continue
             fiche = await client.get_album_async(http, int(brut["id"]))
             if not fiche:
                 bilan.erreurs.append(f"fiche album {brut.get('title')} illisible")
@@ -865,6 +915,7 @@ async def detecter_async(
     )
     accrocher_genius(ecarts, artist, genius_api)
     cocher_par_defaut(ecarts, base)
+    marquer_disques_etrangers(albums, ecarts)
     bilan.ecarts = ecarts
     bilan.editions_jumelles = jumelles
     bilan.albums = albums
@@ -1069,8 +1120,10 @@ def _renseigner_fiche(dm, e: Ecart, track: Track) -> list[str]:
             duration=p.duration or None,
         )
         return [f"autre édition Deezer « {disque or p.title} »"]
-    isrc_compatible = bool(p.isrc) and (
-        not track.isrc or str(track.isrc).strip().upper() == p.isrc.strip().upper()
+    isrc_compatible = (
+        bool(p.isrc)
+        and (not track.isrc or str(track.isrc).strip().upper() == p.isrc.strip().upper())
+        and p.isrc.strip().upper() not in isrcs_refuses(track)
     )
     ecrites = dm.fill_track_identities(
         track.id,
@@ -1444,6 +1497,7 @@ def ecart_vers_dict(e: Ecart) -> dict:
         "kworb_spotify_id": e.kworb_spotify_id,
         "matched_by": e.matched_by,
         "apports": list(e.apports),
+        "disque_etranger": e.disque_etranger,
     }
 
 
@@ -1467,6 +1521,7 @@ def ecart_depuis(d: dict, tracks: dict) -> Ecart:
         existing_track=tracks.get(d.get("existing_track_id")),
         matched_by=d.get("matched_by"),
         apports=list(d.get("apports") or []),
+        disque_etranger=bool(d.get("disque_etranger")),
     )
 
 

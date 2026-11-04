@@ -8001,6 +8001,49 @@ class TrackRepository:
             logger.error(f"Erreur clear_track_spotify_id (track_id={track_id}): {e}")
             return rapport
 
+    def changer_id_spotify_principal(self, track_id: int, spotify_id: str) -> bool:
+        """Change l'ID principal pour un autre ID DÉJÀ connu de la fiche, sœurs
+        comprises : deux parutions Spotify du même enregistrement (Anton Serra
+        seul, ou Lucio Bukowski, Oster Lapwass, Anton Serra, 2026-11-04). Aucun ID
+        ne part de `track_spotify_ids`, rien n'est refusé : c'est un choix entre
+        deux ID justes, pas le retrait d'un faux. Rend False si l'ID est inconnu."""
+        try:
+            with self._ecrire() as conn:
+                connu = conn.execute(
+                    text("SELECT 1 FROM track_spotify_ids WHERE track_id = :t AND spotify_id = :s"),
+                    {"t": track_id, "s": spotify_id},
+                ).first()
+                if connu is None:
+                    return False
+                self._toucher(conn, track_id)
+
+                def poser(tid: int) -> None:
+                    conn.execute(
+                        text(
+                            "UPDATE tracks SET spotify_id = :s, spotify_page_title = NULL, "
+                            "updated_at = :now WHERE id = :tid"
+                        ),
+                        {"s": spotify_id, "tid": tid, "now": datetime.now()},
+                    )
+
+                poser(track_id)
+                effacer_chez_les_soeurs(conn, track_id, poser)
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur changer_id_spotify_principal (track_id={track_id}): {e}")
+            return False
+
+    def retirer_duree_manuelle(self, track_id: int) -> bool:
+        """Retire la seule durée `manual` (sœurs comprises) : le verdict revient
+        aux autres sources (rétablir une `coupe_catalogue`, 2026-11-04)."""
+        try:
+            with self._ecrire() as conn:
+                self._delete_observations(conn, track_id, "duration", ("manual",))
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_duree_manuelle (track_id={track_id}): {e}")
+            return False
+
     def clear_track_duration(self, track_id: int) -> bool:
         """Efface la durée d'un morceau, **colonne ET observations**.
 

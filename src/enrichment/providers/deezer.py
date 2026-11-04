@@ -15,7 +15,7 @@ from src.enrichment.observation import Observation
 from src.models import ReleaseObservation, Track
 from src.observability.issues import SansReponse
 from src.utils.bpm_vote import sanitize_bpm
-from src.utils.corrections_fiches import deezer_refuses
+from src.utils.corrections_fiches import deezer_refuses, isrcs_refuses
 from src.utils.deezer_identity import albums_des_homonymes
 from src.utils.logger import get_logger
 from src.utils.spotify_identity import artistes_connus
@@ -236,6 +236,8 @@ class DeezerProvider:
                 )
 
         # ISRC : pivot inter-sources (non destructif). Alimente ReccoBeats.
+        if data.get("deezer_isrc") and str(data["deezer_isrc"]).upper() in isrcs_refuses(track):
+            data = {**data, "deezer_isrc": None}
         if data.get("deezer_isrc"):
             ctx.observations.append(Observation("isrc", data["deezer_isrc"], self.name))
         if data.get("deezer_isrc") and (not track.isrc or force_update):

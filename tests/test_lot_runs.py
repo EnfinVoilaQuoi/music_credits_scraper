@@ -135,6 +135,115 @@ def test_un_autre_ecrivain_arrete_le_lot_avant_de_lancer(tmp_path):
     assert lot.resultats == [] and lot.code == 3
 
 
+class TestFichierDArret:
+    """Sans lui, arrêter un lot demandait une sentinelle posée au bon moment (2026-11-04)."""
+
+    RUNS = [["streams", "Sheldon"], ["certifs", "search", "Sheldon"], ["artiste", "add", "Logic"]]
+
+    def _raison(self, tmp_path, contenu, n):
+        fichier = tmp_path / "ARRET"
+        fichier.write_bytes(contenu)
+        return lot_runs.arret_demande(fichier, self.RUNS, n)
+
+    def test_sans_fichier_le_lot_continue(self, tmp_path):
+        assert lot_runs.arret_demande(tmp_path / "ARRET", self.RUNS, 1) is None
+
+    def test_vide_arrete_avant_le_prochain_run(self, tmp_path):
+        assert self._raison(tmp_path, b"", 1) == "demandé"
+
+    def test_une_ligne_du_lot_est_la_derniere_lancee(self, tmp_path):
+        ligne = b"certifs search Sheldon\n"
+        assert self._raison(tmp_path, ligne, 2) is None
+        assert "certifs search Sheldon" in self._raison(tmp_path, ligne, 3)
+
+    def test_une_ligne_ecrite_par_powershell(self, tmp_path):
+        """Fin de ligne CRLF et BOM UTF-8, ce que produit `>` sous PowerShell."""
+        assert self._raison(tmp_path, "﻿certifs search Sheldon\r\n".encode(), 2) is None
+
+    def test_une_ligne_hors_du_lot_arrete(self, tmp_path):
+        """« certifs Sheldon » pour « certifs search Sheldon » : Logic ne doit pas partir."""
+        assert "pas dans le lot" in self._raison(tmp_path, b"certifs Sheldon", 1)
+
+    def test_un_fichier_illisible_arrete(self, tmp_path):
+        assert "illisible" in self._raison(tmp_path, "certifs".encode("utf-16"), 1)
+        assert "illisible" in self._raison(tmp_path, b'certifs "sans fin', 1)
+
+    def test_le_run_en_cours_va_au_bout_et_le_suivant_ne_part_pas(self, tmp_path):
+        arret = (tmp_path / "sortie" / "ARRET").as_posix()
+        lot = _executer(tmp_path, [f"open({arret!r}, 'w').close()", "print('jamais')"])
+        assert [r.statut for r in lot.resultats] == ["ok"] and lot.code == 0
+        assert "1 run(s) non lancé(s)" in (tmp_path / "sortie" / "lot.log").read_text("utf-8")
+
+
+class TestCodeRefuse:
+    """Un worktree neuf a son propre `data/`, sans la base (2026-11-04)."""
+
+    def _jonction(self, cible, lien):
+        if sys.platform == "win32":
+            import _winapi
+
+            _winapi.CreateJunction(str(cible), str(lien))
+        else:
+            lien.symlink_to(cible, target_is_directory=True)
+
+    def test_le_depot_lui_meme_est_accepte(self, tmp_path):
+        assert lot_runs.refus_du_code(tmp_path, tmp_path) is None
+
+    def test_un_vrai_dossier_data_est_refuse(self, tmp_path):
+        depot, fige = tmp_path / "depot", tmp_path / "fige"
+        (depot / "data").mkdir(parents=True)
+        (fige / "data").mkdir(parents=True)
+        assert "autre base" in lot_runs.refus_du_code(fige, depot)
+
+    def test_une_jonction_vers_le_data_du_depot_est_acceptee(self, tmp_path):
+        depot, fige = tmp_path / "depot", tmp_path / "fige"
+        (depot / "data").mkdir(parents=True)
+        fige.mkdir()
+        self._jonction(depot / "data", fige / "data")
+        try:
+            assert lot_runs.refus_du_code(fige, depot) is None
+        finally:
+            (fige / "data").rmdir() if sys.platform == "win32" else (fige / "data").unlink()
+
+    def test_le_env_du_depot_est_exige(self, tmp_path):
+        depot, fige = tmp_path / "depot", tmp_path / "fige"
+        (depot / "data").mkdir(parents=True)
+        (depot / ".env").write_text("X=1\n", encoding="utf-8")
+        fige.mkdir()
+        self._jonction(depot / "data", fige / "data")
+        try:
+            assert ".env" in lot_runs.refus_du_code(fige, depot)
+            (fige / ".env").write_text("X=1\n", encoding="utf-8")
+            assert lot_runs.refus_du_code(fige, depot) is None
+        finally:
+            (fige / "data").rmdir() if sys.platform == "win32" else (fige / "data").unlink()
+
+    def test_une_jonction_vers_ailleurs_est_refusee(self, tmp_path):
+        depot, fige = tmp_path / "depot", tmp_path / "fige"
+        (depot / "data").mkdir(parents=True)
+        (tmp_path / "autre").mkdir()
+        fige.mkdir()
+        self._jonction(tmp_path / "autre", fige / "data")
+        try:
+            assert lot_runs.refus_du_code(fige, depot)
+        finally:
+            (fige / "data").rmdir() if sys.platform == "win32" else (fige / "data").unlink()
+
+    def test_le_lot_refuse_ne_lance_rien(self, tmp_path, monkeypatch, capsys):
+        depot, fige = tmp_path / "depot", tmp_path / "fige"
+        (depot / "data").mkdir(parents=True)
+        (fige / "data").mkdir(parents=True)
+        lot = tmp_path / "lot.txt"
+        lot.write_text("credits Booba\n", encoding="utf-8")
+        monkeypatch.setattr(lot_runs, "RACINE", depot)
+        monkeypatch.setattr(sys, "argv", ["lot_runs", str(lot), "--code", str(fige)])
+        monkeypatch.setattr(sys.stdout, "reconfigure", lambda **_: None, raising=False)
+        lance = []
+        monkeypatch.setattr(lot_runs, "executer_lot", lambda *a, **k: lance.append(a))
+        assert lot_runs.main() == 2 and not lance
+        assert "Lot refusé" in capsys.readouterr().out
+
+
 def test_un_run_tue_qui_traine_n_est_pas_un_autre_ecrivain(tmp_path):
     """« streams Django » (2026-10-30) : tué pendant une copie calée vers le
     disque externe, le processus traînait encore et le lot s'arrêtait (code 3)."""

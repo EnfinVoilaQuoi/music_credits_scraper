@@ -18,11 +18,20 @@ Protections, d'office :
   dans son journal, la discographie écrit dans le brut : il faut les trois ;
 - **anti-veille** (Windows) : le PC ne se met pas en veille tant que le lot tourne ;
 - **un seul écrivain** : le lot ne démarre pas (et s'arrête entre deux runs) si
-  un autre processus du projet tient la base (`src.cli`, l'app).
+  un autre processus du projet tient la base (`src.cli`, l'app) ;
+- **bonne base** : `--code` est refusé si son `data` n'est pas celui du dépôt
+  (un worktree neuf a son propre dossier `data/`, sans la base) ou s'il n'a pas
+  de `.env` alors que le dépôt en a un.
+
+Arrêter un lot : créer `ARRET` dans son dossier de journaux, relu avant chaque
+run. Vide : arrêt avant le prochain run, celui en cours va au bout. Avec une ligne
+du lot (« certifs search Sheldon ») : cette ligne est la dernière lancée. Un
+fichier illisible, ou une ligne qui n'est pas dans le lot, arrête aussi : un arrêt
+se rattrape, un run de trop non.
 
 Journal du lot : `data/logs/lots/<date>/lot.log` (DÉBUT / FIN / FIGÉ / DÉLAI),
 la sortie de chaque run à côté. Codes : 0 tout est passé, 1 au moins un run en
-échec, figé ou hors délai, 3 un autre écrivain occupe la base.
+échec, figé ou hors délai, 2 `--code` refusé, 3 un autre écrivain occupe la base.
 """
 
 from __future__ import annotations
@@ -52,6 +61,9 @@ _ECRIVAINS = ("src.cli", "src.main", "src.gui_qt", "src/main.py", "src\\main.py"
 
 FIGE, DELAI = "figé", "délai"
 
+#: Dans le dossier de journaux du lot : sa présence demande l'arrêt.
+FICHIER_ARRET = "ARRET"
+
 
 def lire_lot(texte: str) -> list[list[str]]:
     """PUR. Les runs d'un fichier de lot : une ligne = les arguments d'un run."""
@@ -67,6 +79,36 @@ def nom_de_journal(n: int, args: list[str]) -> str:
     """PUR. « run_03_credits_Kanye_West.txt » : lisible, sans caractère interdit."""
     brut = "_".join(args)[:60]
     return f"run_{n:02d}_" + "".join(c if c.isalnum() or c in "._-" else "_" for c in brut) + ".txt"
+
+
+def arret_demande(fichier: Path, runs: list[list[str]], n: int) -> str | None:
+    """La raison d'arrêter avant le run `n` (à partir de 1), None pour continuer."""
+    try:
+        lignes = lire_lot(fichier.read_bytes().decode("utf-8-sig"))
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return f"fichier d'arrêt illisible ({exc})"
+    if not lignes:
+        return "demandé"
+    places = [i for i, run in enumerate(runs, start=1) if run == lignes[0]]
+    libelle = " ".join(lignes[0])
+    if not places:
+        return f"demandé, mais « {libelle} » n'est pas dans le lot"
+    return f"demandé après « {libelle} »" if n > max(places) else None
+
+
+def refus_du_code(code: Path, racine: Path) -> str | None:
+    """Pourquoi `code` ne peut pas lancer le lot : son `data` doit être celui du dépôt,
+    et il lui faut le `.env` du dépôt (sans lui, ni clés d'API ni export des décisions)."""
+    if (code / "data").resolve() != (racine / "data").resolve():
+        return (
+            f"{code / 'data'} n'est pas {racine / 'data'} : le lot tournerait sur une autre "
+            "base. Remplacer ce dossier par une jonction vers le data du dépôt."
+        )
+    if (racine / ".env").exists() and not (code / ".env").exists():
+        return f"{code / '.env'} manque : copier celui du dépôt."
+    return None
 
 
 def verdict(
@@ -216,6 +258,10 @@ def executer_lot(
         _anti_veille(True)
     try:
         for n, args in enumerate(runs, start=1):
+            raison = arret_demande(sortie / FICHIER_ARRET, runs, n)
+            if raison:
+                noter(f"ARRÊT : {raison} — {len(runs) - n + 1} run(s) non lancé(s)")
+                break
             autres = autres_ecrivains(processus(), {psutil.Process().pid} | tues)
             if autres:
                 lot.autre_ecrivain = autres
@@ -286,7 +332,12 @@ def main() -> int:
     if not runs:
         print(f"Aucun run dans {args.lot}")
         return 1
+    refus = refus_du_code(args.code, RACINE)
+    if refus:
+        print(f"Lot refusé : {refus}")
+        return 2
     sortie = args.sortie or RACINE / "data" / "logs" / "lots" / f"{datetime.now():%Y%m%d_%H%M%S}"
+    print(f"Pour arrêter ce lot : {sortie / FICHIER_ARRET}", flush=True)
     lot = executer_lot(
         runs,
         sortie=sortie,

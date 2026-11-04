@@ -245,6 +245,35 @@ def _corriger_lrc(dm, track, cas: Cas) -> tuple[str, dict]:
     )
 
 
+#: Libellé de l'édition que devient la coupe servie par les catalogues.
+LABEL_COUPE = "Coupe de catalogue"
+
+
+def _corriger_coupe(dm, track, cas: Cas) -> tuple[str, dict]:
+    """La coupe des catalogues en ÉDITION, la durée de la vidéo en verdict
+    (`revue.coupe_de_catalogue`). Les ID restent : ils sont bien ceux de ce
+    morceau, et ses streams s'y lisent."""
+    from src.enrichment.observation import Observation
+
+    preuves = cas.preuves
+    dm.record_track_edition(
+        track.id,
+        LABEL_COUPE,
+        title=track.title,
+        source="regle:coupe_catalogue",
+        duration=preuves["duree_catalogue"],
+        deezer_id=track.deezer_id,
+        spotify_id=track.spotify_id,
+        isrc=track.isrc,
+    )
+    dm.upsert_observations(track.id, [Observation("duration", preuves["duree_video"], "manual")])
+    return (
+        f"« {track.title} » : {preuves['duree_catalogue']} s en édition, "
+        f"durée {preuves['duree_video']} s (vidéo de la page)",
+        {"type": "coupe", "label": LABEL_COUPE},
+    )
+
+
 def _corriger_certif(dm, track, cas: Cas) -> tuple[str, dict]:
     from src.utils.corrections_fiches import cle_certif, memoriser_certif_refusee
 
@@ -568,13 +597,13 @@ def _deezer_rattacher_fiche(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict
     """Rattache la piste « absente » à la fiche de son disque
     (`politiques_revue.fiche_du_meme_disque`) — le geste de
     `_deezer_rattacher_isrc`, la fiche désignée par le disque."""
-    from src.services.politiques_revue import fiche_du_meme_disque
+    from src.services.politiques_revue import fiche_du_meme_disque, fiche_sans_duree_du_disque
 
     preuve = cas.preuves["ecart"]
-    fiche = fiche_du_meme_disque(
-        preuve.get("piste") or {},
-        (preuve.get("album") or {}).get("title"),
-        charger_contexte(dm, artiste).disco,
+    piste, disque = preuve.get("piste") or {}, (preuve.get("album") or {}).get("title")
+    disco = charger_contexte(dm, artiste).disco
+    fiche = fiche_du_meme_disque(piste, disque, disco) or fiche_sans_duree_du_disque(
+        piste, disque, disco
     )
     if fiche is None:
         raise LookupError("la fiche du disque n'est plus identifiable")
@@ -611,11 +640,15 @@ def _rattacher_a(dm, artiste, preuve: dict, fiche, matched_by: str) -> tuple[str
 def _deezer_edition(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
     """Note la piste « absente » en ÉDITION de sa fiche (`_edition_d_une_fiche`)."""
     from src.services import editions
+    from src.services.politiques_revue import edition_du_meme_disque
 
     piste = cas.preuves["ecart"]["piste"]
     titre = piste.get("title") or cas.morceau
+    disco = charger_contexte(dm, artiste).disco
     socle = editions.socle_au_sous_titre_pres(
-        titre, piste.get("duration"), charger_contexte(dm, artiste).disco
+        titre, piste.get("duration"), disco
+    ) or edition_du_meme_disque(
+        piste, (cas.preuves["ecart"].get("album") or {}).get("title"), disco
     )
     if socle is None:
         raise LookupError("le morceau d'origine n'est plus identifiable")
@@ -816,6 +849,7 @@ _CORRECTEURS_DE_REGLE = {
 _CORRECTEURS = {
     "lrc_autre_fiche": ("retirer_lrc", _corriger_lrc),
     "lrc_original": ("retirer_lrc", _corriger_lrc),
+    "coupe_catalogue": ("noter_coupe", _corriger_coupe),
     "certif_autre_titre": ("retirer_certif", _corriger_certif),
     "songbpm_original": ("retirer_songbpm", _corriger_songbpm),
 }
@@ -970,6 +1004,10 @@ def retablir(dm, artiste, correction: dict) -> str:
             dm.reverifier_lrc(tid)
         track.lyrics.synced = lrc
         compte_rendu = f"LRC rétabli sur « {track.title} »"
+    elif annulation.get("type") == "coupe":
+        dm.retirer_duree_manuelle(track.id)
+        dm.retirer_edition(track.id, annulation["label"])
+        compte_rendu = f"Coupe de catalogue rétablie sur « {track.title} »"
     elif annulation.get("type") == "certif":
         entree = annulation["entree"]
         oublier_certif_refusee(track, entree)

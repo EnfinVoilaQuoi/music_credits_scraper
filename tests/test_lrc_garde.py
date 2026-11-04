@@ -381,6 +381,55 @@ class TestDebordeSonAudio:
         assert lrc(data_manager, t.id) is None
 
 
+class TestCaleSurUnAutreAudio:
+    """2026-11-04 : deux LRC, l'un calé à la durée de la fiche, l'autre sur un
+    autre audio (« Bruuuh » : le LRC YTM est celui du remix). Règle de verdict :
+    elle rejuge les LRC déjà en colonne."""
+
+    _LRCLIB, _YTM = "[00:05.51] J-J-J-JID\n[02:10.00] fin", "[00:05.00] J-J-J-JID\n[03:14.00] fin"
+
+    def _obs(self, audio_lrclib, audio_ytm):
+        from datetime import datetime
+
+        vu = datetime(2026, 11, 4, 1, 0)
+        return [
+            Observation("lyrics_synced", self._LRCLIB, "lrclib", seen_at=vu),
+            Observation("lrc_duree_audio", audio_lrclib, "lrclib", seen_at=vu),
+            Observation("lyrics_synced", self._YTM, "ytmusic", seen_at=vu),
+            Observation("lrc_duree_audio", audio_ytm, "ytmusic", seen_at=vu),
+        ]
+
+    def test_pur(self):
+        from src.utils.lrc_garde import cale_sur_un_autre_audio as cale
+
+        assert cale("ytmusic", {"lrclib": 134, "ytmusic": 207}, 135)
+        assert not cale("lrclib", {"lrclib": 134, "ytmusic": 207}, 135)
+        # Seul, l'écart ne prouve rien : la durée de la fiche peut être la fausse.
+        assert not cale("ytmusic", {"ytmusic": 207}, 135)
+        assert not cale("ytmusic", {"lrclib": 180, "ytmusic": 207}, 135)
+        # Un écart de 10 s ou moins reste une autre édition du même morceau.
+        assert not cale("ytmusic", {"lrclib": 134, "ytmusic": 145}, 135)
+        assert not cale("ytmusic", {"lrclib": 134, "ytmusic": 207}, None)
+
+    def test_le_lrc_de_l_autre_audio_perd_le_verdict(self):
+        res = reconcile(self._obs(134, 207), track_duration=135)
+        assert res["lyrics_synced"].value == self._LRCLIB
+        assert res["lyrics_synced"].source == "LRCLIB"
+
+    def test_la_fiche_du_remix_garde_son_lrc(self):
+        res = reconcile(self._obs(207, 207)[2:], track_duration=206)
+        assert res["lyrics_synced"].value == self._YTM
+
+    def test_en_colonne(self, data_manager):
+        a = Artist(name="JID")
+        a.id = data_manager.save_artist(a)
+        t = Track(title="Bruuuh", artist=a)
+        data_manager.save_track(t)
+        data_manager.upsert_observations(t.id, [Observation("duration", 135, "deezer")])
+        data_manager.upsert_observations(t.id, self._obs(134, 207))
+        assert TestTropLongEnColonne()._lrc(data_manager, t.id) == self._LRCLIB
+
+
 class TestAudioDementiParLesCatalogues:
     """LD2 (décision utilisateur 2026-10-31) : un LRC LRCLIB dont l'audio est
     contredit de plus de 10 s par deux catalogues concordants lus par ID n'est

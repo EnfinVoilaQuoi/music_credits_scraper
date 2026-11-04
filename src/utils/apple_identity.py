@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import re
 
+from src.utils.duree_youtube import segment_de_dj_mix
 from src.utils.spotify_identity import remixeur_etranger_a_la_fiche
 from src.utils.title_matching import contains_as_words, names_match_as_words, normalize_name
 from src.utils.version_descriptors import titres_equivalents
@@ -64,6 +65,13 @@ def fiche_concorde(track, fiche: dict | None) -> tuple[bool, str]:
     remixeur = remixeur_etranger_a_la_fiche(track, titre_sans_invites(titre))
     if remixeur:
         return False, f"remix : iTunes sert « {titre} », remixé par {remixeur}"
+    # Le segment d'un DJ mix (« Lose Yourself (Remix) [Mixed] », disque « … (DJ
+    # Mix) », 92 s) n'est pas la page d'un remix (2026-11-04, deux « Drum & Bass
+    # Remix » d'Eminem à 93 s pour 800 mots).
+    if segment_de_dj_mix(titre, fiche.get("collectionName")) and not segment_de_dj_mix(
+        track.title, track.album
+    ):
+        return False, f"DJ mix : iTunes sert « {titre} » de « {fiche.get('collectionName')} »"
     duree = duree_de(fiche)
     if track.duration and duree and abs(int(track.duration) - duree) > TOLERANCE_DUREE:
         return False, f"durée : {track.duration} s attendus, {duree} s chez iTunes"

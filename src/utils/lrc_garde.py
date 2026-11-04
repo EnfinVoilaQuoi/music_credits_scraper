@@ -192,6 +192,25 @@ def audio_dementi_par_les_catalogues(duree_audio: int | None, durees: dict) -> s
     return None
 
 
+def cale_sur_un_autre_audio(source: str, audios: dict, duree) -> bool:
+    """PUR. Deux sources ont un LRC : celui de `source` est calé sur un audio à
+    plus de `ECART_AUDIO_DEMENTI_S` de la durée de la fiche, celui d'une AUTRE
+    source à `ACCORD_CATALOGUES_S` près : le premier minute un autre
+    enregistrement (2026-11-04, « Bruuuh » : 135 s, LRCLIB 134, YTM 207 — le
+    LRC du remix ; « (Rap) Superstar » : 255 s, LRCLIB 256, YTM 294). Seul,
+    l'écart ne prouve rien : la durée de la fiche peut être la fausse.
+    `audios` : `{source: secondes}` (`audios_des_lrc`)."""
+    audio = (audios or {}).get(source)
+    if not audio or not duree:
+        return False
+    duree = int(float(duree))
+    if abs(int(audio) - duree) <= ECART_AUDIO_DEMENTI_S:
+        return False
+    return any(
+        s != source and a and abs(int(a) - duree) <= ACCORD_CATALOGUES_S for s, a in audios.items()
+    )
+
+
 def depasse(lrc: str | None, limite: int | None) -> int | None:
     """PUR. La fin du LRC si elle dépasse `limite` de plus de `ECART_DUREE_S`."""
     fin = fin_du_lrc(lrc) if limite else None

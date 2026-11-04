@@ -1426,6 +1426,62 @@ def fiche_du_meme_disque(piste: dict, disque: str | None, fiches) -> object | No
     return candidates[0] if len(candidates) == 1 else None
 
 
+def _fiches_au_titre_du_disque(piste: dict, disque: str | None, fiches) -> list:
+    """PUR. Les fiches de `disque` au titre de base de la piste."""
+    from src.utils.version_descriptors import (
+        meme_disque,
+        meme_titre_de_base,
+        titre_de_base,
+        titre_sans_son_disque,
+    )
+
+    if not disque or not titre_de_base(piste.get("title")):
+        return []
+    return [
+        t
+        for t in fiches
+        if meme_disque(t.album, disque)
+        and meme_titre_de_base(titre_sans_son_disque(t.title, t.album), piste.get("title"))
+    ]
+
+
+def fiche_sans_duree_du_disque(piste: dict, disque: str | None, fiches) -> object | None:
+    """PUR. La fiche UNIQUE de son disque à ce titre de base, qui n'a ni durée
+    ni ID Deezer : rien ne s'oppose à la piste, qui les lui apporte (Souffrance,
+    *Noctambus*, 2026-11-04 : 11 / 21 `deezer_absent`). Sauf si les paroles
+    Genius ne tiennent pas dans la piste : c'en est une coupe
+    (`edition_du_meme_disque`)."""
+    from src.utils.duree_youtube import trop_courte_pour_les_paroles
+
+    memes = _fiches_au_titre_du_disque(piste, disque, fiches)
+    duree = piste.get("duration")
+    if len(memes) != 1 or not duree:
+        return None
+    t = memes[0]
+    if t.duration or t.deezer_id or trop_courte_pour_les_paroles(duree, t.lyrics.text):
+        return None
+    return t
+
+
+def edition_du_meme_disque(piste: dict, disque: str | None, fiches) -> object | None:
+    """PUR. La fiche UNIQUE de son disque à ce titre de base, que la piste ne
+    peut pas renseigner : une AUTRE durée (Souffrance, *Noctambus* : « Pangolin
+    ( 2020 ) » 122 s, fiche 149 s, le single), ou trop courte pour ses paroles.
+    Une ÉDITION, avec SA durée (décision 2026-10-19), pas une fiche. Jamais un
+    titre générique."""
+    from src.utils.duree_youtube import trop_courte_pour_les_paroles
+    from src.utils.version_descriptors import titre_generique
+
+    memes = _fiches_au_titre_du_disque(piste, disque, fiches)
+    duree = piste.get("duration")
+    if len(memes) != 1 or not duree or titre_generique(piste.get("title")):
+        return None
+    t = memes[0]
+    if t.duration:
+        return t if abs(int(t.duration) - int(duree)) > ECART_FICHIER_S else None
+    return t if t.deezer_id or trop_courte_pour_les_paroles(duree, t.lyrics.text) else None
+
+
 def _generique_de_son_disque(cas, track, ctx) -> Arbitrage | None:
     """Parution à confirmer d'un titre GÉNÉRIQUE (« Intro », « Outro ») sur le
     disque même de la fiche : pas d'ambiguïté quand la fiche est la SEULE de
@@ -1468,13 +1524,34 @@ def _rattacher_a_la_fiche_du_disque(cas, ctx) -> Arbitrage | None:
     ecart = (cas.preuves or {}).get("ecart") or {}
     piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
     fiche = fiche_du_meme_disque(piste, album.get("title"), ctx.disco)
+    preuve = "même disque, même durée"
+    if fiche is None:
+        fiche = fiche_sans_duree_du_disque(piste, album.get("title"), ctx.disco)
+        preuve = "même disque, fiche sans durée"
     if fiche is None:
         return None
     return Arbitrage(
-        f"piste de « {fiche.title} » (même disque, même durée) : rattacher, ne pas créer",
+        f"piste de « {fiche.title} » ({preuve}) : rattacher, ne pas créer",
         "deezer_rattacher_fiche",
         f"« {piste.get('title')} » {piste.get('duration')} s de « {album.get('title')} » ; "
         f"#{fiche.id} {fiche.duration} s sur « {fiche.album} »",
+    )
+
+
+def _edition_du_disque(cas, ctx) -> Arbitrage | None:
+    """La piste « absente » est une édition de la fiche de son disque
+    (`edition_du_meme_disque`) : notée sur elle, pas de fiche."""
+    if cas.detecteur not in ("deezer_absent", "deezer_album_absent") or ctx is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    fiche = edition_du_meme_disque(piste, album.get("title"), ctx.disco)
+    if fiche is None:
+        return None
+    return Arbitrage(
+        f"ÉDITION de « {fiche.title} » (même disque, sa durée propre), pas de fiche",
+        "deezer_edition",
+        f"« {piste.get('title')} » {piste.get('duration')} s ; #{fiche.id} {fiche.duration} s",
     )
 
 
@@ -1536,6 +1613,8 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set, lire
         return None
     if _piste_nue_d_un_disque_live(cas):
         return None
+    if ((cas.preuves or {}).get("ecart") or {}).get("disque_etranger"):
+        return None  # un homonyme sur le même profil Deezer ? l'humain
     if lire_deezer is None:
         from src.utils.deezer_identity import lire_piste_http as lire_deezer
     d_un_autre = _piste_d_un_autre_artiste(cas, ids_artiste, lire_deezer)
@@ -1550,6 +1629,9 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set, lire
     du_disque = _rattacher_a_la_fiche_du_disque(cas, ctx)
     if du_disque is not None:
         return du_disque
+    du_meme_disque = _edition_du_disque(cas, ctx)
+    if du_meme_disque is not None:
+        return du_meme_disque
     de_support = _edition_de_support(cas, ctx)
     if de_support is not None:
         return de_support
@@ -1865,6 +1947,8 @@ def politique_catalogue_designe(lire_spotify: Callable, lire_deezer: Callable) -
         if cas.detecteur != "id_catalogue_partage" or track is None:
             return None
         preuves = cas.preuves or {}
+        if preuves.get("meme_enregistrement"):
+            return None  # à fusionner : décision humaine, l'ID n'a pas à partir
         if preuves.get("spotify_id"):
             champ, valeur, action = "spotify_id", preuves["spotify_id"], "retirer_spotify"
             if track.spotify_id != valeur:

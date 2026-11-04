@@ -35,7 +35,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from difflib import SequenceMatcher
+from types import SimpleNamespace
 
+from src.utils.catalogue_designe import meme_enregistrement_prouve
 from src.utils.compteurs_partages import (
     PLANCHER,
     lectures,
@@ -57,7 +59,12 @@ from src.utils.concordance_paroles import (
     recouvrement_bigrammes,
 )
 from src.utils.credits_genius_api import SOURCE_API, SOURCE_SCRAPE
-from src.utils.duree_youtube import CLIP, SOURCE_AUDIO
+from src.utils.duree_youtube import (
+    CLIP,
+    SOURCE_AUDIO,
+    segment_de_dj_mix,
+    trop_courte_pour_les_paroles,
+)
 from src.utils.spotify_identity import (
     CHAMP_ID_PROPOSE,
     remix_d_autres_artistes,
@@ -405,7 +412,9 @@ def duree_isolee(track, _ctx=None):
     for source in _TEMOINS_ISOLABLES:
         d = durees.get(source)
         vote = voter(durees, d, editions=_editions(track))
-        if vote and vote.nature == ISOLEE:
+        # Sans catalogue contre, seule la durée `manual` l'isole : c'est déjà
+        # tranché, rien à soumettre (« We Back », coupe notée en édition, 2026-11-04).
+        if vote and vote.nature == ISOLEE and vote.contre:
             return (
                 f"durée {source} {d} s démentie par {vote.dementie_par()} — "
                 "vidéo ou piste d'une autre version ?",
@@ -529,6 +538,13 @@ def id_catalogue_partage(track, ctx):
             continue
         autres = [t for t in porteuses if t is not track]
         catalogue = "Spotify" if champ == "spotify_id" else "Deezer"
+        memes = [t for t in autres if meme_enregistrement_prouve(track, t)]
+        if memes:
+            return (
+                f"même enregistrement que « {memes[0].title} » (#{memes[0].id}), deux pages : "
+                "à fusionner — même ISRC sur deux pages Deezer, mêmes paroles, même durée",
+                {champ: valeur, "autres": [t.id for t in autres], "meme_enregistrement": True},
+            )
         return (
             f"même ID {catalogue} que « {autres[0].title} »"
             + (f" et {len(autres) - 1} autre(s)" if len(autres) > 1 else "")
@@ -2096,6 +2112,70 @@ RATIO_VIDEO_NOMMEE = 4
 _DUREES_HORS_JUGE = _DUREES_DE_VIDEO | {"youtube", "legacy"}
 
 
+#: Garde-fous de `coupe_de_catalogue` : le débit des paroles sur la vidéo doit
+#: être celui d'un morceau (We Back, So Wrong, Poison Bananas : 2,9 à 3 mots/s),
+#: pas d'un film ni d'une émission ; la vidéo ne dépasse pas 15 min.
+DEBIT_VIDEO_COMPLETE = (1.5, 5.0)
+VIDEO_COMPLETE_MAX_S = 900
+MOTS_MIN_COUPE = 100
+
+
+def coupe_de_catalogue(track, ctx=None):
+    """Tous les catalogues servent une COUPE : les paroles Genius ne tiennent
+    pas dans la durée (plus de 8 mots/s), et la vidéo de la page, elle, est le
+    morceau entier (D12 « We Back » : Deezer et YTM 48 s pour 727 mots, vidéo de
+    251 s ; Young Buck « So Wrong » : 72 s, vidéo de 261 s). Décision utilisateur
+    2026-11-04 : le catalogue passe en édition, la durée est celle de la vidéo.
+
+    Exception à « un clip ne donne jamais sa durée » : elle ne joue qu'au-delà
+    de 8 mots/s, et seulement si TOUS les garde-fous passent — une seule vidéo
+    de la page, qui nomme le morceau, dans sa version, aucune mention de clip,
+    portée par cette seule page, interprète principal nommé au titre ou à la
+    chaîne, débit de morceau, moins de 15 min. Simulée sur toute la base : 3 cas
+    (dont « Poison Bananas », un ID d'un autre retiré à part) ; entre 5 et 8
+    mots/s, elle n'agit pas, même quand les garde-fous passeraient."""
+    paroles = track.lyrics.text
+    mots = len((paroles or "").split())
+    if not track.duration or mots < MOTS_MIN_COUPE:
+        return None
+    if not trop_courte_pour_les_paroles(track.duration, paroles):
+        return None
+    if segment_de_dj_mix(track.title, track.album):
+        return None
+    media = [v for v in track.videos or [] if v.source == "genius_media" and v.duration]
+    if len(media) != 1:
+        return None
+    v = media[0]
+    if v.duration > VIDEO_COMPLETE_MAX_S:
+        return None
+    if not DEBIT_VIDEO_COMPLETE[0] <= mots / v.duration <= DEBIT_VIDEO_COMPLETE[1]:
+        return None
+    if CLIP.search(v.title or "") or not video_nomme(track, v):
+        return None
+    if not meme_version_publiee(track.title, v.title):
+        return None
+    if porte_une_version(v.title) and not porte_une_version(track.title):
+        return None
+    proprietaires = _proprietaires_des_videos(ctx) if ctx is not None else {}
+    if _nombre_de_pages(proprietaires, v.video_id) > 1:
+        return None
+    principal = track.primary_artist_name or (track.artist.name if track.artist else None)
+    if not principal or not (
+        contains_as_words(principal, v.title) or contains_as_words(principal, v.channel or "")
+    ):
+        return None
+    return (
+        f"coupe de catalogue : {track.duration} s pour {mots} mots, "
+        f"vidéo de la page « {v.title} » {v.duration} s",
+        {
+            "video_id": v.video_id,
+            "duree_video": v.duration,
+            "duree_catalogue": track.duration,
+            "empreinte": v.video_id,
+        },
+    )
+
+
 def video_trop_longue(track, ctx=None):
     """Une vidéo posée par la page Genius (`genius_media`), qu'aucune autre
     page ne porte, BIEN plus longue que le morceau : plus de
@@ -2640,6 +2720,26 @@ def soeurs_identite_divergente(ctx):
     return cas
 
 
+def _publication_du_principal(track, v) -> bool:
+    """La vidéo que la page désigne (`genius_media`) est celle de l'interprète
+    principal de la page, et l'ID Spotify ne dit pas le contraire (décision
+    utilisateur 2026-11-04 : on vérifie le titre d'où viennent les vues). Avec
+    un descripteur de version, l'interprète est nommé DANS le descripteur
+    (« Eminem - Ass Like That (Termik Remix) », page de Termik) ; sans, dans le
+    titre ou la chaîne (« Intro », 50 Cent - Topic : 7 s, que Spotify ne compte
+    pas sous 30 s)."""
+    principal = track.primary_artist_name or (track.artist.name if track.artist else None)
+    if v.source != "genius_media" or not principal:
+        return False
+    if track.spotify_page_title and not video_nomme(
+        track, SimpleNamespace(title=track.spotify_page_title.split(" • ")[0], source=v.source)
+    ):
+        return False
+    if porte_une_version(v.title):
+        return any(contains_as_words(principal, p) for p in _PARENTHESE.findall(v.title))
+    return contains_as_words(principal, v.title) or contains_as_words(principal, v.channel or "")
+
+
 def _vues_expliquees(track, ctx) -> bool:
     """Chaque vidéo qui compte des vues est-elle LA publication du morceau ?
     Elle le nomme, aucune autre fiche ne la porte, et elle est dans sa version
@@ -2659,7 +2759,7 @@ def _vues_expliquees(track, ctx) -> bool:
             return False
         if not video_nomme(track, v):
             return False
-        if meme_version_publiee(track.title, v.title):
+        if meme_version_publiee(track.title, v.title) or _publication_du_principal(track, v):
             continue
         interprete = track.primary_artist_name
         reprise = re.search(r"(?i)\bcover\b", v.title) and not re.search(
@@ -3395,6 +3495,13 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "Vidéo d'un autre artiste (chaîne et durée)",
         "📺",
         video_d_une_autre_chaine,
+    ),
+    Detecteur(
+        "coupe_catalogue",
+        "Coupe de catalogue : la vidéo de la page est le morceau entier",
+        "✂️",
+        coupe_de_catalogue,
+        formel=True,
     ),
     Detecteur(
         "video_trop_longue",

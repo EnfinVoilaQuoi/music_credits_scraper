@@ -149,3 +149,36 @@ def test_download_image_refuse_l_image_par_defaut_de_la_source(tmp_path, monkeyp
 def test_les_empreintes_des_silhouettes_sont_des_sha256():
     assert dl.IMAGES_PAR_DEFAUT_SHA256
     assert all(len(e) == 64 and int(e, 16) >= 0 for e in dl.IMAGES_PAR_DEFAUT_SHA256)
+
+
+def _silhouette_reencodee(chemin, decalage=0):
+    """La silhouette, reconstruite depuis sa grille, comme un autre encodage de Deezer."""
+    from PIL import Image
+
+    grille = Image.new("L", (8, 8))
+    grille.putdata([v + decalage for ligne in dl._SILHOUETTE_8X8 for v in ligne])
+    grille.resize((1000, 1000), Image.Resampling.NEAREST).convert("RGB").save(chemin, quality=85)
+    return chemin
+
+
+def test_une_silhouette_sous_un_autre_encodage_est_reconnue(tmp_path):
+    """Son empreinte varie d'un encodage à l'autre (Lino, Dala, Tessa B, 2026-11-04)."""
+    assert dl.est_image_par_defaut(_silhouette_reencodee(tmp_path / "a.jpg"))
+    assert dl.est_image_par_defaut(_silhouette_reencodee(tmp_path / "b.jpg", decalage=2))
+
+
+def test_une_vraie_photo_claire_n_est_pas_une_silhouette(tmp_path):
+    from PIL import Image
+
+    # Un fond clair du même gris, mais sans la silhouette au centre.
+    uni = tmp_path / "uni.jpg"
+    Image.new("RGB", (1000, 1000), (223, 223, 223)).save(uni)
+    assert not dl.est_image_par_defaut(uni)
+    # Une pochette un peu plus sombre : même dessin, 20 niveaux d'écart.
+    assert not dl.est_image_par_defaut(_silhouette_reencodee(tmp_path / "c.jpg", decalage=-20))
+
+
+def test_un_fichier_illisible_n_est_pas_une_silhouette(tmp_path):
+    casse = tmp_path / "casse.jpg"
+    casse.write_bytes(b"pas une image")
+    assert not dl.est_image_par_defaut(casse)

@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 
 import requests
+from PIL import Image
 
 from src.config import ARTIST_IMAGES_DIR, COVER_IMAGES_DIR, VIGNETTE_IMAGES_DIR
 from src.utils.logger import get_logger
@@ -47,6 +48,21 @@ IMAGES_PAR_DEFAUT_SHA256 = frozenset(
     }
 )
 
+# La silhouette sort aussi sous d'autres encodages, chacun avec son empreinte (6 de plus sur
+# 20 fichiers, 2026-11-04) : elle se reconnaît alors à l'œil, en niveaux de gris sur 8 × 8. Sur
+# les 5 684 photos, les silhouettes s'en écartent de 1 au plus, la photo la plus proche de 13.
+_SILHOUETTE_8X8 = (
+    (223, 223, 223, 223, 223, 223, 223, 223),
+    (223, 223, 223, 223, 223, 223, 223, 223),
+    (223, 223, 223, 216, 216, 223, 223, 223),
+    (223, 223, 223, 207, 207, 223, 223, 223),
+    (223, 223, 220, 205, 205, 220, 223, 223),
+    (223, 223, 219, 209, 209, 219, 223, 223),
+    (223, 223, 223, 223, 223, 223, 223, 223),
+    (223, 223, 223, 223, 223, 223, 223, 223),
+)
+_ECART_MAX_SILHOUETTE = 5
+
 
 def est_image_par_defaut(path: Path) -> bool:
     """Vrai si le fichier est l'image par défaut d'une source (silhouette Deezer)."""
@@ -54,7 +70,19 @@ def est_image_par_defaut(path: Path) -> bool:
         empreinte = hashlib.sha256(Path(path).read_bytes()).hexdigest()
     except OSError:
         return False
-    return empreinte in IMAGES_PAR_DEFAUT_SHA256
+    return empreinte in IMAGES_PAR_DEFAUT_SHA256 or _ressemble_a_la_silhouette(path)
+
+
+def _ressemble_a_la_silhouette(path: Path) -> bool:
+    """Le fichier est-il la silhouette Deezer, quel que soit son encodage ?"""
+    try:
+        with Image.open(path) as image:
+            vignette = image.convert("L").resize((8, 8), Image.Resampling.BILINEAR)
+            gris = vignette.tobytes()
+    except (OSError, ValueError):
+        return False
+    attendu = [valeur for ligne in _SILHOUETTE_8X8 for valeur in ligne]
+    return all(abs(g - a) <= _ECART_MAX_SILHOUETTE for g, a in zip(gris, attendu, strict=True))
 
 
 def slugify_filename(name: str, *, max_len: int = _DEFAULT_SLUG_LEN) -> str:

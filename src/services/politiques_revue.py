@@ -1005,8 +1005,8 @@ def _fiches_ou_il_ecrit(nom: str, ctx) -> list[str]:
     ]
 
 
-#: Interrupteur de `_formation_mb_et_discogs`, levé dans la branche
-#: `regles-panneau` : simulation à lire par l'utilisateur avant la fusion.
+#: Interrupteur de `_formation_mb_et_discogs` : levé le 2026-11-06, validé par
+#: l'utilisateur sur la simulation (12 liens / 13, N.H. tranché à part).
 FORMATIONS_MB_ET_DISCOGS = True
 
 
@@ -1297,7 +1297,7 @@ REGLES_DEEZER = frozenset(
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
         # 2026-11-06 : l'autre page Deezer a la durée de l'ID Spotify de la fiche
-        # (Kery James, *92.2012*) ; simulée sur la copie, à valider.
+        # (Kery James, *92.2012*) ; validée le 2026-11-06 sur la simulation.
         ("deezer_link_candidate", "deezer_rattacher_edition"),
         # 2026-10-31 : édition de diffusion d'une fiche au sous-titre omis par
         # Deezer (Kid Cudi) ; simulée sur la copie, 3 / 4 `deezer_absent`.

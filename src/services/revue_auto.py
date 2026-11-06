@@ -113,8 +113,8 @@ REGLES_ETENDUES_BRANCHEES = True
 REGLES_VIDEO_BRANCHEES = True
 
 #: Famille « piste YTM ou audio d'un autre montage » (`politiques_revue.REGLES_TEMOIN`,
-#: ✓ Normal seulement) : levé dans la branche `regles-panneau` sur la simulation
-#: du 2026-11-06 (6 cas / 7, à valider par l'utilisateur avant la fusion).
+#: ✓ Normal seulement) : levé le 2026-11-06, validé par l'utilisateur sur la
+#: simulation (6 cas / 7).
 REGLES_TEMOIN_BRANCHEES = True
 
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est

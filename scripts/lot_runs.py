@@ -17,6 +17,8 @@ Protections, d'office :
   ce temps, le run est déclaré FIGÉ et tué — un run qui lit bien n'écrit rien
   dans son journal, la discographie écrit dans le brut : il faut les trois ;
 - **anti-veille** (Windows) : le PC ne se met pas en veille tant que le lot tourne ;
+- **défi Cloudflare** : la fenêtre visible n'attend que 3 min (`FENETRE_VISIBLE_MAX_S`),
+  la page reste en échec pour le prochain passage et le run continue ;
 - **un seul écrivain** : le lot ne démarre pas (et s'arrête entre deux runs) si
   un autre processus du projet tient la base (`src.cli`, l'app) ;
 - **bonne base** : `--code` est refusé si son `data` n'est pas celui du dépôt
@@ -37,6 +39,7 @@ la sortie de chaque run à côté. Codes : 0 tout est passé, 1 au moins un run 
 from __future__ import annotations
 
 import argparse
+import os
 import shlex
 import subprocess
 import sys
@@ -63,6 +66,11 @@ FIGE, DELAI = "figé", "délai"
 
 #: Dans le dossier de journaux du lot : sa présence demande l'arrêt.
 FICHIER_ARRET = "ARRET"
+#: Secondes accordées à un défi Cloudflare en fenêtre visible : un lot tourne sans
+#: personne devant l'écran (Aketo, 2026-11-06). Sans cette limite, le chien de garde
+#: tuait le run, et tout ce qu'il restait à en faire. FENETRE_VISIBLE_MAX_S=0 dans
+#: l'environnement du lot la lève, pour qui reste devant.
+FENETRE_VISIBLE_MAX_S = 180
 
 
 def lire_lot(texte: str) -> list[list[str]]:
@@ -273,7 +281,11 @@ def executer_lot(
             debut = time.time()
             with journal.open("w", encoding="utf-8") as f:
                 proc = subprocess.Popen(
-                    commande(args), cwd=code, stdout=f, stderr=subprocess.STDOUT
+                    commande(args),
+                    cwd=code,
+                    stdout=f,
+                    stderr=subprocess.STDOUT,
+                    env={"FENETRE_VISIBLE_MAX_S": str(FENETRE_VISIBLE_MAX_S), **os.environ},
                 )
                 statut = None
                 while proc.poll() is None:

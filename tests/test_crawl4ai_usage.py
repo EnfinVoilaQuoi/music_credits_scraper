@@ -121,3 +121,148 @@ def test_le_pont_sync_sans_appelant_observant_ouvre_la_sienne():
     scraper._crawl_page("https://genius.com/x")
     (verdict,) = su.flush()
     assert verdict.issue == IssueKind.OK and verdict.attempts == 1
+
+
+# --- La fenêtre visible : suit le défi, bornée pendant un lot ---------------------
+
+DEFI = "<html><title>Just a moment...</title></html>"
+SANS_PAROLES = "<html><div>Lyrics for this song have yet to be transcribed</div></html>"
+AVEC_PAROLES = "<html><div data-lyrics-container='true'>paroles</div></html>"
+
+
+class FaussePage:
+    """Sert un HTML par regard ; le dernier reste. Une horloge qu'on fait avancer."""
+
+    def __init__(self, etats, horloge=None):
+        self.etats = list(etats)
+        self.regards = 0
+        self.horloge = horloge
+        self.fermee = False
+
+    def _courant(self):
+        etat = self.etats[min(self.regards, len(self.etats) - 1)]
+        if isinstance(etat, Exception):
+            raise etat
+        return etat
+
+    async def query_selector(self, _sel):
+        return "conteneur" if "data-lyrics-container" in self._courant() else None
+
+    async def content(self):
+        return self._courant()
+
+    async def wait_for_selector(self, _sel, timeout):
+        assert timeout != 0, "jamais d'attente sans limite d'un conteneur"
+        if "data-lyrics-container" in self._courant():
+            return "conteneur"
+        raise base.PatchrightError("Timeout")
+
+    async def wait_for_timeout(self, ms):
+        self.regards += 1
+        if self.horloge:
+            self.horloge["t"] += ms / 1000
+
+    def is_closed(self):
+        return self.fermee
+
+
+def _attendre(page, limite, monkeypatch):
+    monkeypatch.setattr(base.settings, "fenetre_visible_max_s", limite)
+    if page.horloge:
+        monkeypatch.setattr(base.time, "monotonic", lambda: page.horloge["t"])
+    scraper = CrawlAIScraperBase(headless=True, health_key="genius_scrape")
+    return asyncio.run(scraper._attendre_fin_du_defi(page, "[data-lyrics-container='true']", "u"))
+
+
+class TestAttenteDuDefi:
+    def test_defi_leve_sur_une_page_sans_paroles_ne_fige_plus(self, monkeypatch):
+        """« Souvenir Du Bled » d'Aketo, Talib Kweli : le conteneur n'existera jamais."""
+        page = FaussePage([DEFI, DEFI, SANS_PAROLES])
+        assert _attendre(page, 0, monkeypatch) is False
+        assert page.regards == 2
+
+    def test_defi_leve_le_conteneur_est_trouve(self, monkeypatch):
+        assert _attendre(FaussePage([DEFI, AVEC_PAROLES]), 0, monkeypatch) is True
+
+    def test_sans_limite_on_attend_l_humain(self, monkeypatch):
+        """Hors lot : une heure de défi, et la page vient quand même."""
+        horloge = {"t": 0.0}
+        page = FaussePage([DEFI] * 1800 + [AVEC_PAROLES], horloge)
+        assert _attendre(page, 0, monkeypatch) is True
+        assert horloge["t"] >= 3600
+
+    def test_dans_un_lot_le_defi_non_leve_rend_la_main(self, monkeypatch):
+        horloge = {"t": 0.0}
+        assert _attendre(FaussePage([DEFI], horloge), 180, monkeypatch) is False
+        assert 180 <= horloge["t"] < 185
+
+    def test_une_navigation_du_defi_n_arrete_pas_l_attente(self, monkeypatch):
+        """Le contexte détruit pendant une redirection n'est pas une fermeture."""
+        page = FaussePage([DEFI, base.PatchrightError("context destroyed"), AVEC_PAROLES])
+        assert _attendre(page, 0, monkeypatch) is True
+
+    def test_l_onglet_ferme_abandonne(self, monkeypatch):
+        page = FaussePage([base.PatchrightError("Target closed")])
+        page.fermee = True
+        with pytest.raises(base.PatchrightError):
+            _attendre(page, 0, monkeypatch)
+
+    def test_un_defi_revenu_pendant_la_grace_est_encore_attendu(self, monkeypatch):
+        """La page semble passée, le défi revient : ne pas capturer le défi."""
+
+        class Revient(FaussePage):
+            async def wait_for_selector(self, _sel, timeout):
+                self.regards += 1
+                raise base.PatchrightError("Timeout")
+
+        assert _attendre(Revient([SANS_PAROLES, DEFI, DEFI, AVEC_PAROLES]), 0, monkeypatch) is True
+
+
+def test_le_defi_non_leve_n_est_pas_une_page():
+    """La limite atteinte : le HTML du défi ne doit ni être lu ni gardé dans le brut,
+    et la page reste en échec (relue au prochain passage)."""
+    html, verdicts = _jouer(_scraper([(None, True), (DEFI, True)]))
+    assert html is None
+    assert verdicts[0].issue == IssueKind.UNREACHABLE
+    assert verdicts[0].expected_blocked == 2
+
+
+def test_la_fenetre_visible_suit_le_defi_de_bout_en_bout(tmp_path, monkeypatch):
+    """`_patchright_fetch` sans navigateur : le défi non levé rend `blocked`."""
+    import patchright.async_api as pa
+
+    page = FaussePage([DEFI], {"t": 0.0})
+    monkeypatch.setattr(base.time, "monotonic", lambda: page.horloge["t"])
+    monkeypatch.setattr(base.settings, "fenetre_visible_max_s", 180)
+
+    async def goto(*_a, **_k):
+        return None
+
+    page.goto = goto
+
+    class Contexte:
+        pages = [page]
+
+        async def close(self):
+            page.fermee = True
+
+    class Chromium:
+        async def launch_persistent_context(self, *_a, **_k):
+            return Contexte()
+
+    class Playwright:
+        chromium = Chromium()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(pa, "async_playwright", Playwright)
+    scraper = CrawlAIScraperBase(headless=True, health_key="genius_scrape")
+    scraper.profile_dir = str(tmp_path)
+    _, html, blocked = asyncio.run(
+        scraper._patchright_fetch("u", None, None, 120_000, 120_000, 0, headless=False)
+    )
+    assert blocked is True and html == DEFI

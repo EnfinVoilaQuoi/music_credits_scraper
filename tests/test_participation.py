@@ -167,11 +167,13 @@ class TestSurLeDisque:
 
     def test_l_interface_connait_la_categorie(self):
         from src.presentation.filtres import Filtre
+        from src.gui_qt.theme import TOKENS
         from src.presentation.table import LIBELLE_PARTICIPATION
 
         for p in Participation:
             assert p in LIBELLE_PARTICIPATION
             assert Filtre().categorie_visible(p) in (True, False)
+            assert str(p) in TOKENS  # sinon le liseré Qt retombe sur « principal »
         assert "hors de ses totaux" in LIBELLE_PARTICIPATION[Participation.SUR_LE_DISQUE]
 
 

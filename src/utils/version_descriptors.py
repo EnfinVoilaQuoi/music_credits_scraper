@@ -244,18 +244,33 @@ def titre_generique(titre: str | None) -> bool:
 _GROUPE_FINAL = re.compile(r"^(?P<titre>.*?)\s*[\(\[](?P<groupe>[^\(\)\[\]]+)[\)\]]\s*$")
 
 
+_SEGMENT_FINAL = re.compile(r"^(?P<titre>.*?)\s+[-–]\s+(?P<groupe>\S.*)$")
+
+#: « Savoir & vivre ensemble » / « Savoir et Vivre Ensemble » : `normalize_title`
+#: retire l'esperluette et garde le mot.
+_LIAISONS_DE_DISQUE = frozenset({"et", "and"})
+
+
+def _sans_liaison(nu: str) -> str:
+    """PUR. Un nom de disque déjà normalisé, sans ses liaisons ni ses espaces."""
+    return "".join(m for m in nu.split() if m not in _LIAISONS_DE_DISQUE)
+
+
 def titre_sans_son_disque(titre: str | None, album: str | None) -> str:
     """PUR. Le titre générique sans le nom de SON disque, que Genius ajoute
     pour distinguer ses intros : « Intro (0.9) » sur *0.9* → « Intro »,
     « Intro (Vieilles merdes vol.II) » sur *Vieilles Merdes, Vol. II*. Là où
     Deezer et Spotify écrivent « Intro » (Booba, 2026-10-18 : l'Intro de
     *0.9* proposée absente chez Deezer, son ID refusé chez Spotify). Rendu
-    inchangé si le groupe final n'est pas le disque de la fiche."""
+    inchangé si le groupe final n'est pas le disque de la fiche. Aussi en segment
+    final, à la liaison près (« Intro - Savoir et Vivre Ensemble » sur *Savoir &
+    vivre ensemble*, 2026-11-06)."""
     titre = titre or ""
-    m = _GROUPE_FINAL.match(titre)
+    m = _GROUPE_FINAL.match(titre) or _SEGMENT_FINAL.match(titre)
     if not m or not album or not titre_generique(m["titre"]):
         return titre
-    if normalize_title(m["groupe"]).replace(" ", "") != normalize_title(album).replace(" ", ""):
+    groupe = _sans_liaison(normalize_title(m["groupe"]))
+    if not groupe or groupe != _sans_liaison(normalize_title(album)):
         return titre
     return m["titre"]
 
@@ -1452,6 +1467,21 @@ def relation_des_titres(a: str | None, b: str | None) -> str | None:
 _GROUPE_DE_DISQUE = re.compile(r"\s*(?:[\(\[][^\)\]]*[\)\]]|\s[-–]\s.*$)")
 
 
+_DISQUE_DOUBLE = re.compile(
+    r"^(?P<a>.*?\S)\s*(?P<tome_a>\d+(?:\.\d+)?)\s+\+\s+(?P<tome_b>\d+(?:\.\d+)?)$"
+)
+
+
+def _tomes_du_disque_double(nom: str) -> tuple[str, ...]:
+    """PUR. Les deux tomes d'une édition double NUMÉROTÉE (« The Documentary 2 +
+    2.5 (Collector's Edition) » → « The Documentary 2 », « The Documentary 2.5 ») ;
+    rien d'autre : « Red Hot + Cool » n'est pas un disque double."""
+    m = _DISQUE_DOUBLE.match(_GROUPE_DE_DISQUE.sub("", nom).strip())
+    if not m:
+        return ()
+    return (f"{m['a']} {m['tome_a']}", f"{m['a']} {m['tome_b']}")
+
+
 def meme_disque(a: str | None, b: str | None) -> bool:
     """PUR. Deux noms de disque désignent-ils le même album, éditions comprises ?
     Le juge UNIQUE du « titre générique sur son disque » (2026-10-30) : les
@@ -1462,15 +1492,30 @@ def meme_disque(a: str | None, b: str | None) -> bool:
     rouge) » / « 444 Nuits »). Ici l'un OU l'autre. Pas de garde du numéro
     de partie : « Chambre 140 (Part. 3) » (32 pistes) est l'édition qui
     CUMULE les parts 1 et 2, Deezer y place à bon droit l'« Interlude *
-    (Part. 1) » (mesuré le 2026-10-30). Faux si l'un manque."""
+    (Part. 1) » (mesuré le 2026-10-30). À la liaison près (« Savoir & vivre
+    ensemble » / « Savoir et Vivre Ensemble ») ; une édition DOUBLE contient ses
+    deux tomes (« The Documentary 2 + 2.5 », `_tomes_du_disque_double`, 2026-11-06).
+    Faux si l'un manque."""
     from src.utils.title_matching import either_contains_as_words, meme_album
 
     if not a or not b:
         return False
     if meme_album(a, b):
         return True
+    if any(meme_disque(t, b) for t in _tomes_du_disque_double(a)) or any(
+        meme_disque(a, t) for t in _tomes_du_disque_double(b)
+    ):
+        return True
     nus = [normalize_title(_GROUPE_DE_DISQUE.sub("", x)) for x in (a, b)]
-    return bool(nus[0]) and (nus[0] == nus[1] or either_contains_as_words(nus[0], nus[1]))
+    if not nus[0]:
+        return False
+    if nus[0] == nus[1] or (
+        # Un nom réduit à sa liaison (« E.T. » → « et ») n'est le nom de rien.
+        (cle := _sans_liaison(nus[0]))
+        and cle == _sans_liaison(nus[1])
+    ):
+        return True
+    return either_contains_as_words(nus[0], nus[1])
 
 
 def edition_de_diffusion(titre: str | None) -> str | None:

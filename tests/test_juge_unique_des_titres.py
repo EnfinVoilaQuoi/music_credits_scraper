@@ -191,6 +191,9 @@ def test_le_crible_voit_les_egalites():
         ("Paradisiaque", "Paradisiaque / Mc Solaar"),  # Deezer, YouTube, YTM
         ("Chambre 140 (Part. 1)", "Chambre 140 (Part. 3)"),  # l'édition qui cumule
         ("444Nuits (Version rouge)", "444 Nuits"),  # Spotify, GetSongBPM
+        ("Savoir & vivre ensemble", "Savoir et Vivre Ensemble"),  # à la liaison près
+        ("The Documentary 2", "The Documentary 2 + 2.5 (Collector's Edition)"),  # édition double
+        ("The Documentary 2.5", "The Documentary 2 + 2.5 (Collector's Edition)"),
     ],
 )
 def test_meme_disque_reconnait_les_editions(fiche, servi):
@@ -201,12 +204,23 @@ def test_meme_disque_reconnait_les_editions(fiche, servi):
 
 @pytest.mark.parametrize(
     "fiche, servi",
-    [("0.9", "Autopsie Vol. 3"), ("Memoria", "Private Club"), ("Reste Calme", "444 Nuits")],
+    [
+        ("0.9", "Autopsie Vol. 3"),
+        ("Memoria", "Private Club"),
+        ("Reste Calme", "444 Nuits"),
+        # Un autre tome que ceux de l'édition double.
+        ("The Documentary", "The Documentary 2 + 2.5 (Collector's Edition)"),
+        ("The Documentary 3", "The Documentary 2 + 2.5 (Collector's Edition)"),
+        # Un nom réduit à sa liaison n'est le nom de rien.
+        ("E.T. (The Remixes) - EP", "±±±±±  [Plus–minus]"),
+        # La liaison retirée, le reste du nom doit être le même.
+        ("Savoir & vivre ensemble", "Savoir et mourir ensemble"),
+    ],
 )
 def test_meme_disque_separe_deux_disques(fiche, servi):
     from src.utils.version_descriptors import meme_disque
 
-    assert not meme_disque(fiche, servi)
+    assert not meme_disque(fiche, servi) and not meme_disque(servi, fiche)
     assert not meme_disque(fiche, None) and not meme_disque(None, servi)
 
 
@@ -304,3 +318,32 @@ def test_les_questions_des_gates_valent_les_primitives_sur_le_corpus(paires):
         }
         ecarts += [(q, a, b) for q in attendu if attendu[q] != obtenu[q]]
     assert not ecarts, ecarts[:20]
+
+
+def test_seule_une_edition_numerotee_est_double():
+    from src.utils.version_descriptors import _tomes_du_disque_double as tomes
+
+    assert tomes("The Documentary 2 + 2.5 (Collector's Edition)") == (
+        "The Documentary 2",
+        "The Documentary 2.5",
+    )
+    assert tomes("Stolen Moments: Red Hot + Cool") == ()
+    assert tomes("Caméléon +") == ()
+    assert tomes("Matrix II") == ()
+
+
+@pytest.mark.parametrize(
+    "titre, album, attendu",
+    [
+        ("Intro - Savoir et Vivre Ensemble", "Savoir & vivre ensemble", "Intro"),
+        ("Intro (The Documentary 2)", "The Documentary 2", "Intro"),
+        ("Intro (0.9)", "0.9", "Intro"),
+        # Le segment n'est pas le disque, ou le titre n'est pas générique.
+        ("Intro - Bonus", "Savoir & vivre ensemble", "Intro - Bonus"),
+        ("Ensemble - Savoir et Vivre Ensemble", "Savoir & vivre ensemble", None),
+    ],
+)
+def test_titre_sans_son_disque(titre, album, attendu):
+    from src.utils.version_descriptors import titre_sans_son_disque
+
+    assert titre_sans_son_disque(titre, album) == (attendu or titre)

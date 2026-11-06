@@ -1523,6 +1523,18 @@ def _edition_d_une_fiche(cas, ctx, ids_artiste: set) -> Arbitrage | None:
     )
 
 
+def _generique_au_nom_du_disque(titre: str | None, disque: str | None, fiche) -> bool:
+    """PUR. « No Pressure Intro » sur *No Pressure* est la fiche « No Pressure »
+    de ce disque quand elle n'a pas de page Deezer : Genius nomme cette plage du
+    nom du disque (Logic #19125, 175 s des deux côtés, paroles « [Intro: Thalia] »,
+    2026-11-06). La durée reste exigée par l'appelant."""
+    from src.utils.version_descriptors import meme_titre_normalise
+
+    if fiche.deezer_id or not disque or not meme_titre_normalise(fiche.title, disque):
+        return False
+    return any(meme_titre_normalise(titre, f"{disque} {mot}") for mot in ("Intro", "Outro"))
+
+
 def fiche_du_meme_disque(piste: dict, disque: str | None, fiches) -> object | None:
     """PUR. La fiche UNIQUE de l'artiste qu'est la piste Deezer « absente » :
     du même disque (`meme_disque`), au même titre de base (`titre_de_base` :
@@ -1534,7 +1546,8 @@ def fiche_du_meme_disque(piste: dict, disque: str | None, fiches) -> object | No
     Le titre de base se lit aux lettres masquées près (`meme_titre_de_base` :
     « Da S*** (Album Version) » = « Da Shit ») et sans le nom du disque que
     Genius ajoute à un générique (« Intro (LAX) », `titre_sans_son_disque`) —
-    The Game, 2026-11-03."""
+    The Game, 2026-11-03. Le générique au nom du disque est la plage-titre sans
+    page Deezer (`_generique_au_nom_du_disque`, 2026-11-06)."""
     from src.utils.version_descriptors import (
         meme_disque,
         meme_titre_de_base,
@@ -1549,7 +1562,10 @@ def fiche_du_meme_disque(piste: dict, disque: str | None, fiches) -> object | No
         t
         for t in fiches
         if meme_disque(t.album, disque)
-        and meme_titre_de_base(titre_sans_son_disque(t.title, t.album), piste.get("title"))
+        and (
+            meme_titre_de_base(titre_sans_son_disque(t.title, t.album), piste.get("title"))
+            or _generique_au_nom_du_disque(piste.get("title"), disque, t)
+        )
         and t.duration
         and abs(int(t.duration) - int(duree)) <= ECART_FICHIER_S
     ]

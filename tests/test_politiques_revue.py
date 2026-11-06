@@ -742,6 +742,61 @@ class TestRegleA1:
             assert regle in pol.REGLES_DEEZER
 
 
+class TestIntroDuMemeDisque:
+    """Trois « Intro » que `fiche_du_meme_disque` ratait (2026-11-06)."""
+
+    @staticmethod
+    def _piste(titre="Intro", duree=64):
+        return {"id": 9, "title": titre, "duration": duree}
+
+    def test_a_la_liaison_et_au_segment_pres(self):
+        """Kery James, #20864, *Savoir & vivre ensemble*."""
+        fiche = _t("Intro - Savoir et Vivre Ensemble", album="Savoir & vivre ensemble", duration=64)
+        assert pol.fiche_du_meme_disque(self._piste(), "Savoir & vivre ensemble", [fiche]) is fiche
+
+    def test_une_edition_double_contient_son_tome(self):
+        """The Game, #15206 : le disque est l'édition double des tomes 2 et 2.5."""
+        fiche = _t("Intro (The Documentary 2)", album="The Documentary 2", duration=59)
+        disque = "The Documentary 2 + 2.5 (Collector's Edition)"
+        assert pol.fiche_du_meme_disque(self._piste(duree=58), disque, [fiche]) is fiche
+
+    def test_le_generique_au_nom_du_disque(self):
+        """Logic, #19125 : « No Pressure Intro » sur *No Pressure*."""
+        fiche = _t("No Pressure", album="No Pressure", duration=175)
+        piste = self._piste("No Pressure Intro", 175)
+        assert pol.fiche_du_meme_disque(piste, "No Pressure", [fiche]) is fiche
+
+    @pytest.mark.parametrize(
+        "kw",
+        [
+            {"deezer_id": 5},  # la plage-titre a déjà sa page
+            {"duration": 200},  # une autre durée
+            {"album": "Under Pressure"},  # un autre disque
+        ],
+    )
+    def test_le_generique_au_nom_du_disque_exige_tout(self, kw):
+        fiche = _t("No Pressure", **{"album": "No Pressure", "duration": 175, **kw})
+        piste = self._piste("No Pressure Intro", 175)
+        assert pol.fiche_du_meme_disque(piste, "No Pressure", [fiche]) is None
+
+    def test_sans_fiche_rien_n_est_cree_par_regle(self):
+        """Keny Arkana « Intro » 88 s sur *État d'urgence* : #21024 « État
+        d'urgence » (clip 60 s, extraits sonores) est peut-être cette plage."""
+        fiche = _t("État d’urgence", album="État d’urgence", duration=60)
+        cas = _cas(
+            "deezer_absent",
+            None,
+            {
+                "ecart": {
+                    "piste": {"id": 9, "title": "Intro", "duration": 88},
+                    "album": {"id": 5, "title": "État d'urgence", "artist_id": 7},
+                }
+            },
+        )
+        ctx = SimpleNamespace(disco=[fiche])
+        assert pol.arbitrage_deezer(cas, None, ctx, {}, {7}, lire_deezer=lambda _i: None) is None
+
+
 class TestEditionALaDureeDeLIdSpotify:
     """Kery James, *92.2012* : Spotify sert 537 s pour « 28 Décembre 1977 »,
     Deezer a 537 s sur cette parution et 581 s sur la page de la fiche."""

@@ -11,14 +11,17 @@ boucle applicative ; `_crawl_page` n'est plus qu'un pont bloquant
 
 import inspect
 import os
+import re
 import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from crawl4ai import BrowserConfig
 
 from src.concurrency import async_loop
+from src.config import DATA_PATH, settings
 from src.observability import source_usage
 from src.observability.issues import IssueKind, classify
 from src.utils.logger import get_logger
@@ -400,8 +403,10 @@ class CrawlAIScraperBase:
                 html, blocked = None, True
             if not blocked:
                 return html
+            marqueur = _marqueur_de_defi(html) or "aucun, erreur du navigateur"
             logger.info(
-                f"{self.__class__.__name__}: Cloudflare → fenêtre VISIBLE pour {url}. "
+                f"{self.__class__.__name__}: Cloudflare → fenêtre VISIBLE pour {url} "
+                f"(marqueur : {marqueur}). "
                 f"⚠️ Résous le challenge UNE fois ; le cookie est mémorisé (profil persistant), "
                 f"ensuite tout repasse en headless."
             )
@@ -409,7 +414,7 @@ class CrawlAIScraperBase:
         # 2) Mode VISIBLE + undetected + fenêtre longue : tu résous, on capture la
         #    vraie page (on attend le conteneur paroles, pas d'abandon prématuré).
         try:
-            _, html, _ = await self._patchright_fetch(
+            _, html, blocked = await self._patchright_fetch(
                 url,
                 js_before_wait,
                 wait_for,
@@ -418,7 +423,11 @@ class CrawlAIScraperBase:
                 max(delay_before_return, 2.0),
                 headless=False,
             )
-            self._note_passe(passes, False, html, "fenêtre visible")
+            self._note_passe(passes, blocked, html, "fenêtre visible")
+            if blocked:
+                # Le défi n'est pas levé (limite d'un lot) : ce HTML n'est pas la page.
+                _garder_le_defi(url, html)
+                return None
             return html
         except PatchrightError as e:
             passes.note(classify(exc=e), f"fenêtre visible : {e}")
@@ -545,16 +554,17 @@ class CrawlAIScraperBase:
 
                 try:
                     await page.goto(url, wait_until="domcontentloaded", timeout=page_timeout)
-                    # Attend la vraie page (conteneur paroles). En mode VISIBLE : timeout=0
-                    # (infini) → AUCUN timer, la fenêtre reste tant que tu n'as pas fini la
-                    # boucle de challenge (ou que tu fermes l'onglet toi-même).
-                    sel_timeout = 0 if (not headless and not cdp_mode) else wait_timeout
+                    # Attend la vraie page (conteneur paroles). En mode VISIBLE : tant que
+                    # le défi est là, ou que tu fermes l'onglet toi-même.
                     content_found = False
-                    try:
-                        await page.wait_for_selector(sel, timeout=sel_timeout)
-                        content_found = True
-                    except PatchrightError:
-                        pass  # pas trouvé : on récupère quand même le HTML pour diagnostic
+                    if not headless and not cdp_mode:
+                        content_found = await self._attendre_fin_du_defi(page, sel, url)
+                    else:
+                        try:
+                            await page.wait_for_selector(sel, timeout=wait_timeout)
+                            content_found = True
+                        except PatchrightError:
+                            pass  # pas trouvé : on récupère quand même le HTML pour diagnostic
                     # JS d'expansion (crédits) sur la vraie page
                     if js_before_wait:
                         try:
@@ -580,27 +590,109 @@ class CrawlAIScraperBase:
             logger.error(f"{self.__class__.__name__}: patchright fetch {url}: {e}")
             return None, None, True
 
+    async def _attendre_fin_du_defi(self, page, sel: str, url: str) -> bool:
+        """Fenêtre visible : `True` si le conteneur attendu est là.
+
+        L'attente suit le DÉFI, pas le conteneur : attendre celui-ci sans limite
+        gardait ouverte pour toujours une page sans paroles, défi levé ou non
+        (« Souvenir Du Bled » d'Aketo, pas encore transcrite ; l'instrumental de Talib
+        Kweli, 10 h perdues le 2026-10-21). Sans personne devant l'écran,
+        `fenetre_visible_max_s` borne l'attente (lots) ; 0 = sans limite.
+        """
+        nom = self.__class__.__name__
+        limite_s = settings.fenetre_visible_max_s
+        debut = time.monotonic()
+
+        def duree() -> int:
+            return round(time.monotonic() - debut)
+
+        while not limite_s or time.monotonic() - debut < limite_s:
+            try:
+                if await page.query_selector(sel):
+                    logger.info(f"{nom}: défi levé après {duree()} s, contenu attendu : {url}")
+                    return True
+                if not self._looks_blocked(None, await page.content()):
+                    # La durée du défi, sans la grâce qui suit.
+                    leve_apres = duree()
+                    try:
+                        await page.wait_for_selector(sel, timeout=_GRACE_APRES_DEFI_MS)
+                        logger.info(
+                            f"{nom}: défi levé après {leve_apres} s, contenu attendu : {url}"
+                        )
+                        return True
+                    except PatchrightError:
+                        # Un défi peut revenir pendant la grâce : on reste alors à l'attendre.
+                        if not self._looks_blocked(None, await page.content()):
+                            logger.info(
+                                f"{nom}: défi levé après {leve_apres} s, "
+                                f"page sans le contenu attendu : {url}"
+                            )
+                            return False
+            except PatchrightError:
+                # Contexte détruit le temps d'une navigation du défi : on regarde à nouveau.
+                if page.is_closed():
+                    logger.info(f"{nom}: fenêtre fermée après {duree()} s : {url}")
+                    raise
+            await page.wait_for_timeout(_REGARD_DEFI_MS)
+        logger.warning(
+            f"{nom}: défi non levé après {limite_s} s, "
+            f"page laissée pour le prochain passage : {url}"
+        )
+        return False
+
     @staticmethod
     def _looks_blocked(error_message: str | None, html: str | None) -> bool:
         """Détecte un blocage anti-bot (Cloudflare) sur échec OU page-défi 200."""
         err = (error_message or "").lower()
         if any(k in err for k in ("cloudflare", "anti-bot", "challenge", "403", "forbidden")):
             return True
-        h = (html or "").lower()
-        # NE PAS tester "challenge-platform"/"cf-chl" nus : Cloudflare injecte le
-        # beacon /cdn-cgi/challenge-platform/... sur les pages DÉJÀ PASSÉES → faux
-        # positif systématique (fenêtre VISIBLE à chaque page). On ne matche que
-        # l'interstitiel réel (« Just a moment », objet de défi _cf_chl_opt, form).
-        return any(
-            k in h
-            for k in (
-                "just a moment",
-                "checking your browser",
-                "checking if the site connection is secure",
-                "_cf_chl_opt",
-                'id="challenge-form"',
-            )
-        )
+        return _marqueur_de_defi(html) is not None
+
+
+# NE PAS tester "challenge-platform"/"cf-chl" nus : Cloudflare injecte le
+# beacon /cdn-cgi/challenge-platform/... sur les pages DÉJÀ PASSÉES → faux
+# positif systématique (fenêtre VISIBLE à chaque page). On ne matche que
+# l'interstitiel réel (« Just a moment », objet de défi _cf_chl_opt, form).
+_MARQUEURS_DE_DEFI = (
+    "just a moment",
+    "checking your browser",
+    "checking if the site connection is secure",
+    "_cf_chl_opt",
+    'id="challenge-form"',
+)
+
+
+def _marqueur_de_defi(html: str | None) -> str | None:
+    """PUR. Ce qui fait prendre ce HTML pour un défi : dit par le journal, pour qu'une
+    fausse alerte se voie (le contrôle ne porte que sur les pages sans conteneur)."""
+    h = (html or "").lower()
+    return next((m for m in _MARQUEURS_DE_DEFI if m in h), None)
+
+
+def _dossier_des_defis() -> Path:
+    return Path(DATA_PATH) / "diagnostics" / "defis_cloudflare"
+
+
+def _garder_le_defi(url: str, html: str | None) -> None:
+    """Ce que Cloudflare a servi à une fenêtre restée bloquée : il n'en resterait rien,
+    le brut ne gardant que les pages. Une pièce à relire, jamais une raison d'échouer."""
+    if not html:
+        return
+    fin_d_adresse = re.sub(r"[^\w-]+", "_", url.rstrip("/").rsplit("/", 1)[-1])[:80]
+    fichier = _dossier_des_defis() / f"{datetime.now():%Y%m%d_%H%M%S}_{fin_d_adresse}.html"
+    try:
+        fichier.parent.mkdir(parents=True, exist_ok=True)
+        fichier.write_text(f"<!-- {url} -->\n{html}", encoding="utf-8")
+        logger.info(f"HTML du défi gardé : {fichier}")
+    except OSError as e:
+        logger.warning(f"HTML du défi non gardé ({fichier}) : {e}")
+
+
+#: Le défi levé, le temps laissé au conteneur attendu d'apparaître : une page sans
+#: paroles (pas encore transcrites, instrumental) ne l'aura jamais.
+_GRACE_APRES_DEFI_MS = 15_000
+#: Entre deux regards sur une fenêtre visible.
+_REGARD_DEFI_MS = 2_000
 
 
 class _BrowserSession:

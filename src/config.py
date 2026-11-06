@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     selenium_timeout: int = 30  # secondes
     max_retries: int = 3
     delay_between_requests: float = 1.0  # secondes
+    # Attente d'un défi Cloudflare en fenêtre visible : 0 = sans limite (un humain le
+    # résout). Un lot la borne (`scripts/lot_runs.py`) : personne n'est devant l'écran.
+    fenetre_visible_max_s: int = 0
 
     # --- Genius API ---
     genius_timeout: int = 30

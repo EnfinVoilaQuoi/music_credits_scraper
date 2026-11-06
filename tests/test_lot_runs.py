@@ -269,3 +269,20 @@ def test_un_run_tue_qui_traine_n_est_pas_un_autre_ecrivain(tmp_path):
         tuer=tuer,
     )
     assert [r.statut for r in lot.resultats] == ["figé", "ok"] and not lot.autre_ecrivain
+
+
+def test_un_lot_borne_la_fenetre_cloudflare(tmp_path, monkeypatch):
+    """Personne devant l'écran : un défi non levé ne doit pas figer le run."""
+    monkeypatch.delenv("FENETRE_VISIBLE_MAX_S", raising=False)
+    vu = tmp_path / "vu.txt"
+    code = f"import os,pathlib;pathlib.Path({str(vu)!r}).write_text(os.environ['FENETRE_VISIBLE_MAX_S'])"
+    _executer(tmp_path, [code])
+    assert vu.read_text() == str(lot_runs.FENETRE_VISIBLE_MAX_S)
+
+
+def test_qui_reste_devant_leve_la_limite(tmp_path, monkeypatch):
+    monkeypatch.setenv("FENETRE_VISIBLE_MAX_S", "0")
+    vu = tmp_path / "vu.txt"
+    code = f"import os,pathlib;pathlib.Path({str(vu)!r}).write_text(os.environ['FENETRE_VISIBLE_MAX_S'])"
+    _executer(tmp_path, [code])
+    assert vu.read_text() == "0"

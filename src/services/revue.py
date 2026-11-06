@@ -3998,9 +3998,7 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.positions = data_manager.get_artist_positions(artiste.id)
     ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
     if VIDEOS_MORTES_BRANCHEES:
-        from src.services.videos_mortes import constats_frais
-
-        ctx.videos_mortes = constats_frais(data_manager.engine)
+        ctx.videos_mortes = data_manager.videos_mortes_constatees()
     return ctx
 
 

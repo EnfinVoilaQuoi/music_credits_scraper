@@ -1351,6 +1351,34 @@ class TrackRepository:
             oublier(track_id)
             effacer_chez_les_soeurs(conn, track_id, oublier)
 
+    def echecs_d_usage_orphelins(self) -> list[int]:
+        """Lignes `source_usage_failures` qui désignent une fiche disparue."""
+        with self.engine.connect() as conn:
+            return [
+                r[0]
+                for r in conn.execute(
+                    text(
+                        "SELECT id FROM source_usage_failures WHERE track_id IS NOT NULL "
+                        "AND track_id NOT IN (SELECT id FROM tracks)"
+                    )
+                )
+            ]
+
+    def dissocier_echecs_d_usage_orphelins(self) -> int:
+        """Rattrapage de ce que `delete_track` laissait avant le 2026-11-06 :
+        l'historique reste, il ne désigne plus la fiche. Rend le nombre de lignes."""
+        try:
+            with self._ecrire() as conn:
+                return conn.execute(
+                    text(
+                        "UPDATE source_usage_failures SET track_id = NULL "
+                        "WHERE track_id IS NOT NULL AND track_id NOT IN (SELECT id FROM tracks)"
+                    )
+                ).rowcount
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur dissocier_echecs_d_usage_orphelins : {e}")
+            return 0
+
     def delete_track(self, track_id: int) -> bool:
         """Supprime définitivement un morceau et ses données associées"""
         try:
@@ -4632,15 +4660,18 @@ class TrackRepository:
             "reccobeats_retirees": [],
         }
 
-    def _retirer_isrc(self, conn, track_id: int, rapport: dict) -> dict:
+    def _retirer_isrc(self, conn, track_id: int, rapport: dict, *, soeur: bool = False) -> dict:
         """Les gestes de `clear_track_isrc` sur UNE ligne, dans la transaction
-        de l'appelant (la ligne visée, puis chacune de ses sœurs)."""
+        de l'appelant (la ligne visée, puis chacune de ses sœurs). Une `soeur`
+        sans ISRC en colonne passe aussi : les mesures lues par cet ISRC lui sont
+        venues par l'union, qui les rendrait à la ligne visée (« Intro » de Hash
+        24 gardait les 140 s d'un autre disque, 2026-11-06)."""
         ligne = (
             conn.execute(text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": track_id})
             .mappings()
             .first()
         )
-        if ligne is None or not ligne["isrc"]:
+        if ligne is None or (not ligne["isrc"] and not soeur):
             return rapport
 
         conn.execute(
@@ -4703,7 +4734,7 @@ class TrackRepository:
                     ).scalar()
                     if propre and str(propre).upper() != str(ancien).upper():
                         return
-                    self._retirer_isrc(conn, jumelle, self._rapport_isrc())
+                    self._retirer_isrc(conn, jumelle, self._rapport_isrc(), soeur=True)
 
                 effacer_chez_les_soeurs(conn, track_id, chez_la_soeur)
 

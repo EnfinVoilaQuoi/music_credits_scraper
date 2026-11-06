@@ -112,6 +112,18 @@ class TestOrphelins:
                 "source_usage_failures : 1 ligne(s) sans fiche"
             ]
 
+    def test_le_rattrapage_garde_la_ligne_sans_la_fiche(self, data_manager):
+        _sql(
+            data_manager,
+            "INSERT INTO source_usage_failures (source_key, issue, track_id) "
+            "VALUES ('spotify_embed', 'timeout', 99999)",
+        )
+        assert len(data_manager.echecs_d_usage_orphelins()) == 1
+        assert data_manager.dissocier_echecs_d_usage_orphelins() == 1
+        assert data_manager.echecs_d_usage_orphelins() == []
+        with data_manager.engine.connect() as conn:
+            assert conn.execute(text("SELECT COUNT(*) FROM source_usage_failures")).scalar() == 1
+
     def test_un_echec_sans_fiche_n_en_est_pas_un(self, data_manager):
         _sql(
             data_manager,

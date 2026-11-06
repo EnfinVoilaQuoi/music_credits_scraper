@@ -1099,6 +1099,84 @@ def arbitrage_video_hors_colonne(cas, track, _ctx) -> Arbitrage | None:
     return None
 
 
+# ── Piste YTM ou audio de la page d'un autre montage (2026-11-06) ──────────
+
+#: Interrupteur : `revue_auto.REGLES_TEMOIN_BRANCHEES`.
+REGLES_TEMOIN = frozenset({("duree_isolee", "normal")})
+
+
+def _durees_lues_par_id(track, durees: dict, temoin: str) -> dict:
+    """`{source: secondes}` des catalogues lus par un IDENTIFIANT, hors `temoin` :
+    Deezer, Apple, la page Spotify, l'audio de la vidéo du lien, chacun si la
+    fiche porte son identifiant. ReccoBeats est la voix de Spotify (sans page
+    Spotify lue : `durees_du_vote`) ; lu par l'ISRC, il ne lit pas l'ID de la
+    fiche, et ne compte que contre un simple hit de recherche."""
+    lues = {}
+    if track.deezer_id and durees.get("deezer"):
+        lues["deezer"] = int(durees["deezer"])
+    if track.apple_music_id and durees.get("apple_music"):
+        lues["apple_music"] = int(durees["apple_music"])
+    if temoin != revue.SOURCE_AUDIO and durees.get(revue.SOURCE_AUDIO):
+        lues[revue.SOURCE_AUDIO] = int(durees[revue.SOURCE_AUDIO])
+    if track.spotify_id and durees.get("spotify_web"):
+        lues["spotify_web"] = int(durees["spotify_web"])
+    if (
+        track.spotify_id
+        and durees.get("reccobeats")
+        and (track.audio.reccobeats_resolution != "isrc" or temoin == _HIT_DE_RECHERCHE)
+    ):
+        lues["reccobeats"] = int(durees["reccobeats"])
+    return lues
+
+
+def arbitrage_temoin_hors_colonne(cas, track, _ctx) -> Arbitrage | None:
+    """Le témoin isolé est la piste YTM ou l'audio de la vidéo du lien, DEUX
+    catalogues (familles) lus par un identifiant le démentent en s'accordant à
+    ± 2 s, et la colonne a leur valeur : ✓ Normal. Aucune donnée ne change, et le
+    témoin ne tient pas la colonne (`_colonne_impactee`).
+
+    Pendant de `arbitrage_video_hors_colonne`, qui ne couvre que les vidéos
+    ordinaires (6 cas du 2026-11-06 : « (Rap) Superstar » : piste YTM 294 s,
+    Deezer et Spotify 255 s, audio 256 s). Versions et génériques ne sont pas
+    rendus à l'humain pour la même raison : rien n'est modifié.
+
+    La vidéo que la PAGE désigne vaut plus qu'un hit : à plus de
+    `ECART_VERSION_S`, sans piste YTM qui rejoigne les catalogues, ce sont
+    peut-être eux qui lisent un autre morceau (Yelawolf « Radio », page
+    *Radioactive* : audio et piste YTM 333 s ; Deezer et Spotify 267 s, sur
+    *Sometimes Y*). L'humain."""
+    if (cas.detecteur, "normal") not in REGLES_TEMOIN or track is None or not track.duration:
+        return None
+    durees = _durees(track)
+    if "manual" in durees:
+        return None
+    piste = durees.get(_HIT_DE_RECHERCHE)
+    for source in (revue.SOURCE_AUDIO, _HIT_DE_RECHERCHE):
+        d = durees.get(source)
+        lues = _durees_lues_par_id(track, durees, source)
+        if not d or not lues or len({famille(s) for s in lues}) < 2:
+            continue
+        if max(lues.values()) - min(lues.values()) > ECART_FICHIER_S:
+            continue
+        ref = sorted(lues.values())[len(lues) // 2]
+        if abs(int(d) - ref) <= TOLERANCE_S:
+            continue
+        if abs(int(track.duration) - ref) > ECART_FICHIER_S or _colonne_impactee(track, source):
+            return None
+        if (
+            source == revue.SOURCE_AUDIO
+            and abs(int(d) - ref) > ECART_VERSION_S
+            and not (piste and abs(int(piste) - ref) <= ECART_FICHIER_S)
+        ):
+            return None
+        return Arbitrage(
+            f"témoin {source} d'un autre montage ; la colonne garde {track.duration} s",
+            "normal",
+            f"{source} {d} s contre {ref} s ({', '.join(sorted(lues))})",
+        )
+    return None
+
+
 # ── Famille « ID Spotify proposé » — VALIDÉE le 2026-10-20 ─────────────────
 
 #: Validée par l'utilisateur sur le passage à blanc restreint du 2026-10-20

@@ -112,6 +112,11 @@ REGLES_ETENDUES_BRANCHEES = True
 #: aux catalogues.
 REGLES_VIDEO_BRANCHEES = True
 
+#: Famille « piste YTM ou audio d'un autre montage » (`politiques_revue.REGLES_TEMOIN`,
+#: ✓ Normal seulement) : levé dans la branche `regles-panneau` sur la simulation
+#: du 2026-11-06 (6 cas / 7, à valider par l'utilisateur avant la fusion).
+REGLES_TEMOIN_BRANCHEES = True
+
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.
 _SANS_FICHE = frozenset(
@@ -177,6 +182,7 @@ def cas_par_regle(
     catalogue: bool = False,
     compteur: bool = False,
     video: bool = False,
+    temoin: bool = False,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
@@ -188,6 +194,7 @@ def cas_par_regle(
         arbitrage_id_partage,
         arbitrage_id_propose,
         arbitrage_liens_deezer,
+        arbitrage_temoin_hors_colonne,
         arbitrage_valide,
         arbitrage_video_hors_colonne,
     )
@@ -218,6 +225,8 @@ def cas_par_regle(
             arbitrage = arbitrage_compteur(c, track, ctx)
         if arbitrage is None and video:
             arbitrage = arbitrage_video_hors_colonne(c, track, ctx)
+        if arbitrage is None and temoin:
+            arbitrage = arbitrage_temoin_hors_colonne(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -885,6 +894,7 @@ def corriger(dm, artiste) -> BilanCorrections:
             or REGLES_CATALOGUE_BRANCHEES
             or REGLES_COMPTEUR_BRANCHEES
             or REGLES_VIDEO_BRANCHEES
+            or REGLES_TEMOIN_BRANCHEES
         ):
             rendus = _rendus_a_l_humain(dm, artiste.id)
             a_faire += [
@@ -902,6 +912,7 @@ def corriger(dm, artiste) -> BilanCorrections:
                     catalogue=REGLES_CATALOGUE_BRANCHEES,
                     compteur=REGLES_COMPTEUR_BRANCHEES,
                     video=REGLES_VIDEO_BRANCHEES,
+                    temoin=REGLES_TEMOIN_BRANCHEES,
                 )
                 if (c.detecteur, c.cle) not in rendus
             ]

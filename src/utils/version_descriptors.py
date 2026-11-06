@@ -1151,6 +1151,17 @@ def graphies_equivalentes(a: str | None, b: str | None) -> bool:
     return _graphies_equivalentes(ka, kb)
 
 
+def graphie_censuree(a: str | None, b: str | None) -> bool:
+    """PUR. L'un des deux titres est l'autre aux lettres MASQUÉES près (« Just
+    Don't Give a F** » / « Just Don’t Give a Fuck ») : l'édition censurée du même
+    morceau, pas une simple ressemblance."""
+    ka, kb = cle_titre(a), cle_titre(b)
+    return bool(ka.titre and kb.titre) and bool(
+        (ka.censure and ka.censure.fullmatch(kb.norme))
+        or (kb.censure and kb.censure.fullmatch(ka.norme))
+    )
+
+
 def meme_oeuvre(a: CleTitre, b: CleTitre) -> bool:
     """Le même MORCEAU, en une version ou une autre (voir `meme_socle`)."""
     if meme_enregistrement(a, b):

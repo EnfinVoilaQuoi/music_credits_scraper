@@ -46,6 +46,7 @@ from src.utils.version_descriptors import (
     edition_de_diffusion,
     est_remix_nomme,
     est_une_rendition,
+    graphie_censuree,
     libelle_de_la_version,
     meme_prise_du_morceau,
     meme_version_stricte,
@@ -696,8 +697,9 @@ def duree_de_la_ligne(entry, track, lire_identite) -> str | None:
     édition de diffusion ni entre deux versions de même famille, dont la durée
     diffère par nature (« Memories … Remix Edit » confirmé à la main sur le
     remix, 225 / 365 s), ni entre deux titres ÉQUIVALENTS : une autre durée y
-    désigne une autre édition du même morceau, peut-être à sommer (Eminem
-    « Just Don't Give a F** », 227 s, contre 242 s pour la fiche) — l'humain.
+    désigne une autre édition du même morceau — l'humain, sauf édition censurée,
+    sommée à l'original (`equivalence_confirmee`, Eminem « Just Don't Give a
+    F** », 227 / 242 s, décision utilisateur 2026-11-06).
     Sans durée de l'un ou l'autre côté, rien n'est prouvé."""
     sid = entry.get("spotify_id")
     if not sid or sid in corrections_fiches.ids_refuses(track):
@@ -730,9 +732,11 @@ def equivalence_confirmee(entry, track, lire_identite) -> bool:
     « F*ck a B*tch » / « Fuck a Bitch », 2026-11-06), son ID n'est pas refusé,
     et aucune durée ne la contredit : l'un des deux sans durée, ou l'ID à moins
     de `ECART_AUTRE_ENREGISTREMENT` d'un témoin INDÉPENDANT de la fiche (228 /
-    224 s, 273 / 270 s, le même morceau dans les deux cas). Au-delà, à l'humain :
-    une autre édition, peut-être à sommer (voir `duree_de_la_ligne`, Eminem
-    « Just Don't Give a F** », 227 / 242 s)."""
+    224 s, 273 / 270 s, le même morceau dans les deux cas). Au-delà, à l'humain,
+    sauf une graphie CENSURÉE (`graphie_censuree`) : édition de support du même
+    morceau, sommée à l'original quelle que soit sa durée, comme un « Bonus Track »
+    (Eminem « Just Don't Give a F** », 227 / 242 s, décision utilisateur
+    2026-11-06)."""
     titre = _SUFFIXE_UPLOAD.sub("", entry["title"])
     fiche = _SUFFIXE_UPLOAD.sub("", track.title)
     if not titres_equivalents(titre, fiche) or not meme_version_stricte(titre, fiche):
@@ -740,6 +744,8 @@ def equivalence_confirmee(entry, track, lire_identite) -> bool:
     sid = entry.get("spotify_id")
     if sid and sid in corrections_fiches.ids_refuses(track):
         return False
+    if graphie_censuree(titre, fiche):
+        return True
     temoin = duree_temoin(track)
     duree = (_identite_embed(sid, lire_identite) or {}).get("duration") if sid else None
     return not temoin or not duree or abs(temoin - duree) <= ECART_AUTRE_ENREGISTREMENT

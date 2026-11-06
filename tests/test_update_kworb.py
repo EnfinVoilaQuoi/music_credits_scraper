@@ -484,8 +484,28 @@ class TestFlouConfirme:
         assert "kworb_flou" not in self._codes(res) and dm.streams_writes[0][:2] == (1, 5000)
 
     def test_une_autre_duree_reste_a_l_humain(self):
-        """Eminem « Just Don't Give a F** » (227 / 242 s) : une autre édition,
-        peut-être à sommer."""
+        """Même titre écrit autrement, 40 s d'écart, sans lettre masquée : rien
+        ne dit que c'est une édition du même enregistrement."""
+        t = _track(1, "J’te parle", spotify_id="FICHE")
+        t.duration = 270
+        res, _ = self._run(t, _entry("J' te parle", 5000, 50, "KWORB"), lambda s: {"duration": 230})
+        assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
+
+    def test_une_edition_censuree_se_somme_malgre_sa_duree(self):
+        """Eminem « Just Don't Give a F** » (227 / 242 s) : édition de support,
+        comme un « Bonus Track » (décision utilisateur 2026-11-06)."""
+        t = _track(1, "Just Don’t Give a Fuck", spotify_id="FICHE")
+        t.duration = 242
+        res, dm = self._run(
+            t, _entry("Just Don't Give a F**", 5000, 50, "KWORB"), lambda s: {"duration": 227}
+        )
+        assert res["flous_confirmes"] == [("Just Don't Give a F**", "Just Don’t Give a Fuck")]
+        assert "kworb_flou" not in self._codes(res) and dm.streams_writes[0][:2] == (1, 5000)
+
+    def test_une_edition_censuree_a_l_id_refuse_reste_exclue(self, monkeypatch):
+        from src.utils import corrections_fiches
+
+        monkeypatch.setattr(corrections_fiches, "ids_refuses", lambda track: {"KWORB"})
         t = _track(1, "Just Don’t Give a Fuck", spotify_id="FICHE")
         t.duration = 242
         res, _ = self._run(
@@ -527,12 +547,12 @@ class TestFlouConfirme:
         assert res["unmatched_titles"] == [entree["title"]]
 
     def test_un_titre_equivalent_a_une_autre_duree_reste_a_l_humain(self):
-        """Eminem « Just Don't Give a F** » (227 s) / la fiche « Just Don’t Give
-        a Fuck » (242 s) : une autre édition du même morceau, peut-être."""
-        t = _track(1, "Just Don’t Give a Fuck")
-        t.duration = 242
-        entree = _entry("Just Don't Give a F**", spotify_id="K")
-        res, dm = self._run(t, entree, lambda s: {"duration": 227})
+        """Une autre édition du même morceau, peut-être (hors graphie censurée,
+        sommée : `test_une_edition_censuree_se_somme_malgre_sa_duree`)."""
+        t = _track(1, "Y’a pas de mérite")
+        t.duration = 247
+        entree = _entry("Y a pas de mérite", spotify_id="K")
+        res, dm = self._run(t, entree, lambda s: {"duration": 200})
         assert "kworb_flou" in self._codes(res) and dm.streams_writes
 
     def test_une_decision_memorisee_rattache_quand_meme(self, monkeypatch):
@@ -580,6 +600,14 @@ class TestTitreEquivalent:
         res, dm = self._run([t], _entry(kworb, 900, spotify_id="K"), lambda s: {"duration": 228})
         assert dm.streams_writes[0][:2] == (1, 900)
         assert res["suggestions"] == [] and res["flous_confirmes"] == [(kworb, fiche)]
+
+    def test_une_edition_censuree_hors_du_flou_se_somme(self):
+        t = _track(1, "Fuck a Bitch")
+        t.duration = 224
+        res, dm = self._run(
+            [t], _entry("F*ck a B*tch (feat. X)", 900, spotify_id="K"), lambda s: {"duration": 180}
+        )
+        assert dm.streams_writes[0][:2] == (1, 900) and res["suggestions"] == []
 
     def test_une_autre_duree_reste_proposee(self):
         t = _track(1, "Airplanes, Pt. 2")

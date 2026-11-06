@@ -6,7 +6,7 @@ La table est faite des titres RÉELS rencontrés sur les pages Kworb et en base 
 
 import pytest
 
-from src.utils.title_matching import strip_featuring
+from src.utils.title_matching import normalize_title, strip_featuring
 from src.utils.version_descriptors import (
     Kind,
     doublons_evidents,
@@ -540,6 +540,45 @@ class TestGraphiesDesPlateformes:
     )
     def test_toujours_distincts(self, a, b):
         assert not titres_equivalents(a, b)
+
+
+class TestAuxEspacesPres:
+    """2026-11-06 : `normalize_title` retire l'apostrophe sans espace, « J’te
+    parle » et « J' te parle » ne se valaient pas. Le juge compare le socle aux
+    espaces près ; la clé `normalize_title`, utilisée partout, ne change pas."""
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("J’te parle", "J' te parle"),
+            ("Y’a pas de mérite", "Y a pas de mérite"),
+            ("I Ain’t Fukin Wit Cha", "I Ain't Fukin Witcha"),
+            ("Gold Digger", "Golddigger"),
+            ("Mr. Rager", "Mr.Rager"),
+            ("3G", "3 G"),
+            ("One Blood (West Coast Remix)", "One Blood (Westcoast Remix)"),
+            ("Down Town (Live)", "Downtown - Live at Bercy"),
+        ],
+    )
+    def test_meme_morceau(self, a, b):
+        assert titres_equivalents(a, b)
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            ("Down Town (Live)", "Downtown"),  # la version reste jugée
+            ("Love (Live)", "Lovelive"),
+            ("Down Town Pt. 2", "Downtown Pt. 1"),  # la partie aussi
+            ("One Blood (West Coast Remix)", "One Blood (East Coast Remix)"),
+            ("Get Em High (J. Period Remix 2)", "Get Em High (J.Period Remix)"),
+            ("Digital Girl (Remix 2)", "Digital Girl (Remix)"),
+        ],
+    )
+    def test_toujours_distincts(self, a, b):
+        assert not titres_equivalents(a, b)
+
+    def test_la_cle_d_index_ne_change_pas(self):
+        assert normalize_title("J' te parle") != normalize_title("J’te parle")
 
 
 class TestGraphiesEtFeat:

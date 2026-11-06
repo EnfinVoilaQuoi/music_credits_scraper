@@ -823,6 +823,20 @@ def meme_prise(a: Variant, b: Variant) -> bool:
     return bool(communes - {"edition"})
 
 
+def _sans_espaces(norme: str) -> str:
+    """Un texte normalisé sans ses espaces : deux graphies du même mot
+    (« West Coast » / « Westcoast »)."""
+    return norme.replace(" ", "")
+
+
+_NUMERO_DE_REMIX = re.compile(r"\bremix\s+(\d{1,2}|ii|iii|iv)\b", re.IGNORECASE)
+
+
+def _numero_de_remix(v: Variant) -> str | None:
+    m = _NUMERO_DE_REMIX.search(v.descriptor or "")
+    return m.group(1).lower() if m else None
+
+
 def meme_famille(a: Variant, b: Variant, *, compter_qualificatifs: bool = True) -> bool:
     """Deux titres désignent-ils la même VERSION d'un morceau ?
 
@@ -834,6 +848,10 @@ def meme_famille(a: Variant, b: Variant, *, compter_qualificatifs: bool = True) 
     if qualificatifs_incompatibles(a, b, compter=compter_qualificatifs):
         return False
     if a.est_remix and b.est_remix:
+        # « Remix 2 » n'est pas « Remix » : un autre remix du même remixeur
+        # (« Get Em High (J. Period Remix 2) », 2026-11-06).
+        if _numero_de_remix(a) != _numero_de_remix(b):
+            return False
         # Genius écrit « (Remix) », une plateforme nomme le remixeur : un remix
         # NU face à un remix NOMMÉ est le même remix jusqu'à preuve du
         # contraire. Deux remixeurs nommés différents, non. La preuve se lit
@@ -842,7 +860,9 @@ def meme_famille(a: Variant, b: Variant, *, compter_qualificatifs: bool = True) 
         # (2026-10-25 : « In Common (Remix) », avec Kanye et Travis Scott, n'est
         # pas « In Common - Black Coffee Remix », pris ici en exemple le 24/09).
         if a.remixer and b.remixer:
-            return normalize_title(a.remixer) == normalize_title(b.remixer)
+            return _sans_espaces(normalize_title(a.remixer)) == _sans_espaces(
+                normalize_title(b.remixer)
+            )
         return True
     if a.kind != b.kind:
         return False
@@ -850,7 +870,8 @@ def meme_famille(a: Variant, b: Variant, *, compter_qualificatifs: bool = True) 
         # Le MÊME descripteur des deux côtés est la même version, même hors du
         # vocabulaire des familles : « Intro (Black Album) » face à lui-même
         # était refusé comme « autre version » (2026-10-14, Lunatic).
-        if normalize_title(a.descriptor or "") == normalize_title(b.descriptor or "") != "":
+        da, db = normalize_title(a.descriptor or ""), normalize_title(b.descriptor or "")
+        if da and _sans_espaces(da) == _sans_espaces(db):
             return True
         return bool(_familles_de_rendition(a) & _familles_de_rendition(b))
     return True
@@ -1037,7 +1058,11 @@ def meme_enregistrement(a: CleTitre, b: CleTitre) -> bool:
     # écrivent en clair — même place du même disque (2026-10-14, Josman).
     if (a.censure and a.censure.fullmatch(b.norme)) or (b.censure and b.censure.fullmatch(a.norme)):
         return True
-    if a.parties != b.parties or a.socle != b.socle:
+    # Le socle se compare AUX ESPACES PRÈS (« J’te parle » / « J' te parle »,
+    # « Y’a pas » / « Y a pas », « Gold Digger » / « Golddigger »,
+    # 2026-11-06) : la version et la partie restent jugées, et `normalize_title`,
+    # clé d'index partout, ne change pas.
+    if a.parties != b.parties or _sans_espaces(a.socle) != _sans_espaces(b.socle):
         return _graphies_equivalentes(a, b)
     return meme_famille(a.variant, b.variant)
 
@@ -1152,10 +1177,10 @@ def meme_version_cherchee(a: CleTitre, b: CleTitre) -> bool:
 def titres_equivalents(a: str | None, b: str | None) -> bool:
     """Deux titres désignent-ils le MÊME morceau dans la MÊME version ?
 
-    Égalité des titres normalisés, ou même socle avec des descripteurs de la
-    même famille (« Nudes (Live at AK Studios) » ≈ « Nudes - Acoustic »). Une
-    asymétrie de descripteur refuse : « MW2 » n'est pas « MW2 (Chopped &
-    $crewed) ». UN prédicat pour DEUX producteurs de durée (gate Deezer,
+    Égalité des titres normalisés, ou même socle (aux espaces près) avec des
+    descripteurs de la même famille (« Nudes (Live at AK Studios) » ≈ « Nudes -
+    Acoustic »). Une asymétrie de descripteur refuse : « MW2 » n'est pas « MW2
+    (Chopped & $crewed) ». UN prédicat pour DEUX producteurs de durée (gate Deezer,
     déclaration YTM) — vit ici et non dans `title_matching`, que ce module
     importe déjà (cycle sinon).
     """
@@ -1163,11 +1188,13 @@ def titres_equivalents(a: str | None, b: str | None) -> bool:
 
 
 def titres_confondus(a: str | None, b: str | None) -> bool:
-    """`titres_equivalents`, ou les mêmes lettres une fois les ESPACES retirés.
+    """`titres_equivalents`, ou les mêmes lettres une fois les ESPACES retirés,
+    quels que soient les descripteurs.
 
     Pour reconnaître une fiche déjà en base sous une autre GRAPHIE (« 3 G » /
     « 3G », « A V L D » / « AVLD », « POL-AK » / « Polak ») — jamais pour juger
-    une identité de plateforme : les gates gardent `titres_equivalents`.
+    une identité de plateforme : `titres_equivalents`, lui, compare aussi aux
+    espaces près depuis le 2026-11-06, mais exige la même version.
     """
     return meme_graphie(cle_titre(a), cle_titre(b))
 

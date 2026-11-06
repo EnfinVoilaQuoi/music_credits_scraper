@@ -2247,6 +2247,52 @@ def video_trop_longue(track, ctx=None):
     return None
 
 
+_LANGUES_DE_TRADUCTION = (
+    "english|french|fran[cç]ais|anglais|spanish|german|italian|portuguese|russian|turkish|"
+    "hindi|arabic|polish|dutch|japanese|korean|chinese"
+)
+_TRADUIT = r"translat(?:e|ed|ions?)"
+#: « Seum (english translate) », « [English Translation] », « Racailles English
+#: translation », « traduction anglaise ». La langue est exigée : « Lost in
+#: Translation » de Logic est un morceau.
+_TRADUCTION_DANS_LE_TITRE_RE = re.compile(
+    rf"\b(?:{_LANGUES_DE_TRADUCTION})\s+{_TRADUIT}\b|\btraduction\s+(?:anglaise|fran[cç]aise)\b",
+    re.IGNORECASE,
+)
+#: Les pages des comptes de traduction de Genius (« Genius-hindi-translations-… »,
+#: « Genius-traductions-francaises-… ») et le même descripteur dans l'adresse.
+_TRADUCTION_DANS_L_ADRESSE_RE = re.compile(
+    rf"genius\.com/genius-[a-z0-9-]*(?:translations?|traductions?|traducoes|traducciones)-"
+    rf"|-(?:{_LANGUES_DE_TRADUCTION})-{_TRADUIT}-lyrics",
+    re.IGNORECASE,
+)
+
+
+def est_page_de_traduction(titre: str | None, adresse: str | None) -> bool:
+    """PUR. La page Genius d'une TRADUCTION (la relation `translation_of` n'est
+    sur aucune fiche, mesuré le 2026-11-06) : ni « Lost in Translation », ni une
+    version chantée (« (english version) » de MC Solaar, « (French Version) »)."""
+    return bool(
+        _TRADUCTION_DANS_LE_TITRE_RE.search(titre or "")
+        or _TRADUCTION_DANS_L_ADRESSE_RE.search(adresse or "")
+    )
+
+
+def page_traduction(track, _ctx=None):
+    """Une page de traduction n'est pas un morceau, et elle prend le média de
+    l'original : la vidéo devient « partagée » chez l'artiste et sort de son total
+    (« Seum » 5 538 vues chez Vald, 2 265 391 chez Tunisiano, 5,2 M écartés sur 3
+    fiches, 2026-11-06). Une page DÉSACTIVÉE reste une ligne de `tracks` et
+    continuerait à partager la vidéo (`_recalculer_vues_ytm`) : la règle la
+    supprime et la note supprimée, comme les pages de prose."""
+    if not track.genius_id or not est_page_de_traduction(track.title, track.genius_url):
+        return None
+    return (
+        f"page de traduction ({track.genius_url}) : ce n'est pas un morceau",
+        {"impact": 0},
+    )
+
+
 #: Interrupteur de la règle des liens morts : PROPOSÉE, simulée, pas encore
 #: décidée par l'utilisateur (2026-11-06). Baissé, aucun cas n'en sort ; le
 #: relevé des vues pose quand même ses constats, qui ne sont que des faits.
@@ -3544,6 +3590,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "Vidéo de la recherche : ni le titre ni la durée",
         "🔎",
         recherche_dementie,
+    ),
+    Detecteur(
+        "page_traduction",
+        "Page de traduction, pas un morceau",
+        "🌐",
+        page_traduction,
     ),
     Detecteur(
         "video_morte",

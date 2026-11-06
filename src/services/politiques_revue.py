@@ -2076,6 +2076,8 @@ REGLES_ETENDUES = frozenset(
         # de plus de 10 s par 2 catalogues lus par ID ; simulée sur la base,
         # 6 vidéos, chacune un autre morceau ou une autre partie.
         ("recherche_dementie", "retirer_video_recherche"),
+        # 2026-11-06 : page de traduction ; simulée, 9 fiches, toutes des traductions.
+        ("page_traduction", "supprimer_non_musique"),
         # 2026-11-06 (interrupteur `revue.VIDEOS_MORTES_BRANCHEES`, baissé) : lien
         # d'une vidéo que YouTube a répondu ne pas avoir ; refus de règle.
         ("video_morte", "retirer_video_recherche"),
@@ -2489,6 +2491,16 @@ def politique_video_trop_longue(cas, track, _ctx):
     )
 
 
+def politique_page_traduction(cas, track, _ctx):
+    """Supprimée et notée supprimée, comme une page de prose : désactivée, elle
+    resterait une ligne qui partage la vidéo de l'original."""
+    if cas.detecteur != "page_traduction" or track is None:
+        return None
+    return Arbitrage(
+        "une traduction, pas un morceau : supprimer", "supprimer_non_musique", "traduction"
+    )
+
+
 def politique_video_morte(cas, track, _ctx):
     """Le détecteur exige la RÉPONSE de YouTube : le lien part, par un refus de
     règle, pour que la discographie ne le repose pas (« ↩ Rétablir » le rend).
@@ -2587,6 +2599,7 @@ _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "annotee": politique_non_musique,
     "recherche_dementie": politique_recherche_dementie,
     "video_morte": politique_video_morte,
+    "page_traduction": politique_page_traduction,
     "doublon": politique_doublon,
     "duree_spotify": politique_spotify_confirme,
     "video_trop_longue": politique_video_trop_longue,

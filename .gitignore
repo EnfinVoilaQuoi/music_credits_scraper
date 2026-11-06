@@ -209,6 +209,7 @@ scripts/*
 !scripts/retirer_credits_youtube_doublons.py
 # Invités d'un album posés sur une piste par le correcteur (2026-11-06).
 !scripts/retirer_feats_d_album.py
+!scripts/reparer_encodage_genius.py
 # Titre de la page Spotify relu dans le brut (2026-10-31).
 !scripts/rafraichir_titres_spotify.py
 !scripts/marquer_parutions_live.py

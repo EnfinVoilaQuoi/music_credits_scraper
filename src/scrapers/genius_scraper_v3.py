@@ -16,6 +16,7 @@ from src.observability import source_usage
 from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
 from src.utils import credits_genius_api
 from src.utils.credit_roles import LIBELLES_HORS_CREDITS, map_role, valeur_vide
+from src.utils.encodage import reparer_c1
 from src.utils.inedits import titre_sans_marqueur
 from src.utils.logger import get_logger
 from src.utils.paroles_genius import inedit_par_le_texte, instrumental_par_le_texte
@@ -495,7 +496,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
         lyrics = re.sub(r"^You might also like.*$", "", lyrics, flags=re.MULTILINE)
         lyrics = re.sub(r"\n?\d*Embed\s*$", "", lyrics)
         lyrics = re.sub(r"\n{3,}", "\n\n", lyrics)
-        return lyrics.strip()
+        return reparer_c1(lyrics).strip()
 
     @staticmethod
     def _is_instrumental_bs4(soup) -> bool:
@@ -576,7 +577,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 embed.decompose()
             text = bio.get_text(separator=" ", strip=True)
             if text and len(text) > 50:
-                return re.sub(r"\s+", " ", text).strip()
+                return reparer_c1(re.sub(r"\s+", " ", text)).strip()
         return None
 
     # -------------------------------------------------------------------------

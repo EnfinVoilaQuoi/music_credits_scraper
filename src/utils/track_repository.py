@@ -18,7 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from src.config import settings
 from src.enrichment.observation import Observation
 from src.models import Credit, ReleaseObservation, Track, TrackSpotifyId, TrackVideo
-from src.models.track import CreditRole
+from src.models.track import SOURCE_NON_TRANSCRITES, CreditRole
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.codes_barres import cle_upc
@@ -38,6 +38,7 @@ from src.utils.dates import completer, la_plus_ancienne, meme_jour
 from src.utils.encodage import reparer_c1
 from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
+from src.utils.paroles_genius import a_des_paroles, paroles_factices
 from src.utils.positions_disque import position_retenue
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
 from src.utils.track_mapper import (
@@ -2544,6 +2545,58 @@ class TrackRepository:
         poser(track_id)
         effacer_chez_les_soeurs(conn, track_id, poser)
 
+    def paroles_factices_de_la_base(self) -> list[dict[str, Any]]:
+        """Les fiches dont le texte n'est pas des paroles (`paroles_factices`) :
+        `[{id, title, lyrics, nature, lyrics_synced, unreleased}]`. Lecture seule."""
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                select(
+                    tracks.c.id,
+                    tracks.c.title,
+                    tracks.c.lyrics,
+                    tracks.c.lyrics_synced,
+                    tracks.c.unreleased,
+                ).where(tracks.c.lyrics.is_not(None))
+            ).mappings()
+            return [
+                {**ligne, "nature": nature}
+                for ligne in lignes
+                if (nature := paroles_factices(ligne["lyrics"], ligne["title"]))
+            ]
+
+    def constater_paroles_factices(self, track_id: int) -> bool:
+        """Retire un texte qui n'est pas des paroles (`paroles_factices`), au
+        constat que la page n'en a pas : `SOURCE_NON_TRANSCRITES`, daté par sa
+        lecture, comme le placeholder officiel de Genius ; le LRC garde ses juges.
+        Chez les sœurs aussi, sauf une sœur à vrai texte : sa lecture décide."""
+        try:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
+
+                def poser(tid: int) -> None:
+                    ligne = conn.execute(
+                        select(tracks.c.lyrics, tracks.c.title).where(tracks.c.id == tid)
+                    ).first()
+                    if ligne is None or not paroles_factices(ligne.lyrics, ligne.title):
+                        return
+                    conn.execute(
+                        update(tracks)
+                        .where(tracks.c.id == tid)
+                        .values(
+                            lyrics=None,
+                            has_lyrics=False,
+                            lyrics_source=SOURCE_NON_TRANSCRITES,
+                            updated_at=datetime.now(),
+                        )
+                    )
+
+                poser(track_id)
+                effacer_chez_les_soeurs(conn, track_id, poser)
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur constater_paroles_factices({track_id}): {e}")
+            return False
+
     @staticmethod
     def _paroles_a_retirer(conn, track_id: int, genius_id) -> bool:
         """La fiche ou une sœur porte encore paroles, LRC ou observation LRC."""
@@ -3585,13 +3638,16 @@ class TrackRepository:
         # un total qu'aucun fait n'explique n'a plus à être épargné (2026-10-20 :
         # Diam's « A quand mon heure ? » gardait les vues d'une vidéo refusée).
         self._recalculer_vues_ytm(conn, track_id)
-        conn.execute(
-            text(
-                "UPDATE tracks SET has_lyrics = CASE WHEN lyrics IS NOT NULL AND lyrics <> '' "
-                "THEN 1 ELSE 0 END WHERE id = :t"
-            ),
-            {"t": track_id},
-        )
+        # Un texte, et un vrai : « TBD » ou « . » ne font pas des paroles (2026-11-06).
+        paroles = conn.execute(
+            select(tracks.c.lyrics, tracks.c.title).where(tracks.c.id == track_id)
+        ).first()
+        if paroles is not None:
+            conn.execute(
+                update(tracks)
+                .where(tracks.c.id == track_id)
+                .values(has_lyrics=a_des_paroles(paroles.lyrics, paroles.title))
+            )
         # Après la durée et les paroles : le verdict LRC en dépend.
         self._rearbitrer_lrc(conn, track_id)
         # L'ID PRINCIPAL a toujours sa ligne : `is_primary` matérialise la

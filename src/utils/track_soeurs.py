@@ -798,7 +798,8 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
     rapport["lien_youtube"] += _aligner_lien_youtube(conn, famille)
     # `has_lyrics` n'est que le reflet de `lyrics` : `0` étant une VALEUR pour
     # le comblement, une ligne qui recevait les paroles gardait son `0`
-    # (2026-10-11 : 72 fiches à paroles marquées « sans paroles »).
+    # (2026-10-11 : 72 fiches à paroles marquées « sans paroles »). Un texte
+    # factice retombe à 0 au recalcul de `_ecrire`, seul à le juger.
     marques = ", ".join(f":f{n}" for n in range(len(famille)))
     conn.execute(
         text(

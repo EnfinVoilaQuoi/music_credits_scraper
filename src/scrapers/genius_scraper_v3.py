@@ -19,7 +19,13 @@ from src.utils.credit_roles import LIBELLES_HORS_CREDITS, map_role, valeur_vide
 from src.utils.encodage import reparer_c1
 from src.utils.inedits import titre_sans_marqueur
 from src.utils.logger import get_logger
-from src.utils.paroles_genius import inedit_par_le_texte, instrumental_par_le_texte
+from src.utils.paroles_genius import (
+    INSTRUMENTAL,
+    NON_TRANSCRITES,
+    a_des_paroles,
+    inedit_par_le_texte,
+    paroles_factices,
+)
 from src.utils.version_heritage import est_herite, est_instrumental
 
 logger = get_logger(__name__)
@@ -371,11 +377,23 @@ class GeniusScraperV3(CrawlAIScraperBase):
         # « [Morceau instrumental : Lucio Bukowski] » : un en-tête n'est pas des
         # paroles, c'est le constat d'un instrumental (11 fiches le portaient
         # comme texte, 2026-09-26).
-        instrumental_ecrit = instrumental_par_le_texte(lyrics)
+        factice = paroles_factices(lyrics, track.title)
+        instrumental_ecrit = factice == INSTRUMENTAL
+        # « Unreleased » / « Please check back once the song has been released » :
+        # le placeholder d'un inédit est un CONSTAT (e34), qu'il ne reste pas comme
+        # paroles. Tout autre placeholder (« TBD », « [? : Kanye West] », le seul
+        # titre) tient la place de paroles que la page n'a pas (2026-11-06).
+        if inedit_par_le_texte(lyrics):
+            track.unreleased = True
+            logger.info(f"🔒 Inédit constaté sur Genius pour '{track.title}'")
+        non_transcrites = factice == NON_TRANSCRITES or self._non_transcrites_bs4(soup)
+        titre_instrumental = bool(lyrics) and est_instrumental(track.title)
+        if factice == NON_TRANSCRITES:
+            lyrics = ""
         # Un TITRE instrumental l'est quoi que la page affiche : Genius y
         # recopie souvent les paroles de l'original (Booba « Boulbi
         # (Instrumental) », 3 320 caractères) — décision utilisateur 2026-10-09.
-        if lyrics and est_instrumental(track.title):
+        if titre_instrumental:
             instrumental_ecrit = True
         if instrumental_ecrit:
             lyrics = ""
@@ -399,11 +417,6 @@ class GeniusScraperV3(CrawlAIScraperBase):
             if track.lyrics.source == SOURCE_NON_TRANSCRITES:
                 track.lyrics.source = "genius"  # les paroles sont arrivées
             logger.info(f"✅ Paroles récupérées pour '{track.title}' ({len(lyrics.split())} mots)")
-            # « Unreleased » / « Please check back once the song has been
-            # released » : le placeholder d'un inédit est un CONSTAT (e34).
-            if inedit_par_le_texte(lyrics):
-                track.unreleased = True
-                logger.info(f"🔒 Inédit constaté sur Genius pour '{track.title}'")
         elif instrumental_ecrit or self._is_instrumental_bs4(soup):
             # Pas de paroles PAR NATURE : le scrape a ABOUTI, il se date et se
             # source comme un succès — c'est ce constat qui évite de re-crawler
@@ -414,7 +427,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
             track.lyrics.scraped_at = datetime.now()
             track.lyrics.source = "genius"
             logger.info(f"🎹 Instrumental constaté sur Genius pour '{track.title}'")
-        elif self._non_transcrites_bs4(soup) and (track.lyrics.text or "").strip():
+        elif non_transcrites and a_des_paroles(track.lyrics.text, track.title):
             # Des paroles d'une AUTRE source (YTM, Musixmatch, héritage) : la page
             # ne dit rien d'elles. Le constat, qui ne vidait pas le texte (le
             # save ne vide jamais), lui volait sa provenance — 11 fiches
@@ -422,7 +435,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
             logger.info(
                 f"📭 Page Genius non transcrite, paroles d'ailleurs gardées : '{track.title}'"
             )
-        elif self._non_transcrites_bs4(soup):
+        elif non_transcrites:
             # La page a répondu, sans paroles POUR L'INSTANT : un constat daté,
             # relu après `RELIRE_NON_TRANSCRITES` (Lyrics.page_genius_a_relire).
             # `instrumental` n'est pas touché : rien n'a été constaté à ce sujet.

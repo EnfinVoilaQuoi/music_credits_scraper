@@ -49,3 +49,23 @@ def test_heartless_de_dermot_kennedy_ne_passe_pas():
     fiche = _fiche("Heartless - Recorded At RAK Studios", "Kanye West", {"deezer": 210})
     video = _video("Dermot Kennedy - Power Over Me", "ytm_album", 210, "Dermot Kennedy")
     assert not video_nomme(fiche, video)
+
+
+def test_le_dernier_cote_de_deux_mots_suffit():
+    fiche = _fiche("Entre les lignes : Une goutte de plus", "Keny Arkana", {})
+    video = _video('clip arkana "une goutte de plus" sauvons la planete', "genius_media")
+    assert video_nomme(fiche, video)
+
+
+def test_le_cote_de_la_serie_ne_nomme_pas_le_morceau():
+    """Mesuré sur la copie : un concert entier et des scènes de film comptaient."""
+    fiche = _fiche("DAYS BEFORE RODEO: THE PRAYER (Live)", "Travis Scott", {"deezer": 200})
+    video = _video(
+        "TRAVIS SCOTT DAYS BEFORE RODEO LIVE 10 YEAR ANNIVERSARY IN ATLANTA", "genius_media", 3267
+    )
+    assert not video_nomme(fiche, video)
+    fiche = _fiche("8 Mile: B-Rabbit vs Papa Doc", "Eminem", {})
+    video = _video(
+        "8 Mile (2002) - Rabbit Battles Papa Doc Scene (10/10) | Movieclips", "genius_media"
+    )
+    assert not video_nomme(fiche, video)

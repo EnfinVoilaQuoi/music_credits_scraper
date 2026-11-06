@@ -1945,11 +1945,15 @@ def video_nomme(track, v) -> bool:
         sans = _mots(_FREESTYLE_RE.sub(" ", socle_du_titre(track.title)))
         if sans:
             variantes.append(sans)
-    parties = _parties_deux_points(track)
-    if any(len(p.split()) >= 2 and _video_couvre(p, titre) for p in parties):
-        return True
-    if any(set(p.split()) <= set(titre.split()) for p in parties) and _video_prouvee(track, v):
-        return True
+    # « A : B » : A nomme souvent la série (« 8 Mile: … », « DAYS BEFORE RODEO: … ») :
+    # mesuré le 2026-11-06, le juge souple sur les deux côtés faisait compter 40 M
+    # de vues de scènes de film et un concert de 54 min. Seul le DERNIER côté, de
+    # deux mots au moins et en mots exacts, suffit ; un autre exige la preuve.
+    nommes = [p for p in _parties_deux_points(track) if set(p.split()) <= set(titre.split())]
+    if nommes:
+        dernier = _mots(_DEUX_POINTS_RE.split(track.title or "")[-1])
+        if (dernier in nommes and len(dernier.split()) >= 2) or _video_prouvee(track, v):
+            return True
     return (
         any(_video_couvre(x, titre) or _mots_a_une_lettre(x, titre) for x in variantes)
         or _video_couvre(nu, titre)

@@ -1071,6 +1071,43 @@ def test_id_propose_un_refus_de_duree_dementi_par_les_catalogues_va_a_l_humain()
     assert arb.action == "refuser_id"
 
 
+class TestIdProposeHomonyme:
+    """Sniper « Hustle Di Money » #20371 : Spotify crédite un autre « Sniper » ;
+    Deezer, Apple et YTM ont sa durée, car tous lisent le morceau de l'homonyme.
+    L'URI passe avant les durées (2026-11-06)."""
+
+    DUREES = {"apple_music": 245, "deezer": 244, "reccobeats": 244, "ytmusic": 245}
+
+    @staticmethod
+    def _identite(nom="Sniper", uri="HOMONYME"):
+        return {"name": "Hustle Di Money", "artists": [nom], "artist_ids": [uri], "duration": 245}
+
+    def _juger(self, identite, titre="Hustle Di Money", spotify_artiste="FRANCAIS"):
+        t = Track(title=titre, artist=Artist(name="Sniper", spotify_id=spotify_artiste))
+        t.id, t.durees_editions, t.durations_observees = 1, (), dict(self.DUREES)
+        cas = _cas("id_spotify_propose", t, {"spotify_id_propose": "SP"})
+        return pol.arbitrage_id_propose(
+            cas, t, None, lire=lambda _sid: identite, gate=lambda *_: False
+        )
+
+    def test_l_uri_passe_avant_les_durees(self):
+        arbitrage = self._juger(self._identite())
+        assert arbitrage.action == "refuser_id"
+        assert "homonyme" in arbitrage.raison
+
+    def test_une_version_aussi(self):
+        """Le refus sur le seul NOM d'une version reste à l'humain, pas l'URI."""
+        assert self._juger(self._identite(), titre="Hustle Di Money (Remix)").action == "refuser_id"
+
+    def test_un_refus_sans_homonyme_va_toujours_a_l_humain(self):
+        """Le gate refuse, deux catalogues confirment la durée (Kanye « Comfy ») :
+        c'est la colonne qui dément, pas l'ID."""
+        assert self._juger(self._identite(uri="FRANCAIS")) is None
+
+    def test_sans_profil_connu_rien_n_est_prouve(self):
+        assert self._juger(self._identite(), spotify_artiste=None) is None
+
+
 class TestIdProposeVersions:
     """2026-10-31 : une VERSION passe par le gate comme à l'étape Identité. Ce
     qu'il refuse est refusé par règle ; une pose exige le MÊME titre (version

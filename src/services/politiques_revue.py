@@ -318,11 +318,14 @@ def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
     édition ou ID faux, l'humain). `lire(sid)` rend l'identité de la page embed
     (None : jamais lue, non jugé) ; `gate(track, sid)` est le gate d'identité
     STRICT (artiste, durée, version, titre). Refusé par le gate : refuser
-    l'ID. Accepté ET une durée INDÉPENDANTE (un catalogue lu par un autre
-    identifiant) confirme à 2 s la durée de l'ID : poser l'ID. Accepté sans
+    l'ID, sauf si deux catalogues confirment la durée de l'ID et que le refus
+    n'est pas celui d'un homonyme prouvé par l'URI. Accepté ET une durée
+    INDÉPENDANTE (un catalogue lu par un autre identifiant) confirme à 2 s la durée de l'ID : poser l'ID. Accepté sans
     durée indépendante : l'humain."""
 
     def juger(cas, track, _ctx):
+        from src.utils.spotify_identity import artiste_homonyme
+
         if track is None or track.spotify_id:
             return None
         sid = cas.preuves.get("spotify_id_propose")
@@ -333,6 +336,14 @@ def politique_id_propose(lire: Callable, gate: Callable) -> Callable:
         temoins = ", ".join(f"{s} {d} s" for s, d in sorted(durees.items()) if d) or "aucune"
         servi = f"Spotify sert « {identite.get('name')} » ({identite.get('duration')} s)"
         if not gate(track, sid):
+            # L'URI passe avant les durées : elles concordent parce que tout le
+            # monde lit le morceau de l'homonyme (Sniper « Hustle Di Money » :
+            # Spotify crédite un autre « Sniper », Deezer, Apple et YTM aussi).
+            homonyme = artiste_homonyme(track, identite)
+            if homonyme:
+                return Arbitrage(
+                    "l'URI de l'artiste désigne un homonyme : refuser", "refuser_id", homonyme
+                )
             # Le gate compare la durée de Spotify à la COLONNE de la fiche : si
             # deux catalogues indépendants confirment celle de Spotify, c'est la
             # colonne (souvent une autre édition Deezer) qui dément, pas l'ID —
@@ -1202,6 +1213,7 @@ def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | N
     2026-10-31, qui lève pour ce seul cas celle du 2026-10-20 (« une version
     ne reçoit jamais d'ID par règle ») : ce qui trompait le gate sur une
     version, c'est un autre nom de version, que le même titre exclut."""
+    from src.utils.spotify_identity import artiste_homonyme
     from src.utils.version_descriptors import meme_titre_normalise
 
     if cas.detecteur != "id_spotify_propose" or track is None:
@@ -1235,7 +1247,9 @@ def arbitrage_id_propose(cas, track, ctx, lire=None, gate=None) -> Arbitrage | N
         # durée servie : rien n'est montré, l'humain. Un titre générique dont
         # le disque n'est pas montré le même se refuse (gate, 2026-10-13).
         identite = lire(cas.preuves.get("spotify_id_propose")) or {}
-        if _familles_qui_confirment(_durees(track), identite.get("duration")):
+        if _familles_qui_confirment(
+            _durees(track), identite.get("duration")
+        ) and not artiste_homonyme(track, identite):
             return None
     if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_ID_PROPOSE:
         return arbitrage

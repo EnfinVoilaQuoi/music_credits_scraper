@@ -4,8 +4,9 @@ L'import ne change pas : Genius pose `is_featuring`, `primary_artist_name` et
 `secondary_role` tels qu'il les lit. Ce module décide seul de ce qu'ils VEULENT
 DIRE pour nous, en deux axes distincts :
 
-  · la **participation**, EXCLUSIVE — Principal · Feat · Prod · Rôle secondaire.
-    C'est elle qui décide des règles (certifs, Timeline, cumul de streams).
+  · la **participation**, EXCLUSIVE — Principal · Feat · Prod · Rôle secondaire ·
+    Sur le disque (le morceau d'un autre, gardé sur la discographie de l'artiste
+    mais hors de ses comptes). C'est elle qui décide des règles (certifs, Timeline, cumul de streams).
     La production n'est plus un rôle secondaire comme un autre : « si t'as fait
     la prod, t'as participé activement au morceau » (décision utilisateur) ;
   · des **attributs** CUMULABLES — Inédit, Version alt. — et le marqueur « a
@@ -35,6 +36,11 @@ class Participation(StrEnum):
     FEAT = "feat"
     PROD = "prod"
     SECONDAIRE = "secondaire"
+    #: Le morceau d'un autre sur un disque de l'artiste : ni feat, ni rôle, un
+    #: principal étranger, aucun crédit à son nom (« Still D.R.E. » chez Eminem,
+    #: *Confused? You Should Be*). Gardé, hors des comptes (décision utilisateur
+    #: 2026-11-06).
+    SUR_LE_DISQUE = "sur_le_disque"
 
 
 #: Valeurs de `secondary_role` qui disent une VERSION d'un tiers, pas un rôle
@@ -87,8 +93,22 @@ def _chante_ce_qu_il_a_ecrit(track: Track, noms) -> bool:
     )
 
 
+def sans_participation(principal, credites, noms, formations=()) -> bool:
+    """PUR. Sans feat ni rôle : ce morceau est-il celui d'un autre ? Il a un
+    principal, qui n'est ni l'artiste ni sa formation, et aucun crédit au nom de
+    l'artiste, sous aucune graphie (`noms` : alias confirmés compris). Sans `noms`,
+    rien ne permet de le dire. `credites` : les noms crédités de la fiche."""
+    noms = [n for n in noms if n]
+    if not noms or not principal:
+        return False
+    if _est_l_artiste(principal, noms) or _est_l_artiste(principal, formations):
+        return False
+    return not any(_est_l_artiste(nom, noms) for nom in credites)
+
+
 def participation(track: Track, noms, formations=()) -> Participation:
-    """Principal · Feat · Prod · Rôle secondaire — une seule, par priorité.
+    """Principal · Feat · Prod · Rôle secondaire · Sur le disque — une seule, par
+    priorité.
 
     `noms` = le nom de l'artiste et ses alias confirmés : une fiche dont
     l'interprète est « Ye » est la fiche de Kanye West.
@@ -109,7 +129,13 @@ def participation(track: Track, noms, formations=()) -> Participation:
     if track.membre_de_la_formation or _est_l_artiste(track.primary_artist_name, formations):
         return Participation.PRINCIPAL
     if not role:
-        return Participation.FEAT if track.is_featuring else Participation.PRINCIPAL
+        if track.is_featuring:
+            return Participation.FEAT
+        if sans_participation(
+            track.primary_artist_name, [c.name for c in track.credits], noms, formations
+        ):
+            return Participation.SUR_LE_DISQUE
+        return Participation.PRINCIPAL
     if map_role(role) in _ROLES_DE_CHANT:
         return Participation.FEAT
     if map_role(role) in _ROLES_DE_VOIX_ADDITIONNELLE and _chante_ce_qu_il_a_ecrit(track, noms):

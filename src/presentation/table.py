@@ -97,6 +97,7 @@ LIBELLE_PARTICIPATION = {
     Participation.FEAT: "Invité (featuring)",
     Participation.PROD: "Production",
     Participation.SECONDAIRE: "Rôle secondaire",
+    Participation.SUR_LE_DISQUE: "Sur le disque de l'artiste (hors de ses totaux)",
 }
 
 

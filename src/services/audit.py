@@ -48,6 +48,7 @@ from src.services.revue import (
     session_live,
     video_nomme,
 )
+from src.utils.artist_repository import ALIAS_LETTRES_MIN
 from src.utils.cert_titres import certif_du_morceau
 from src.utils.compteurs_partages import titres_parents
 from src.utils.concordance_paroles import (
@@ -66,7 +67,8 @@ from src.utils.duree_youtube import (
     segment_de_dj_mix,
     trop_courte_pour_les_paroles,
 )
-from src.utils.title_matching import contains_as_words, names_match_as_words, normalize_title
+from src.utils.participation import sans_participation
+from src.utils.title_matching import contains_as_words, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
@@ -176,7 +178,7 @@ FAMILLES = {
     # ── Hors critère (natures `RUN` et `INFORMATION`) ──
     "colonne_sans_provenance": "durée, date, ISRC ou LRC en colonne sans aucune observation",
     "id_spotify_sans_compteur": "ID Spotify posé, aucun compteur (plafond de pages du run)",
-    "fiche_sans_participation": "fiche sans rôle de l'artiste : ni feat, ni rôle secondaire, ni crédit",
+    "fiche_sans_participation": "morceau d'un autre sur le disque de l'artiste, hors de ses totaux",
     "lien_jamais_mesure": "lien YouTube sans ligne `track_videos` : vues jamais relevées",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
@@ -1272,35 +1274,26 @@ def ids_spotify_sans_compteur(c, pistes) -> list[Cas]:
     return cas
 
 
-#: Relations qui font d'un nom l'artiste lui-même, ou sa formation.
-RELATIONS_DE_L_ARTISTE = ("alias", "member_of", "has_member")
-
-
 def fiches_sans_participation(c, pistes) -> list[Cas]:
-    """Une fiche chez un artiste qui n'y participe pas, d'après tout ce qu'on en
-    sait : ni feat, ni rôle secondaire, un principal étranger, aucun crédit à son
-    nom (« Still D.R.E. » chez Eminem, *JACKBOYS* chez Travis Scott). Rien ne se
-    retire : c'est une décision de l'utilisateur, en attente (`INFORMATION`).
-    Noms comparés en mots entiers (`names_match_as_words`), alias et formations
-    compris."""
-    noms = collections.defaultdict(set)
+    """Le morceau d'un autre sur le disque de l'artiste (« Still D.R.E. » chez
+    Eminem, *JACKBOYS 2* chez Travis Scott) : gardé, hors de ses totaux (décision
+    utilisateur 2026-11-06). Le juge est celui des totaux,
+    `participation.sans_participation` ; rien à faire (`INFORMATION`), la famille
+    montre ce qu'il écarte. Mêmes alias que `noms_de_lartiste`."""
+    alias, formations = collections.defaultdict(set), collections.defaultdict(set)
     for r in c.execute(
-        "SELECT artist_id, related_name FROM artist_relations WHERE kind IN "
-        f"({','.join('?' * len(RELATIONS_DE_L_ARTISTE))}) AND related_name IS NOT NULL",
-        RELATIONS_DE_L_ARTISTE,
+        "SELECT artist_id, related_name, kind FROM artist_relations "
+        "WHERE kind IN ('alias', 'member_of') AND status = 'confirmed' "
+        "AND related_name IS NOT NULL"
     ):
-        noms[r["artist_id"]].add(r["related_name"])
-
-    def est_l_artiste(t, nom) -> bool:
-        return any(names_match_as_words(n, nom) for n in (t["artiste"], *noms[t["artist_id"]]))
-
+        if r["kind"] == "member_of":
+            formations[r["artist_id"]].add(r["related_name"])
+        elif sum(x.isalnum() for x in r["related_name"]) >= ALIAS_LETTRES_MIN:
+            alias[r["artist_id"]].add(r["related_name"])
     candidates = [
         t
         for t in pistes
-        if not t["is_featuring"]
-        and not t["secondary_role"]
-        and t["primary_artist_name"]
-        and not est_l_artiste(t, t["primary_artist_name"])
+        if not t["is_featuring"] and not t["secondary_role"] and t["primary_artist_name"]
     ]
     if not candidates:
         return []
@@ -1311,7 +1304,10 @@ def fiches_sans_participation(c, pistes) -> list[Cas]:
             credites[r["track_id"]].add(r["name"])
     cas = []
     for t in candidates:
-        if any(est_l_artiste(t, nom) for nom in credites[t["id"]]):
+        noms = (t["artiste"], *alias[t["artist_id"]])
+        if not sans_participation(
+            t["primary_artist_name"], credites[t["id"]], noms, formations[t["artist_id"]]
+        ):
             continue
         cas.append(
             Cas(

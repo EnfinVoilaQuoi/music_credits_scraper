@@ -105,6 +105,76 @@ class TestAttributs:
         )
 
 
+class TestSurLeDisque:
+    """Décision utilisateur 2026-11-06 : le morceau d'un autre sur le disque de
+    l'artiste se garde, marqué, hors de ses totaux (« Still D.R.E. » chez Eminem,
+    *Confused? You Should Be* : 2 Md de streams comptés comme les siens)."""
+
+    EMINEM = ("Eminem", "Slim Shady")
+
+    def _dre(self, **autres):
+        return _t("Still D.R.E.", feat=False, principal="Dr. Dre", **autres)
+
+    def test_principal_etranger_sans_credit(self):
+        assert participation(self._dre(), self.EMINEM) == Participation.SUR_LE_DISQUE
+
+    def test_hors_des_comptes_meme_avec_les_prods(self):
+        assert not compte_comme_sien(Participation.SUR_LE_DISQUE, prods=True)
+
+    @pytest.mark.parametrize("nom", ["Eminem", "EMINEM", "Slim Shady", "Eminem (2)"])
+    def test_credite_sous_une_graphie_il_participe(self, nom):
+        t = self._dre(credits=[Credit(name=nom, role=CreditRole.WRITER)])
+        assert participation(t, self.EMINEM) == Participation.PRINCIPAL
+
+    def test_un_nom_qui_le_contient_dans_un_mot_ne_compte_pas(self):
+        t = self._dre(credits=[Credit(name="Eminemmm", role=CreditRole.WRITER)])
+        assert participation(t, self.EMINEM) == Participation.SUR_LE_DISQUE
+
+    def test_sa_formation_en_principal_reste_sienne(self):
+        t = _t("Petit frère", feat=False, principal="IAM")
+        assert participation(t, ("Shurik'n",), ("IAM",)) == Participation.PRINCIPAL
+
+    def test_le_drapeau_de_formation_reste_sien(self):
+        t = _t("Petit frère", feat=False, principal="IAM")
+        t.membre_de_la_formation = True
+        assert participation(t, ("Shurik'n",)) == Participation.PRINCIPAL
+
+    def test_sans_principal_ou_sans_noms_rien_ne_le_dit(self):
+        assert participation(_t(feat=False), self.EMINEM) == Participation.PRINCIPAL
+        assert participation(self._dre(), ()) == Participation.PRINCIPAL
+
+    def test_le_feat_et_le_role_passent_avant(self):
+        assert participation(_t(feat=True, principal="Dr. Dre"), self.EMINEM) == Participation.FEAT
+        assert (
+            participation(_t(feat=False, principal="Dr. Dre", role="Writer"), self.EMINEM)
+            == Participation.SECONDAIRE
+        )
+
+    def test_le_cumul_l_exclut(self):
+        from src.utils.streams_calculator import morceaux_comptes, total_discographie
+
+        sien = _t("Stan", feat=False, principal="Eminem")
+        sien.streams.spotify_streams = 100
+        autre = self._dre()
+        autre.streams.spotify_streams = 2000
+        assert morceaux_comptes([sien, autre], self.EMINEM) == [sien]
+        assert total_discographie([sien, autre], self.EMINEM, mesure=True) == 100
+
+    def test_aucune_certif_de_l_autre(self):
+        from src.utils.certification_enricher import _qui_chercher
+
+        assert _qui_chercher(self._dre(), "Eminem", ("Slim Shady",))[0] is None
+
+    def test_l_interface_connait_la_categorie(self):
+        from src.presentation.filtres import Filtre
+        from src.presentation.table import LIBELLE_PARTICIPATION
+
+        for p in Participation:
+            assert p in LIBELLE_PARTICIPATION
+            assert Filtre().categorie_visible(p) in (True, False)
+        assert "hors de ses totaux" in LIBELLE_PARTICIPATION[Participation.SUR_LE_DISQUE]
+
+
 class TestCompteCommeSien:
     def test_principal_et_feat(self):
         assert compte_comme_sien(Participation.PRINCIPAL)

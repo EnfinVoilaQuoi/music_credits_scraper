@@ -81,6 +81,68 @@ class TestIdSpotifySansCompteur:
         assert not _cas(data_manager, au.ids_spotify_sans_compteur)
 
 
+class TestFicheSansParticipation:
+    def _credit(self, dm, track_id, nom):
+        _sql(
+            dm,
+            "INSERT INTO credits (track_id, name, role, source) VALUES (:t, :n, 'Writer', 'genius')",
+            t=track_id,
+            n=nom,
+        )
+
+    def _alias(self, dm, artiste, nom, kind="alias", status="confirmed"):
+        _sql(
+            dm,
+            "INSERT INTO artist_relations (artist_id, related_name, kind, source, status) "
+            "VALUES (:a, :n, :k, 'test', :s)",
+            a=artiste.id,
+            n=nom,
+            k=kind,
+            s=status,
+        )
+
+    def _marquee(self, dm, artiste):
+        return _fiche(dm, artiste, is_featuring=0, primary_artist_name="Dr. Dre")
+
+    def test_le_morceau_d_un_autre_pour_information(self, data_manager):
+        t = self._marquee(data_manager, _artiste(data_manager))
+        cas = _cas(data_manager, au.fiches_sans_participation)
+        assert [(x.nature, x.pistes) for x in cas] == [(INFORMATION, [t.id])]
+
+    def test_credite_sous_une_graphie_il_n_y_est_pas(self, data_manager):
+        t = self._marquee(data_manager, _artiste(data_manager))
+        self._credit(data_manager, t.id, "Eminem (2)")
+        assert not _cas(data_manager, au.fiches_sans_participation)
+
+    def test_credite_sous_un_alias_confirme_il_n_y_est_pas(self, data_manager):
+        a = _artiste(data_manager)
+        self._alias(data_manager, a, "Slim Shady")
+        t = self._marquee(data_manager, a)
+        self._credit(data_manager, t.id, "Slim Shady")
+        assert not _cas(data_manager, au.fiches_sans_participation)
+
+    def test_un_alias_trop_court_ne_vaut_pas_credit(self, data_manager):
+        """« M » et « Em » ne désignent personne : « Still D.R.E. » y échappait."""
+        a = _artiste(data_manager)
+        self._alias(data_manager, a, "Em")
+        t = self._marquee(data_manager, a)
+        self._credit(data_manager, t.id, "Em Rusciano")
+        assert len(_cas(data_manager, au.fiches_sans_participation)) == 1
+
+    def test_un_alias_seulement_propose_ne_vaut_pas_credit(self, data_manager):
+        a = _artiste(data_manager)
+        self._alias(data_manager, a, "Slim Shady", status="proposed")
+        t = self._marquee(data_manager, a)
+        self._credit(data_manager, t.id, "Slim Shady")
+        assert len(_cas(data_manager, au.fiches_sans_participation)) == 1
+
+    def test_sa_formation_n_y_est_pas(self, data_manager):
+        a = _artiste(data_manager)
+        self._alias(data_manager, a, "Dr. Dre", kind="member_of")
+        self._marquee(data_manager, a)
+        assert not _cas(data_manager, au.fiches_sans_participation)
+
+
 class TestLienJamaisMesure:
     _URL = "https://www.youtube.com/watch?v=abcdefghijk"
 

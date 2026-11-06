@@ -112,6 +112,7 @@ def construire(
             (par_categorie[Participation.FEAT], "feat", "feats"),
             (par_categorie[Participation.PROD], "prod", "prods"),
             (par_categorie[Participation.SECONDAIRE], "rôle secondaire", "rôles secondaires"),
+            (par_categorie[Participation.SUR_LE_DISQUE], "sur le disque", "sur le disque"),
         )
         if n
     )

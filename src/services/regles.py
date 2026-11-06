@@ -39,10 +39,13 @@ PORTIERS: dict[str, tuple[str, ...]] = {
     ),
     # Les vidéos posées par la recherche ne comptent leurs vues que si ce que
     # la recherche a vu passe le score COURANT (`vues_comptees`, 2026-10-20) :
-    # le score change, les totaux YTM de l'artiste se recalculent.
+    # le score change, les totaux YTM de l'artiste se recalculent. Le juge
+    # `revue.video_nomme` décide de même pour les vidéos Genius : changé le
+    # 2026-11-06, il laissait 4 totaux décrochés (`colonne_verdict`).
     "recherche_youtube": (
         "src.youtube.youtube_searcher",
         "src.services.vues_comptees",
+        "src.services.revue",
         "src.utils.version_descriptors",
         "src.utils.version_heritage",
         "src.utils.title_matching",
@@ -148,12 +151,13 @@ def _rejouer_certifs(dm, artiste) -> str:
 
 def rejouer_recherche_youtube(dm, artiste) -> str:
     """Le REJEU du portier « recherche_youtube » : le total YTM de chaque fiche
-    qui porte une vidéo de la recherche est recalculé (le verdict des vues
-    comptées y juge la vidéo au score courant). Hors ligne ; marque la règle."""
+    qui porte une vidéo de la recherche ou de la page Genius est recalculé (le
+    verdict des vues comptées juge l'une au score courant, l'autre par
+    `revue.video_nomme`). Hors ligne ; marque la règle."""
     fiches = [
         t.id
         for t in artiste.tracks
-        if t.id and any(v.source == "search_auto" for v in t.videos or [])
+        if t.id and any(v.source in ("search_auto", "genius_media") for v in t.videos or [])
     ]
     for track_id in fiches:
         dm.recalculer_vues_ytm(track_id)

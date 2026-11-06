@@ -69,3 +69,36 @@ def test_le_cote_de_la_serie_ne_nomme_pas_le_morceau():
         "8 Mile (2002) - Rabbit Battles Papa Doc Scene (10/10) | Movieclips", "genius_media"
     )
     assert not video_nomme(fiche, video)
+
+
+def test_un_juge_change_recalcule_les_totaux_des_videos_genius(data_manager):
+    """`video_nomme` change, le code n'écrit rien : le portier suit `revue`, et son
+    rejeu recalcule aussi les fiches à vidéo Genius (4 totaux décrochés sur la
+    copie du 2026-11-06, « 8 Mile: Lotto vs B-Rabbit »)."""
+    from sqlalchemy import text
+
+    from src.models import Artist, Track, TrackVideo
+    from src.services import regles
+
+    assert "src.services.revue" in regles.PORTIERS["recherche_youtube"]
+    artiste = Artist(name="Eminem")
+    artiste.id = data_manager.save_artist(artiste)
+    fiche = Track(title="8 Mile: Lotto vs B-Rabbit", artist=artiste, genius_id=7)
+    data_manager.save_track(fiche)
+    data_manager.record_track_videos(
+        fiche.id,
+        [
+            TrackVideo(
+                video_id="AAAAAAAAAAA", source="genius_media", views=9, title="B Rabbit vs Lotto"
+            )
+        ],
+    )
+    with data_manager.engine.begin() as conn:
+        conn.execute(text("UPDATE tracks SET ytm_streams = NULL WHERE id = :t"), {"t": fiche.id})
+    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
+    assert regles.rejouer_recherche_youtube(data_manager, artiste).startswith("1 total")
+    with data_manager.engine.connect() as conn:
+        total = conn.execute(
+            text("SELECT ytm_streams FROM tracks WHERE id = :t"), {"t": fiche.id}
+        ).scalar()
+    assert total == 9

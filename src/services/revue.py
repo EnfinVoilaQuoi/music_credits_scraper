@@ -1878,6 +1878,47 @@ def _mots_d_un_titre(texte: str | None) -> str:
     return _ORDINAL_MOT_RE.sub(lambda m: _ORDINAUX[m.group(1)], t)
 
 
+#: « Entre les lignes : prière » : chaque côté peut être le titre publié.
+_DEUX_POINTS_RE = re.compile(r"\s*:\s+")
+
+
+def _parties_deux_points(track) -> list[str]:
+    """Les côtés d'un titre « A : B », sauf un descripteur de version."""
+    morceaux = _DEUX_POINTS_RE.split(track.title or "")
+    if len(morceaux) < 2:
+        return []
+    return [
+        _mots(m)
+        for m in morceaux
+        if _mots(m) and not porte_une_version(f"x ({m})") and not _CONTEXTE_RE.search(m)
+    ]
+
+
+def _video_prouvee(track, v) -> bool:
+    """Durée de la vidéo à 2 s d'une durée INDÉPENDANTE d'elle (ni tirée d'une
+    vidéo, ni legacy : `duree_temoin` retomberait sur la colonne, qui peut venir
+    d'elle), ET chaîne « X - Topic » d'un interprète de la fiche ou page d'album
+    YTM. Les appelants sans durée ni chaîne n'ont pas cette preuve : rien."""
+    duree = getattr(v, "duration", None)
+    if not duree:
+        return False
+    independantes = []
+    for source, d in (track.durations_observees or {}).items():
+        if d and source not in _DUREES_HORS_JUGE:
+            try:
+                independantes.append(int(float(d)))
+            except (TypeError, ValueError):
+                continue
+    if not any(abs(d - duree) <= 2 for d in independantes):
+        return False
+    if v.source == "ytm_album":
+        return True
+    chaine = getattr(v, "channel", None) or ""
+    if not chaine.endswith(" - Topic"):
+        return False
+    return _place_de_l_artiste(track, chaine.removesuffix(" - Topic")) != "étranger"
+
+
 def video_nomme(track, v) -> bool:
     """Le titre de la vidéo `v` nomme-t-il le morceau `track` ?"""
     socle = _mots_d_un_titre(socle_du_titre(track.title))
@@ -1892,6 +1933,10 @@ def video_nomme(track, v) -> bool:
         # (A2) » → « Booba - Outro (Son Officiel) »), est bien la sienne.
         if v.source == "genius_media" and set(nu.split()) <= set(titre.split()):
             return True
+        # Ou que son disque désigne : chaîne Topic d'un interprète, ou page
+        # d'album YTM, ET durée à 2 s d'un catalogue (« Intro (LAX) »).
+        if set(nu.split()) <= set(titre.split()) and _video_prouvee(track, v):
+            return True
         nu = socle
     variantes = [socle, *_parties_de_medley(track)]
     if _FREESTYLE_RE.search(track.title or ""):
@@ -1900,6 +1945,11 @@ def video_nomme(track, v) -> bool:
         sans = _mots(_FREESTYLE_RE.sub(" ", socle_du_titre(track.title)))
         if sans:
             variantes.append(sans)
+    parties = _parties_deux_points(track)
+    if any(len(p.split()) >= 2 and _video_couvre(p, titre) for p in parties):
+        return True
+    if any(set(p.split()) <= set(titre.split()) for p in parties) and _video_prouvee(track, v):
+        return True
     return (
         any(_video_couvre(x, titre) or _mots_a_une_lettre(x, titre) for x in variantes)
         or _video_couvre(nu, titre)

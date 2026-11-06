@@ -1,0 +1,51 @@
+"""Un générique, ou un côté de « A : B », se prouve par le disque : chaîne Topic
+d'un interprète ou page d'album YTM, ET durée indépendante à 2 s (2026-11-06)."""
+
+from types import SimpleNamespace
+
+from src.services.revue import video_nomme
+
+
+def _fiche(titre, artiste, durees):
+    return SimpleNamespace(
+        title=titre,
+        artist=SimpleNamespace(name=artiste),
+        primary_artist_name=None,
+        secondary_role=None,
+        featured_artists_list=[],
+        durations_observees=durees,
+    )
+
+
+def _video(titre, source, duree=None, chaine=None):
+    return SimpleNamespace(title=titre, source=source, duration=duree, channel=chaine)
+
+
+def test_generique_de_la_chaine_topic_a_la_bonne_duree():
+    fiche = _fiche("Intro (LAX)", "The Game", {"deezer": 80, "youtube": 81})
+    assert video_nomme(
+        fiche, _video("Intro (Album Version)", "search_auto", 81, "The Game - Topic")
+    )
+
+
+def test_generique_sans_duree_independante_refuse():
+    """La durée lue par la vidéo elle-même ne la corrobore pas."""
+    fiche = _fiche("Intro (LAX)", "The Game", {"youtube": 81})
+    assert not video_nomme(fiche, _video("Intro", "search_auto", 81, "The Game - Topic"))
+
+
+def test_generique_d_une_chaine_etrangere_refuse():
+    fiche = _fiche("Intro (LAX)", "The Game", {"deezer": 80})
+    assert not video_nomme(fiche, _video("Intro", "search_auto", 80, "Autre Rappeur - Topic"))
+
+
+def test_partie_d_un_titre_a_deux_points_par_l_album_ytm():
+    fiche = _fiche("Entre les lignes : prière", "Keny Arkana", {"deezer": 258})
+    assert video_nomme(fiche, _video("Keny Arkana - Prière", "ytm_album", 259, "Keny Arkana"))
+    assert not video_nomme(fiche, _video("Keny Arkana - Prière", "search_auto", 259, "Keny Arkana"))
+
+
+def test_heartless_de_dermot_kennedy_ne_passe_pas():
+    fiche = _fiche("Heartless - Recorded At RAK Studios", "Kanye West", {"deezer": 210})
+    video = _video("Dermot Kennedy - Power Over Me", "ytm_album", 210, "Dermot Kennedy")
+    assert not video_nomme(fiche, video)

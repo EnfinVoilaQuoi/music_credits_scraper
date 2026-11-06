@@ -295,12 +295,17 @@ def _variante_de(piste: PisteDeezer):
     )
 
 
+_MENTIONS_SANS_ARTISTE = frozenset({"traditional", "traditionnel", "trad"})
+
+
 def nom_de_contributeur_plausible(nom: str | None) -> bool:
     """PUR. Deezer crée parfois une entité d'artiste à partir d'un titre mal
     découpé : « Soprano) / Ils Disent / Personne n'est Innocent » est
     contributeur de « La Colombe » de Médine (2026-09-24). Une parenthèse
-    orpheline trahit la coupure — jamais un nom d'artiste."""
-    if not nom or not nom.strip():
+    orpheline trahit la coupure — jamais un nom d'artiste. « Traditional » non
+    plus : c'est la mention d'un air du domaine public (« Al-Jilani » de Kery
+    James, 2026-11-06), pas un invité."""
+    if not nom or not nom.strip() or normalize_name(nom) in _MENTIONS_SANS_ARTISTE:
         return False
     return nom.count("(") == nom.count(")") and nom.count("[") == nom.count("]")
 
@@ -1320,6 +1325,11 @@ def retirer_editions_de_la_page(dm, track_id: int, deezer_id: int) -> list[str]:
     ]
 
 
+#: Drapeau « contributeurs à relire » (`source_track_failures`) : fiche créée sans
+#: réponse de `/track/{id}`, ses invités restent à lire (décision utilisateur 2026-11-06).
+SOURCE_CONTRIBUTEURS = "deezer_contributeurs"
+
+
 @etape_de_flux("Création des écarts Deezer")
 def creer_lignes(
     dm, artist, ecarts: list[Ecart], *, lire_piste=None, heriter=None, should_stop=lambda: False
@@ -1377,11 +1387,13 @@ def creer_lignes(
             comptes.append(f"« {e.titre} » existe déjà (« {connue.title} ») — rien")
             continue
         contributeurs = e.piste.contributors
-        if not contributeurs and lire_piste is not None:
-            detail = lire_piste(e.piste.id) or {}
+        a_relire = False
+        if not contributeurs:
+            detail = lire_piste(e.piste.id) if lire_piste is not None else None
+            a_relire = detail is None and e.album.nb_tracks != 1
             contributeurs = [
                 (int(c["id"]), c.get("name") or "")
-                for c in detail.get("contributors") or []
+                for c in (detail or {}).get("contributors") or []
                 if c.get("id")
             ]
         track = _ligne(artist, e, contributeurs)
@@ -1389,6 +1401,8 @@ def creer_lignes(
             (heriter or version_heritage.heriter)(track, e.socle)
         dm.save_track(track)
         dm.record_pending(track)
+        if a_relire:
+            noter_relecture(dm, [(track.id, artist.id)], "contributeurs de la piste non lus")
         base.append(track)  # deux écarts de la même piste ne la créent pas deux fois
         if track.observations:
             dm.upsert_observations(track.id, track.observations)
@@ -1437,6 +1451,86 @@ def creer_lignes(
         from src.services.lignes_tiers import donner_aux_interpretes
 
         comptes += donner_aux_interpretes(dm, track, artist)
+    return comptes
+
+
+def noter_relecture(dm, fiches, detail: str, *, issue=None) -> None:
+    """Pose (ou solde, `issue=IssueKind.OK`) le drapeau « contributeurs à relire »
+    sur `fiches` = `[(track_id, artist_id)]` : un échec suivi, que `cli echecs` montre
+    et que `relire_contributeurs` retente au prochain passage de l'étape identité."""
+    from src.observability.issues import IssueKind
+    from src.observability.repository import SourceUsageRepository
+    from src.observability.source_usage import Verdict
+
+    SourceUsageRepository(dm.engine).suivre_morceaux(
+        [
+            Verdict(
+                source_key=SOURCE_CONTRIBUTEURS,
+                issue=issue or IssueKind.UNREACHABLE,
+                flow="identite",
+                artist_id=artist_id,
+                track_id=track_id,
+                detail=detail,
+            )
+            for track_id, artist_id in fiches
+        ]
+    )
+
+
+def feats_manquants(track: Track, artist, detail: dict) -> list[Credit]:
+    """PUR. Les contributeurs de la piste (`/track/{id}`) qui ne sont ni l'artiste, ni
+    l'interprète principal, ni un feat déjà porté par la fiche."""
+    connus = {normalize_name(c.name) for c in track.credits if c.role == CreditRole.FEATURED}
+    nouveaux: list[Credit] = []
+    for c in detail.get("contributors") or []:
+        nom = c.get("name") or ""
+        cle = normalize_name(nom)
+        if (
+            cle in connus
+            or not nom_de_contributeur_plausible(nom)
+            or names_match_as_words(nom, artist.name)
+            or (track.primary_artist_name and names_match_as_words(nom, track.primary_artist_name))
+        ):
+            continue
+        connus.add(cle)
+        nouveaux.append(Credit(name=nom, role=CreditRole.FEATURED, source="deezer"))
+    return nouveaux
+
+
+def relire_contributeurs(dm, artist, lire_piste=None) -> list[str]:
+    """Relit `/track/{id}` des fiches de l'artiste au drapeau levé : les invités de la
+    piste rejoignent la fiche, et ceux qui sont en base reçoivent leur ligne. Toujours
+    sans réponse, le drapeau reste. Rend un compte rendu par fiche complétée."""
+    from src.observability.issues import IssueKind
+    from src.observability.repository import SourceUsageRepository
+    from src.services.lignes_tiers import donner_aux_interpretes
+    from src.utils.deezer_identity import lire_piste_http
+
+    a_relire = {
+        r["track_id"]
+        for r in SourceUsageRepository(dm.engine).echecs_suivis(sources=[SOURCE_CONTRIBUTEURS])
+    }
+    if not a_relire:
+        return []
+    lire = lire_piste or lire_piste_http
+    comptes: list[str] = []
+    for track in dm.get_artist_tracks(artist.id):
+        if track.id not in a_relire:
+            continue
+        detail = lire(int(track.deezer_id)) if track.deezer_id else {}
+        if detail is None:
+            noter_relecture(dm, [(track.id, artist.id)], "contributeurs de la piste non lus")
+            continue
+        nouveaux = feats_manquants(track, artist, detail)
+        if nouveaux:
+            track.credits = [*track.credits, *nouveaux]
+            dm.save_track(track)
+            comptes.append(
+                f"« {track.title} » : invités relus — {', '.join(c.name for c in nouveaux)}"
+            )
+            logger.info(comptes[-1])
+            comptes += donner_aux_interpretes(dm, track, artist)
+        noter_relecture(dm, [(track.id, artist.id)], "", issue=IssueKind.OK)
     return comptes
 
 

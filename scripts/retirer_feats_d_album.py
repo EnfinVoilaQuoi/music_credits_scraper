@@ -13,6 +13,9 @@ nom absent des contributeurs de la piste, présent dans ceux de son album, album
 plusieurs pistes. Deezer ne répond pas : la fiche est laissée, à relire au prochain
 passage. La ligne donnée à un de ces faux invités (même ID Deezer, sans page) est
 supprimée ; les autres crédits sont retirés de la fiche.
+
+Ces mêmes fiches n'ont jamais lu les invités de LEUR piste : toutes les fiches sans page
+au même ID sont relues (`ecarts_deezer.relire_contributeurs`), leurs vrais invités ajoutés.
 """
 
 import argparse
@@ -130,6 +133,65 @@ def reparer(dm, a_faire: list[Fiche]) -> tuple[int, int]:
     return supprimees, retires
 
 
+def fiches_sans_page(dm) -> list[tuple[int, int]]:
+    """`[(track_id, artist_id)]` des fiches créées depuis Deezer, sans page Genius."""
+    with dm.engine.connect() as conn:
+        return [
+            (r[0], r[1])
+            for r in conn.execute(
+                text(
+                    "SELECT id, artist_id FROM tracks "
+                    "WHERE genius_id IS NULL AND deezer_id IS NOT NULL ORDER BY id"
+                )
+            )
+        ]
+
+
+def lecteur_en_memoire(lire_piste, pause: float = 0.2):
+    """Une piste n'est lue qu'une fois : à blanc, puis à l'écriture."""
+    lues: dict[int, dict | None] = {}
+
+    def lire(deezer_id: int) -> dict | None:
+        if deezer_id not in lues or lues[deezer_id] is None:
+            lues[deezer_id] = lire_piste(deezer_id)
+            time.sleep(pause)
+        return lues[deezer_id]
+
+    return lire
+
+
+def apercu_des_invites(dm, lire_piste) -> list[str]:
+    """À blanc : les vrais invités que la relecture ajouterait, après la réparation."""
+    from src.services.ecarts_deezer import feats_manquants
+
+    lignes = []
+    fiches = dict(fiches_sans_page(dm))
+    for artiste in dm.artistes_de_la_base():
+        if artiste.id not in set(fiches.values()):
+            continue
+        for t in dm.get_artist_tracks(artiste.id):
+            detail = lire_piste(int(t.deezer_id)) if t.id in fiches else None
+            manquants = feats_manquants(t, artiste, detail) if detail else []
+            if manquants:
+                noms = ", ".join(c.name for c in manquants)
+                lignes.append(f"  [{artiste.name}] #{t.id} « {t.title} » + {noms}")
+    return lignes
+
+
+def relire_tout(dm, lire_piste) -> list[str]:
+    """Lève le drapeau sur les fiches sans page, puis les relit artiste par artiste."""
+    from src.services import ecarts_deezer
+
+    fiches = fiches_sans_page(dm)
+    ecarts_deezer.noter_relecture(dm, fiches, "rattrapage du 2026-11-06")
+    comptes = []
+    artistes = {artist_id for _, artist_id in fiches}
+    for artiste in dm.artistes_de_la_base():
+        if artiste.id in artistes:
+            comptes += ecarts_deezer.relire_contributeurs(dm, artiste, lire_piste)
+    return comptes
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--apply", action="store_true", help="écrit (backup automatique avant)")
@@ -148,9 +210,13 @@ def main(argv=None) -> int:
     dm = module_dm.DataManager()
     print(f"Base : {dm.db_path}")
 
-    a_faire = juger(lire_fiches(dm), lire_piste_http, lire_album_http)
+    lire_piste = lecteur_en_memoire(lire_piste_http)
+    a_faire = juger(lire_fiches(dm), lire_piste, lire_album_http)
     rapport(a_faire)
-    if not args.apply or not a_faire:
+    if not args.apply:
+        apercu = apercu_des_invites(dm, lire_piste)
+        print(f"\nRelecture : {len(fiches_sans_page(dm))} fiche(s), {len(apercu)} à compléter")
+        print("\n".join(apercu))
         print("\n(à blanc — relancer avec --apply pour écrire)")
         return 0
     sauvegarde = (
@@ -167,6 +233,9 @@ def main(argv=None) -> int:
     print(f"💾 Backup : {backup}")
     supprimees, retires = reparer(dm, a_faire)
     print(f"✅ {supprimees} fiche(s) supprimée(s), {retires} crédit(s) retiré(s)")
+    comptes = relire_tout(dm, lire_piste)
+    print("\n".join(comptes))
+    print(f"✅ relecture : {len(comptes)} ligne(s) de compte rendu")
     return 0
 
 

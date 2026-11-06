@@ -709,6 +709,7 @@ def test_contributeur_au_nom_malforme_ecarte():
 
     assert not nom_de_contributeur_plausible("Soprano) / Ils Disent / Personne n'est Innocent")
     assert not nom_de_contributeur_plausible("")
+    assert not nom_de_contributeur_plausible("Traditional")
     assert nom_de_contributeur_plausible("Soprano")
     assert nom_de_contributeur_plausible("Swing (BE)")
 

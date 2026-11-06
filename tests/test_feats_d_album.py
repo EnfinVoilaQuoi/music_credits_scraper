@@ -138,6 +138,79 @@ class TestCorrecteur:
         assert data_manager.get_artist_tracks(diams.id) == []
 
 
+def _drapeaux(dm) -> set[int]:
+    from src.observability.repository import SourceUsageRepository
+
+    return {
+        r["track_id"]
+        for r in SourceUsageRepository(dm.engine).echecs_suivis(sources=[ed.SOURCE_CONTRIBUTEURS])
+    }
+
+
+class TestRelecture:
+    def _creer_sans_reponse(self, dm, artiste, nb_tracks=15):
+        piste = ed.PisteDeezer(id=9, title="En duo", duration=186, isrc="FR1")
+        ed.creer_lignes(
+            dm,
+            artiste,
+            [ed.Ecart("absent", _album(artiste, nb_tracks), piste)],
+            lire_piste=lambda _i: None,
+        )
+        return _charger(dm, artiste)["En duo"]
+
+    def test_sans_reponse_la_fiche_porte_le_drapeau(self, data_manager):
+        kery = _artiste(data_manager, "Kery James", 77)
+        fiche = self._creer_sans_reponse(data_manager, kery)
+        assert _feats(fiche) == set() and _drapeaux(data_manager) == {fiche.id}
+
+    def test_une_reponse_ne_pose_pas_de_drapeau(self, data_manager):
+        kery = _artiste(data_manager, "Kery James", 77)
+        piste = ed.PisteDeezer(id=9, title="Solo", duration=186, isrc="FR1")
+        ed.creer_lignes(
+            data_manager,
+            kery,
+            [ed.Ecart("absent", _album(kery, 15), piste)],
+            lire_piste=lambda _i: {"contributors": [{"id": 77, "name": "Kery James"}]},
+        )
+        assert _drapeaux(data_manager) == set()
+
+    def test_un_single_n_a_pas_besoin_de_relecture(self, data_manager):
+        kery = _artiste(data_manager, "Kery James", 77)
+        fiche = self._creer_sans_reponse(data_manager, kery, nb_tracks=1)
+        assert _feats(fiche) == {"Diam's", "Tunisiano"} and _drapeaux(data_manager) == set()
+
+    def test_la_relecture_pose_les_invites_et_leur_ligne(self, data_manager):
+        kery = _artiste(data_manager, "Kery James", 77)
+        diams = _artiste(data_manager, "Diam's")
+        fiche = self._creer_sans_reponse(data_manager, kery)
+        lecture = {"contributors": [{"id": 77, "name": "Kery James"}, {"id": 8, "name": "Diam's"}]}
+
+        comptes = ed.relire_contributeurs(data_manager, kery, lambda _i: lecture)
+
+        assert len(comptes) == 2
+        assert _feats(_charger(data_manager, kery)["En duo"]) == {"Diam's"}
+        assert [t.title for t in data_manager.get_artist_tracks(diams.id)] == ["En duo"]
+        assert fiche.id not in _drapeaux(data_manager)
+        assert ed.relire_contributeurs(data_manager, kery, lambda _i: lecture) == []
+
+    def test_toujours_sans_reponse_le_drapeau_reste(self, data_manager):
+        kery = _artiste(data_manager, "Kery James", 77)
+        fiche = self._creer_sans_reponse(data_manager, kery)
+        assert ed.relire_contributeurs(data_manager, kery, lambda _i: None) == []
+        assert _drapeaux(data_manager) == {fiche.id}
+
+    def test_une_fiche_sans_invite_solde_son_drapeau(self, data_manager):
+        kery = _artiste(data_manager, "Kery James", 77)
+        self._creer_sans_reponse(data_manager, kery)
+        solo = {"contributors": [{"id": 77, "name": "Kery James"}]}
+        assert ed.relire_contributeurs(data_manager, kery, lambda _i: solo) == []
+        assert _drapeaux(data_manager) == set()
+
+    def test_l_etape_identite_relit_le_drapeau(self):
+        source = Path(__file__).resolve().parents[1] / "src" / "services" / "identite.py"
+        assert "ecarts_deezer.relire_contributeurs(" in source.read_text(encoding="utf-8")
+
+
 class TestReparation:
     def test_le_juge(self):
         s = _script()

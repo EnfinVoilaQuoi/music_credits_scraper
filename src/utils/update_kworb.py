@@ -724,10 +724,51 @@ def duree_de_la_ligne(entry, track, lire_identite) -> str | None:
     return "autre"
 
 
+def equivalence_confirmee(entry, track, lire_identite) -> bool:
+    """La ligne porte le titre de la fiche sous une autre GRAPHIE (titres
+    ÉQUIVALENTS, même version : « Airplanes, Pt. II » / « Airplanes, Pt. 2 »,
+    « F*ck a B*tch » / « Fuck a Bitch », 2026-11-06), son ID n'est pas refusé,
+    et aucune durée ne la contredit : l'un des deux sans durée, ou l'ID à moins
+    de `ECART_AUTRE_ENREGISTREMENT` d'un témoin INDÉPENDANT de la fiche (228 /
+    224 s, 273 / 270 s, le même morceau dans les deux cas). Au-delà, à l'humain :
+    une autre édition, peut-être à sommer (voir `duree_de_la_ligne`, Eminem
+    « Just Don't Give a F** », 227 / 242 s)."""
+    titre = _SUFFIXE_UPLOAD.sub("", entry["title"])
+    fiche = _SUFFIXE_UPLOAD.sub("", track.title)
+    if not titres_equivalents(titre, fiche) or not meme_version_stricte(titre, fiche):
+        return False
+    sid = entry.get("spotify_id")
+    if sid and sid in corrections_fiches.ids_refuses(track):
+        return False
+    temoin = duree_temoin(track)
+    duree = (_identite_embed(sid, lire_identite) or {}).get("duration") if sid else None
+    return not temoin or not duree or abs(temoin - duree) <= ECART_AUTRE_ENREGISTREMENT
+
+
+def _fiche_equivalente(entry, index: Index, lire_identite):
+    """L'UNIQUE fiche dont le titre équivaut à celui de la ligne sans lui être
+    égal une fois normalisé, si `equivalence_confirmee` la rattache ; sinon
+    None. Ni titre générique (chaque projet a les siens), ni homonymes : deux
+    fiches au titre équivalent restent à l'humain ; une fiche en rôle secondaire
+    ne passe qu'à défaut, si Spotify crédite son principal (`_recevable`)."""
+    titre = _SUFFIXE_UPLOAD.sub("", entry["title"])
+    if titre_generique(titre):
+        return None
+    fiches = [t for t in index.tracks if titres_equivalents(titre, t.title)]
+    principales = [t for t in fiches if not t.secondary_role]
+    fiches = principales or fiches
+    if len(fiches) != 1 or not _recevable(fiches[0], entry.get("spotify_id"), lire_identite):
+        return None
+    return fiches[0] if equivalence_confirmee(entry, fiches[0], lire_identite) else None
+
+
 def flou_confirme(entry, track, lire_identite) -> bool:
     """Un rapprochement FLOU qui n'en est pas un : la durée de l'ID de la
-    ligne est celle de la fiche (`duree_de_la_ligne`) — rien à soumettre."""
-    return duree_de_la_ligne(entry, track, lire_identite) == "meme"
+    ligne est celle de la fiche (`duree_de_la_ligne`), ou le titre est le sien
+    sous une autre graphie (`equivalence_confirmee`) — rien à soumettre."""
+    return duree_de_la_ligne(entry, track, lire_identite) == "meme" or equivalence_confirmee(
+        entry, track, lire_identite
+    )
 
 
 def lien_tranche(entry, track, decisions: dict) -> bool:
@@ -968,6 +1009,10 @@ def rapprocher(
         verdict = duree_de_la_ligne(entry, cand, lire_identite) if cand else None
         if verdict == "meme" and _recevable(cand, sid, lire_identite):
             return Rapprochement(track=cand, via="duree", score=score)
+        # Le titre de la fiche sous une autre graphie (2026-11-06).
+        equivalente = _fiche_equivalente(entry, index, lire_identite)
+        if equivalente is not None:
+            return Rapprochement(track=equivalente, via="equivalent")
         if verdict == "autre":
             return Rapprochement(motif="autre_duree")
         if cand:
@@ -1225,6 +1270,7 @@ def relier_ids_kworb(artist, data_manager, scraper=None, lire_identite=None) -> 
             "title+artistes",
             "fuzzy",
             "duree",
+            "equivalent",
             "sous_titre",
         ) and autre_upload_que_la_fiche(track, sid, entry["streams"], ids_page, lus_web):
             continue
@@ -1499,7 +1545,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         track, via = r.track, r.via
         sid = entry.get("spotify_id")
         if (
-            via in ("title", "title+artistes", "fuzzy", "duree", "sous_titre")
+            via in ("title", "title+artistes", "fuzzy", "duree", "equivalent", "sous_titre")
             and sid
             and autre_upload_que_la_fiche(track, sid, entry["streams"], ids_page, lus_web)
             and not lien_tranche(entry, track, _decisions)
@@ -1534,11 +1580,13 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                     label=entry["title"],
                     variant_track_id=track.id,
                 )
-        if via == "duree" or (via == "fuzzy" and flou_confirme(entry, track, lire_identite)):
+        if via in ("duree", "equivalent") or (
+            via == "fuzzy" and flou_confirme(entry, track, lire_identite)
+        ):
             result["flous_confirmes"].append((entry["title"], track.title))
             logger.info(
                 f"🔗 Kworb '{entry['title']}' → '{track.title}' : titre proche, "
-                f"même durée — confirmé"
+                f"même durée ou même titre écrit autrement — confirmé"
             )
         elif via == "fuzzy":
             result["fuzzy_matched"].append((entry["title"], track.title, r.score))

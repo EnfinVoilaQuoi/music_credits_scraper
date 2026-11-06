@@ -14,7 +14,8 @@ from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
 
 
 @pytest.fixture(autouse=True)
-def _propre(monkeypatch):
+def _propre(monkeypatch, tmp_path):
+    monkeypatch.setattr(base, "_dossier_des_defis", lambda: tmp_path / "defis")
     su.reset()
     su.set_sink(None)
     monkeypatch.delenv("GENIUS_CDP_URL", raising=False)  # échelle headless → visible
@@ -266,3 +267,92 @@ def test_la_fenetre_visible_suit_le_defi_de_bout_en_bout(tmp_path, monkeypatch):
         scraper._patchright_fetch("u", None, None, 120_000, 120_000, 0, headless=False)
     )
     assert blocked is True and html == DEFI
+
+
+# --- Le journal dit comment la fenêtre s'est terminée ----------------------------
+
+
+@pytest.fixture
+def journal(monkeypatch):
+    lignes = []
+    monkeypatch.setattr(base.logger, "info", lignes.append)
+    monkeypatch.setattr(base.logger, "warning", lignes.append)
+    return lignes
+
+
+class TestCompteRendu:
+    def test_defi_leve_page_sans_le_contenu(self, monkeypatch, journal):
+        """La piste « Souvenir Du Bled » : ce que le journal ne disait pas."""
+        horloge = {"t": 0.0}
+        _attendre(FaussePage([DEFI] * 4 + [SANS_PAROLES], horloge), 0, monkeypatch)
+        assert journal == [
+            "CrawlAIScraperBase: défi levé après 8 s, page sans le contenu attendu : u"
+        ]
+
+    def test_defi_leve_contenu_attendu(self, monkeypatch, journal):
+        horloge = {"t": 0.0}
+        _attendre(FaussePage([DEFI, AVEC_PAROLES], horloge), 0, monkeypatch)
+        assert journal == ["CrawlAIScraperBase: défi levé après 2 s, contenu attendu : u"]
+
+    def test_la_duree_est_celle_du_defi_sans_la_grace(self, monkeypatch, journal):
+        horloge = {"t": 0.0}
+
+        class Lente(FaussePage):
+            async def wait_for_selector(self, _sel, timeout):
+                horloge["t"] += timeout / 1000
+                raise base.PatchrightError("Timeout")
+
+        _attendre(Lente([DEFI, SANS_PAROLES], horloge), 0, monkeypatch)
+        assert "après 2 s" in journal[0]
+
+    def test_defi_non_leve(self, monkeypatch, journal):
+        _attendre(FaussePage([DEFI], {"t": 0.0}), 180, monkeypatch)
+        assert journal == [
+            "CrawlAIScraperBase: défi non levé après 180 s, "
+            "page laissée pour le prochain passage : u"
+        ]
+
+    def test_fenetre_fermee(self, monkeypatch, journal):
+        page = FaussePage([base.PatchrightError("Target closed")], {"t": 0.0})
+        page.fermee = True
+        with pytest.raises(base.PatchrightError):
+            _attendre(page, 0, monkeypatch)
+        assert journal == ["CrawlAIScraperBase: fenêtre fermée après 0 s : u"]
+
+    def test_l_ouverture_nomme_le_marqueur(self, journal):
+        _jouer(_scraper([(DEFI, True), (AVEC_PAROLES, False)]))
+        assert "(marqueur : just a moment)" in journal[0]
+
+    def test_l_ouverture_sans_html_dit_l_erreur(self, journal):
+        _jouer(_scraper([(None, True), (AVEC_PAROLES, False)]))
+        assert "(marqueur : aucun, erreur du navigateur)" in journal[0]
+
+
+def test_les_marqueurs_du_defi():
+    assert base._marqueur_de_defi(DEFI) == "just a moment"
+    assert base._marqueur_de_defi("<script>window._cf_chl_opt={}</script>") == "_cf_chl_opt"
+    assert base._marqueur_de_defi(None) is None
+    assert base._marqueur_de_defi(SANS_PAROLES) is None
+    assert (
+        base._marqueur_de_defi('<script src="/cdn-cgi/challenge-platform/x"></script>') is None
+    ), "le beacon est aussi sur les pages déjà passées"
+
+
+class TestDefiGarde:
+    URL = "https://genius.com/Kamelancien-souvenir-du-bled-lyrics"
+
+    def test_le_defi_non_leve_est_garde(self):
+        _jouer(_scraper([(None, True), (DEFI, True)]), url=self.URL)
+        (fichier,) = base._dossier_des_defis().iterdir()
+        assert fichier.name.endswith("_Kamelancien-souvenir-du-bled-lyrics.html")
+        assert fichier.read_text(encoding="utf-8") == f"<!-- {self.URL} -->\n{DEFI}"
+
+    def test_un_defi_leve_ne_garde_rien(self):
+        _jouer(_scraper([(DEFI, True), (AVEC_PAROLES, False)]), url=self.URL)
+        assert not base._dossier_des_defis().exists()
+
+    def test_une_ecriture_impossible_ne_fait_pas_tomber_le_run(self, monkeypatch, tmp_path):
+        (tmp_path / "fichier").write_text("x")
+        monkeypatch.setattr(base, "_dossier_des_defis", lambda: tmp_path / "fichier" / "defis")
+        html, verdicts = _jouer(_scraper([(None, True), (DEFI, True)]), url=self.URL)
+        assert html is None and verdicts[0].issue == IssueKind.UNREACHABLE

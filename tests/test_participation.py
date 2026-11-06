@@ -166,8 +166,8 @@ class TestSurLeDisque:
         assert _qui_chercher(self._dre(), "Eminem", ("Slim Shady",))[0] is None
 
     def test_l_interface_connait_la_categorie(self):
-        from src.presentation.filtres import Filtre
         from src.gui_qt.theme import TOKENS
+        from src.presentation.filtres import Filtre
         from src.presentation.table import LIBELLE_PARTICIPATION
 
         for p in Participation:

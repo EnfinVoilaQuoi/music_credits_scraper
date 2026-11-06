@@ -2093,6 +2093,35 @@ class TrackRepository:
             logger.error(f"Erreur purger_credits_relations_deguisees: {e}")
             return 0
 
+    def credits_hors_credits(self) -> list[dict[str, Any]]:
+        """Les lignes de rôle `Other` dont le libellé Genius est une métadonnée de
+        la page (`credit_roles.LIBELLES_HORS_CREDITS`), pour `reclasser_credits`."""
+        from src.utils.credit_roles import LIBELLES_HORS_CREDITS
+
+        marques = ", ".join(f"'{libelle}'" for libelle in LIBELLES_HORS_CREDITS)
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text(
+                    "SELECT id, track_id, name, role_detail FROM credits "
+                    f"WHERE role = 'Other' AND lower(role_detail) IN ({marques}) "  # noqa: S608
+                    "ORDER BY id"
+                )
+            ).mappings()
+            return [dict(ligne) for ligne in lignes]
+
+    def credits_au_nom_d_annee(self) -> list[dict[str, Any]]:
+        """Les crédits dont le nom est une année, avec le titre de leur fiche."""
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text(
+                    "SELECT c.id, c.track_id, c.name, c.role, c.role_detail, t.title "
+                    "FROM credits c JOIN tracks t ON t.id = c.track_id "
+                    "WHERE c.name GLOB '19[0-9][0-9]' OR c.name GLOB '20[0-9][0-9]' "
+                    "ORDER BY c.id"
+                )
+            ).mappings()
+            return [dict(ligne) for ligne in lignes]
+
     def reclasser_credits(self, roles: dict, suppressions=()) -> tuple[int, int]:
         """Change le rôle de crédits existants et en retire d'autres.
 

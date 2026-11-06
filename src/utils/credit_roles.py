@@ -13,7 +13,15 @@ from src.models.track import CreditRole
 #: Libellés de la section crédits d'une page Genius qui ne sont PAS des crédits
 #: (métadonnées du morceau). Partagé par le scrape et la voie API : deux
 #: copies finiraient par diverger.
-LIBELLES_HORS_CREDITS = ("album", "released on", "release date", "genre", "tags")
+LIBELLES_HORS_CREDITS = (
+    "album",
+    "released on",
+    "released in",
+    "release date",
+    "expected",
+    "genre",
+    "tags",
+)
 
 #: Ce que les contributeurs Genius tapent FAUTE DE SAVOIR, dans un champ en
 #: texte libre (« Recorded At » : « N/A » sur deux « references » de Kanye,

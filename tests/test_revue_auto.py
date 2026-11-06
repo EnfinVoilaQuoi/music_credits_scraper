@@ -607,6 +607,58 @@ def test_deezer_edition_de_support_rattachee_puis_retablie(data_manager, artiste
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
 
 
+def test_edition_a_la_duree_de_l_id_spotify_rattachee_puis_retablie(
+    data_manager, artiste, monkeypatch
+):
+    """Kery James « 28 Décembre 1977 » : la page de *92.2012* a la durée de l'ID
+    Spotify. Notée en édition, elle garde la page de la fiche, et le
+    `duree_spotify` tombe seul. Rétablir retire l'édition."""
+    from src.services import ecarts_deezer as ed
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    _fiche_durees(
+        data_manager,
+        artiste,
+        "28 décembre 1977",
+        41,
+        {"deezer": 581, "spotify_web": 537, "youtube": 582, "ytmusic": 582},
+        duration=581,
+        isrc="FRN370102110",
+        deezer_id=100,
+        spotify_id="SP537",
+    )
+    fiche = _charger(data_manager, artiste)["28 décembre 1977"]
+    artiste.deezer_id = 77
+    album = ed.AlbumDeezer(id=501, title="92.2012", artist_id=77, artist_name=artiste.name)
+    piste = ed.PisteDeezer(id=9, title="28 Décembre 1977", duration=537, isrc="FR9W11201876")
+    bilan = ed.BilanEcarts(deezer_id=77, artiste=artiste.name)
+    bilan.ecarts = [
+        ed.Ecart("link_candidate", album, piste, existing_track=fiche, matched_by="title")
+    ]
+    ed.enregistrer_signalements(data_manager, artiste, bilan)
+    _charger(data_manager, artiste)
+    assert "duree_spotify" in {c.detecteur for c in revue.analyser(data_manager, artiste).actifs}
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert not bilan.echecs, bilan
+    assert 9 in data_manager.get_artist_edition_deezer_ids(artiste.id)
+    fiche = _charger(data_manager, artiste)["28 décembre 1977"]
+    assert fiche.deezer_id == 100 and fiche.durations_observees["deezer"] == 581
+    assert "duree_spotify" not in {
+        c.detecteur for c in revue.analyser(data_manager, artiste).actifs
+    }
+
+    correction = next(
+        c
+        for c in data_manager.corrections_revue(artiste.id)
+        if c["action"] == "regle:deezer_rattacher_edition"
+    )
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert 9 not in data_manager.get_artist_edition_deezer_ids(artiste.id)
+    fiche = _charger(data_manager, artiste)["28 décembre 1977"]
+    assert fiche.deezer_id == 100 and fiche.durations_observees["deezer"] == 581
+
+
 def test_deezer_version_sans_fiche_creee_en_secondaire_puis_retablie(
     data_manager, artiste, monkeypatch
 ):

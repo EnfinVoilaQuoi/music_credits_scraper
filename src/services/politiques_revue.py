@@ -1258,6 +1258,9 @@ REGLES_DEEZER = frozenset(
         ("deezer_apparition", "deezer_rattacher_isrc"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
+        # 2026-11-06 : l'autre page Deezer a la durée de l'ID Spotify de la fiche
+        # (Kery James, *92.2012*) ; simulée sur la copie, à valider.
+        ("deezer_link_candidate", "deezer_rattacher_edition"),
         # 2026-10-31 : édition de diffusion d'une fiche au sous-titre omis par
         # Deezer (Kid Cudi) ; simulée sur la copie, 3 / 4 `deezer_absent`.
         ("deezer_absent", "deezer_edition"),
@@ -1442,6 +1445,41 @@ def _edition_de_support(cas, ctx) -> Arbitrage | None:
         f"édition de support de « {fiche.title} » : rattacher, ne pas créer",
         "deezer_rattacher_edition",
         f"« {piste.get('title')} » ; #{fiche.id} ; {preuve}",
+    )
+
+
+def _edition_a_la_duree_de_l_id_spotify(cas, track) -> Arbitrage | None:
+    """Une AUTRE page Deezer, au même titre, a la durée de l'ID Spotify de la
+    fiche à ± 2 s : les deux catalogues ont la même édition du disque, dont la
+    durée diffère de la page principale de la fiche. Elle se note en édition, et
+    `duree_spotify` tombe seul : le vote lit les durées d'édition (Kery James,
+    *92.2012* : « 28 Décembre 1977 » à 537 s chez Spotify et Deezer, la fiche à
+    581 s). Un rapprochement ambigu ou un titre générique reste à l'humain, une
+    page refusée n'est jamais rattachée."""
+    from src.utils.corrections_fiches import deezer_refuses
+    from src.utils.version_descriptors import meme_titre_normalise
+
+    if cas.detecteur != "deezer_link_candidate" or track is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste = ecart.get("piste") or {}
+    duree, spotify = piste.get("duration"), _durees(track).get("spotify_web")
+    if ecart.get("matched_by") != "title" or not (duree and spotify and track.spotify_id):
+        return None
+    if not track.deezer_id or str(track.deezer_id) == str(piste.get("id")):
+        return None
+    if abs(int(duree) - int(spotify)) > ECART_FICHIER_S:
+        return None
+    if not meme_titre_normalise(piste.get("title"), track.title) or titre_generique(track.title):
+        return None
+    if int(piste.get("id") or 0) in deezer_refuses(track):
+        return None
+    disque = (ecart.get("album") or {}).get("title")
+    return Arbitrage(
+        f"édition du disque « {disque} » : rattacher à « {track.title} »",
+        "deezer_rattacher_edition",
+        f"page {piste.get('id')} {duree} s = ID Spotify {spotify} s ; "
+        f"page de la fiche {track.deezer_id}",
     )
 
 
@@ -1713,6 +1751,9 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set, lire
     de_support = _edition_de_support(cas, ctx)
     if de_support is not None:
         return de_support
+    a_la_duree_spotify = _edition_a_la_duree_de_l_id_spotify(cas, track)
+    if a_la_duree_spotify is not None:
+        return a_la_duree_spotify
     if cas.detecteur == "deezer_version":
         # Une version n'est jamais un original : le « ✓ Normal » de
         # l'instrumental / a cappella (aucune fiche créée, DV1), ou la fiche

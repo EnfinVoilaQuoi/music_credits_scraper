@@ -631,12 +631,17 @@ def _deezer_rattacher_edition(dm, _track, cas: Cas, *, artiste) -> tuple[str, di
     from src.services.politiques_revue import fiche_de_l_edition_de_support
 
     preuve = cas.preuves["ecart"]
-    trouvee = fiche_de_l_edition_de_support(
-        preuve.get("piste") or {}, charger_contexte(dm, artiste).disco
-    )
-    if trouvee is None:
+    disco = charger_contexte(dm, artiste).disco
+    if cas.track_id is not None:
+        # Parution à confirmer : le cas désigne sa fiche
+        # (`_edition_a_la_duree_de_l_id_spotify`).
+        fiche = next((t for t in disco if t.id == cas.track_id), None)
+    else:
+        trouvee = fiche_de_l_edition_de_support(preuve.get("piste") or {}, disco)
+        fiche = trouvee[0] if trouvee else None
+    if fiche is None:
         raise LookupError("la fiche de l'édition n'est plus identifiable")
-    return _rattacher_a(dm, artiste, preuve, trouvee[0], "edition_de_support")
+    return _rattacher_a(dm, artiste, preuve, fiche, "edition_de_support")
 
 
 def _rattacher_a(dm, artiste, preuve: dict, fiche, matched_by: str) -> tuple[str, dict]:

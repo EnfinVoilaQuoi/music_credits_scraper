@@ -557,9 +557,14 @@ def _retirer_video_partagee(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict
 
 def _contexte_action(dm, artiste):
     from src.services import revue_actions
+    from src.utils.deezer_identity import lire_piste_http
 
     tracks = {t.id: t for t in artiste.tracks or []}
-    return revue_actions.ContexteAction(dm, artiste, tracks, renvois={})
+    # Sans lecteur, une fiche créée n'a pas les contributeurs de SA piste (la liste
+    # d'un album ne les donne pas) : même lecture que la fenêtre « À trancher ».
+    return revue_actions.ContexteAction(
+        dm, artiste, tracks, renvois={"lire_piste_deezer": lire_piste_http}
+    )
 
 
 def _deezer_appliquer(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
@@ -633,7 +638,7 @@ def _rattacher_a(dm, artiste, preuve: dict, fiche, matched_by: str) -> tuple[str
     ctx = _contexte_action(dm, artiste)
     ecart = ecarts_deezer.ecart_depuis(preuve, ctx.tracks)
     ecart.nature, ecart.existing_track, ecart.matched_by = "link", fiche, matched_by
-    (compte_rendu,) = ecarts_deezer.creer_lignes(dm, artiste, [ecart]) or ["rien"]
+    compte_rendu = ecarts_deezer.creer_une_ligne(dm, artiste, ecart)
     return compte_rendu, {"type": "lien_deezer", "track_id": fiche.id, "ecart": preuve}
 
 
@@ -1075,6 +1080,9 @@ def retablir(dm, artiste, correction: dict) -> str:
         )
         if creee is None:
             raise LookupError("la fiche créée n'est plus là")
+        from src.services.lignes_tiers import retirer_lignes_donnees
+
+        retirer_lignes_donnees(dm, creee, artiste)
         dm.delete_track(creee.id)
         compte_rendu = f"fiche « {creee.title} » (créée par règle) supprimée"
     elif annulation.get("type") == "lien_deezer":

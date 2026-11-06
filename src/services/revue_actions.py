@@ -261,13 +261,12 @@ def _deezer_appliquer(ctx: ContexteAction, cas: Cas) -> str:
     ecart = ecarts_deezer.ecart_depuis(cas.preuves["ecart"], ctx.tracks)
     if ecart.nature in ("link_candidate", "link_review") and ecart.existing_track is None:
         raise LookupError("la fiche concernée n'est plus dans la discographie")
-    (compte,) = ecarts_deezer.creer_lignes(
+    return ecarts_deezer.creer_une_ligne(
         ctx.data_manager,
         ctx.artiste,
-        [ecart],
+        ecart,
         lire_piste=ctx.renvois.get("lire_piste_deezer"),
-    ) or ["rien"]
-    return compte
+    )
 
 
 def _deezer_rattacher_isrc(ctx: ContexteAction, cas: Cas) -> str:
@@ -284,8 +283,7 @@ def _deezer_rattacher_isrc(ctx: ContexteAction, cas: Cas) -> str:
             f"{len(fiches)} fiche(s) portent l'ISRC {isrc or '—'} — rattachement à faire à la main"
         )
     ecart.nature, ecart.existing_track, ecart.matched_by = "link", fiches[0], "isrc_autre_titre"
-    (compte,) = ecarts_deezer.creer_lignes(ctx.data_manager, ctx.artiste, [ecart]) or ["rien"]
-    return compte
+    return ecarts_deezer.creer_une_ligne(ctx.data_manager, ctx.artiste, ecart)
 
 
 def _deezer_edition(ctx: ContexteAction, cas: Cas) -> str:

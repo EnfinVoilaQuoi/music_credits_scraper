@@ -207,6 +207,8 @@ scripts/*
 !scripts/retirer_pochettes_photo_artiste.py
 # Crédits YouTube en double et noms composés de clip (2026-11-03).
 !scripts/retirer_credits_youtube_doublons.py
+# Invités d'un album posés sur une piste par le correcteur (2026-11-06).
+!scripts/retirer_feats_d_album.py
 # Titre de la page Spotify relu dans le brut (2026-10-31).
 !scripts/rafraichir_titres_spotify.py
 !scripts/marquer_parutions_live.py

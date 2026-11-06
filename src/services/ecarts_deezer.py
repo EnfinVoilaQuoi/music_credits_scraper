@@ -1025,7 +1025,10 @@ def _ligne(artist, e: Ecart, contributeurs: list[tuple[int, str]]) -> Track:
         track.primary_artist_name = a.artist_name or None
     credits: list[Credit] = []
     vus: set[str] = set()
-    for _cid, nom in contributeurs or a.contributors:
+    # Les contributeurs de l'ALBUM ne disent rien d'une piste, sauf sur un single :
+    # ceux d'un disque sont les invités de TOUT le disque (2026-11-06, Diam's et
+    # neuf autres posés sur « 28 décembre 1977 » du live de Kery James).
+    for _cid, nom in contributeurs or (a.contributors if a.nb_tracks == 1 else []):
         # Deezer liste parfois la même personne deux fois (deux rôles) : un
         # seul crédit (doublons Akalex, Dee Mad, Snight B — e47).
         if nom in vus:
@@ -1322,7 +1325,8 @@ def creer_lignes(
     dm, artist, ecarts: list[Ecart], *, lire_piste=None, heriter=None, should_stop=lambda: False
 ) -> list[str]:
     """Crée les lignes des écarts fournis (déjà VALIDÉS). Rend une ligne de
-    compte rendu par écart. `lire_piste(id) -> dict|None` (fiche `/track/{id}`,
+    compte rendu par écart, plus une par interprète en base qui reçoit sa ligne
+    (`creer_une_ligne` pour un seul écart). `lire_piste(id) -> dict|None` (fiche `/track/{id}`,
     pour les contributeurs) est injectable ; `heriter(version, socle)` l'est
     aussi (défaut : `version_heritage.heriter` — paroles/écriture/production
     du socle selon la famille de la version).
@@ -1434,6 +1438,13 @@ def creer_lignes(
 
         comptes += donner_aux_interpretes(dm, track, artist)
     return comptes
+
+
+def creer_une_ligne(dm, artist, ecart: Ecart, *, lire_piste=None) -> str:
+    """`creer_lignes` pour UN écart, son compte rendu en une chaîne : un écart
+    peut en rendre plusieurs, quand un interprète en base reçoit sa ligne
+    (2026-11-06 : `(compte,) = creer_lignes(…)` faisait tomber le correcteur)."""
+    return " ; ".join(creer_lignes(dm, artist, [ecart], lire_piste=lire_piste)) or "rien"
 
 
 # ── Rendu ─────────────────────────────────────────────────────────────────────

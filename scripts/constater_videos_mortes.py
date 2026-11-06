@@ -6,15 +6,16 @@
 
 À blanc, seul YouTube est interrogé (~25 unités de quota). `--retirer` applique
 la règle `video_morte` et elle seule, artiste par artiste (refus de règle,
-journal des corrections, « ↩ Rétablir ») : à ne lancer qu'après décision de
-l'utilisateur, jamais pendant un lot. Voir `services.videos_mortes`.
+journal des corrections, « ↩ Rétablir ») : décidée par l'utilisateur le
+2026-11-06, à ne lancer ni pendant un lot, ni sur une mesure incomplète (un lot
+sans réponse ne prouve rien : il reste hors constat). Voir `services.videos_mortes`.
 """
 
 import argparse
 import sys
 from collections import Counter
 
-from src.services import revue, revue_auto, videos_mortes
+from src.services import revue_auto, videos_mortes
 from src.utils.data_manager import DataManager
 from src.utils.database_backup import get_backup_manager
 from src.utils.logger import configurer_journaux
@@ -57,7 +58,6 @@ def main() -> int:
     print(f"✅ {len(fiches)} constat(s) posé(s).")
     if not args.retirer:
         return 0
-    revue.VIDEOS_MORTES_BRANCHEES = True
     retires = 0
     for nom in par_artiste:
         artiste = dm.get_artist_by_name(nom)

@@ -2076,9 +2076,10 @@ REGLES_ETENDUES = frozenset(
         # de plus de 10 s par 2 catalogues lus par ID ; simulée sur la base,
         # 6 vidéos, chacune un autre morceau ou une autre partie.
         ("recherche_dementie", "retirer_video_recherche"),
-        # 2026-11-06 : page de traduction ; simulée, 9 fiches, toutes des traductions.
+        # 2026-11-06, décision utilisateur : page de traduction ; 9 fiches, toutes
+        # des traductions, ni « Lost in Translation », ni les « (english version) ».
         ("page_traduction", "supprimer_non_musique"),
-        # 2026-11-06 (interrupteur `revue.VIDEOS_MORTES_BRANCHEES`, baissé) : lien
+        # 2026-11-06, décision utilisateur (`revue.VIDEOS_MORTES_BRANCHEES`) : lien
         # d'une vidéo que YouTube a répondu ne pas avoir ; refus de règle.
         ("video_morte", "retirer_video_recherche"),
         # 2026-10-31 (LD1, rapport panneau-familles) : LRC LRCLIB calé sur un

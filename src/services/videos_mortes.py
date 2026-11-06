@@ -10,8 +10,8 @@ Seule une RÉPONSE de YouTube prouve une absence (`MetaVideos.absentes`) : le
 constat va dans `source_track_absences` (clé `cle_video_morte`), daté, levé dès
 que la vidéo est revue, périmé comme les autres (`delai_absence_jours`).
 
-Le retrait, s'il est décidé (`revue.VIDEOS_MORTES_BRANCHEES`), est celui des
-autres liens de règle : `clear_track_youtube_link` (vues et nature du lien
+Le retrait (décision utilisateur 2026-11-06, `revue.VIDEOS_MORTES_BRANCHEES`)
+est celui des autres liens de règle : `clear_track_youtube_link` (vues et nature du lien
 comprises), refus `regle:video_morte`, « ↩ Rétablir ». Les durées `youtube*` de
 ces fiches RESTENT : une vidéo disparue n'est pas une vidéo fausse, l'observation
 garde sa provenance et la colonne son verdict (on ne retire que ce qu'on peut

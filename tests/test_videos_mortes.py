@@ -146,8 +146,8 @@ def constatee(data_manager):
 
 
 class TestInterrupteur:
-    def test_baisse_aucun_cas_et_rien_ne_part(self, data_manager, constatee):
-        assert revue.VIDEOS_MORTES_BRANCHEES is False
+    def test_baisse_aucun_cas_et_rien_ne_part(self, data_manager, constatee, monkeypatch):
+        monkeypatch.setattr(revue, "VIDEOS_MORTES_BRANCHEES", False)
         artiste = _artiste(data_manager, constatee)
         assert not [
             c for c in revue.analyser(data_manager, artiste).actifs if c.detecteur == "video_morte"
@@ -156,11 +156,12 @@ class TestInterrupteur:
         assert _lien(data_manager, constatee.id)["youtube_url"] == _URL
 
 
-class TestRegle:
-    @pytest.fixture(autouse=True)
-    def _branchee(self, monkeypatch):
-        monkeypatch.setattr(revue, "VIDEOS_MORTES_BRANCHEES", True)
+def test_la_regle_est_branchee():
+    """Décision utilisateur du 2026-11-06."""
+    assert revue.VIDEOS_MORTES_BRANCHEES is True
 
+
+class TestRegle:
     def _corriger(self, dm, track):
         return revue_auto.corriger(dm, _artiste(dm, track), seulement=frozenset({"video_morte"}))
 

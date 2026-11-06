@@ -2343,10 +2343,10 @@ def page_traduction(track, _ctx=None):
     )
 
 
-#: Interrupteur de la règle des liens morts : PROPOSÉE, simulée, pas encore
-#: décidée par l'utilisateur (2026-11-06). Baissé, aucun cas n'en sort ; le
-#: relevé des vues pose quand même ses constats, qui ne sont que des faits.
-VIDEOS_MORTES_BRANCHEES = False
+#: Interrupteur de la règle des liens morts, décidée par l'utilisateur le
+#: 2026-11-06. Baissé, aucun cas n'en sort ; le relevé des vues pose quand même
+#: ses constats, qui ne sont que des faits.
+VIDEOS_MORTES_BRANCHEES = True
 
 
 def video_morte(track, ctx=None):

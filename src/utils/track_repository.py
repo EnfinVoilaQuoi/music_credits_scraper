@@ -1395,6 +1395,12 @@ class TrackRepository:
                     text("DELETE FROM source_track_absences WHERE track_id = :tid"),
                     {"tid": track_id},
                 )
+                # Santé des sources : un HISTORIQUE d'usage, qui survit à la fiche
+                # sans plus la désigner (invariant `orphelin`, 2026-11-06).
+                conn.execute(
+                    text("UPDATE source_usage_failures SET track_id = NULL WHERE track_id = :tid"),
+                    {"tid": track_id},
+                )
                 # Parutions (e31/e32) : pas de cascade SQLite, les preuves
                 # (`release_track_sources`) partent AVANT le lien qu'elles portent.
                 conn.execute(
@@ -1514,6 +1520,13 @@ class TrackRepository:
                 # recherches faites avec la fiche absorbée.
                 conn.execute(
                     text("DELETE FROM source_track_absences WHERE track_id = :delete_id"),
+                    {"delete_id": delete_id},
+                )
+                conn.execute(
+                    text(
+                        "UPDATE source_usage_failures SET track_id = NULL "
+                        "WHERE track_id = :delete_id"
+                    ),
                     {"delete_id": delete_id},
                 )
                 self._unir_compteurs_ytm(conn, keep_id, delete_id)

@@ -40,7 +40,14 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from src.services import vues_comptees
-from src.services.revue import DECISION, INFORMATION, RUN, _titre_sans_feat, video_nomme
+from src.services.revue import (
+    DECISION,
+    INFORMATION,
+    RUN,
+    _titre_sans_feat,
+    session_live,
+    video_nomme,
+)
 from src.utils.cert_titres import certif_du_morceau
 from src.utils.compteurs_partages import titres_parents
 from src.utils.concordance_paroles import (
@@ -59,7 +66,7 @@ from src.utils.duree_youtube import (
     segment_de_dj_mix,
     trop_courte_pour_les_paroles,
 )
-from src.utils.title_matching import normalize_title
+from src.utils.title_matching import contains_as_words, names_match_as_words, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
@@ -69,6 +76,7 @@ from src.utils.version_descriptors import (
     titre_generique,
     titres_equivalents,
 )
+from src.utils.youtube_utils import extract_video_id
 
 #: Messages d'absence ou de refus rangés en échec de communication.
 _ABSENCE = re.compile(
@@ -165,6 +173,11 @@ FAMILLES = {
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
     "disque_homonyme": "disque d'au moins 3 fiches, aucune avec page Genius ni ID Spotify (homonyme ?)",
+    # ── Hors critère (natures `RUN` et `INFORMATION`) ──
+    "colonne_sans_provenance": "durée, date, ISRC ou LRC en colonne sans aucune observation",
+    "id_spotify_sans_compteur": "ID Spotify posé, aucun compteur (plafond de pages du run)",
+    "fiche_sans_participation": "fiche sans rôle de l'artiste : ni feat, ni rôle secondaire, ni crédit",
+    "lien_jamais_mesure": "lien YouTube sans ligne `track_videos` : vues jamais relevées",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
     "soeurs_divergentes": "INVARIANT — lignes sœurs aux valeurs d'enregistrement différentes",
@@ -854,7 +867,19 @@ TABLES_LIEES = (
     "scraping_errors",
     "source_track_failures",
     "source_track_absences",
+    "track_editions",
+    # L'historique de santé des sources survit à la fiche, sans plus la désigner.
+    "source_usage_failures",
+    "revue_corrections",
 )
+
+#: Lignes d'une table liée qui ne désignent légitimement plus de fiche.
+#: `revue_corrections` : le journal d'une page `annotee` supprimée, écrit APRÈS la
+#: suppression ; « Rétablir » n'y relit que `annulation` (page Genius et titre,
+#: `revue_auto`), jamais `track_id` (8 lignes le 2026-11-06).
+EXCLUSIONS_D_ORPHELINS = {
+    "revue_corrections": "AND COALESCE(x.annulation, '') NOT LIKE '%page_supprimee%'"
+}
 
 
 def orphelins(c) -> list[Cas]:
@@ -867,7 +892,9 @@ def orphelins(c) -> list[Cas]:
             continue
         n = c.execute(
             f"SELECT COUNT(*) FROM {table} x "  # noqa: S608 — nom de table de la liste fermée
-            "WHERE NOT EXISTS (SELECT 1 FROM tracks t WHERE t.id = x.track_id)"
+            "WHERE x.track_id IS NOT NULL "
+            "AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.id = x.track_id) "
+            + EXCLUSIONS_D_ORPHELINS.get(table, "")
         ).fetchone()[0]
         if n:
             cas.append(Cas("orphelin", "—", [], f"{table} : {n} ligne(s) sans fiche"))
@@ -1027,6 +1054,19 @@ def isrc_d_une_autre_fiche(c, pistes) -> list[Cas]:
 FICHES_MIN_DISQUE_HOMONYME = 3
 
 
+def _disque_de_sessions(album: str, fiches) -> bool:
+    """Chaque fiche se dit session du disque (« Racailles (Deezer Session) » sur
+    *Deezer Session*) : une exclusivité d'une plateforme n'a par nature pas d'ID
+    sur une autre (Kery James, 2026-11-06). Le juge est `revue.session_live` ; le
+    nom du disque DANS le titre écarte un disque d'homonyme qui ne serait que live."""
+    nom = normalize_title(album)
+    return all(
+        session_live(SimpleNamespace(title=f["title"]))
+        and contains_as_words(nom, normalize_title(f["title"]))
+        for f in fiches
+    )
+
+
 def disques_homonymes(pistes) -> list[Cas]:
     """Un disque dont aucune fiche n'a de page Genius ni d'ID Spotify : posé par
     le seul Deezer, dont un profil peut mêler deux homonymes. Les données d'un
@@ -1041,6 +1081,8 @@ def disques_homonymes(pistes) -> list[Cas]:
         if len(fiches) < FICHES_MIN_DISQUE_HOMONYME:
             continue
         if any(f["genius_id"] or f["spotify_id"] for f in fiches):
+            continue
+        if _disque_de_sessions(album, fiches):
             continue
         cas.append(
             Cas(
@@ -1164,6 +1206,146 @@ class _LigneDeCredit:
     source: str | None
 
 
+# ── Ce qu'aucune autre famille ne voit (hors critère) ─────────────────────────
+
+#: Colonnes dérivées dont le champ d'observation porte le même nom.
+COLONNES_A_PROVENANCE = ("duration", "release_date", "isrc", "lyrics_synced")
+#: Un de ces identifiants soutient une colonne sans observation.
+IDS_DE_CATALOGUE = ("spotify_id", "deezer_id", "apple_music_id", "discogs_id")
+
+
+def colonnes_sans_provenance(c, pistes) -> list[Cas]:
+    """Une colonne dérivée remplie sans AUCUNE observation : `_rearbitrer_*` ne
+    touche pas ces colonnes, `colonne_verdict` ne peut donc pas les voir, et
+    aucun juge ne peut les démentir. Nature `RUN`, pas invariant : ces valeurs
+    datent d'avant leurs observations, et une relecture forcée ou le rattrapage
+    (`scripts/rattraper_colonnes_sans_provenance.py`) les règle ; à zéro, la
+    famille pourra devenir un invariant."""
+    observees = collections.defaultdict(set)
+    for r in c.execute(
+        "SELECT DISTINCT track_id, field FROM observations WHERE field IN "
+        f"({','.join('?' * len(COLONNES_A_PROVENANCE))})",
+        COLONNES_A_PROVENANCE,
+    ):
+        observees[r["field"]].add(r["track_id"])
+    cas = []
+    for t in pistes:
+        for col in COLONNES_A_PROVENANCE:
+            if t[col] in (None, "") or t["id"] in observees[col]:
+                continue
+            soutien = "un ID de catalogue" if any(t[i] for i in IDS_DE_CATALOGUE) else "aucun ID"
+            cas.append(
+                Cas(
+                    "colonne_sans_provenance",
+                    t["artiste"],
+                    [t["id"]],
+                    f"{_lib(t)} {col} sans observation ({soutien})",
+                    RUN,
+                )
+            )
+    return cas
+
+
+def ids_spotify_sans_compteur(c, pistes) -> list[Cas]:
+    """ID Spotify posé, compteur nul. Une fiche jamais lue attend une page :
+    chaque run s'arrête à `spotify_web_max_pages_per_run` (120 pages sur Sheldon,
+    Eminem, The Game, Mac Miller…). Une page lue sans compteur existe aussi
+    (*VULTURES*). Un compteur compté sur une autre fiche (refus `compteur_spotify`)
+    n'en est pas un manque."""
+    refuses = {
+        r["valeur"] for r in c.execute("SELECT valeur FROM refus WHERE nature = 'compteur_spotify'")
+    }
+    lues = {
+        r["track_id"]
+        for r in c.execute(
+            "SELECT DISTINCT track_id FROM observations WHERE source = 'spotify_web'"
+        )
+    }
+    cas = []
+    for t in pistes:
+        if not t["spotify_id"] or t["spotify_streams"] is not None or t["spotify_id"] in refuses:
+            continue
+        etat = "page lue, sans compteur" if t["id"] in lues else "jamais lue (plafond de pages)"
+        cas.append(
+            Cas("id_spotify_sans_compteur", t["artiste"], [t["id"]], f"{_lib(t)} {etat}", RUN)
+        )
+    return cas
+
+
+#: Relations qui font d'un nom l'artiste lui-même, ou sa formation.
+RELATIONS_DE_L_ARTISTE = ("alias", "member_of", "has_member")
+
+
+def fiches_sans_participation(c, pistes) -> list[Cas]:
+    """Une fiche chez un artiste qui n'y participe pas, d'après tout ce qu'on en
+    sait : ni feat, ni rôle secondaire, un principal étranger, aucun crédit à son
+    nom (« Still D.R.E. » chez Eminem, *JACKBOYS* chez Travis Scott). Rien ne se
+    retire : c'est une décision de l'utilisateur, en attente (`INFORMATION`).
+    Noms comparés en mots entiers (`names_match_as_words`), alias et formations
+    compris."""
+    noms = collections.defaultdict(set)
+    for r in c.execute(
+        "SELECT artist_id, related_name FROM artist_relations WHERE kind IN "
+        f"({','.join('?' * len(RELATIONS_DE_L_ARTISTE))}) AND related_name IS NOT NULL",
+        RELATIONS_DE_L_ARTISTE,
+    ):
+        noms[r["artist_id"]].add(r["related_name"])
+
+    def est_l_artiste(t, nom) -> bool:
+        return any(names_match_as_words(n, nom) for n in (t["artiste"], *noms[t["artist_id"]]))
+
+    candidates = [
+        t
+        for t in pistes
+        if not t["is_featuring"]
+        and not t["secondary_role"]
+        and t["primary_artist_name"]
+        and not est_l_artiste(t, t["primary_artist_name"])
+    ]
+    if not candidates:
+        return []
+    voulues = {t["id"] for t in candidates}
+    credites = collections.defaultdict(set)
+    for r in c.execute("SELECT track_id, name FROM credits WHERE name IS NOT NULL"):
+        if r["track_id"] in voulues:
+            credites[r["track_id"]].add(r["name"])
+    cas = []
+    for t in candidates:
+        if any(est_l_artiste(t, nom) for nom in credites[t["id"]]):
+            continue
+        cas.append(
+            Cas(
+                "fiche_sans_participation",
+                t["artiste"],
+                [t["id"]],
+                f"{_lib(t)} de {t['primary_artist_name']} (disque « {t['album'] or '—'} », "
+                f"{t['spotify_streams'] or 0} streams)",
+                INFORMATION,
+            )
+        )
+    return cas
+
+
+def liens_jamais_mesures(c, pistes) -> list[Cas]:
+    """`youtube_url` sans ligne `track_videos` de cette vidéo : ses vues n'ont
+    jamais été relevées, et rien ne compte pour elle au total YTM. Le sort de ces
+    liens se décide ailleurs (`INFORMATION`)."""
+    mesurees = {
+        (r["track_id"], r["video_id"])
+        for r in c.execute("SELECT track_id, video_id FROM track_videos")
+    }
+    cas = []
+    for t in pistes:
+        video = extract_video_id(t["youtube_url"])
+        if video and (t["id"], video) not in mesurees:
+            cas.append(
+                Cas(
+                    "lien_jamais_mesure", t["artiste"], [t["id"]], f"{_lib(t)} {video}", INFORMATION
+                )
+            )
+    return cas
+
+
 def ecarts_de_schema(db_path) -> list[Cas]:
     from src.persistence.bootstrap import ecarts_au_schema
 
@@ -1259,6 +1441,10 @@ def auditer(
         audit.cas += echecs(c, pistes)
         audit.cas += studio_sur_live(c, pistes)
         audit.cas += disques_homonymes(pistes)
+        audit.cas += colonnes_sans_provenance(c, pistes)
+        audit.cas += ids_spotify_sans_compteur(c, pistes)
+        audit.cas += fiches_sans_participation(c, pistes)
+        audit.cas += liens_jamais_mesures(c, pistes)
         if persistance:
             audit.cas += soeurs_divergentes(c, pistes)
             audit.cas += refus_vivants(c, pistes)

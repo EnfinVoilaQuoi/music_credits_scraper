@@ -87,7 +87,7 @@ FICHE_EMISSION = re.compile(
 #: un court (`court_par_nature`). Seuil de l'audit (`duree_aberrante`) et du
 #: verdict (`reconcile.resoudre_duree`, extraits vidéo, 2026-10-27).
 DUREE_MIN_MORCEAU = 25
-_COURT = re.compile(r"\b(?:intro|interlude|skit|outro|prelude|prélude)\b", re.IGNORECASE)
+_COURT = re.compile(r"\b(?:intro|interlude|skit|outro|prelude|prélude|commentary)\b", re.IGNORECASE)
 
 
 def court_par_nature(titre: str | None) -> bool:
@@ -95,7 +95,9 @@ def court_par_nature(titre: str | None) -> bool:
     outro) : moins de 25 s n'y est pas aberrant. Mesuré le 2026-10-13 : 20 des
     26 durées sous 25 s de la base (les « Interlude : … » des Cool Sessions de
     MC Solaar, 15-24 s, arrivés avec le lot de streams) ; restent les vrais
-    suspects (« ISABELLA » 9 s, « RXN » 7 s, « SICKO MODE (ref. CyHi) » 12 s)."""
+    suspects (« ISABELLA » 9 s, « RXN » 7 s, « SICKO MODE (ref. CyHi) » 12 s).
+    Le commentaire d'un morceau aussi (*Blue Slide Park (Commentary Version)*,
+    15-29 s, 2026-11-06)."""
     from src.utils.version_descriptors import titre_generique
 
     t = titre or ""

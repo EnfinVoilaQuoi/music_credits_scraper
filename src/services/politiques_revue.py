@@ -2076,6 +2076,9 @@ REGLES_ETENDUES = frozenset(
         # de plus de 10 s par 2 catalogues lus par ID ; simulée sur la base,
         # 6 vidéos, chacune un autre morceau ou une autre partie.
         ("recherche_dementie", "retirer_video_recherche"),
+        # 2026-11-06 (interrupteur `revue.VIDEOS_MORTES_BRANCHEES`, baissé) : lien
+        # d'une vidéo que YouTube a répondu ne pas avoir ; refus de règle.
+        ("video_morte", "retirer_video_recherche"),
         # 2026-10-31 (LD1, rapport panneau-familles) : LRC LRCLIB calé sur un
         # audio que 2 catalogues lus par ID confirment ; 3 / 22 sur la copie.
         ("lrc_douteux", "normal"),
@@ -2486,6 +2489,19 @@ def politique_video_trop_longue(cas, track, _ctx):
     )
 
 
+def politique_video_morte(cas, track, _ctx):
+    """Le détecteur exige la RÉPONSE de YouTube : le lien part, par un refus de
+    règle, pour que la discographie ne le repose pas (« ↩ Rétablir » le rend).
+    Un choix `manual` reste à l'humain."""
+    if cas.detecteur != "video_morte" or track is None:
+        return None
+    if track.youtube_url_source == "manual":
+        return None
+    return Arbitrage(
+        "YouTube n'a plus cette vidéo : retirer le lien", "retirer_video_recherche", cas.motif
+    )
+
+
 def politique_recherche_dementie(cas, track, _ctx):
     """Le détecteur exige déjà les deux témoins (titre vu non équivalent, durée
     démentie par deux catalogues d'accord) : le lien part, par un refus de
@@ -2570,6 +2586,7 @@ def politique_non_musique(cas, track, _ctx):
 _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "annotee": politique_non_musique,
     "recherche_dementie": politique_recherche_dementie,
+    "video_morte": politique_video_morte,
     "doublon": politique_doublon,
     "duree_spotify": politique_spotify_confirme,
     "video_trop_longue": politique_video_trop_longue,

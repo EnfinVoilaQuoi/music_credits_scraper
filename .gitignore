@@ -186,6 +186,7 @@ scripts/*
 !scripts/rematerialiser.py
 !scripts/combler_isrc.py
 !scripts/realigner_soeurs.py
+!scripts/constater_videos_mortes.py
 !scripts/retirer_cles_locales_relations.py
 # Mesures hors ligne (2026-10-14) : places sur les disques, champs du brut.
 !scripts/mesurer_positions.py

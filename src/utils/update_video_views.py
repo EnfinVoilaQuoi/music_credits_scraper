@@ -38,6 +38,26 @@ def videos_a_mesurer(track) -> list[str]:
     return ids
 
 
+def _constater_liens_morts(data_manager, pairs, meta) -> None:
+    """Le lien de chaque fiche que l'API a RÉPONDU ne pas avoir : constat daté
+    (`videos_mortes.poser_constats`). Vue de nouveau, la vidéo lève le constat ;
+    un lot sans réponse ne dit rien (absent ≠ échec). Avant, ces liens comptaient
+    en `no_meta` puis étaient oubliés (1 218 fiches, 2026-11-06)."""
+    from src.api.ytmusic_api import MetaVideos
+    from src.services.videos_mortes import poser_constats
+
+    if not isinstance(meta, MetaVideos):
+        return
+    liens = [
+        (track.id, ids[0]) for track, ids in pairs if ids[0] == extract_video_id(track.youtube_url)
+    ]
+    poser_constats(
+        data_manager.engine,
+        [(tid, vid) for tid, vid in liens if vid in meta.absentes],
+        [(tid, vid) for tid, vid in liens if vid in meta],
+    )
+
+
 def update_video_views(artist, tracks, data_manager, api=None, track_ids=None) -> dict:
     """Met à jour vues + kind de TOUTES les vidéos YouTube des morceaux.
 
@@ -71,6 +91,7 @@ def update_video_views(artist, tracks, data_manager, api=None, track_ids=None) -
 
         api = YTMusicAPI()
     meta = api.fetch_video_meta_batch([vid for _, ids in pairs for vid in ids])
+    _constater_liens_morts(data_manager, pairs, meta)
 
     for track, ids in pairs:
         mesurees = []

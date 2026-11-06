@@ -209,6 +209,9 @@ class Contexte:
     #: Divergences d'IDENTITÉ entre lignes sœurs, lues par `analyser`
     #: (`divergences_identite_soeurs`) — le détecteur reste pur.
     soeurs: list = field(default_factory=list)
+    #: `{track_id: {video_id}}` que YouTube a répondu ne pas avoir, lus par
+    #: `charger_contexte` quand `VIDEOS_MORTES_BRANCHEES` : le détecteur reste pur.
+    videos_mortes: dict = field(default_factory=dict)
     #: Places des fiches sur leurs disques (`get_artist_positions`), lues par
     #: `analyser` : preuve d'appoint des 👯.
     positions: dict = field(default_factory=dict)
@@ -2244,6 +2247,33 @@ def video_trop_longue(track, ctx=None):
     return None
 
 
+#: Interrupteur de la règle des liens morts : PROPOSÉE, simulée, pas encore
+#: décidée par l'utilisateur (2026-11-06). Baissé, aucun cas n'en sort ; le
+#: relevé des vues pose quand même ses constats, qui ne sont que des faits.
+VIDEOS_MORTES_BRANCHEES = False
+
+
+def video_morte(track, ctx=None):
+    """Le lien `youtube_url` d'une vidéo que YouTube a RÉPONDU ne pas avoir
+    (`videos_mortes`, constat daté du relevé des vues) : supprimée ou privée.
+    Mesuré le 2026-11-06 : 1 126 vidéos sur 1 232 liens sans ligne `track_videos`,
+    aucun lot sans réponse. Une vidéo qui a sa ligne (vues relevées autrefois,
+    comptées au total) n'est pas jugée ici : le lien seul ne compte rien."""
+    from src.utils.youtube_utils import extract_video_id
+
+    if ctx is None:
+        return None
+    vid = extract_video_id(track.youtube_url)
+    if not vid or vid not in ctx.videos_mortes.get(track.id, ()):
+        return None
+    if any(v.video_id == vid for v in track.videos or []):
+        return None
+    return (
+        f"lien {vid} : YouTube répond qu'il n'a plus cette vidéo",
+        {"video_id": vid, "track_ids": [track.id], "impact": 0},
+    )
+
+
 def video_etrangere(track, ctx=None):
     """Une vidéo rattachée dont le titre ne nomme pas le morceau : peut-être
     celle d'un autre (Kanye « Heartless - Recorded At RAK Studios » → vidéo de
@@ -3515,6 +3545,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "🔎",
         recherche_dementie,
     ),
+    Detecteur(
+        "video_morte",
+        "Lien vers une vidéo que YouTube n'a plus",
+        "🪦",
+        video_morte,
+    ),
     # Pour INFORMATION (décision utilisateur 2026-10-26, « la vérif manuelle,
     # c'est pour les cas que le code ne peut pas trancher ») : une page qui ne
     # porte rien (ni paroles, ni plateforme, ni album, ni vidéo, ni tiers
@@ -3859,6 +3895,10 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.soeurs = data_manager.divergences_identite_soeurs(artiste.id)
     ctx.positions = data_manager.get_artist_positions(artiste.id)
     ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
+    if VIDEOS_MORTES_BRANCHEES:
+        from src.services.videos_mortes import constats_frais
+
+        ctx.videos_mortes = constats_frais(data_manager.engine)
     return ctx
 
 

@@ -41,6 +41,14 @@ def cle_absence(source: str, donnee: str) -> str:
     return f"{source}:{donnee}"
 
 
+#: Le constat « YouTube a répondu sans cette vidéo » : un par vidéo, sur la fiche.
+PREFIXE_VIDEO_MORTE = cle_absence("youtube_data", "video:")
+
+
+def cle_video_morte(video_id: str) -> str:
+    return f"{PREFIXE_VIDEO_MORTE}{video_id}"
+
+
 class SourceUsageRepository:
     """Lecture/écriture des compteurs d'usage. Ne lève jamais vers l'appelant."""
 
@@ -307,6 +315,21 @@ class SourceUsageRepository:
         for r in lignes:
             par_morceau.setdefault(r["track_id"], set()).add(r["source_key"])
         return par_morceau
+
+    def videos_mortes(self, depuis: datetime) -> dict[int, set[str]]:
+        """`{track_id: {video_id}}` que YouTube a répondu ne pas avoir, depuis
+        `depuis` (`cle_video_morte`)."""
+        lignes = self._rows(
+            "SELECT track_id, source_key FROM source_track_absences "
+            "WHERE source_key LIKE :prefixe AND derniere_absence >= :depuis",
+            {"prefixe": f"{PREFIXE_VIDEO_MORTE}%", "depuis": _isoformat(depuis)},
+        )
+        mortes: dict[int, set[str]] = {}
+        for r in lignes:
+            mortes.setdefault(r["track_id"], set()).add(
+                r["source_key"].removeprefix(PREFIXE_VIDEO_MORTE)
+            )
+        return mortes
 
     def requalifier_anciens_echecs(self) -> tuple[int, int]:
         """Applique aux lignes DÉJÀ suivies les règles de classement du

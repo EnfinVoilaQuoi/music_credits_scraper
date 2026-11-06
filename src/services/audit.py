@@ -759,12 +759,19 @@ def _volatile(colonne: str) -> bool:
 #: propre à chaque ligne.
 VERDICTS_D_ENREGISTREMENT = ("duration", "release_date", "isrc", "spotify_streams")
 
+#: Colonnes où « vide chez l'une, plein chez l'autre » est AUSSI une divergence :
+#: un verdict calculé sur les mêmes observations ne peut pas être vide d'un côté
+#: seulement (« G.O.O.D. Friday » : 296 s chez Kid Cudi, rien chez Kanye,
+#: 2026-11-06). Les autres colonnes partagées se comblent à la synchronisation.
+VERDICTS_PLEIN_CONTRE_VIDE = (*VERDICTS_D_ENREGISTREMENT, "lyrics_synced")
+
 
 def soeurs_divergentes(c, pistes) -> list[Cas]:
     """Deux lignes sœurs (même `genius_id`, artistes différents) aux valeurs
     différentes d'une colonne d'ENREGISTREMENT. La synchronisation ne fait que
     combler (jamais remplacer) : une fois divergées, elles le restent — le
-    symptôme que le chantier A doit faire tomber à zéro."""
+    symptôme que le chantier A doit faire tomber à zéro. Pour un verdict dérivé,
+    le vide compte comme une valeur (`VERDICTS_PLEIN_CONTRE_VIDE`)."""
     from src.utils.track_soeurs import COLONNES_PARTAGEES
 
     colonnes = [
@@ -788,6 +795,8 @@ def soeurs_divergentes(c, pistes) -> list[Cas]:
     for lignes in familles.values():
         for col in colonnes:
             valeurs = {str(r[col]) for r in lignes if r[col] not in (None, "")}
+            if col in VERDICTS_PLEIN_CONTRE_VIDE and any(r[col] in (None, "") for r in lignes):
+                valeurs.add("vide")
             if len(valeurs) > 1:
                 t = lignes[0]
                 cas.append(

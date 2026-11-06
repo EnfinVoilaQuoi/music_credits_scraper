@@ -27,7 +27,7 @@ from playwright.sync_api import (
 from src.config import BASE_DIR, settings
 from src.observability import source_usage
 from src.observability.issues import IssueKind
-from src.scrapers.playwright_manager import get_playwright
+from src.scrapers.playwright_manager import get_playwright, rendre_playwright
 from src.utils.fichiers_json import ecrire_atomique, lire_cache
 from src.utils.logger import get_logger
 from src.utils.title_matching import contains_as_words, names_match_as_words, normalize_name
@@ -121,7 +121,6 @@ class SpotifyIDScraper:
             raise
 
     def _cleanup_resources(self):
-        # NB: ne pas stopper self._playwright — instance partagée (playwright_manager)
         for attr in ("page", "context", "browser"):
             obj = getattr(self, attr, None)
             if obj:
@@ -130,6 +129,9 @@ class SpotifyIDScraper:
                 except PlaywrightError:
                     pass
                 setattr(self, attr, None)
+        # Un autre fil ne peut pas la rendre : l'instance est liée au fil qui l'a empruntée.
+        if self._playwright is not None and self._owner_thread == threading.get_ident():
+            rendre_playwright()
         self._playwright = None
 
     # ──────────────────────────────────────────────────────────────────────────

@@ -9,10 +9,14 @@ et lancer chacun leur propre browser dessus.
 Usage dans un scraper :
     from src.scrapers.playwright_manager import get_playwright
 
-    self._playwright = get_playwright()          # instance partagée
+    self._playwright = get_playwright()          # instance partagée, empruntée
     self.browser = self._playwright.chromium.launch(...)
-    # Dans close()/_cleanup : fermer page/context/browser,
-    # mais NE PAS appeler self._playwright.stop().
+    # Dans close()/_cleanup : fermer page/context/browser, puis rendre_playwright().
+
+Une instance sync laissée démarrée garde une boucle asyncio « en cours » sur son fil :
+tout `run_sync` suivant y lève « run_sync appelé depuis une boucle asyncio » (cycles de
+Delusional Thomas et Larry Fisherman, 2026-11-06 : la recherche Spotify de l'artiste par
+son nom a fait tomber la nature des disques, les crédits Genius et les pages Spotify).
 
 Phase F3 : les scrapers async partagent de la même façon UNE instance
 `async_playwright()` liée à LA boucle applicative (`src.concurrency.async_loop`
@@ -46,7 +50,17 @@ def get_playwright() -> Playwright:
         logger.debug("Démarrage d'une instance Playwright partagée pour ce thread")
         pw = sync_playwright().start()
         _local.playwright = pw
+        _local.emprunts = 0
+    _local.emprunts += 1
     return pw
+
+
+def rendre_playwright() -> None:
+    """Fin d'un emprunt de `get_playwright`, sur le même fil : le dernier arrête
+    l'instance, ce qui rend le fil au code qui appelle `run_sync`."""
+    _local.emprunts = getattr(_local, "emprunts", 0) - 1
+    if _local.emprunts <= 0:
+        stop_playwright()
 
 
 def stop_playwright() -> None:
@@ -58,6 +72,7 @@ def stop_playwright() -> None:
         except Exception:  # noqa: BLE001 — arrêt best-effort de l'instance Playwright
             pass
         _local.playwright = None
+    _local.emprunts = 0
 
 
 async def get_playwright_async() -> AsyncPlaywright:

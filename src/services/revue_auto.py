@@ -127,6 +127,7 @@ _SANS_FICHE = frozenset(
         "deezer_rattacher_edition",
         "deezer_edition",
         "confirmer_lien",
+        "confirmer_formation",
         "kworb_tiers",
         # Cas d'ARTISTE : ses fiches sont dans ses preuves.
         "retirer_video_partagee",
@@ -466,6 +467,34 @@ def _confirmer_lien(_dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
         "nom": cas.preuves["nom"],
         "kind": cas.preuves["kind"],
     }
+
+
+def _confirmer_formation(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Confirme une formation que MusicBrainz et Discogs donnent : la nature déjà
+    choisie pour elle chez un autre membre, sinon « collectif ». Un lien
+    `has_member` n'a pas de nature (il ne réunit rien). Rétablir rend le lien
+    « proposé », sans la nature posée ici."""
+    nom, kind = cas.preuves["nom"], cas.preuves["kind"]
+    nature = None
+    if kind == "member_of":
+        nature = dm.nature_connue_pour(nom) or "collectif"
+    relation = next(
+        (
+            r
+            for r in dm.get_artist_relations(artiste.id, status="proposed")
+            if r.kind == kind and r.related_name == nom
+        ),
+        None,
+    )
+    if relation is None:
+        raise LookupError(f"lien « {nom} » introuvable")
+    posee = bool(nature and not relation.formation)
+    if not dm.set_relation_status(artiste.id, nom, kind, "confirmed", formation=nature):
+        raise LookupError(f"lien « {nom} » introuvable")
+    return (
+        f"« {nom} » confirmé" + (f" ({nature})" if nature else ""),
+        {"type": "lien", "nom": nom, "kind": kind, "nature_posee": posee},
+    )
 
 
 def _kworb_tiers(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
@@ -846,6 +875,7 @@ _CORRECTEURS_DE_REGLE = {
     "retirer_identite_derivee": _retirer_identite_derivee,
     "retirer_lrc": _corriger_lrc,
     "confirmer_lien": _confirmer_lien,
+    "confirmer_formation": _confirmer_formation,
     "kworb_tiers": _kworb_tiers,
     "retirer_video_partagee": _retirer_video_partagee,
     # Même geste pour UNE fiche : `track_ids` = [la fiche], refus de règle.
@@ -1150,7 +1180,11 @@ def retablir(dm, artiste, correction: dict) -> str:
         compte_rendu = f"« {annulation['kworb_title']} » : fiche retirée, proposition rendue"
     elif annulation.get("type") == "lien":
         if not dm.set_relation_status(
-            artiste.id, annulation["nom"], annulation["kind"], "proposed"
+            artiste.id,
+            annulation["nom"],
+            annulation["kind"],
+            "proposed",
+            effacer_nature=bool(annulation.get("nature_posee")),
         ):
             raise LookupError(f"lien « {annulation['nom']} » introuvable")
         compte_rendu = f"« {annulation['nom']} » rendu « proposé »"

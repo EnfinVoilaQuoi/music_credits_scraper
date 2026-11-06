@@ -944,7 +944,8 @@ def politique_alias(cas, _track, ctx):
     Une page d'alias Discogs sans autre trace reste à l'humain : nom civil mal
     graphié (« Eli Yaffa » ; Genius écrit « Elie Yaffa ») ou nom douteux
     (« Global » chez Médine). Une formation n'est confirmée que si sa nature
-    est connue (L2) ; sinon elle se tranche dans la fenêtre Groupes.
+    est connue (L2), ou si MusicBrainz ET Discogs la donnent
+    (`_formation_mb_et_discogs`) ; sinon elle se tranche dans la fenêtre Groupes.
     Prudence : un alias confirmé devient un nom de RECHERCHE (certifications,
     collectifs) et un profil Spotify connu."""
     preuves = cas.preuves or {}
@@ -955,11 +956,13 @@ def politique_alias(cas, _track, ctx):
     )
     if rel is None:
         return None
+    sources = set((rel.source or "").split("+"))
     if kind == "member_of":
-        return _formation_par_ses_morceaux(rel, ctx)
+        return _formation_par_ses_morceaux(rel, ctx) or _formation_mb_et_discogs(rel, sources)
+    if kind == "has_member":
+        return _formation_mb_et_discogs(rel, sources)
     if kind != "alias":
         return None
-    sources = set((rel.source or "").split("+"))
     if {"discogs", "musicbrainz"} <= sources:
         return Arbitrage("confirmer l'alias", "confirmer_lien", "MusicBrainz ET Discogs")
     if "musicbrainz" in sources and rel.detail == "Artist name":
@@ -1000,6 +1003,27 @@ def _fiches_ou_il_ecrit(nom: str, ctx) -> list[str]:
             for c in t.credits or []
         )
     ]
+
+
+#: Interrupteur de `_formation_mb_et_discogs`, levé dans la branche
+#: `regles-panneau` : simulation à lire par l'utilisateur avant la fusion.
+FORMATIONS_MB_ET_DISCOGS = True
+
+
+def _formation_mb_et_discogs(rel, sources: set) -> Arbitrage | None:
+    """Une formation que MusicBrainz ET Discogs donnent se confirme, « collectif »
+    par défaut : prendre un groupe pour un collectif ne coûte presque rien,
+    l'inverse apporte des morceaux en trop (décision utilisateur du 2026-11-06, le
+    lien de membre n'a pas de nature : `has_member`, navigation seulement). Une
+    nature déjà proposée autre que « collectif » reste à l'humain (N.H. : groupe)."""
+    if not FORMATIONS_MB_ET_DISCOGS or not {"discogs", "musicbrainz"} <= sources:
+        return None
+    if rel.formation and rel.formation != "collectif":
+        return None
+    nature = "collectif" if rel.kind == "member_of" else "lien de membre"
+    return Arbitrage(
+        f"confirmer la formation ({nature})", "confirmer_formation", "MusicBrainz ET Discogs"
+    )
 
 
 def _formation_par_ses_morceaux(rel, ctx) -> Arbitrage | None:
@@ -2179,6 +2203,8 @@ REGLES_ETENDUES = frozenset(
         ("lrc_live", "retirer_lrc"),
         ("doublon_lrc", "retirer_lrc"),
         ("liens_proposes", "confirmer_lien"),
+        # 2026-11-06 : formation MusicBrainz + Discogs, « collectif » par défaut.
+        ("liens_proposes", "confirmer_formation"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
         ("kworb_proposition", "kworb_tiers"),

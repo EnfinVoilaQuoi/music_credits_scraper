@@ -1036,6 +1036,41 @@ def test_alias_confirme_par_deux_sources_ou_par_le_type_musicbrainz():
     assert juger("Go Getters", "member_of") is None  # une formation : jamais
 
 
+class TestFormationMbEtDiscogs:
+    """Décision utilisateur du 2026-11-06 : MusicBrainz et Discogs d'accord, la
+    formation est confirmée, « collectif » par défaut."""
+
+    @staticmethod
+    def _juger(kind="member_of", source="discogs+musicbrainz", formation=None):
+        rel = SimpleNamespace(
+            kind=kind, related_name="Sniper", source=source, formation=formation, detail=None
+        )
+        ctx = SimpleNamespace(relations_proposees=[rel], disco=[])
+        cas = _cas("liens_proposes", None, {"nom": "Sniper", "kind": kind})
+        return pol.politique_alias(cas, None, ctx)
+
+    @pytest.mark.parametrize("kind", ["member_of", "has_member"])
+    def test_les_deux_sources_confirment(self, kind):
+        arbitrage = self._juger(kind)
+        assert arbitrage.action == "confirmer_formation"
+        assert ("liens_proposes", "confirmer_formation") in pol.REGLES_ETENDUES
+
+    def test_une_nature_deja_collectif(self):
+        assert self._juger(formation="collectif").action == "confirmer_formation"
+
+    @pytest.mark.parametrize("source", ["musicbrainz", "discogs"])
+    def test_une_seule_source_reste_a_l_humain(self, source):
+        assert self._juger(source=source) is None
+
+    def test_une_autre_nature_proposee_reste_a_l_humain(self):
+        """N.H. (Médine) : proposé « groupe », confirmé il apporterait tout."""
+        assert self._juger(formation="groupe") is None
+
+    def test_interrupteur_baisse(self, monkeypatch):
+        monkeypatch.setattr(pol, "FORMATIONS_MB_ET_DISCOGS", False)
+        assert self._juger() is None
+
+
 def test_les_regles_validees_sont_gelees():
     """Une règle n'entre ici qu'après la validation de l'utilisateur (2026-10-20)."""
     assert {

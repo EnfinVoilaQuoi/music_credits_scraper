@@ -10,7 +10,7 @@ from __future__ import annotations
 from playwright.sync_api import Error as PlaywrightError
 
 from src.models import Artist
-from src.scrapers.playwright_manager import get_playwright
+from src.scrapers.playwright_manager import get_playwright, rendre_playwright
 from src.services.runtime import Runtime
 from src.utils.logger import get_logger
 
@@ -64,6 +64,7 @@ def fetch_artist_from_genius_url(url: str, fallback_name: str) -> Artist | None:
     masquage navigator.webdriver).
     """
     browser = None
+    pw = None
     try:
         pw = get_playwright()
         browser = pw.chromium.launch(
@@ -100,9 +101,11 @@ def fetch_artist_from_genius_url(url: str, fallback_name: str) -> Artist | None:
     finally:
         if browser:
             try:
-                browser.close()  # ne PAS stopper l'instance Playwright partagée
+                browser.close()
             except PlaywrightError:
                 pass
+        if pw is not None:
+            rendre_playwright()
     return None
 
 

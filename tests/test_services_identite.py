@@ -517,6 +517,10 @@ class TestCatalogueDeezer:
         monkeypatch.setattr("src.services.ecarts_deezer.detecter", _detecter)
         monkeypatch.setattr("src.services.ecarts_deezer.rattacher_liens_confirmes", _rattacher)
         monkeypatch.setattr(
+            "src.services.ecarts_deezer.relire_contributeurs",
+            lambda _dm, _artist: appels.append("relecture"),
+        )
+        monkeypatch.setattr(
             "src.services.ecarts_deezer.enregistrer_signalements",
             lambda *a, **k: appels.append("signalements"),
         )
@@ -531,7 +535,7 @@ class TestCatalogueDeezer:
         b = ed.BilanEcarts(deezer_id=1236609)
         b.ecarts = [SimpleNamespace(nature="link"), SimpleNamespace(nature="absent", coche=True)]
         res, recus, appels = self._run(monkeypatch, detection=b)
-        assert appels == ["identite", "detection", "rattachement", "signalements"]
+        assert appels == ["identite", "detection", "rattachement", "signalements", "relecture"]
         assert recus == [b] and b.rattachements_auto == 1 and not res.panne
         assert res.deezer_id == 1236609
 

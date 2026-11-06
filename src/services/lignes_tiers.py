@@ -91,6 +91,27 @@ def donner_aux_interpretes(dm, track: Track, proprietaire: Artist) -> list[str]:
     return faits
 
 
+def retirer_lignes_donnees(dm, track: Track, proprietaire: Artist) -> list[str]:
+    """L'inverse de `donner_aux_interpretes`, quand la fiche est défaite : les lignes
+    sans page qu'elle a données à ses interprètes, au même ID Deezer, créditées à
+    son propriétaire. Rend un compte rendu par ligne retirée."""
+    if track.genius_id or not track.deezer_id:
+        return []
+    faits = []
+    for artiste in interpretes_en_base(track, dm.artistes_de_la_base(), proprietaire.id):
+        for ligne in dm.get_artist_tracks(artiste.id):
+            if (
+                not ligne.genius_id
+                and ligne.is_featuring
+                and ligne.primary_artist_name == proprietaire.name
+                and str(ligne.deezer_id or "") == str(track.deezer_id)
+            ):
+                dm.delete_track(ligne.id)
+                faits.append(f"« {ligne.title} » retiré de chez {artiste.name}")
+                logger.info(f"👥 {faits[-1]}")
+    return faits
+
+
 def rattraper(dm, artiste: Artist, tracks: list[Track] | None = None) -> list[str]:
     """Passe sur les fiches sans page Genius de l'artiste (fin de run
     discographie) : rattrape celles créées avant la règle."""

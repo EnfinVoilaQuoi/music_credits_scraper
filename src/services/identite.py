@@ -196,6 +196,7 @@ def catalogue_deezer(
         runtime.data_manager, artist, res.ecarts, should_stop=hooks.should_stop
     )
     ecarts_deezer.enregistrer_signalements(runtime.data_manager, artist, res.ecarts)
+    ecarts_deezer.relire_contributeurs(runtime.data_manager, artist)
     if res.ecarts.ecarts:
         hooks.confirmer_ecarts(res.ecarts)
     return res

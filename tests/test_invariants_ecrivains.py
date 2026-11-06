@@ -149,10 +149,10 @@ class TestApresChaqueEcrivain:
         « Father Stretch My Hands, Pt. 1 », « Moon »)."""
         video = TrackVideo(video_id="AAAAAAAAAAA", source="ytm_album", views=500, title="Durag")
         data_manager.record_track_videos(base["durag"].id, [video])
-        data_manager.record_track_videos(base["swing"].id, [video])
         assert _ytm(data_manager, base["durag"].id) == 500
 
-        data_manager.save_track(base["swing"])  # union : Isha « Grünt #33 » reçoit la vidéo
+        # Union en fin de transaction : Isha « Grünt #33 » reçoit la vidéo.
+        data_manager.record_track_videos(base["swing"].id, [video])
         assert _invariants(data_manager) == {}
         assert not _ytm(data_manager, base["durag"].id)
 

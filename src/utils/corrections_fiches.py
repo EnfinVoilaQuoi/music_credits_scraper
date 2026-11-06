@@ -729,6 +729,79 @@ def videos_refusees(track) -> set[str]:
     return {r["valeur"] for r in _lignes(track, "video")}
 
 
+def videos_refusees_des_lignes(conn, track_ids: list[int]) -> dict[int, set[str]]:
+    """`{track_id: vidéos refusées}` lus DANS la transaction de l'appelant
+    (`track_soeurs.unir_videos`) : même désignation que `videos_refusees`, un
+    refus par page Genius vaut chez tout artiste, un refus par titre + album
+    pour la fiche de cet artiste seulement."""
+    from sqlalchemy import text
+
+    if not track_ids:
+        return {}
+    marques = ", ".join(f":i{n}" for n in range(len(track_ids)))
+    fiches = (
+        conn.execute(
+            text(
+                "SELECT t.id, t.title, t.album, t.genius_id, a.name AS artiste FROM tracks t "  # noqa: S608
+                f"LEFT JOIN artists a ON a.id = t.artist_id WHERE t.id IN ({marques})"
+            ),
+            {f"i{n}": tid for n, tid in enumerate(track_ids)},
+        )
+        .mappings()
+        .all()
+    )
+    resultat: dict[int, set[str]] = {f["id"]: set() for f in fiches}
+    gids = {f["genius_id"] for f in fiches if f["genius_id"] is not None}
+    noms = {f["artiste"] for f in fiches if f["artiste"]}
+    if not gids and not noms:
+        return resultat
+    params = {f"g{n}": int(g) for n, g in enumerate(sorted(gids))}
+    params.update({f"a{n}": a for n, a in enumerate(sorted(noms))})
+    portee = " OR ".join(
+        [
+            *(
+                ["genius_id IN (" + ", ".join(f":g{n}" for n in range(len(gids))) + ")"]
+                if gids
+                else []
+            ),
+            *(
+                [
+                    "(genius_id IS NULL AND artiste IN ("
+                    + ", ".join(f":a{n}" for n in range(len(noms)))
+                    + "))"
+                ]
+                if noms
+                else []
+            ),
+        ]
+    )
+    lignes = (
+        conn.execute(
+            text(
+                "SELECT genius_id, artiste, titre, album, valeur FROM refus "  # noqa: S608
+                f"WHERE nature = 'video' AND ({portee})"
+            ),
+            params,
+        )
+        .mappings()
+        .all()
+    )
+    for r in lignes:
+        for f in fiches:
+            if r["genius_id"] is not None:
+                vise = f["genius_id"] is not None and int(r["genius_id"]) == int(f["genius_id"])
+            else:
+                vise = r["artiste"] == f["artiste"] and designe(
+                    {"titre": r["titre"], "album": r["album"]},
+                    genius_id=f["genius_id"],
+                    titre=f["title"],
+                    album=f["album"],
+                )
+            if vise:
+                resultat[f["id"]].add(r["valeur"])
+    return resultat
+
+
 def memoriser_video_refusee(track, video_id: str, origine: str | None = None) -> None:
     _memoriser(track, "video", video_id, origine=origine)
 

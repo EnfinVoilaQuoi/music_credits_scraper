@@ -434,6 +434,17 @@ def _aligner_lien_youtube(conn, famille: list[int], *, page_relue: bool = False)
             "youtube_url_source": gagnante["youtube_url_source"],
             "youtube_video_kind": nature,
         }
+        # Les vues aussi : c'est le compteur de la MÊME vidéo, le relevé le plus
+        # récent vaut pour toutes (relevées à des dates différentes selon la
+        # ligne, 2026-11-06). Sans relevé nulle part, rien à transmettre.
+        mesurees = [r for r in avec if r["youtube_video_views"] is not None]
+        if mesurees:
+            releve = max(
+                mesurees,
+                key=lambda r: (str(r["youtube_video_views_updated"] or ""), r["id"] == famille[0]),
+            )
+            valeurs["youtube_video_views"] = releve["youtube_video_views"]
+            valeurs["youtube_video_views_updated"] = releve["youtube_video_views_updated"]
         a_reecrire = avec
     else:
         return 0
@@ -615,11 +626,11 @@ def unir_observations(conn, ids: list[int]) -> int:
 
 
 def _unir_table_additive(conn, ids: list[int], table: str, cle: str) -> int:
-    """Réunit une table ADDITIVE (`track_videos`, `track_spotify_ids`).
+    """Réunit une table ADDITIVE (`track_spotify_ids`).
 
-    Mêmes tables, même raison : aucun producteur n'en connaît la liste complète,
-    donc chaque ligne sœur en connaît un morceau. `is_primary` n'est PAS recopié
-    — il matérialise `tracks.spotify_id`, qui est propre à chaque ligne.
+    Aucun producteur n'en connaît la liste complète, donc chaque ligne sœur en
+    connaît un morceau. `is_primary` n'est PAS recopié — il matérialise
+    `tracks.spotify_id`, qui est propre à chaque ligne.
     """
     from sqlalchemy import text
 
@@ -654,6 +665,113 @@ def _unir_table_additive(conn, ids: list[int], table: str, cle: str) -> int:
                 ),
                 valeurs,
             ).rowcount
+    return ecrites
+
+
+#: Colonnes qui décrivent la VIDÉO, relevées au même appel que ses vues : la
+#: lecture la plus fraîche vaut pour toutes les lignes (une valeur vide ne
+#: remplace rien).
+COLONNES_DE_LA_VIDEO = ("url", "kind", "title", "duration", "channel", "channel_id")
+
+
+def unir_videos(conn, ids: list[int]) -> int:
+    """Chaque ligne reçoit les VIDÉOS (`track_videos`) de ses sœurs, au relevé le
+    plus frais.
+
+    Une vidéo est un fait de l'ENREGISTREMENT : « 160 Rimes » et « Mr No » chez
+    Caballero, pas chez JeanJass (45 familles, 2026-11-06), et la même vidéo à
+    des vues différentes selon la ligne, relevée à des dates différentes (1 261
+    vidéos). `save_track` seul les unissait, sans le relevé ni les refus.
+
+    Par `video_id` : une vidéo absente est copiée, sauf chez la ligne qui la
+    refuse (un refus désigne l'enregistrement, `videos_refusees_des_lignes`). Une
+    présente reçoit les vues du relevé le plus récent (à relevé de même seconde,
+    `ids[0]`, la ligne qu'un écrivain vient de toucher), `COLONNES_DE_LA_VIDEO`
+    de la lecture la plus fraîche qui en a une, la provenance la plus forte
+    (`manual` > `genius_media` > le reste, comme `_aligner_lien_youtube`) et ce
+    que la recherche a vu si elle ne l'a pas.
+
+    Ce qui reste PAR LIGNE, et c'est voulu : le jugement des vues
+    (`vues_comptees`) et le partage dans la discographie de l'artiste
+    (`_recalculer_vues_ytm`) — « Bethléem / Goût du beurre » est partagée chez
+    Caballero, elle n'y compte sur aucune fiche.
+
+    Les RETRAITS passent par `effacer_chez_les_soeurs` (`forget_track_video`) ;
+    garde : crible `test_retraits_d_observations`. Idempotent. Rend le nombre de
+    lignes `track_videos` écrites."""
+    from sqlalchemy import text
+
+    from src.utils.corrections_fiches import videos_refusees_des_lignes
+
+    marques = ", ".join(f":i{n}" for n in range(len(ids)))
+    lignes = (
+        conn.execute(
+            text(
+                "SELECT id, track_id, video_id, url, kind, source, views, views_updated, "  # noqa: S608
+                "created_at, title, recherche, duration, channel, channel_id "
+                f"FROM track_videos WHERE track_id IN ({marques})"
+            ),
+            {f"i{n}": tid for n, tid in enumerate(ids)},
+        )
+        .mappings()
+        .all()
+    )
+    if not lignes:
+        return 0
+    refusees = videos_refusees_des_lignes(conn, ids)
+    par_video: dict[str, list] = {}
+    for ligne in lignes:
+        par_video.setdefault(ligne["video_id"], []).append(ligne)
+
+    def fraicheur(r):
+        return (str(r["views_updated"] or ""), r["track_id"] == ids[0], -r["id"])
+
+    ecrites = 0
+    for video_id, portees in par_video.items():
+        portees = sorted(portees, key=fraicheur, reverse=True)
+        valeurs: dict = {}
+        mesurees = [r for r in portees if r["views"] is not None]
+        if mesurees:
+            valeurs["views"] = mesurees[0]["views"]
+            valeurs["views_updated"] = mesurees[0]["views_updated"]
+        for colonne in (*COLONNES_DE_LA_VIDEO, "recherche"):
+            connue = next((r[colonne] for r in portees if not _est_vide(r[colonne])), None)
+            if connue is not None:
+                valeurs[colonne] = connue
+        forte = max(portees, key=lambda r: _rang_lien(r["source"]))
+        if not _est_vide(forte["source"]):
+            valeurs["source"] = forte["source"]
+
+        presentes = {r["track_id"]: r for r in portees}
+        for track_id in ids:
+            ligne = presentes.get(track_id)
+            if ligne is not None:
+                changees = {c: v for c, v in valeurs.items() if ligne[c] != v}
+                if changees:
+                    conn.execute(
+                        text(
+                            "UPDATE track_videos SET "  # noqa: S608
+                            + ", ".join(f"{c} = :{c}" for c in changees)
+                            + " WHERE id = :id"
+                        ),
+                        {"id": ligne["id"], **changees},
+                    )
+                    ecrites += 1
+            elif video_id not in refusees.get(track_id, ()):
+                cols = ["track_id", "video_id", "created_at", *valeurs]
+                conn.execute(
+                    text(
+                        f"INSERT INTO track_videos ({', '.join(cols)}) "  # noqa: S608
+                        f"VALUES ({', '.join(':' + c for c in cols)})"
+                    ),
+                    {
+                        "track_id": track_id,
+                        "video_id": video_id,
+                        "created_at": portees[0]["created_at"],
+                        **valeurs,
+                    },
+                )
+                ecrites += 1
     return ecrites
 
 
@@ -822,7 +940,7 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
                 rapport["credits"] += _unir_credits(conn, source, cible)
 
     rapport["observations"] = unir_observations(conn, famille)
-    rapport["videos"] = _unir_table_additive(conn, famille, "track_videos", "video_id")
+    rapport["videos"] = unir_videos(conn, famille)
     rapport["spotify_ids"] = _unir_table_additive(conn, famille, "track_spotify_ids", "spotify_id")
     rapport["editions"] = unir_editions(conn, famille)
     # `is_primary` RECOPIE `tracks.spotify_id` : une colonne comblée par une

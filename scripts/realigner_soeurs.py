@@ -1,8 +1,8 @@
 """Réaligne les lignes SŒURS (même page Genius chez plusieurs artistes) :
 rejoue la synchronisation de `save_track`, dont la règle « la lecture la plus
 récente de la page l'emporte » (anecdotes, relations, paroles — décision
-utilisateur 2026-10-12) et l'union des éditions (`track_editions`, 2026-10-29),
-puis recalcule les colonnes dérivées des membres. Une transaction par famille.
+utilisateur 2026-10-12), l'union des éditions (`track_editions`, 2026-10-29) et
+celle des vidéos, au relevé le plus frais (`track_videos`, 2026-11-06), puis recalcule les colonnes dérivées des membres. Une transaction par famille.
 
     python scripts/realigner_soeurs.py            # à blanc (défaut)
     python scripts/realigner_soeurs.py --apply    # backup + écriture
@@ -30,7 +30,7 @@ def main() -> int:
     changes = dm.realigner_soeurs()
     print(
         f"{len(changes)} famille(s) changent, {sum(changes.values())} ligne(s) réécrite(s) "
-        "(données de page, lien YouTube, éditions)"
+        "(données de page, lien YouTube, éditions, vidéos)"
     )
     if not args.apply:
         print("(à blanc — relancer avec --apply pour écrire)")

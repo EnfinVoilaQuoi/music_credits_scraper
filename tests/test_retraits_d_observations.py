@@ -53,6 +53,14 @@ EXCEPTIONS_EDITIONS = {
     "merge_tracks": "ligne absorbée par une autre",
 }
 
+#: VIDÉOS (`track_videos`) : unies entre sœurs en fin de transaction depuis le
+#: 2026-11-06 (`unir_videos`) — même revers, même exigence.
+MOTIFS_VIDEOS = ("DELETE FROM track_videos",)
+EXCEPTIONS_VIDEOS = {
+    "delete_track": "ligne supprimée",
+    "merge_tracks": "ligne absorbée par une autre",
+}
+
 
 def _fonctions(motifs=("DELETE FROM observations",)):
     """(nom, texte SQL qui retire, appels) de chaque fonction du module."""
@@ -138,4 +146,21 @@ def test_un_retrait_d_edition_passe_par_les_soeurs():
     # Le crible voit bien les écrivains de retrait (sinon il passerait en silence).
     assert {"retirer_edition", "deplacer_edition"} <= set(retraits)
     perimees = sorted(set(EXCEPTIONS_EDITIONS) - {n for n, p in retraits.items() if not p})
+    assert not perimees, f"exceptions sans objet, à retirer de la liste : {perimees}"
+
+
+def test_un_retrait_de_video_passe_par_les_soeurs():
+    premier_niveau = _de_premier_niveau()
+    retraits = dict(_fonctions_qui_retirent(MOTIFS_VIDEOS, frozenset()))
+    fautives = sorted(
+        nom
+        for nom, propage in retraits.items()
+        if nom in premier_niveau and not propage and nom not in EXCEPTIONS_VIDEOS
+    )
+    assert not fautives, (
+        "retrait de vidéo sur UNE ligne : l'union de fin de transaction le "
+        f"rendrait — passer par `effacer_chez_les_soeurs` : {fautives}"
+    )
+    assert "forget_track_video" in retraits
+    perimees = sorted(set(EXCEPTIONS_VIDEOS) - {n for n, p in retraits.items() if not p})
     assert not perimees, f"exceptions sans objet, à retirer de la liste : {perimees}"

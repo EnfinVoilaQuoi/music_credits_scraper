@@ -462,10 +462,64 @@ class TestFlouConfirme:
 
     @pytest.mark.parametrize("duree", [None, 222])
     def test_sans_duree_qui_tranche_le_cas_reste(self, duree):
-        """Sans durée de l'ID, ou à 3-10 s de la fiche : rien n'est prouvé."""
+        """Une coquille sans durée de l'ID, ou à 3-10 s de la fiche : rien n'est
+        prouvé."""
+        t = _track(1, "Gangbangn 101", spotify_id="FICHE")
+        t.duration = 216
         res, _ = self._run(
-            self._fiche(), _entry("Don't Like.1", 5000, 50, "KWORB"), lambda s: {"duration": duree}
+            t, _entry("Gangbangin' 101", 5000, 50, "KWORB"), lambda s: {"duration": duree}
         )
+        assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
+
+    @pytest.mark.parametrize("duree", [None, 222])
+    def test_le_titre_de_la_fiche_ecrit_autrement_est_confirme(self, duree):
+        """Sniper « J' te parle » (273 / 270 s) : titres équivalents, aucune
+        durée qui contredit, rien à soumettre (2026-11-06)."""
+        t = _track(1, "J’te parle", spotify_id="FICHE")
+        t.duration = 216
+        res, dm = self._run(
+            t, _entry("J' te parle", 5000, 50, "KWORB"), lambda s: {"duration": duree}
+        )
+        assert res["flous_confirmes"] == [("J' te parle", "J’te parle")]
+        assert "kworb_flou" not in self._codes(res) and dm.streams_writes[0][:2] == (1, 5000)
+
+    def test_une_autre_duree_reste_a_l_humain(self):
+        """Même titre écrit autrement, 40 s d'écart, sans lettre masquée : rien
+        ne dit que c'est une édition du même enregistrement."""
+        t = _track(1, "J’te parle", spotify_id="FICHE")
+        t.duration = 270
+        res, _ = self._run(t, _entry("J' te parle", 5000, 50, "KWORB"), lambda s: {"duration": 230})
+        assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
+
+    def test_une_edition_censuree_se_somme_malgre_sa_duree(self):
+        """Eminem « Just Don't Give a F** » (227 / 242 s) : édition de support,
+        comme un « Bonus Track » (décision utilisateur 2026-11-06)."""
+        t = _track(1, "Just Don’t Give a Fuck", spotify_id="FICHE")
+        t.duration = 242
+        res, dm = self._run(
+            t, _entry("Just Don't Give a F**", 5000, 50, "KWORB"), lambda s: {"duration": 227}
+        )
+        assert res["flous_confirmes"] == [("Just Don't Give a F**", "Just Don’t Give a Fuck")]
+        assert "kworb_flou" not in self._codes(res) and dm.streams_writes[0][:2] == (1, 5000)
+
+    def test_une_edition_censuree_a_l_id_refuse_reste_exclue(self, monkeypatch):
+        from src.utils import corrections_fiches
+
+        monkeypatch.setattr(corrections_fiches, "ids_refuses", lambda track: {"KWORB"})
+        t = _track(1, "Just Don’t Give a Fuck", spotify_id="FICHE")
+        t.duration = 242
+        res, _ = self._run(
+            t, _entry("Just Don't Give a F**", 5000, 50, "KWORB"), lambda s: {"duration": 227}
+        )
+        assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
+
+    def test_un_id_refuse_n_est_pas_confirme_par_le_titre(self, monkeypatch):
+        from src.utils import corrections_fiches
+
+        monkeypatch.setattr(corrections_fiches, "ids_refuses", lambda track: {"KWORB"})
+        t = _track(1, "J’te parle", spotify_id="FICHE")
+        t.duration = 216
+        res, _ = self._run(t, _entry("J' te parle", 5000, 50, "KWORB"), lambda s: {"duration": 216})
         assert res["flous_confirmes"] == [] and "kworb_flou" in self._codes(res)
 
     def test_une_coquille_a_la_meme_duree_est_confirmee(self):
@@ -493,12 +547,12 @@ class TestFlouConfirme:
         assert res["unmatched_titles"] == [entree["title"]]
 
     def test_un_titre_equivalent_a_une_autre_duree_reste_a_l_humain(self):
-        """Eminem « Just Don't Give a F** » (227 s) / la fiche « Just Don’t Give
-        a Fuck » (242 s) : une autre édition du même morceau, peut-être."""
-        t = _track(1, "Just Don’t Give a Fuck")
-        t.duration = 242
-        entree = _entry("Just Don't Give a F**", spotify_id="K")
-        res, dm = self._run(t, entree, lambda s: {"duration": 227})
+        """Une autre édition du même morceau, peut-être (hors graphie censurée,
+        sommée : `test_une_edition_censuree_se_somme_malgre_sa_duree`)."""
+        t = _track(1, "Y’a pas de mérite")
+        t.duration = 247
+        entree = _entry("Y a pas de mérite", spotify_id="K")
+        res, dm = self._run(t, entree, lambda s: {"duration": 200})
         assert "kworb_flou" in self._codes(res) and dm.streams_writes
 
     def test_une_decision_memorisee_rattache_quand_meme(self, monkeypatch):
@@ -514,6 +568,79 @@ class TestFlouConfirme:
             self._fiche(), _entry("Don't Like.1", 5000, 50, "KWORB"), lambda s: {"duration": 230}
         )
         assert dm.streams_writes[0][:2] == (1, 5000)
+
+
+class TestTitreEquivalent:
+    """2026-11-06 : une ligne au titre de la fiche sous une autre graphie, que le
+    flou ne voit pas (« Airplanes, Pt. II » : « un numéro de plus », 86 %), n'est
+    plus soumise — sauf durée qui la dément, homonymes, ID refusé ou rejet."""
+
+    def _run(self, tracks, entry, lire=lambda sid: None, memoire=None, monkeypatch=None):
+        if memoire is not None:
+            from src.utils import kworb_links_manager
+
+            monkeypatch.setattr(
+                kworb_links_manager.KworbLinksManager, "load", lambda self, nom: memoire
+            )
+        dm = _DataManager(tracks)
+        scraper = _Scraper(songs=_page([entry]))
+        return update_kworb_streams(_Artist(), dm, scraper=scraper, lire_identite=lire), dm
+
+    @pytest.mark.parametrize(
+        ("kworb", "fiche"),
+        [
+            ("Airplanes, Pt. II (feat. Eminem & Hayley Williams of Paramore)", "Airplanes, Pt. 2"),
+            ("Love The Way You Lie (Part II) - Pt. 2", "Love the Way You Lie, Pt. II"),
+            ("F*ck a B*tch (feat. Nipsey Hussle)", "Fuck a Bitch"),
+        ],
+    )
+    def test_rattachee_sans_rien_soumettre(self, kworb, fiche):
+        t = _track(1, fiche)
+        t.duration = 224
+        res, dm = self._run([t], _entry(kworb, 900, spotify_id="K"), lambda s: {"duration": 228})
+        assert dm.streams_writes[0][:2] == (1, 900)
+        assert res["suggestions"] == [] and res["flous_confirmes"] == [(kworb, fiche)]
+
+    def test_une_edition_censuree_hors_du_flou_se_somme(self):
+        t = _track(1, "Fuck a Bitch")
+        t.duration = 224
+        res, dm = self._run(
+            [t], _entry("F*ck a B*tch (feat. X)", 900, spotify_id="K"), lambda s: {"duration": 180}
+        )
+        assert dm.streams_writes[0][:2] == (1, 900) and res["suggestions"] == []
+
+    def test_une_autre_duree_reste_proposee(self):
+        t = _track(1, "Airplanes, Pt. 2")
+        t.duration = 319
+        res, dm = self._run(
+            [t],
+            _entry("Airplanes, Pt. II (feat. X)", 900, spotify_id="K"),
+            lambda s: {"duration": 200},
+        )
+        assert dm.streams_writes == [] and len(res["suggestions"]) == 1
+
+    def test_deux_fiches_equivalentes_restent_proposees(self):
+        res, dm = self._run(
+            [_track(1, "Airplanes, Pt. 2"), _track(2, "Airplanes Pt 2")],
+            _entry("Airplanes, Pt. II", 900, spotify_id="K"),
+        )
+        assert dm.streams_writes == []
+
+    def test_une_autre_partie_ne_passe_pas(self):
+        res, dm = self._run(
+            [_track(1, "Airplanes, Pt. 1")], _entry("Airplanes, Pt. II", 900, spotify_id="K")
+        )
+        assert dm.streams_writes == []
+
+    def test_un_rejet_passe_avant(self, monkeypatch):
+        memoire = {"confirmed": {}, "rejected": ["airplanes pt ii"], "decisions": {}}
+        _, dm = self._run(
+            [_track(1, "Airplanes, Pt. 2")],
+            _entry("Airplanes, Pt. II", 900, spotify_id="K"),
+            memoire=memoire,
+            monkeypatch=monkeypatch,
+        )
+        assert dm.streams_writes == []
 
 
 class TestMemeMorceauParLaDuree:

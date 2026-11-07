@@ -22,6 +22,7 @@ from src.observability import source_usage
 from src.utils import credits_genius_api
 from src.utils.apple_identity import CHAMP_APPLE_PROPOSE
 from src.utils.credit_roles import map_role
+from src.utils.encodage import reparer_c1
 from src.utils.inedits import porte_le_marqueur, titre_sans_marqueur
 from src.utils.logger import get_logger, log_api
 from src.utils.pages_genius import page_non_morceau, role_de_version
@@ -913,7 +914,7 @@ class GeniusAPI:
         # Anecdote : la description de l'API garde ses PARAGRAPHES, la page les
         # aplatissait (`_extract_anecdotes_bs4`). Posée quand la fiche n'en a
         # pas, ou quand elle est plus complète.
-        bio = ((song.get("description") or {}).get("plain") or "").strip()
+        bio = reparer_c1((song.get("description") or {}).get("plain") or "").strip()
         if bio and bio != "?" and bio != track.anecdotes and len(bio) >= len(track.anecdotes or ""):
             track.anecdotes = bio
             changed = True

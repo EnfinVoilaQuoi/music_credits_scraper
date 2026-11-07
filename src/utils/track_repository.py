@@ -18,7 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from src.config import settings
 from src.enrichment.observation import Observation
 from src.models import Credit, ReleaseObservation, Track, TrackSpotifyId, TrackVideo
-from src.models.track import CreditRole
+from src.models.track import SOURCE_NON_TRANSCRITES, CreditRole
 from src.persistence.binding import date_bind
 from src.persistence.schema import albums, artists, credits, tracks
 from src.utils.codes_barres import cle_upc
@@ -35,8 +35,10 @@ from src.utils.credits_genius_api import (
 )
 from src.utils.credits_genius_api import unir as unir_credits
 from src.utils.dates import completer, la_plus_ancienne, meme_jour
+from src.utils.encodage import reparer_c1
 from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
+from src.utils.paroles_genius import a_des_paroles, paroles_factices
 from src.utils.positions_disque import position_retenue
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
 from src.utils.track_mapper import (
@@ -218,6 +220,10 @@ def _est_album_repere(album: str | None, titre_parution: str | None) -> bool:
     liens sur 8 807 où l'égalité exacte ne reconnaissait pas le repère — et le
     délien le retirait alors sans exiger de remplaçant."""
     return bool(album and titre_parution and cle_album(album) == cle_album(titre_parution))
+
+
+#: Les colonnes de texte venues de Genius que `reparer_c1` surveille.
+_CHAMPS_C1 = ("title", "lyrics", "anecdotes")
 
 
 class TrackRepository:
@@ -2088,6 +2094,35 @@ class TrackRepository:
             logger.error(f"Erreur purger_credits_relations_deguisees: {e}")
             return 0
 
+    def credits_hors_credits(self) -> list[dict[str, Any]]:
+        """Les lignes de rôle `Other` dont le libellé Genius est une métadonnée de
+        la page (`credit_roles.LIBELLES_HORS_CREDITS`), pour `reclasser_credits`."""
+        from src.utils.credit_roles import LIBELLES_HORS_CREDITS
+
+        marques = ", ".join(f"'{libelle}'" for libelle in LIBELLES_HORS_CREDITS)
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text(
+                    "SELECT id, track_id, name, role_detail FROM credits "
+                    f"WHERE role = 'Other' AND lower(role_detail) IN ({marques}) "  # noqa: S608
+                    "ORDER BY id"
+                )
+            ).mappings()
+            return [dict(ligne) for ligne in lignes]
+
+    def credits_au_nom_d_annee(self) -> list[dict[str, Any]]:
+        """Les crédits dont le nom est une année, avec le titre de leur fiche."""
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text(
+                    "SELECT c.id, c.track_id, c.name, c.role, c.role_detail, t.title "
+                    "FROM credits c JOIN tracks t ON t.id = c.track_id "
+                    "WHERE c.name GLOB '19[0-9][0-9]' OR c.name GLOB '20[0-9][0-9]' "
+                    "ORDER BY c.id"
+                )
+            ).mappings()
+            return [dict(ligne) for ligne in lignes]
+
     def reclasser_credits(self, roles: dict, suppressions=()) -> tuple[int, int]:
         """Change le rôle de crédits existants et en retire d'autres.
 
@@ -2509,6 +2544,58 @@ class TrackRepository:
 
         poser(track_id)
         effacer_chez_les_soeurs(conn, track_id, poser)
+
+    def paroles_factices_de_la_base(self) -> list[dict[str, Any]]:
+        """Les fiches dont le texte n'est pas des paroles (`paroles_factices`) :
+        `[{id, title, lyrics, nature, lyrics_synced, unreleased}]`. Lecture seule."""
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                select(
+                    tracks.c.id,
+                    tracks.c.title,
+                    tracks.c.lyrics,
+                    tracks.c.lyrics_synced,
+                    tracks.c.unreleased,
+                ).where(tracks.c.lyrics.is_not(None))
+            ).mappings()
+            return [
+                {**ligne, "nature": nature}
+                for ligne in lignes
+                if (nature := paroles_factices(ligne["lyrics"], ligne["title"]))
+            ]
+
+    def constater_paroles_factices(self, track_id: int) -> bool:
+        """Retire un texte qui n'est pas des paroles (`paroles_factices`), au
+        constat que la page n'en a pas : `SOURCE_NON_TRANSCRITES`, daté par sa
+        lecture, comme le placeholder officiel de Genius ; le LRC garde ses juges.
+        Chez les sœurs aussi, sauf une sœur à vrai texte : sa lecture décide."""
+        try:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
+
+                def poser(tid: int) -> None:
+                    ligne = conn.execute(
+                        select(tracks.c.lyrics, tracks.c.title).where(tracks.c.id == tid)
+                    ).first()
+                    if ligne is None or not paroles_factices(ligne.lyrics, ligne.title):
+                        return
+                    conn.execute(
+                        update(tracks)
+                        .where(tracks.c.id == tid)
+                        .values(
+                            lyrics=None,
+                            has_lyrics=False,
+                            lyrics_source=SOURCE_NON_TRANSCRITES,
+                            updated_at=datetime.now(),
+                        )
+                    )
+
+                poser(track_id)
+                effacer_chez_les_soeurs(conn, track_id, poser)
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur constater_paroles_factices({track_id}): {e}")
+            return False
 
     @staticmethod
     def _paroles_a_retirer(conn, track_id: int, genius_id) -> bool:
@@ -3551,13 +3638,16 @@ class TrackRepository:
         # un total qu'aucun fait n'explique n'a plus à être épargné (2026-10-20 :
         # Diam's « A quand mon heure ? » gardait les vues d'une vidéo refusée).
         self._recalculer_vues_ytm(conn, track_id)
-        conn.execute(
-            text(
-                "UPDATE tracks SET has_lyrics = CASE WHEN lyrics IS NOT NULL AND lyrics <> '' "
-                "THEN 1 ELSE 0 END WHERE id = :t"
-            ),
-            {"t": track_id},
-        )
+        # Un texte, et un vrai : « TBD » ou « . » ne font pas des paroles (2026-11-06).
+        paroles = conn.execute(
+            select(tracks.c.lyrics, tracks.c.title).where(tracks.c.id == track_id)
+        ).first()
+        if paroles is not None:
+            conn.execute(
+                update(tracks)
+                .where(tracks.c.id == track_id)
+                .values(has_lyrics=a_des_paroles(paroles.lyrics, paroles.title))
+            )
         # Après la durée et les paroles : le verdict LRC en dépend.
         self._rearbitrer_lrc(conn, track_id)
         # L'ID PRINCIPAL a toujours sa ligne : `is_primary` matérialise la
@@ -6654,6 +6744,57 @@ class TrackRepository:
                     .values(spotify_page_title=e["neuf"], updated_at=datetime.now())
                 ).rowcount
         return ecrites
+
+    def textes_a_caracteres_c1(self) -> list[dict[str, Any]]:
+        """Les titres, paroles et anecdotes qui portent un caractère de contrôle
+        C1 (`encodage.reparer_c1`) : `[{id, champ, valeur}]`."""
+        with self.engine.connect() as conn:
+            lignes = conn.execute(select(tracks.c.id, *[tracks.c[c] for c in _CHAMPS_C1])).all()
+        return [
+            {"id": ligne.id, "champ": champ, "valeur": getattr(ligne, champ)}
+            for ligne in lignes
+            for champ in _CHAMPS_C1
+            if (getattr(ligne, champ) or "") != reparer_c1(getattr(ligne, champ) or "")
+        ]
+
+    def textes_c1_hors_genius(self) -> list[str]:
+        """Le même défaut là où il ne vient pas de Genius (LRC, titres de vidéo) :
+        pour le dire, rien de ce qui suit ne les répare."""
+        with self.engine.connect() as conn:
+            lrc = conn.execute(
+                text(
+                    "SELECT track_id, source, value FROM observations WHERE field = 'lyrics_synced'"
+                )
+            ).all()
+            videos = conn.execute(
+                text("SELECT track_id, video_id, title FROM track_videos WHERE title IS NOT NULL")
+            ).all()
+        return [f"#{t} LRC {s}" for t, s, v in lrc if isinstance(v, str) and v != reparer_c1(v)] + [
+            f"#{t} vidéo {v}" for t, v, x in videos if x != reparer_c1(x)
+        ]
+
+    def corriger_texte_de_page(
+        self, track_id: int, *, lyrics: str | None = None, anecdotes: str | None = None
+    ) -> bool:
+        """Réécrit le texte des paroles ou de l'anecdote, sans toucher ni à sa
+        provenance ni à sa date de lecture : le même texte, corrigé. Chaque ligne
+        sœur porte le même défaut et passe de même : l'horloge de lecture qui
+        départage les sœurs ne bouge pas."""
+        valeurs = {c: v for c, v in (("lyrics", lyrics), ("anecdotes", anecdotes)) if v is not None}
+        if not valeurs:
+            return False
+        try:
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
+                conn.execute(
+                    update(tracks)
+                    .where(tracks.c.id == track_id)
+                    .values(**valeurs, updated_at=datetime.now())
+                )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur corriger_texte_de_page (track_id={track_id}): {e}")
+            return False
 
     # ──────────────────────────────────────────────────────────────────────────
     # Vidéos YouTube d'un morceau (table `track_videos`, e20)

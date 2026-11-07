@@ -8,6 +8,8 @@ coûté des faux non-matchés ("MURDER INC" vs "MURDER INC.", "S.O.A.B" vs "SOAB
 import re
 import unicodedata
 
+from src.utils.encodage import reparer_c1
+
 # Superpositions décoratives que Genius laisse dans certains titres
 # (« F̶i̶e̶s̶t̶a̶ ») : barres et solidus combinants. Ce ne sont JAMAIS des accents,
 # contrairement au reste du bloc U+0300-U+036F — les retirer en bloc casserait
@@ -187,11 +189,12 @@ def clean_stored_title(title: str) -> str:
 
     Appliquée à l'écriture (`save_track`, `rename_track`), elle est ce qui rend
     le défaut auto-correctif : un titre pollué ne crée plus une seconde fiche,
-    il retombe sur l'existante.
+    il retombe sur l'existante. Les octets d'un autre encodage aussi (« Le
+    myst\x8fre feminin » sert « mystère », `encodage.reparer_c1`, 2026-11-06).
     """
     if not title:
         return ""
-    propre = "".join(ch for ch in title if ord(ch) not in _SANS_LARGEUR)
+    propre = "".join(ch for ch in reparer_c1(title) if ord(ch) not in _SANS_LARGEUR)
     return unicodedata.normalize("NFC", propre).strip()
 
 

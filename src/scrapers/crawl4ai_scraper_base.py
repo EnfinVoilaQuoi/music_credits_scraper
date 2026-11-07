@@ -400,7 +400,9 @@ class CrawlAIScraperBase:
             except PatchrightError as e:
                 passes.note(classify(exc=e), f"headless : {e}")
                 logger.error(f"{self.__class__.__name__}: patchright headless {url}: {e}")
-                html, blocked = None, True
+                # Une coupure réseau n'est pas un défi : la fenêtre visible n'y ferait
+                # rien (197 fenêtres ouvertes pour rien le 2026-11-08, chez Kaaris).
+                html, blocked = None, not erreur_reseau(e)
             if not blocked:
                 return html
             marqueur = _marqueur_de_defi(html) or "aucun, erreur du navigateur"
@@ -450,9 +452,10 @@ class CrawlAIScraperBase:
         else:
             passes.note(IssueKind.UNREACHABLE, f"{passe} : page vide")
 
-    def _launch_kwargs(self, headless: bool) -> dict:
+    def _launch_kwargs(self, headless: bool, *, hors_ecran: bool = False) -> dict:
         """Arguments de lancement du contexte persistant, partagés par
-        `_patchright_fetch` (une page) et `session` (N pages)."""
+        `_patchright_fetch` (une page) et `session` (N pages). `hors_ecran` : la
+        fenêtre visible d'un défi, qui ne vient devant que s'il faut un humain."""
         kwargs = dict(
             headless=headless,
             user_agent=_USER_AGENT,
@@ -460,6 +463,11 @@ class CrawlAIScraperBase:
         )
         # channel="chrome" → utilise le vrai Chrome installé (passe mieux certains
         # Cloudflare que le Chromium bundlé)
+        if hors_ecran and not headless:
+            # Ouverte HORS de l'écran : un défi se lève seul en quelques secondes
+            # (197 / 197 en ≤ 5 s dans les journaux du 2026-11), la fenêtre ne vient
+            # devant que s'il faut un humain (`_au_premier_plan`). Rendue même cachée.
+            kwargs["args"] = [_POSITION_HORS_ECRAN, "--disable-backgrounding-occluded-windows"]
         if _BROWSER_CHANNEL:
             kwargs["channel"] = _BROWSER_CHANNEL
         if self.locale:
@@ -548,7 +556,7 @@ class CrawlAIScraperBase:
                     logger.info(f"{self.__class__.__name__}: connecté via CDP à {cdp_url}")
                 else:
                     ctx = await pw.chromium.launch_persistent_context(
-                        profile_dir, **self._launch_kwargs(headless)
+                        profile_dir, **self._launch_kwargs(headless, hors_ecran=True)
                     )
                     page = ctx.pages[0] if ctx.pages else await ctx.new_page()
 
@@ -588,7 +596,9 @@ class CrawlAIScraperBase:
             return None, html, blocked
         except PatchrightError as e:
             logger.error(f"{self.__class__.__name__}: patchright fetch {url}: {e}")
-            return None, None, True
+            # Une coupure réseau n'est pas un blocage : sans elle, la passe headless
+            # montait en fenêtre visible à chaque page (2026-11-08, ERR_NAME_NOT_RESOLVED).
+            return None, None, not erreur_reseau(e)
 
     async def _attendre_fin_du_defi(self, page, sel: str, url: str) -> bool:
         """Fenêtre visible : `True` si le conteneur attendu est là.
@@ -602,11 +612,16 @@ class CrawlAIScraperBase:
         nom = self.__class__.__name__
         limite_s = settings.fenetre_visible_max_s
         debut = time.monotonic()
+        devant = False
 
         def duree() -> int:
             return round(time.monotonic() - debut)
 
         while not limite_s or time.monotonic() - debut < limite_s:
+            if not devant and time.monotonic() - debut >= _PREMIER_PLAN_APRES_S:
+                # Le défi ne s'est pas levé seul : il faut l'humain, la fenêtre vient devant.
+                devant = True
+                await self._au_premier_plan(page, url)
             try:
                 if await page.query_selector(sel):
                     logger.info(f"{nom}: défi levé après {duree()} s, contenu attendu : {url}")
@@ -639,6 +654,25 @@ class CrawlAIScraperBase:
             f"page laissée pour le prochain passage : {url}"
         )
         return False
+
+    async def _au_premier_plan(self, page, url: str) -> None:
+        """La fenêtre du défi, ouverte hors de l'écran, revient à l'écran et passe
+        devant : seul un humain peut encore lever le défi. Un échec ne coûte que la
+        fenêtre restée cachée (l'attente continue jusqu'à sa limite)."""
+        logger.warning(
+            f"{self.__class__.__name__}: défi non levé seul après {_PREMIER_PLAN_APRES_S} s — "
+            f"fenêtre au premier plan, résous-le : {url}"
+        )
+        try:
+            cdp = await page.context.new_cdp_session(page)
+            fenetre = await cdp.send("Browser.getWindowForTarget")
+            await cdp.send(
+                "Browser.setWindowBounds",
+                {"windowId": fenetre["windowId"], "bounds": {"left": 80, "top": 60}},
+            )
+            await page.bring_to_front()
+        except PatchrightError as e:
+            logger.info(f"{self.__class__.__name__}: fenêtre non ramenée à l'écran ({e})")
 
     @staticmethod
     def _looks_blocked(error_message: str | None, html: str | None) -> bool:
@@ -693,6 +727,35 @@ def _garder_le_defi(url: str, html: str | None) -> None:
 _GRACE_APRES_DEFI_MS = 15_000
 #: Entre deux regards sur une fenêtre visible.
 _REGARD_DEFI_MS = 2_000
+#: Un défi que le navigateur n'a pas levé seul dans ce délai attend un humain : la
+#: fenêtre, ouverte hors de l'écran, vient alors devant (197 / 197 levés en ≤ 5 s).
+_PREMIER_PLAN_APRES_S = 15
+#: Hors de tout écran, même à gauche d'un écran principal (coordonnées négatives).
+_POSITION_HORS_ECRAN = "--window-position=-10000,-10000"
+
+#: Les erreurs du navigateur qui disent une coupure du RÉSEAU, jamais un défi :
+#: le DNS, la carte, la connexion. Un délai dépassé n'en est pas (un défi peut
+#: faire attendre la page).
+_ERREURS_RESEAU = (
+    "net::ERR_NAME_NOT_RESOLVED",
+    "net::ERR_INTERNET_DISCONNECTED",
+    "net::ERR_NETWORK_CHANGED",
+    "net::ERR_NETWORK_IO_SUSPENDED",
+    "net::ERR_ADDRESS_UNREACHABLE",
+    "net::ERR_CONNECTION_REFUSED",
+    "net::ERR_CONNECTION_RESET",
+    "net::ERR_CONNECTION_CLOSED",
+    "net::ERR_CONNECTION_ABORTED",
+    "net::ERR_CONNECTION_FAILED",
+    "net::ERR_PROXY_CONNECTION_FAILED",
+)
+
+
+def erreur_reseau(exc: BaseException) -> bool:
+    """PUR. L'erreur du navigateur dit une coupure réseau : la page n'est pas venue,
+    aucune fenêtre visible n'y changera rien."""
+    texte = str(exc)
+    return any(code in texte for code in _ERREURS_RESEAU)
 
 
 class _BrowserSession:

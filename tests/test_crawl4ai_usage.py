@@ -139,6 +139,24 @@ class FaussePage:
         self.regards = 0
         self.horloge = horloge
         self.fermee = False
+        self.devant = 0  # appels à bring_to_front
+        self.bornes = None  # la dernière position demandée à la fenêtre
+
+    # La session CDP de la fenêtre : la fausse page la joue elle-même.
+    @property
+    def context(self):
+        return self
+
+    async def new_cdp_session(self, _page):
+        return self
+
+    async def send(self, methode, params=None):
+        if methode == "Browser.getWindowForTarget":
+            return {"windowId": 1}
+        self.bornes = params["bounds"]
+
+    async def bring_to_front(self):
+        self.devant += 1
 
     def _courant(self):
         etat = self.etats[min(self.regards, len(self.etats) - 1)]
@@ -267,6 +285,129 @@ def test_la_fenetre_visible_suit_le_defi_de_bout_en_bout(tmp_path, monkeypatch):
         scraper._patchright_fetch("u", None, None, 120_000, 120_000, 0, headless=False)
     )
     assert blocked is True and html == DEFI
+    assert page.devant == 1, "un défi de 180 s demande l'humain"
+
+
+# --- La fenêtre du défi ne vient devant que s'il faut un humain (2026-11-08) ------
+
+
+class _FauxNavigateur:
+    """`async_playwright` sans navigateur : garde les arguments de lancement."""
+
+    def __init__(self, page):
+        self.page = page
+        self.lancements = []
+        test = self
+
+        class Contexte:
+            pages = [page]
+
+            async def close(self):
+                page.fermee = True
+
+        class Chromium:
+            async def launch_persistent_context(self, _profil, **kwargs):
+                test.lancements.append(kwargs)
+                return Contexte()
+
+        class Playwright:
+            chromium = Chromium()
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_a):
+                return False
+
+        self.Playwright = Playwright
+
+
+def _fetch(page, monkeypatch, tmp_path, *, headless):
+    import patchright.async_api as pa
+
+    nav = _FauxNavigateur(page)
+    monkeypatch.setattr(pa, "async_playwright", nav.Playwright)
+    scraper = CrawlAIScraperBase(headless=True, health_key="genius_scrape")
+    scraper.profile_dir = str(tmp_path)
+    rendu = asyncio.run(
+        scraper._patchright_fetch("u", None, None, 1_000, 1_000, 0, headless=headless)
+    )
+    return rendu, nav.lancements
+
+
+class TestPremierPlan:
+    def test_un_defi_leve_seul_ne_vient_jamais_devant(self, monkeypatch):
+        """197 / 197 défis levés en ≤ 5 s : personne n'a à voir la fenêtre."""
+        page = FaussePage([DEFI] * 5 + [AVEC_PAROLES], {"t": 0.0})
+        assert _attendre(page, 0, monkeypatch) is True
+        assert page.devant == 0 and page.bornes is None
+
+    def test_un_defi_qui_dure_vient_devant_une_seule_fois(self, monkeypatch):
+        """Sans limite (l'app, hors lot) : une heure d'attente, UN passage devant."""
+        page = FaussePage([DEFI] * 1800 + [AVEC_PAROLES], {"t": 0.0})
+        assert _attendre(page, 0, monkeypatch) is True
+        assert page.devant == 1
+        assert page.bornes["left"] >= 0 and page.bornes["top"] >= 0, "ramenée à l'écran"
+
+    def test_la_fenetre_du_defi_s_ouvre_hors_de_l_ecran(self, monkeypatch, tmp_path):
+        page = FaussePage([AVEC_PAROLES], {"t": 0.0})
+
+        async def goto(*_a, **_k):
+            return None
+
+        page.goto = goto
+        (_, html, blocked), (lancement,) = _fetch(page, monkeypatch, tmp_path, headless=False)
+        assert html == AVEC_PAROLES and blocked is False
+        assert base._POSITION_HORS_ECRAN in lancement["args"]
+        assert "--disable-backgrounding-occluded-windows" in lancement["args"]
+        assert page.devant == 0
+
+    def test_headless_et_sessions_sans_position(self):
+        scraper = CrawlAIScraperBase(headless=True, health_key="genius_scrape")
+        assert "args" not in scraper._launch_kwargs(True, hors_ecran=True)
+        assert "args" not in scraper._launch_kwargs(False), "session() : rien de changé"
+
+
+# --- Une coupure réseau n'est pas un défi (2026-11-08, Kaaris) --------------------
+
+COUPURE = "Page.goto: net::ERR_NAME_NOT_RESOLVED at https://genius.com/Kaaris-ecoute-lyrics"
+
+
+class TestCoupureReseau:
+    def test_les_erreurs_du_reseau(self):
+        assert base.erreur_reseau(base.PatchrightError(COUPURE))
+        assert base.erreur_reseau(base.PatchrightError("net::ERR_INTERNET_DISCONNECTED at u"))
+        assert base.erreur_reseau(base.PatchrightError("net::ERR_NETWORK_CHANGED at u"))
+        assert not base.erreur_reseau(base.PatchrightError("Timeout 30000ms exceeded."))
+        assert not base.erreur_reseau(base.PatchrightError("Target closed"))
+
+    def test_la_coupure_en_headless_n_ouvre_pas_de_fenetre(self):
+        """Une seule passe : la fenêtre visible n'en a pas d'autre à servir."""
+        html, verdicts = _jouer(_scraper([(base.PatchrightError(COUPURE), True)]))
+        assert html is None
+        (verdict,) = verdicts
+        assert verdict.issue == IssueKind.UNREACHABLE and verdict.attempts == 1
+
+    def test_la_coupure_n_est_pas_un_blocage(self, monkeypatch, tmp_path):
+        page = FaussePage([AVEC_PAROLES])
+
+        async def goto(*_a, **_k):
+            raise base.PatchrightError(COUPURE)
+
+        page.goto = goto
+        (_, html, blocked), _ = _fetch(page, monkeypatch, tmp_path, headless=True)
+        assert html is None and blocked is False
+
+    def test_une_erreur_du_navigateur_reste_un_blocage(self, monkeypatch, tmp_path):
+        """Hors réseau, l'échelle est inchangée : la fenêtre visible est tentée."""
+        page = FaussePage([AVEC_PAROLES])
+
+        async def goto(*_a, **_k):
+            raise base.PatchrightError("Timeout 30000ms exceeded.")
+
+        page.goto = goto
+        (_, html, blocked), _ = _fetch(page, monkeypatch, tmp_path, headless=True)
+        assert html is None and blocked is True
 
 
 # --- Le journal dit comment la fenêtre s'est terminée ----------------------------
@@ -308,8 +449,10 @@ class TestCompteRendu:
     def test_defi_non_leve(self, monkeypatch, journal):
         _attendre(FaussePage([DEFI], {"t": 0.0}), 180, monkeypatch)
         assert journal == [
+            "CrawlAIScraperBase: défi non levé seul après 15 s — "
+            "fenêtre au premier plan, résous-le : u",
             "CrawlAIScraperBase: défi non levé après 180 s, "
-            "page laissée pour le prochain passage : u"
+            "page laissée pour le prochain passage : u",
         ]
 
     def test_fenetre_fermee(self, monkeypatch, journal):

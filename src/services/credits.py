@@ -21,6 +21,7 @@ from src.services.runtime import (
     Hooks,
     Manque,
     Runtime,
+    conclure_sans_morceau,
     est_manquant,
     morceaux_a_traiter,
 )
@@ -507,7 +508,7 @@ def run(
         ]
     bilan = BilanCredits(morceaux=len(tracks))
     if not tracks:
-        bilan.interrompu("aucun morceau à traiter")
+        conclure_sans_morceau(bilan, artist, options.track_ids)
         return bilan
     scraper = None
     n = len(tracks)

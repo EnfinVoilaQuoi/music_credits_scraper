@@ -252,6 +252,24 @@ class TestFermetureEtSauvegarde:
         bilan = credits.run(_rt(), Artist(name="S"), [], credits.OptionsCredits(), Hooks())
         assert not bilan.complete
 
+    def test_rien_a_traiter_est_complet(self):
+        """La restriction a tout écarté : rien n'a manqué (2026-11-06)."""
+        fiche = Track(title="T", artist=Artist(name="S"))
+        fiche.id = 1
+        artist = Artist(name="S")
+        artist.tracks = [fiche]
+        bilan = credits.run(_rt(), artist, [], credits.OptionsCredits(), Hooks())
+        assert bilan.complete and bilan.motif == "rien à traiter"
+
+    def test_fiches_d_un_autre_artiste_restent_un_echec(self):
+        fiche = Track(title="T", artist=Artist(name="S"))
+        fiche.id = 1
+        artist = Artist(name="S")
+        artist.tracks = [fiche]
+        options = credits.OptionsCredits(track_ids=frozenset({999}))
+        bilan = credits.run(_rt(), artist, [], options, Hooks())
+        assert not bilan.complete and "aucun morceau" in bilan.motif
+
 
 def test_un_credit_herite_ne_dispense_pas_de_la_description_youtube():
     """Une version acoustique hérite ses auteurs : sa production n'est connue que

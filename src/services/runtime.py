@@ -370,3 +370,18 @@ class Bilan:
     def interrompu(self, motif: str) -> None:
         self.complete = False
         self.motif = motif
+
+
+def conclure_sans_morceau(
+    bilan: Bilan, artist: Artist, track_ids: Iterable[int] | None = None
+) -> None:
+    """La sélection d'une étape est vide. Si la restriction a tout écarté (rien ne
+    manque, tout est désactivé), l'étape est COMPLÈTE : rien à faire n'est pas un
+    échec (code 2 de Larry Fisherman et Larry Lovestein, 2026-11-06). Elle ne l'est
+    pas quand aucune fiche demandée n'existe : artiste sans discographie, `--fiches`
+    d'un autre artiste."""
+    connues = {t.id for t in artist.tracks}
+    if connues if track_ids is None else connues & set(track_ids):
+        bilan.motif = "rien à traiter"
+    else:
+        bilan.interrompu("aucun morceau à traiter")

@@ -299,7 +299,7 @@ def _rattraper_discogs(runtime: Runtime, artist: Artist, bilan: BilanCycle) -> N
 def resume(bilan: BilanCycle, options: OptionsCycle) -> str:
     lignes = [f"Cycle — {bilan.artist_name}", ""]
     for etape, b in bilan.etapes.items():
-        etat = "✅" if b.complete else f"⚠️ {b.motif}"
+        etat = f"✅ {b.motif}".rstrip() if b.complete else f"⚠️ {b.motif}"
         lignes.append(f"{etape:<8} {etat}")
     for etape in bilan.non_lancees:
         lignes.append(f"{etape:<8} ⏹️ non lancée")

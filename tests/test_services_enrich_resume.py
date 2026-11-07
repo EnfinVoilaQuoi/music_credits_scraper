@@ -5,10 +5,19 @@ boucle unique et attend, et le texte du résumé (statuts par source, verdict
 global, titre tronqué, compteurs, mode force, run incomplet).
 """
 
+import asyncio
 from types import SimpleNamespace
 
+from src.models import Artist, Track
 from src.services import enrichissement as enr
+from src.services.runtime import Hooks
 from tests.test_services_enrichissement import _run, _setup
+
+
+def _fiche(tid):
+    t = Track(title=f"T{tid}", artist=Artist(name="A"))
+    t.id = tid
+    return t
 
 
 class TestRunAsync:
@@ -16,6 +25,22 @@ class TestRunAsync:
         rt, _, journal = _setup(monkeypatch)
         bilan = _run(rt, [])
         assert not bilan.complete and "aucun morceau" in bilan.motif and journal == []
+
+    def test_rien_a_traiter_est_complet_sans_teardown(self, monkeypatch):
+        """La restriction a tout écarté : rien n'a manqué (2026-11-06)."""
+        rt, _, journal = _setup(monkeypatch)
+        artist = Artist(name="A")
+        artist.tracks = [_fiche(1)]
+        bilan = asyncio.run(enr.run_async(rt, artist, [], enr.OptionsEnrich(), Hooks()))
+        assert bilan.complete and bilan.motif == "rien à traiter" and journal == []
+
+    def test_fiches_d_un_autre_artiste_restent_un_echec(self, monkeypatch):
+        rt, _, _ = _setup(monkeypatch)
+        artist = Artist(name="A")
+        artist.tracks = [_fiche(1)]
+        options = enr.OptionsEnrich(track_ids=frozenset({999}))
+        bilan = asyncio.run(enr.run_async(rt, artist, [], options, Hooks()))
+        assert not bilan.complete and "aucun morceau" in bilan.motif
 
 
 class TestPontSync:

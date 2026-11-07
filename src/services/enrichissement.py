@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from src.concurrency import async_loop
 from src.models import Artist, Track
 from src.observability import source_usage
-from src.services.runtime import Bilan, Hooks, Runtime
+from src.services.runtime import Bilan, Hooks, Runtime, conclure_sans_morceau
 from src.utils.logger import etape_de_flux, get_logger
 
 logger = get_logger(__name__)
@@ -121,7 +121,7 @@ async def run_async(
     du `sync_runner`)."""
     bilan = BilanEnrich()
     if not tracks:
-        bilan.interrompu("aucun morceau à traiter")
+        conclure_sans_morceau(bilan, artist, options.track_ids)
         return bilan
     enricher = runtime.data_enricher
     dm = runtime.data_manager

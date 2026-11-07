@@ -6,6 +6,7 @@ pour les streams, certifs = recherche PUIS application sur la discographie
 rechargée), une étape inconnue lève, et `resume`/`resume_etape` délèguent.
 """
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -184,6 +185,25 @@ class TestExecuterEtape:
 
 
 class TestResumes:
+    def test_une_etape_sans_morceau_a_traiter_laisse_le_cycle_complet(self, monkeypatch):
+        """Le vrai parcours : toutes les fiches ont leur audio, la sélection est vide.
+        Larry Fisherman rendait le code 2 pour cette seule raison (2026-11-06)."""
+        monkeypatch.setattr(
+            enrichissement,
+            "run",
+            lambda *a, **k: asyncio.run(enrichissement.run_async(*a, **k)),
+        )
+        monkeypatch.setattr(enrichissement, "sources_suivies", lambda runtime, options: ())
+        artist = _artist([_track(1, bpm=120)])
+        rt = _rt(artist.tracks)
+        monkeypatch.setattr("src.services.runtime.est_manquant", lambda track, kind: False)
+        options = cycle.OptionsCycle()
+        b = cycle.executer_etape(rt, artist, "enrich", options, Hooks())
+        assert b.complete and b.motif == "rien à traiter"
+        bilan = cycle.BilanCycle(artist_name="Swing", etapes={"enrich": b})
+        txt = cycle.resume(bilan, options)
+        assert "✅ rien à traiter" in txt and txt.endswith("COMPLET")
+
     def test_resume_liste_les_non_lancees(self):
         b = cycle.BilanCycle(artist_name="S", non_lancees=["streams", "certifs"])
         b.etapes["disco"] = Bilan()

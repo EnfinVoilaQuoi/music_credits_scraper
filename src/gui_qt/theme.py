@@ -38,6 +38,7 @@ SOMBRE = MappingProxyType(
         "prod": "#4f9a94",
         "secondaire": "#bfbfbf",
         "sur_le_disque": "#bfbfbf",  # hors des comptes, comme un rôle secondaire
+        "sur_son_disque": "#744da9",  # dans les comptes, comme un morceau principal
         # Badges et états
         "inedit": "#c97a70",
         "instru": "#c9a227",

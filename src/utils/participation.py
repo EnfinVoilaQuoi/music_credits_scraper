@@ -6,7 +6,9 @@ DIRE pour nous, en deux axes distincts :
 
   · la **participation**, EXCLUSIVE — Principal · Feat · Prod · Rôle secondaire ·
     Sur le disque (le morceau d'un autre, gardé sur la discographie de l'artiste
-    mais hors de ses comptes). C'est elle qui décide des règles (certifs, Timeline, cumul de streams).
+    mais hors de ses comptes) · Sur son disque (le morceau d'un autre sur un disque
+    que l'artiste SIGNE : compté, sans le présenter comme interprète).
+    C'est elle qui décide des règles (certifs, Timeline, cumul de streams).
     La production n'est plus un rôle secondaire comme un autre : « si t'as fait
     la prod, t'as participé activement au morceau » (décision utilisateur) ;
   · des **attributs** CUMULABLES — Inédit, Version alt. — et le marqueur « a
@@ -22,6 +24,7 @@ base, aucun réseau ; les noms de l'artiste (alias confirmés compris,
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -41,6 +44,12 @@ class Participation(StrEnum):
     #: *Confused? You Should Be*). Gardé, hors des comptes (décision utilisateur
     #: 2026-11-06).
     SUR_LE_DISQUE = "sur_le_disque"
+    #: Le morceau d'un autre sur un disque que l'artiste SIGNE : « Champignon » de
+    #: Sirius sur *NQNT33* de Vald, l'« Aubade » de Jimmy Jay sur *Prose Combat*.
+    #: « C'est choisi » : il compte dans ses totaux, mais il n'y interprète rien
+    #: (décision utilisateur 2026-11-07, et déjà celle du 2026-09-24 pour les
+    #: tracklists : « son album, sa DA, ses choix »). Sa certif reste celle de l'autre.
+    SUR_SON_DISQUE = "sur_son_disque"
 
 
 #: Valeurs de `secondary_role` qui disent une VERSION d'un tiers, pas un rôle
@@ -106,9 +115,50 @@ def sans_participation(principal, credites, noms, formations=()) -> bool:
     return not any(_est_l_artiste(nom, noms) for nom in credites)
 
 
+#: Ce qui sépare le premier nom d'un crédit de disque des suivants.
+_SEPARATEURS_DU_CREDIT = re.compile(
+    r"\s*(?:,|&|/|\+)\s*|\s+(?:x|et|and|with|feat\.?|ft\.?|featuring)\s+", re.I
+)
+
+#: Qui signe les disques d'une fiche : le crédit de ses parutions (catalogues) et
+#: l'artiste de son album Genius (`album_artist`). Sans « : » ni commentaire : passé
+#: tel quel à `text()` comme à sqlite3. `artiste` à NULL : toute la base.
+SQL_SIGNATURES_DE_DISQUES = (
+    "SELECT t.id AS track_id, rel.title AS titre, rel.credited_artist_name AS credit "
+    "FROM release_tracks rt JOIN releases rel ON rel.id = rt.release_id "
+    "JOIN tracks t ON t.id = rt.track_id "
+    "WHERE rel.credited_artist_name IS NOT NULL AND (:artiste IS NULL OR t.artist_id = :artiste) "
+    "UNION ALL "
+    "SELECT t.id, t.album, o.value FROM observations o JOIN tracks t ON t.id = o.track_id "
+    "WHERE o.field = 'album_artist' AND (:artiste IS NULL OR t.artist_id = :artiste)"
+)
+
+
+def _compilation_presentee(titre, noms) -> bool:
+    """« Eminem Presents the Re-Up » : la compilation de son label, pas son disque,
+    même si les catalogues la lui créditent (décision utilisateur 2026-11-07)."""
+    return any(
+        re.match(rf"\s*{re.escape(n)}\s+(?:presents?|pr[eé]sentes?)\b", titre or "", re.I)
+        for n in noms
+    )
+
+
+def signe_son_disque(signatures, noms) -> bool:
+    """PUR. L'artiste est-il EN TÊTE du crédit d'un des disques de la fiche ?
+    `signatures` : `(titre du disque, crédit)`. La tête seule : *JACKBOYS 2*
+    (« JACKBOYS & Travis Scott ») est le disque d'un collectif, *Anger Management 3*
+    celui de Clinton Sparks, même quand l'artiste y est nommé ensuite."""
+    noms = [n for n in noms if n]
+    return any(
+        _est_l_artiste(_SEPARATEURS_DU_CREDIT.split(credit or "", maxsplit=1)[0], noms)
+        and not _compilation_presentee(titre, noms)
+        for titre, credit in signatures
+    )
+
+
 def participation(track: Track, noms, formations=()) -> Participation:
-    """Principal · Feat · Prod · Rôle secondaire · Sur le disque — une seule, par
-    priorité.
+    """Principal · Feat · Prod · Rôle secondaire · Sur le disque · Sur son disque —
+    une seule, par priorité.
 
     `noms` = le nom de l'artiste et ses alias confirmés : une fiche dont
     l'interprète est « Ye » est la fiche de Kanye West.
@@ -134,6 +184,8 @@ def participation(track: Track, noms, formations=()) -> Participation:
         if sans_participation(
             track.primary_artist_name, [c.name for c in track.credits], noms, formations
         ):
+            if signe_son_disque(track.signatures_disque, noms):
+                return Participation.SUR_SON_DISQUE
             return Participation.SUR_LE_DISQUE
         return Participation.PRINCIPAL
     if map_role(role) in _ROLES_DE_CHANT:
@@ -178,9 +230,9 @@ def badges(track: Track, noms, formations=()) -> Badges:
 
 def compte_comme_sien(p: Participation, *, prods: bool = False) -> bool:
     """Ce morceau entre-t-il dans les comptes de l'artiste (Timeline, cumul de
-    streams) ? Principal et Feat oui ; la Prod est un CHOIX, pas encore tranché
+    streams) ? Principal, Feat et Sur son disque oui ; la Prod est un CHOIX, pas encore tranché
     (« aujourd'hui on compte pas les prods, mais ça pourrait changer ou du moins
     avoir le choix ») — d'où le paramètre, faux par défaut comme aujourd'hui."""
-    if p in (Participation.PRINCIPAL, Participation.FEAT):
+    if p in (Participation.PRINCIPAL, Participation.FEAT, Participation.SUR_SON_DISQUE):
         return True
     return prods and p == Participation.PROD

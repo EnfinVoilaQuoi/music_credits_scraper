@@ -98,6 +98,7 @@ LIBELLE_PARTICIPATION = {
     Participation.PROD: "Production",
     Participation.SECONDAIRE: "Rôle secondaire",
     Participation.SUR_LE_DISQUE: "Sur le disque de l'artiste (hors de ses totaux)",
+    Participation.SUR_SON_DISQUE: "Sur son disque, sans y interpréter (dans ses totaux)",
 }
 
 

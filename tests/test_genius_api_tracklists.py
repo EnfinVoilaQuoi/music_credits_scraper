@@ -49,6 +49,7 @@ class TestAlbumDuMorceau:
         assert g.album_du_morceau(9) == {
             "id": 5,
             "name": "Bitume Caviar",
+            "artist_name": None,
             "primary_artist_ids": {1, 2, 3},
             "release_date_for_display": "2021",
         }

@@ -772,6 +772,10 @@ class Track:
     # expliquée par son appartenance, et le marqueur sous-entendrait le
     # contraire. La donnée reste intacte, seul son AFFICHAGE est levé.
     membre_de_la_formation: bool = field(default=False, repr=False)
+    # Qui signe les disques de ce morceau : `(titre, crédit)`, posé au chargement
+    # (`get_artist_tracks`), jamais en base sous cette forme. `participation` y lit
+    # si le morceau d'un autre est sur un disque de l'artiste (2026-11-07).
+    signatures_disque: list = field(default_factory=list, repr=False)
 
     def _identity(self) -> tuple:
         """Clé d'identité métier d'un morceau.

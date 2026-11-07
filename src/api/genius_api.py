@@ -576,6 +576,7 @@ class GeniusAPI:
                             )
                         )
                     album_data = song.get("album")
+                    self.noter_signature_album(track, album_data)
                     if isinstance(album_data, dict) and album_data.get("name"):
                         track.release_observations.append(
                             ReleaseObservation(
@@ -754,6 +755,15 @@ class GeniusAPI:
         )
         return numbers
 
+    @staticmethod
+    def noter_signature_album(track: Track, album) -> None:
+        """Qui signe l'album de la page : le morceau d'un autre sur un disque de
+        l'artiste compte, sur le disque d'un autre non (`participation`, 2026-11-07)."""
+        artiste = album.get("artist") if isinstance(album, dict) else None
+        nom = artiste.get("name") if isinstance(artiste, dict) else None
+        if nom:
+            track.observations.append(Observation("album_artist", str(nom), "genius"))
+
     def album_du_morceau(self, song_id: int) -> dict | None:
         """L'album Genius d'un morceau : `{id, name, primary_artist_ids,
         release_date_for_display}` ; `{}` si Genius ne le range dans aucun
@@ -787,6 +797,7 @@ class GeniusAPI:
         if artiste.get("id"):
             ids.add(artiste["id"])
         return {
+            "artist_name": artiste.get("name"),
             "id": album["id"],
             "name": album.get("name"),
             "primary_artist_ids": ids,
@@ -852,6 +863,7 @@ class GeniusAPI:
         album = song.get("album")
         name = album.get("name") if isinstance(album, dict) else None
         album_id = album.get("id") if isinstance(album, dict) else None
+        self.noter_signature_album(track, album)
         if name and not track.album and not track.album_override:  # édition manuelle respectée
             # Le marqueur d'inédit se retire de la FICHE comme de l'observation :
             # seule l'observation l'était, et « 13* » vivait dans `tracks.album`

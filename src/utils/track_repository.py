@@ -39,6 +39,7 @@ from src.utils.encodage import reparer_c1
 from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
 from src.utils.paroles_genius import a_des_paroles, paroles_factices
+from src.utils.participation import SQL_SIGNATURES_DE_DISQUES
 from src.utils.positions_disque import position_retenue
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
 from src.utils.track_mapper import (
@@ -869,6 +870,11 @@ class TrackRepository:
                 # motif que les observations (surtout pas un N+1 par morceau).
                 videos_by_track = self._videos_by_artist(conn, artist_id)
                 credits_by_track = self._credits_by_artist(conn, artist_id)
+                signatures_by_track: dict[int, list] = {}
+                for ligne in conn.execute(text(SQL_SIGNATURES_DE_DISQUES), {"artiste": artist_id}):
+                    signatures_by_track.setdefault(ligne.track_id, []).append(
+                        (ligne.titre, ligne.credit)
+                    )
 
                 # e23 : IDs Spotify de tout l'artiste, même motif. C'est ce qui
                 # RANIME `Track.spotify_ids` — écrit et testé de longue date,
@@ -905,6 +911,7 @@ class TrackRepository:
                         # le N+1 coûtait 1,9 s par chargement chez Kanye West, et
                         # un cycle recharge la discographie une vingtaine de fois).
                         track.credits = credits_by_track.get(row["id"], [])
+                        track.signatures_disque = signatures_by_track.get(row["id"], [])
 
                         result.append(track)
 

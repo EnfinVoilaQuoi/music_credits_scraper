@@ -67,7 +67,7 @@ from src.utils.duree_youtube import (
     segment_de_dj_mix,
     trop_courte_pour_les_paroles,
 )
-from src.utils.participation import sans_participation
+from src.utils.participation import SQL_SIGNATURES_DE_DISQUES, sans_participation, signe_son_disque
 from src.utils.title_matching import contains_as_words, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
@@ -1279,7 +1279,8 @@ def fiches_sans_participation(c, pistes) -> list[Cas]:
     Eminem, *JACKBOYS 2* chez Travis Scott) : gardé, hors de ses totaux (décision
     utilisateur 2026-11-06). Le juge est celui des totaux,
     `participation.sans_participation` ; rien à faire (`INFORMATION`), la famille
-    montre ce qu'il écarte. Mêmes alias que `noms_de_lartiste`."""
+    montre ce qu'il écarte : pas un disque que l'artiste signe, qui compte
+    (`signe_son_disque`, 2026-11-07). Mêmes alias que `noms_de_lartiste`."""
     alias, formations = collections.defaultdict(set), collections.defaultdict(set)
     for r in c.execute(
         "SELECT artist_id, related_name, kind FROM artist_relations "
@@ -1302,12 +1303,16 @@ def fiches_sans_participation(c, pistes) -> list[Cas]:
     for r in c.execute("SELECT track_id, name FROM credits WHERE name IS NOT NULL"):
         if r["track_id"] in voulues:
             credites[r["track_id"]].add(r["name"])
+    signatures = collections.defaultdict(list)
+    for r in c.execute(SQL_SIGNATURES_DE_DISQUES, {"artiste": None}):
+        if r["track_id"] in voulues:
+            signatures[r["track_id"]].append((r["titre"], r["credit"]))
     cas = []
     for t in candidates:
         noms = (t["artiste"], *alias[t["artist_id"]])
         if not sans_participation(
             t["primary_artist_name"], credites[t["id"]], noms, formations[t["artist_id"]]
-        ):
+        ) or signe_son_disque(signatures[t["id"]], noms):
             continue
         cas.append(
             Cas(

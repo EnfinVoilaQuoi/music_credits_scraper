@@ -121,6 +121,8 @@ def piste_depuis_tracklist(entree: dict, album: dict, artist: Artist) -> Track |
     )
     if porte_le_marqueur(titre_brut):
         track.unreleased = True
+    if album.get("artist_name"):
+        track.observations.append(Observation("album_artist", album["artist_name"], "genius"))
     signataire = (song.get("primary_artist") or {}).get("name")
     if aid not in principaux:
         if aid in invites:

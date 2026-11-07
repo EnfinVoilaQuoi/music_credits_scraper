@@ -70,6 +70,8 @@ class Filtre:
             Participation.SECONDAIRE: self.secondaire,
             # Hors des comptes comme un rôle secondaire, et rangé sous son filtre.
             Participation.SUR_LE_DISQUE: self.secondaire,
+            # Dans les comptes : rangé avec les morceaux de l'artiste.
+            Participation.SUR_SON_DISQUE: self.principal,
         }[p]
 
     def avec(self, **changements) -> Filtre:

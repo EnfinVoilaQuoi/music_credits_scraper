@@ -908,10 +908,11 @@ _CORRECTEURS = {
     "Corrections automatiques",
     verdict=lambda r: (not r.echecs, f"{len(r.echecs)} échec(s)"),
 )
-def corriger(dm, artiste) -> BilanCorrections:
+def corriger(dm, artiste, seulement: frozenset[str] | None = None) -> BilanCorrections:
     """Applique toutes les corrections à preuve formelle de l'artiste (sa
     discographie chargée) et les consigne. Idempotent : une correction faite
-    ne se représente plus (la donnée est partie, la mémoire la garde partie)."""
+    ne se représente plus (la donnée est partie, la mémoire la garde partie).
+    `seulement` : ces détecteurs et eux seuls (rattrapage d'une règle)."""
     bilan = BilanCorrections()
     tracks = {t.id: t for t in artiste.tracks or []}
     deja: set[tuple[str, str]] = set()
@@ -951,7 +952,11 @@ def corriger(dm, artiste) -> BilanCorrections:
                 )
                 if (c.detecteur, c.cle) not in rendus
             ]
-        nouveaux = [(c, a) for c, a in a_faire if (c.detecteur, c.cle) not in deja]
+        nouveaux = [
+            (c, a)
+            for c, a in a_faire
+            if (c.detecteur, c.cle) not in deja and (seulement is None or c.detecteur in seulement)
+        ]
         if not nouveaux:
             break
         for cas, arbitrage in nouveaux:

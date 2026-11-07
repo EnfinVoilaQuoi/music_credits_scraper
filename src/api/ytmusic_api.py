@@ -123,6 +123,16 @@ def _channel_from_votes(votes, names: dict | None = None) -> str | None:
 # ── Classe principale ─────────────────────────────────────────────────────────
 
 
+class MetaVideos(dict):
+    """`{videoId: méta}` d'un relevé, plus `absentes` : les vidéos d'un lot auquel
+    l'API a répondu SANS elles (supprimée, privée). Une vidéo d'un lot tombé
+    n'est ni dans l'un ni dans l'autre : absent ≠ échec (2026-11-06)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.absentes: set[str] = set()
+
+
 class YTMusicAPI:
     """Wrapper ytmusicapi + YouTube Data API v3 pour les streams d'un artiste.
 
@@ -697,14 +707,16 @@ class YTMusicAPI:
         + chaîne) est la base de la différenciation clip/show/audio.
 
         Returns:
-            ``{videoId: {"views": int|None, "title": str|None, "channel": str|None, "description": str|None}}``
+            ``{videoId: {"views": int|None, "title": str|None, "channel": str|None, "description": str|None}}``,
+            un `MetaVideos` : `absentes` y dit ce que l'API a RÉPONDU ne pas avoir.
+            Un lot tombé n'y met rien (absent ≠ échec).
         """
         if not video_ids:
-            return {}
+            return MetaVideos()
 
         if not self._use_yt_api:
             logger.debug("fetch_video_meta_batch ignoré : pas de YOUTUBE_API_KEY")
-            return {}
+            return MetaVideos()
 
         try:
             from googleapiclient.discovery import build
@@ -712,9 +724,9 @@ class YTMusicAPI:
             logger.warning(
                 "google-api-python-client non installé — pip install google-api-python-client"
             )
-            return {}
+            return MetaVideos()
 
-        meta: dict[str, dict] = {}
+        meta = MetaVideos()
         unique_ids = list(dict.fromkeys(video_ids))
         n_batches = (len(unique_ids) + _YT_BATCH_SIZE - 1) // _YT_BATCH_SIZE
         logger.info(
@@ -740,6 +752,9 @@ class YTMusicAPI:
                         "channel": snippet.get("channelTitle"),
                         "description": snippet.get("description"),
                     }
+                # Une réponse sans `items` n'en est pas une : rien n'est constaté.
+                if "items" in response:
+                    meta.absentes.update(v for v in batch if v not in meta)
             except (GoogleApiError, OSError, KeyError, ValueError) as e:
                 logger.error(
                     f"Erreur YouTube Data API v3 meta (batch {i // _YT_BATCH_SIZE + 1}): {e}"

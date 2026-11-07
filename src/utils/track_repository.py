@@ -60,6 +60,7 @@ from src.utils.track_soeurs import (
     synchroniser_soeurs,
     unir_editions,
     unir_observations,
+    unir_videos,
 )
 from src.utils.version_descriptors import meme_titre_normalise, titre_generique
 from src.utils.version_heritage import sans_heritage_couvert
@@ -3676,6 +3677,10 @@ class TrackRepository:
                     # la durée (« Make Her Say » notée chez Kid Cudi, pas chez
                     # Kanye, 2026-10-29).
                     unir_editions(conn, [tid, *jumelles])
+                    # Les VIDÉOS et leur relevé : elles décrivent l'enregistrement
+                    # (« Mr No » chez Caballero, pas chez JeanJass, 2026-11-06).
+                    # Le partage et le jugement des vues restent par ligne.
+                    unir_videos(conn, [tid, *jumelles])
                     # Le lien YouTube principal et sa NATURE : un relevé des
                     # vues ne la posait que sur SA ligne (« In Common (Remix) »,
                     # « audio » chez Kanye, « unknown » chez Travis, 2026-10-30).
@@ -3817,9 +3822,9 @@ class TrackRepository:
         `genius_id` chez plusieurs artistes), puis rematérialise ses membres —
         rattrapage des familles divergées avant la règle « la lecture la plus
         récente de la page l'emporte » (2026-10-12), du lien YouTube arbitré
-        (2026-10-26) et de l'union des éditions (2026-10-29). Rend
-        `{genius_id: lignes réécrites (données de page, lien YouTube,
-        éditions)}` pour les familles qui changent ; sans `appliquer`, rien
+        (2026-10-26), de l'union des éditions (2026-10-29) et de celle des vidéos
+        (2026-11-06). Rend `{genius_id: lignes réécrites (données de page, lien
+        YouTube, éditions, vidéos)}` pour les familles qui changent ; sans `appliquer`, rien
         n'est gardé (passage à blanc). Aucune règle n'est réimplémentée ici :
         c'est la synchronisation de `save_track`.
 
@@ -3853,7 +3858,7 @@ class TrackRepository:
                             transaction.rollback()
                     reecrites = sum(
                         rapport.get(cle, 0)
-                        for cle in ("donnees_de_page", "lien_youtube", "editions")
+                        for cle in ("donnees_de_page", "lien_youtube", "editions", "videos")
                     )
                     if reecrites:
                         changes[gid] = reecrites

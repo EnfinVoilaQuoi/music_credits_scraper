@@ -206,6 +206,12 @@ class RevueRepository:
                 )
             ).inserted_primary_key[0]
 
+    def videos_mortes_constatees(self) -> dict[int, set[str]]:
+        """`{track_id: {video_id}}` que YouTube a répondu ne pas avoir, dans le délai."""
+        from src.services.videos_mortes import constats_frais
+
+        return constats_frais(self.engine)
+
     def corrections_revue(self, artist_id: int, *, retablies: bool = False) -> list[dict]:
         """Le journal de l'artiste, le plus récent d'abord (sans les corrections
         déjà défaites, sauf `retablies=True`)."""

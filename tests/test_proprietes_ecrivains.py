@@ -223,7 +223,24 @@ def _violations(dm, *, soeurs: bool) -> dict:
             divergentes = audit.soeurs_divergentes(c, audit._pistes(c, None))
             if divergentes:
                 v["soeurs_divergentes"] = [x.libelle for x in divergentes]
+            videos = _videos_des_soeurs_divergentes(c)
+            if videos:
+                v["videos_des_soeurs"] = videos
     return v
+
+
+def _videos_des_soeurs_divergentes(c) -> list:
+    """Les familles dont les lignes n'ont pas les mêmes vidéos aux mêmes vues
+    (`unir_videos`, 2026-11-06)."""
+    jeux: dict = {}
+    for gid, tid, vid, vues in c.execute(
+        "SELECT t.genius_id, t.id, v.video_id, v.views FROM tracks t "
+        "LEFT JOIN track_videos v ON v.track_id = t.id WHERE t.genius_id IS NOT NULL"
+    ):
+        ligne = jeux.setdefault(gid, {}).setdefault(tid, set())
+        if vid:
+            ligne.add((vid, vues))
+    return [gid for gid, lignes in jeux.items() if len({frozenset(j) for j in lignes.values()}) > 1]
 
 
 @pytest.fixture(scope="module")

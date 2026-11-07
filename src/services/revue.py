@@ -209,6 +209,9 @@ class Contexte:
     #: Divergences d'IDENTITÉ entre lignes sœurs, lues par `analyser`
     #: (`divergences_identite_soeurs`) — le détecteur reste pur.
     soeurs: list = field(default_factory=list)
+    #: `{track_id: {video_id}}` que YouTube a répondu ne pas avoir, lus par
+    #: `charger_contexte` quand `VIDEOS_MORTES_BRANCHEES` : le détecteur reste pur.
+    videos_mortes: dict = field(default_factory=dict)
     #: Places des fiches sur leurs disques (`get_artist_positions`), lues par
     #: `analyser` : preuve d'appoint des 👯.
     positions: dict = field(default_factory=dict)
@@ -1875,6 +1878,47 @@ def _mots_d_un_titre(texte: str | None) -> str:
     return _ORDINAL_MOT_RE.sub(lambda m: _ORDINAUX[m.group(1)], t)
 
 
+#: « Entre les lignes : prière » : chaque côté peut être le titre publié.
+_DEUX_POINTS_RE = re.compile(r"\s*:\s+")
+
+
+def _parties_deux_points(track) -> list[str]:
+    """Les côtés d'un titre « A : B », sauf un descripteur de version."""
+    morceaux = _DEUX_POINTS_RE.split(track.title or "")
+    if len(morceaux) < 2:
+        return []
+    return [
+        _mots(m)
+        for m in morceaux
+        if _mots(m) and not porte_une_version(f"x ({m})") and not _CONTEXTE_RE.search(m)
+    ]
+
+
+def _video_prouvee(track, v) -> bool:
+    """Durée de la vidéo à 2 s d'une durée INDÉPENDANTE d'elle (ni tirée d'une
+    vidéo, ni legacy : `duree_temoin` retomberait sur la colonne, qui peut venir
+    d'elle), ET chaîne « X - Topic » d'un interprète de la fiche ou page d'album
+    YTM. Les appelants sans durée ni chaîne n'ont pas cette preuve : rien."""
+    duree = getattr(v, "duration", None)
+    if not duree:
+        return False
+    independantes = []
+    for source, d in (track.durations_observees or {}).items():
+        if d and source not in _DUREES_HORS_JUGE:
+            try:
+                independantes.append(int(float(d)))
+            except (TypeError, ValueError):
+                continue
+    if not any(abs(d - duree) <= 2 for d in independantes):
+        return False
+    if v.source == "ytm_album":
+        return True
+    chaine = getattr(v, "channel", None) or ""
+    if not chaine.endswith(" - Topic"):
+        return False
+    return _place_de_l_artiste(track, chaine.removesuffix(" - Topic")) != "étranger"
+
+
 def video_nomme(track, v) -> bool:
     """Le titre de la vidéo `v` nomme-t-il le morceau `track` ?"""
     socle = _mots_d_un_titre(socle_du_titre(track.title))
@@ -1889,6 +1933,10 @@ def video_nomme(track, v) -> bool:
         # (A2) » → « Booba - Outro (Son Officiel) »), est bien la sienne.
         if v.source == "genius_media" and set(nu.split()) <= set(titre.split()):
             return True
+        # Ou que son disque désigne : chaîne Topic d'un interprète, ou page
+        # d'album YTM, ET durée à 2 s d'un catalogue (« Intro (LAX) »).
+        if set(nu.split()) <= set(titre.split()) and _video_prouvee(track, v):
+            return True
         nu = socle
     variantes = [socle, *_parties_de_medley(track)]
     if _FREESTYLE_RE.search(track.title or ""):
@@ -1897,6 +1945,15 @@ def video_nomme(track, v) -> bool:
         sans = _mots(_FREESTYLE_RE.sub(" ", socle_du_titre(track.title)))
         if sans:
             variantes.append(sans)
+    # « A : B » : A nomme souvent la série (« 8 Mile: … », « DAYS BEFORE RODEO: … ») :
+    # mesuré le 2026-11-06, le juge souple sur les deux côtés faisait compter 40 M
+    # de vues de scènes de film et un concert de 54 min. Seul le DERNIER côté, de
+    # deux mots au moins et en mots exacts, suffit ; un autre exige la preuve.
+    nommes = [p for p in _parties_deux_points(track) if set(p.split()) <= set(titre.split())]
+    if nommes:
+        dernier = _mots(_DEUX_POINTS_RE.split(track.title or "")[-1])
+        if (dernier in nommes and len(dernier.split()) >= 2) or _video_prouvee(track, v):
+            return True
     return (
         any(_video_couvre(x, titre) or _mots_a_une_lettre(x, titre) for x in variantes)
         or _video_couvre(nu, titre)
@@ -2242,6 +2299,79 @@ def video_trop_longue(track, ctx=None):
             },
         )
     return None
+
+
+_LANGUES_DE_TRADUCTION = (
+    "english|french|fran[cç]ais|anglais|spanish|german|italian|portuguese|russian|turkish|"
+    "hindi|arabic|polish|dutch|japanese|korean|chinese"
+)
+_TRADUIT = r"translat(?:e|ed|ions?)"
+#: « Seum (english translate) », « [English Translation] », « Racailles English
+#: translation », « traduction anglaise ». La langue est exigée : « Lost in
+#: Translation » de Logic est un morceau.
+_TRADUCTION_DANS_LE_TITRE_RE = re.compile(
+    rf"\b(?:{_LANGUES_DE_TRADUCTION})\s+{_TRADUIT}\b|\btraduction\s+(?:anglaise|fran[cç]aise)\b",
+    re.IGNORECASE,
+)
+#: Les pages des comptes de traduction de Genius (« Genius-hindi-translations-… »,
+#: « Genius-traductions-francaises-… ») et le même descripteur dans l'adresse.
+_TRADUCTION_DANS_L_ADRESSE_RE = re.compile(
+    rf"genius\.com/genius-[a-z0-9-]*(?:translations?|traductions?|traducoes|traducciones)-"
+    rf"|-(?:{_LANGUES_DE_TRADUCTION})-{_TRADUIT}-lyrics",
+    re.IGNORECASE,
+)
+
+
+def est_page_de_traduction(titre: str | None, adresse: str | None) -> bool:
+    """PUR. La page Genius d'une TRADUCTION (la relation `translation_of` n'est
+    sur aucune fiche, mesuré le 2026-11-06) : ni « Lost in Translation », ni une
+    version chantée (« (english version) » de MC Solaar, « (French Version) »)."""
+    return bool(
+        _TRADUCTION_DANS_LE_TITRE_RE.search(titre or "")
+        or _TRADUCTION_DANS_L_ADRESSE_RE.search(adresse or "")
+    )
+
+
+def page_traduction(track, _ctx=None):
+    """Une page de traduction n'est pas un morceau, et elle prend le média de
+    l'original : la vidéo devient « partagée » chez l'artiste et sort de son total
+    (« Seum » 5 538 vues chez Vald, 2 265 391 chez Tunisiano, 5,2 M écartés sur 3
+    fiches, 2026-11-06). Une page DÉSACTIVÉE reste une ligne de `tracks` et
+    continuerait à partager la vidéo (`_recalculer_vues_ytm`) : la règle la
+    supprime et la note supprimée, comme les pages de prose."""
+    if not track.genius_id or not est_page_de_traduction(track.title, track.genius_url):
+        return None
+    return (
+        f"page de traduction ({track.genius_url}) : ce n'est pas un morceau",
+        {"impact": 0},
+    )
+
+
+#: Interrupteur de la règle des liens morts, décidée par l'utilisateur le
+#: 2026-11-06. Baissé, aucun cas n'en sort ; le relevé des vues pose quand même
+#: ses constats, qui ne sont que des faits.
+VIDEOS_MORTES_BRANCHEES = True
+
+
+def video_morte(track, ctx=None):
+    """Le lien `youtube_url` d'une vidéo que YouTube a RÉPONDU ne pas avoir
+    (`videos_mortes`, constat daté du relevé des vues) : supprimée ou privée.
+    Mesuré le 2026-11-06 : 1 126 vidéos sur 1 232 liens sans ligne `track_videos`,
+    aucun lot sans réponse. Une vidéo qui a sa ligne (vues relevées autrefois,
+    comptées au total) n'est pas jugée ici : le lien seul ne compte rien."""
+    from src.utils.youtube_utils import extract_video_id
+
+    if ctx is None:
+        return None
+    vid = extract_video_id(track.youtube_url)
+    if not vid or vid not in ctx.videos_mortes.get(track.id, ()):
+        return None
+    if any(v.video_id == vid for v in track.videos or []):
+        return None
+    return (
+        f"lien {vid} : YouTube répond qu'il n'a plus cette vidéo",
+        {"video_id": vid, "track_ids": [track.id], "impact": 0},
+    )
 
 
 def video_etrangere(track, ctx=None):
@@ -3515,6 +3645,18 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "🔎",
         recherche_dementie,
     ),
+    Detecteur(
+        "page_traduction",
+        "Page de traduction, pas un morceau",
+        "🌐",
+        page_traduction,
+    ),
+    Detecteur(
+        "video_morte",
+        "Lien vers une vidéo que YouTube n'a plus",
+        "🪦",
+        video_morte,
+    ),
     # Pour INFORMATION (décision utilisateur 2026-10-26, « la vérif manuelle,
     # c'est pour les cas que le code ne peut pas trancher ») : une page qui ne
     # porte rien (ni paroles, ni plateforme, ni album, ni vidéo, ni tiers
@@ -3859,6 +4001,8 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.soeurs = data_manager.divergences_identite_soeurs(artiste.id)
     ctx.positions = data_manager.get_artist_positions(artiste.id)
     ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
+    if VIDEOS_MORTES_BRANCHEES:
+        ctx.videos_mortes = data_manager.videos_mortes_constatees()
     return ctx
 
 

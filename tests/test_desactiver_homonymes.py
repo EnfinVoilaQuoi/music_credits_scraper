@@ -38,6 +38,28 @@ class TestDesactiverHomonymes:
         gestion.reactiver("Sniper", [i])
         assert gestion.load_disabled_tracks("Sniper") == set()
 
+    def test_supprimer_retire_la_fiche_et_la_note(self, data_manager, capsys):
+        """Le morceau d'un homonyme part de la base, et la discographie ne le recrée pas."""
+        import scripts.desactiver_homonymes as script
+        from src.utils.deleted_tracks_manager import DeletedTracksManager
+
+        sniper = _artiste(data_manager, "Sniper")
+        i = _fiche(data_manager, sniper, "Radio Wolna Europa", 2166930)
+        args = ["Sniper", "--fiches", str(i), "--base", str(data_manager.db_path), "--supprimer"]
+
+        assert script.main(args) == 0
+        assert "à supprimer" in capsys.readouterr().out
+        assert [t.id for t in data_manager.get_artist_tracks(sniper.id)] == [i]
+
+        assert script.main([*args, "--apply"]) == 0
+        assert data_manager.get_artist_tracks(sniper.id) == []
+        notes = DeletedTracksManager()
+        assert notes.load_deleted_ids("Sniper") == {2166930}
+        assert DisabledTracksManager().load_disabled_tracks("Sniper") == set()
+
+        assert notes.remove_deleted("Sniper", 2166930)
+        assert notes.load_deleted_ids("Sniper") == set()
+
     def test_une_ligne_soeur_est_gardee(self, data_manager, capsys):
         """Aketo porte la même page : le groupe y est, ce n'est pas l'homonyme."""
         import scripts.desactiver_homonymes as script

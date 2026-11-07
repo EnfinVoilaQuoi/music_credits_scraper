@@ -12,6 +12,12 @@ autre artiste porte aussi (ligne sœur) est gardée : le groupe y est sans doute
 La désactivation est réversible (motif `homonyme`, origine `manuel`, réactivable
 dans l'IHM) et aucune règle ne la lève. `--disque` refuse aussi le disque Deezer
 (`memoriser_disque_refuse`), sinon le run Deezer suivant le reproposerait.
+
+`--supprimer` retire les fiches au lieu de les désactiver (décision utilisateur
+2026-11-07 : le morceau d'un homonyme n'a rien à faire dans la base, une ligne
+désactivée y partagerait encore ses vidéos) : supprimées et notées supprimées
+(`DeletedTracksManager`), comme une traduction ; la discographie ne les recrée pas.
+Ôtées de la liste (`remove_deleted`), la discographie suivante les recrée.
 """
 
 import argparse
@@ -70,6 +76,9 @@ def main(argv=None) -> int:
     parser.add_argument("artiste")
     parser.add_argument("--fiches", required=True, help="ID des fiches, séparés par des virgules")
     parser.add_argument("--disque", type=int, action="append", help="ID d'album Deezer à refuser")
+    parser.add_argument(
+        "--supprimer", action="store_true", help="supprime et note, au lieu de désactiver"
+    )
     parser.add_argument("--apply", action="store_true", help="écrit (backup automatique avant)")
     parser.add_argument("--base", type=Path, help="autre base que data/music_credits.db")
     args = parser.parse_args(argv)
@@ -78,6 +87,7 @@ def main(argv=None) -> int:
     import src.utils.data_manager as module_dm
     from src.utils.corrections_fiches import memoriser_disque_refuse
     from src.utils.database_backup import DatabaseBackupManager, get_backup_manager
+    from src.utils.deleted_tracks_manager import DeletedTracksManager
     from src.utils.disabled_tracks_manager import DisabledTracksManager
     from src.utils.logger import configurer_journaux
 
@@ -106,7 +116,8 @@ def main(argv=None) -> int:
     disques = {d: titre_du_disque(dm, d) for d in args.disque or []}
     for d, titre in disques.items():
         print(f"Disque Deezer {d} « {titre or '?'} » à refuser")
-    print(f"\n{len(retenues)} fiches à désactiver, {len(disques)} disques à refuser")
+    geste = "supprimer" if args.supprimer else "désactiver"
+    print(f"\n{len(retenues)} fiches à {geste}, {len(disques)} disques à refuser")
     if not args.apply or not (retenues or disques):
         print("(à blanc — relancer avec --apply pour écrire)")
         return 0
@@ -121,12 +132,26 @@ def main(argv=None) -> int:
     if not sauvegarde.create_backup("before_desactiver_homonymes"):
         print("❌ Backup impossible — abandon (règle projet : jamais d'écriture sans backup).")
         return 1
-    if retenues and not DisabledTracksManager().desactiver(artiste.name, retenues, MOTIF, "manuel"):
+    if args.supprimer:
+        notes = DeletedTracksManager()
+        for i in retenues:
+            f = fiches[i]
+            # Sans page Genius, seul le refus du disque l'empêche de revenir.
+            if f["genius_id"] and not notes.add_deleted(artiste.name, f["genius_id"], f["title"]):
+                print(
+                    f"❌ #{i} : note impossible (fichier illisible ?) — rien de plus n'est écrit."
+                )
+                return 1
+            dm.delete_track(i)
+    elif retenues and not DisabledTracksManager().desactiver(
+        artiste.name, retenues, MOTIF, "manuel"
+    ):
         print("❌ Désactivation impossible (fichier illisible ?) — rien de plus n'est écrit.")
         return 1
     for d, titre in disques.items():
         memoriser_disque_refuse(artiste.name, d, titre or "")
-    print(f"✅ {len(retenues)} fiches désactivées, {len(disques)} disques refusés")
+    fait = "supprimées et notées" if args.supprimer else "désactivées"
+    print(f"✅ {len(retenues)} fiches {fait}, {len(disques)} disques refusés")
     return 0
 
 

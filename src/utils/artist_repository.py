@@ -430,6 +430,9 @@ class ArtistRepository:
                     "DELETE FROM source_track_failures WHERE track_id IN {morceaux} "
                     "OR artist_id = :aid",
                     "DELETE FROM source_track_absences WHERE track_id IN {morceaux}",
+                    # Historique d'usage : survit, sans plus désigner la fiche.
+                    "UPDATE source_usage_failures SET track_id = NULL "
+                    "WHERE track_id IN {morceaux}",
                     "DELETE FROM release_track_sources WHERE release_track_id IN "
                     "(SELECT id FROM release_tracks WHERE track_id IN {morceaux} "
                     "OR release_id IN (SELECT id FROM releases WHERE artist_id = :aid))",

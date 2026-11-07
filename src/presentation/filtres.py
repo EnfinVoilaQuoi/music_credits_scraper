@@ -68,6 +68,8 @@ class Filtre:
             Participation.FEAT: self.feat,
             Participation.PROD: self.prod,
             Participation.SECONDAIRE: self.secondaire,
+            # Hors des comptes comme un rôle secondaire, et rangé sous son filtre.
+            Participation.SUR_LE_DISQUE: self.secondaire,
         }[p]
 
     def avec(self, **changements) -> Filtre:

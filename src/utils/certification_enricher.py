@@ -100,6 +100,8 @@ def _qui_chercher(
     d'Estelle ft. Kanye sur la reprise de Glee Cast (382 fiches secondaires,
     1 453 entrées mesurées).
 
+    · le morceau d'un autre sur le disque de l'artiste → AUCUNE certif : elle
+      est celle de l'autre (2026-11-06) ;
     · rôle secondaire → AUCUNE certif, sauf la PRODUCTION (décision
       utilisateur 2026-09-25 : « si t'as fait la prod, t'as participé
       activement au morceau ») ; alors par l'INTERPRÈTE seul — la certif est
@@ -115,7 +117,7 @@ def _qui_chercher(
     noms = (artist_name, *alias)
     p = participation(track, noms, formations)
     principal = track.primary_artist_name
-    if p == Participation.SECONDAIRE:
+    if p in (Participation.SECONDAIRE, Participation.SUR_LE_DISQUE):
         return None, [], [], []
     if p == Participation.PROD:
         return (principal or None), [], [], []

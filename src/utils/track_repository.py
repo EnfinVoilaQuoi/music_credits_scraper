@@ -1289,6 +1289,7 @@ class TrackRepository:
     def _upsert_observations(self, conn, track_id: int, observations) -> None:
         if observations:
             self._toucher(conn, track_id)
+            self._oublier_audio_d_un_autre_lrc(conn, track_id, observations)
         for obs in observations:
             # `seen_at` verbatim (string) comme le backfill E4 et le stockage
             # legacy ; datetime → format legacy, absent → maintenant.
@@ -1320,6 +1321,69 @@ class TrackRepository:
                     "seen_at": seen_at,
                 },
             )
+
+    @staticmethod
+    def _oublier_audio_d_un_autre_lrc(conn, track_id: int, observations) -> None:
+        """Une source relit un AUTRE LRC sans donner la durée de son audio : celle
+        qu'on gardait décrit l'ancien LRC, et part (la ligne et ses sœurs, sinon
+        l'union la rendrait). C'est ce qui rend `lrc_garde.audios_des_lrc`
+        indépendant des horloges (2026-11-06). Un LRC relu à l'identique garde
+        son audio : même texte, même minutage."""
+        from src.utils.lrc_garde import CHAMP_DUREE_AUDIO
+
+        avec_audio = {o.source for o in observations if o.field == CHAMP_DUREE_AUDIO}
+        for obs in observations:
+            if obs.field != "lyrics_synced" or obs.source in avec_audio:
+                continue
+            actuel = conn.execute(
+                text(
+                    "SELECT value FROM observations WHERE track_id = :t "
+                    "AND field = 'lyrics_synced' AND source = :s"
+                ),
+                {"t": track_id, "s": obs.source},
+            ).scalar()
+            if actuel is None or actuel == obs.value:
+                continue
+
+            def oublier(tid: int, source: str = obs.source) -> None:
+                conn.execute(
+                    text(
+                        "DELETE FROM observations WHERE track_id = :t "
+                        "AND field = :f AND source = :s"
+                    ),
+                    {"t": tid, "f": CHAMP_DUREE_AUDIO, "s": source},
+                )
+
+            oublier(track_id)
+            effacer_chez_les_soeurs(conn, track_id, oublier)
+
+    def echecs_d_usage_orphelins(self) -> list[int]:
+        """Lignes `source_usage_failures` qui désignent une fiche disparue."""
+        with self.engine.connect() as conn:
+            return [
+                r[0]
+                for r in conn.execute(
+                    text(
+                        "SELECT id FROM source_usage_failures WHERE track_id IS NOT NULL "
+                        "AND track_id NOT IN (SELECT id FROM tracks)"
+                    )
+                )
+            ]
+
+    def dissocier_echecs_d_usage_orphelins(self) -> int:
+        """Rattrapage de ce que `delete_track` laissait avant le 2026-11-06 :
+        l'historique reste, il ne désigne plus la fiche. Rend le nombre de lignes."""
+        try:
+            with self._ecrire() as conn:
+                return conn.execute(
+                    text(
+                        "UPDATE source_usage_failures SET track_id = NULL "
+                        "WHERE track_id IS NOT NULL AND track_id NOT IN (SELECT id FROM tracks)"
+                    )
+                ).rowcount
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur dissocier_echecs_d_usage_orphelins : {e}")
+            return 0
 
     def delete_track(self, track_id: int) -> bool:
         """Supprime définitivement un morceau et ses données associées"""
@@ -1363,6 +1427,12 @@ class TrackRepository:
                 )
                 conn.execute(
                     text("DELETE FROM source_track_absences WHERE track_id = :tid"),
+                    {"tid": track_id},
+                )
+                # Santé des sources : un HISTORIQUE d'usage, qui survit à la fiche
+                # sans plus la désigner (invariant `orphelin`, 2026-11-06).
+                conn.execute(
+                    text("UPDATE source_usage_failures SET track_id = NULL WHERE track_id = :tid"),
                     {"tid": track_id},
                 )
                 # Parutions (e31/e32) : pas de cascade SQLite, les preuves
@@ -1484,6 +1554,13 @@ class TrackRepository:
                 # recherches faites avec la fiche absorbée.
                 conn.execute(
                     text("DELETE FROM source_track_absences WHERE track_id = :delete_id"),
+                    {"delete_id": delete_id},
+                )
+                conn.execute(
+                    text(
+                        "UPDATE source_usage_failures SET track_id = NULL "
+                        "WHERE track_id = :delete_id"
+                    ),
                     {"delete_id": delete_id},
                 )
                 self._unir_compteurs_ytm(conn, keep_id, delete_id)
@@ -3340,10 +3417,12 @@ class TrackRepository:
 
     @staticmethod
     def _durees_des_titres_parents(conn, track_id: int, artist_id, titre) -> list[int]:
-        """Durées des AUTRES fiches de l'artiste dont le titre contient tous les
-        mots de celui-ci (« out for the night, pt. 2 » pour « out for the
-        night »), lignes sœurs exclues : la garde de DT1 (`reconcile.
-        _video_dementie_par_le_lrc`). Lu seulement quand la règle allait jouer."""
+        """Durées des AUTRES fiches dont le titre contient tous les mots de
+        celui-ci (« out for the night, pt. 2 » pour « out for the night »),
+        lignes sœurs exclues : la garde de DT1 (`reconcile.
+        _video_dementie_par_le_lrc`). Lu seulement quand la règle allait jouer.
+        Chez TOUS les artistes de l'enregistrement (2026-11-06) : le verdict d'une
+        durée ne dépend pas de l'artiste sous lequel on regarde la ligne."""
         import re
         import unicodedata
 
@@ -3356,7 +3435,9 @@ class TrackRepository:
             return []
         lignes = conn.execute(
             text(
-                "SELECT t.title, t.duration FROM tracks t WHERE t.artist_id = :a "
+                "SELECT t.title, t.duration FROM tracks t WHERE (t.artist_id = :a OR t.artist_id "
+                "IN (SELECT artist_id FROM tracks WHERE genius_id = "
+                "(SELECT genius_id FROM tracks WHERE id = :id))) "
                 "AND t.id != :id AND t.duration IS NOT NULL AND (t.genius_id IS NULL "
                 "OR t.genius_id IS NOT (SELECT genius_id FROM tracks WHERE id = :id))"
             ),
@@ -4669,15 +4750,18 @@ class TrackRepository:
             "reccobeats_retirees": [],
         }
 
-    def _retirer_isrc(self, conn, track_id: int, rapport: dict) -> dict:
+    def _retirer_isrc(self, conn, track_id: int, rapport: dict, *, soeur: bool = False) -> dict:
         """Les gestes de `clear_track_isrc` sur UNE ligne, dans la transaction
-        de l'appelant (la ligne visée, puis chacune de ses sœurs)."""
+        de l'appelant (la ligne visée, puis chacune de ses sœurs). Une `soeur`
+        sans ISRC en colonne passe aussi : les mesures lues par cet ISRC lui sont
+        venues par l'union, qui les rendrait à la ligne visée (« Intro » de Hash
+        24 gardait les 140 s d'un autre disque, 2026-11-06)."""
         ligne = (
             conn.execute(text("SELECT isrc FROM tracks WHERE id = :tid"), {"tid": track_id})
             .mappings()
             .first()
         )
-        if ligne is None or not ligne["isrc"]:
+        if ligne is None or (not ligne["isrc"] and not soeur):
             return rapport
 
         conn.execute(
@@ -4740,7 +4824,7 @@ class TrackRepository:
                     ).scalar()
                     if propre and str(propre).upper() != str(ancien).upper():
                         return
-                    self._retirer_isrc(conn, jumelle, self._rapport_isrc())
+                    self._retirer_isrc(conn, jumelle, self._rapport_isrc(), soeur=True)
 
                 effacer_chez_les_soeurs(conn, track_id, chez_la_soeur)
 

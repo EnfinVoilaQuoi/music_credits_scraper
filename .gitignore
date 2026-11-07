@@ -203,6 +203,8 @@ scripts/*
 # Et le disque, la place et les crédits de la même piste (2026-11-02).
 !scripts/retirer_pistes_discogs.py
 !scripts/retirer_disque_homonyme.py
+!scripts/rattraper_colonnes_sans_provenance.py
+!scripts/dissocier_echecs_orphelins.py
 !scripts/retirer_photos_par_defaut.py
 !scripts/retirer_pochettes_photo_artiste.py
 !scripts/desactiver_homonymes.py

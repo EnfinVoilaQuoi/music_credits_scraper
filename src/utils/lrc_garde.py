@@ -76,8 +76,9 @@ ECART_DUREE_S = 5
 #: Observation `(fiche, CHAMP_DUREE_AUDIO, source du LRC)` : la durée (s) de
 #: l'audio sur lequel le LRC de cette source est calé — `duration` de LRCLIB,
 #: la piste YTM dont viennent les paroles (2026-10-27). Un FAIT sur le LRC,
-#: pas une durée de la fiche : il n'entre pas au vote des durées. Posé avec le
-#: LRC, au même `seen_at` : il ne vaut que pour la lecture qui l'a donné.
+#: pas une durée de la fiche : il n'entre pas au vote des durées. Il décrit
+#: le LRC de cette source tant qu'il n'a pas changé : un LRC RELU différent sans
+#: durée le retire (`TrackRepository._oublier_audio_d_un_autre_lrc`).
 CHAMP_DUREE_AUDIO = "lrc_duree_audio"
 
 
@@ -128,16 +129,17 @@ def limite_du_lrc(titre: str | None, duree, confirmee: int | None) -> int | None
 
 
 def audios_des_lrc(observations) -> dict[str, int]:
-    """PUR. `{source: durée de l'audio de SON LRC}` — l'observation
-    `CHAMP_DUREE_AUDIO` d'une source ne vaut que posée à la même lecture que son
-    LRC (même `seen_at`) : celle d'une lecture antérieure dirait l'audio d'un
-    autre LRC."""
-    lrc_vu = {o.source: o.seen_at for o in observations if o.field == "lyrics_synced"}
+    """PUR. `{source: durée de l'audio de SON LRC}`, pour les sources qui ont un
+    LRC. Aucune horloge ici (2026-11-06) : `unir_observations` ne recopie pas le
+    `seen_at` d'une valeur identique, si bien que la même paire portait deux
+    horodatages selon la ligne sœur, et que le verdict différait entre sœurs
+    (« The Storm », « G.O.O.D. Friday », 106 observations). Que l'audio soit
+    celui de CE LRC, c'est l'écrivain qui le tient
+    (`TrackRepository._oublier_audio_d_un_autre_lrc`)."""
+    avec_lrc = {o.source for o in observations if o.field == "lyrics_synced"}
     audios = {}
     for o in observations:
-        if o.field != CHAMP_DUREE_AUDIO or o.source not in lrc_vu:
-            continue
-        if str(o.seen_at) != str(lrc_vu[o.source]):
+        if o.field != CHAMP_DUREE_AUDIO or o.source not in avec_lrc:
             continue
         try:
             audios[o.source] = int(float(o.value))

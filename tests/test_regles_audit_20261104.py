@@ -215,6 +215,7 @@ class TestAuditDisqueHomonyme:
             "id": i,
             "artist_id": 1,
             "artiste": "Anton Serra",
+            "title": f"Piste {i}",
             "album": album,
             "genius_id": genius,
             "spotify_id": spotify,

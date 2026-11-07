@@ -157,3 +157,74 @@ def paroles_factices(texte: str | None, titre: str | None = None) -> str | None:
 def a_des_paroles(texte: str | None, titre: str | None = None) -> bool:
     """PUR. Le verdict de la colonne `has_lyrics` : un texte, et un vrai."""
     return bool((texte or "").strip()) and paroles_factices(texte, titre) is None
+
+
+#: Les sections qu'une voix interprète, en toutes lettres (sans accent ni
+#: ponctuation). Liste FERMÉE : une tête qu'elle ne connaît pas ne reçoit aucun
+#: nom (« Produced by… », « Paroles de… », « Rest of the lyrics… », une
+#: didascalie, un nom seul, « Couplet 1 - Tunisiano » qui nomme déjà sa voix).
+_MOTS_DE_SECTION = (
+    "couplet|verse|open verse|vers|verso|strofa|zwrotka|куплет"
+    "|refrain|chorus|hook|coro|estribillo|ritornello|refren|припев|nakarat"
+    "|pre refrain|prerefrain|pre chorus|pre hook|pre verse"
+    "|post refrain|post chorus|post hook"
+    "|intro|outro|pont|bridge|interlude|intermede|transition|break|breakdown"
+)
+#: Le mot de la section, son numéro, son multiplicateur : rien d'autre.
+_TETE_DE_SECTION = re.compile(
+    rf"^(?:{_MOTS_DE_SECTION})"
+    r"(?: (?:\d+|[ivx]+|one|two|three|four|five|unique|un|deux|trois|quatre|cinq))?"
+    r"(?: ?x ?\d+)?$"
+)
+#: Une ligne faite d'une seule tête : son étiquette en groupe 1.
+_LIGNE_DE_TETE = re.compile(r"(?m)^\[([^\]\n]+)\]\s*$")
+
+
+def _cle_de_section(etiquette: str) -> str:
+    """L'étiquette sans accent ni ponctuation, en gardant les autres alphabets
+    (`_norme` retire le cyrillique : « Куплет » n'y serait plus rien)."""
+    sans_accent = "".join(
+        ch for ch in unicodedata.normalize("NFKD", etiquette) if not unicodedata.combining(ch)
+    )
+    return " ".join(re.sub(r"[^\w\s]|_", " ", sans_accent).casefold().split())
+
+
+def est_tete_de_section(etiquette: str) -> bool:
+    """PUR. Cette étiquette (sans crochets) est-elle une section interprétée, sans
+    attribution ? « Couplet 1 », « Refrain x2 » oui ; « Produced by X »,
+    « Paroles de "Y" », « Couplet 1 - Tunisiano », « Couplet 1 : Isha » non."""
+    return ":" not in etiquette and bool(_TETE_DE_SECTION.match(_cle_de_section(etiquette)))
+
+
+def interprete_des_sections(
+    ligne: str | None,
+    principal: str | None,
+    est_feat: bool | None,
+    role_secondaire: str | None = None,
+) -> str | None:
+    """PUR. Le nom à donner aux sections que Genius n'attribue pas : l'interprète
+    principal de la FICHE, le même chez toutes ses lignes sœurs. L'artiste de la
+    ligne n'en vaut que s'il est lui-même le principal (rien d'autre n'est
+    renseigné et la ligne n'est ni un feat, ni un rôle secondaire) ; sinon None :
+    aucun nom plutôt qu'un nom deviné (« Fenwick » de Niro, lu sur la ligne de
+    Booba : « [Couplet 1 : Booba] », 2026-11-07)."""
+    if principal and principal.strip():
+        return principal.strip()
+    if est_feat is False and not role_secondaire and ligne and ligne.strip():
+        return ligne.strip()
+    return None
+
+
+def attribuer_sections(paroles: str, interprete: str | None) -> str:
+    """PUR. Ajoute ` : <interprete>` aux seules têtes de section sans attribution,
+    seules sur leur ligne. Sans interprète, le texte reste celui de Genius."""
+    if not paroles or not interprete:
+        return paroles
+
+    def attribuer(tete: re.Match) -> str:
+        etiquette = tete.group(1)
+        if not est_tete_de_section(etiquette):
+            return tete.group(0)
+        return f"[{etiquette.rstrip()} : {interprete}]"
+
+    return _LIGNE_DE_TETE.sub(attribuer, paroles)

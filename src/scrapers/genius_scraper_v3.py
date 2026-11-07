@@ -23,7 +23,9 @@ from src.utils.paroles_genius import (
     INSTRUMENTAL,
     NON_TRANSCRITES,
     a_des_paroles,
+    attribuer_sections,
     inedit_par_le_texte,
+    interprete_des_sections,
     paroles_factices,
 )
 from src.utils.version_heritage import est_herite, est_instrumental
@@ -398,17 +400,17 @@ class GeniusScraperV3(CrawlAIScraperBase):
         if instrumental_ecrit:
             lyrics = ""
         if lyrics:
-            # Ajoute l'artiste aux en-têtes de section sans attribution (Genius ne
-            # le met qu'en cas de feat). Ex. [Couplet 1] → [Couplet 1 : Isha].
-            if getattr(track, "is_featuring", False) and getattr(
-                track, "primary_artist_name", None
-            ):
-                artist_name = track.primary_artist_name
-            elif track.artist and hasattr(track.artist, "name"):
-                artist_name = track.artist.name
-            else:
-                artist_name = None
-            lyrics = self._inject_section_artist(lyrics, artist_name)
+            # Le nom de l'interprète sur les têtes de section sans attribution
+            # (Genius ne le met qu'en cas de feat) : [Couplet 1] → [Couplet 1 : Isha].
+            lyrics = attribuer_sections(
+                lyrics,
+                interprete_des_sections(
+                    track.artist.name if track.artist else None,
+                    track.primary_artist_name,
+                    track.is_featuring,
+                    track.secondary_role,
+                ),
+            )
 
             track.lyrics.text = lyrics
             track.lyrics.present = True
@@ -447,23 +449,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
         return lyrics
 
     @staticmethod
-    def _inject_section_artist(lyrics: str, artist_name: str | None) -> str:
-        """
-        Ajoute ` : <artiste>` aux en-têtes de section `[...]` qui n'ont pas déjà
-        d'attribution. N'agit que sur des en-têtes seuls sur leur ligne.
-        """
-        if not lyrics or not artist_name:
-            return lyrics
-
-        def repl(m):
-            inside = m.group(1)
-            if ":" in inside:  # déjà attribué (feat) → ne pas toucher
-                return m.group(0)
-            return f"[{inside.rstrip()} : {artist_name}]"
-
-        return re.sub(r"(?m)^\[([^\]\n]+)\]\s*$", repl, lyrics)
-
-    def _extract_lyrics_bs4(self, soup) -> str:
+    def _extract_lyrics_bs4(soup) -> str:
         """
         Extraction structurée des paroles :
           - conteneurs div[data-lyrics-container="true"] uniquement

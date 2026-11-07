@@ -2438,6 +2438,31 @@ class TrackRepository:
             logger.error(f"Erreur oublier_paroles_ytm({track_id}): {e}")
             return False
 
+    def corriger_tetes_de_paroles(self, track_id: int, ancien: str, nouveau: str) -> int:
+        """Remplace le texte des paroles, chez la fiche et ses sœurs qui portent
+        encore `ancien` : seules les têtes de section changent, c'est donc la même
+        lecture de la page, qui garde sa date. Rend le nombre de lignes changées."""
+        changees = [0]
+        try:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
+
+                def remplacer(tid: int) -> None:
+                    changees[0] += conn.execute(
+                        text(
+                            "UPDATE tracks SET lyrics = :nouveau, updated_at = :now "
+                            "WHERE id = :id AND lyrics = :ancien"
+                        ),
+                        {"nouveau": nouveau, "now": datetime.now(), "id": tid, "ancien": ancien},
+                    ).rowcount
+
+                remplacer(track_id)
+                effacer_chez_les_soeurs(conn, track_id, remplacer)
+            return changees[0]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur corriger_tetes_de_paroles({track_id}): {e}")
+            return 0
+
     def retirer_mesures_songbpm(
         self,
         track_id: int,

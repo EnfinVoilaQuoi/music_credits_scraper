@@ -235,6 +235,33 @@ def parcourir(source: str, chemin: Path | None = None):
             yield requete, zlib.decompress(corps), premiere, derniere
 
 
+def requetes_gardees(source: str, chemin: str | Path | None = None) -> set[str]:
+    """Les requêtes de `source` gardées, EN LECTURE SEULE."""
+    chemin = Path(chemin or CHEMIN)
+    if not chemin.exists():
+        return set()
+    with closing(sqlite3.connect(f"file:{chemin.as_posix()}?mode=ro", uri=True)) as conn:
+        return {
+            r[0]
+            for r in conn.execute("SELECT DISTINCT requete FROM brut WHERE source = ?", (source,))
+        }
+
+
+def corps_gardes(source: str, requete: str, chemin: str | Path | None = None) -> list[bytes]:
+    """Les lectures gardées d'une requête, EN LECTURE SEULE : plusieurs processus
+    peuvent les lire à côté d'un run, sans la connexion d'écriture de `lectures`."""
+    chemin = Path(chemin or CHEMIN)
+    if not chemin.exists():
+        return []
+    with closing(sqlite3.connect(f"file:{chemin.as_posix()}?mode=ro", uri=True)) as conn:
+        return [
+            zlib.decompress(r[0])
+            for r in conn.execute(
+                "SELECT corps FROM brut WHERE source = ? AND requete = ?", (source, requete)
+            )
+        ]
+
+
 def bilan() -> dict:
     """Ce que garde le magasin : requêtes et octets (compressés / bruts) par source."""
     with _verrou:

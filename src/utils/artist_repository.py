@@ -813,11 +813,14 @@ class ArtistRepository:
         kind: str,
         status: str,
         formation: str | None = None,
+        *,
+        effacer_nature: bool = False,
     ) -> bool:
         """Arbitre UN lien existant : `proposed` → `confirmed` / `refused`, ou l'inverse.
 
         `confirmed_at` est posé quand on confirme, effacé sinon. `formation` n'est
-        écrite que si fournie (la nature d'un alias reste NULL).
+        écrite que si fournie (la nature d'un alias reste NULL). `effacer_nature` la
+        retire : rétablir une confirmation par règle défait aussi sa nature.
         """
         if status not in self.STATUTS_RELATION:
             raise ValueError(f"Statut de lien inconnu : {status!r}")
@@ -839,13 +842,15 @@ class ArtistRepository:
                     text(
                         "UPDATE artist_relations SET status = :status, "
                         "confirmed_at = :quand, "
-                        "formation = COALESCE(:formation, formation) "
+                        "formation = CASE WHEN :effacer THEN NULL "
+                        "ELSE COALESCE(:formation, formation) END "
                         "WHERE id = :rid"
                     ),
                     {
                         "status": status,
                         "quand": datetime.now() if status == "confirmed" else None,
                         "formation": formation,
+                        "effacer": effacer_nature,
                         "rid": rid,
                     },
                 )

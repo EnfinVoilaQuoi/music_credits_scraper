@@ -190,6 +190,127 @@ class TestVideoHorsColonne:
         assert {("duree_isolee", "normal")} == pol.REGLES_VIDEO
 
 
+class TestTemoinHorsColonne:
+    """Piste YTM ou audio de la page démentis par deux catalogues lus par leur
+    ID, d'accord à ± 2 s, la colonne à leur valeur (6 cas réels du 2026-11-06)."""
+
+    juger = staticmethod(pol.arbitrage_temoin_hors_colonne)
+
+    @staticmethod
+    def _fiche(titre, colonne, durees, **kw):
+        t = _t(titre, duration=durees[colonne], durations_observees=durees)
+        t.duration_source = colonne
+        t.deezer_id = kw.get("deezer_id", 1)
+        t.spotify_id = kw.get("spotify_id", "SP")
+        t.apple_music_id = kw.get("apple_music_id")
+        t.audio.reccobeats_resolution = kw.get("recco", "spotify_id")
+        return t
+
+    @pytest.mark.parametrize(
+        "titre, durees, temoin",
+        [
+            # Le hit YTM, l'audio de la page avec les catalogues.
+            (
+                "(Rap) Superstar",
+                {"deezer": 255, "reccobeats": 255, "youtube": 256, "ytmusic": 294},
+                "ytmusic",
+            ),
+            (
+                "Ken Kaniff (Skit)",
+                {"deezer": 62, "discogs": 61, "reccobeats": 61, "youtube": 62, "ytmusic": 77},
+                "ytmusic",
+            ),
+            (
+                "E (DJ BoozyWoozy Remix)",
+                {
+                    "deezer": 210,
+                    "reccobeats": 210,
+                    "spotify_web": 210,
+                    "youtube": 211,
+                    "ytmusic": 364,
+                },
+                "ytmusic",
+            ),
+            # Sans vidéo du tout.
+            (
+                "Two Blunts (with Wiz Khalifa)",
+                {"deezer": 277, "reccobeats": 277, "ytmusic": 289},
+                "ytmusic",
+            ),
+            # Le clip (194 s), la piste YTM avec les catalogues.
+            (
+                "Playinwitme (Remix)",
+                {"deezer": 217, "reccobeats": 217, "youtube": 194, "ytmusic": 218},
+                "youtube",
+            ),
+            # Audio et piste à 222 s : à 10 s au plus, une édition.
+            (
+                "Reaper (Monty & Visages Remix)",
+                {"deezer": 230, "spotify_web": 229, "youtube": 222, "ytmusic": 222},
+                "youtube",
+            ),
+        ],
+    )
+    def test_cas_reels(self, titre, durees, temoin):
+        t = self._fiche(titre, "deezer", durees)
+        arbitrage = self.juger(_cas("duree_isolee", t), t, None)
+        assert arbitrage.action == "normal"
+        assert temoin in arbitrage.raison
+
+    def test_les_catalogues_lisent_peut_etre_un_autre_morceau(self):
+        """Yelawolf « Radio » (page *Radioactive*) : audio de la page et piste
+        YTM à 333 s, Deezer et Spotify à 267 s (*Sometimes Y*) : l'humain."""
+        t = self._fiche(
+            "Radio", "deezer", {"deezer": 267, "reccobeats": 267, "youtube": 333, "ytmusic": 333}
+        )
+        assert self.juger(_cas("duree_isolee", t), t, None) is None
+
+    def test_reccobeats_par_l_isrc_compte_contre_un_hit(self):
+        """« Two Blunts » : Deezer et ReccoBeats 277 s, hit YTM 289 s."""
+        durees = {"deezer": 277, "reccobeats": 277, "ytmusic": 289}
+        t = self._fiche("Two Blunts (with Wiz Khalifa)", "deezer", durees, recco="isrc")
+        assert self.juger(_cas("duree_isolee", t), t, None).action == "normal"
+
+    def test_l_audio_de_la_page_compte_contre_le_hit(self):
+        """« (Rap) Superstar » : Deezer 255 s, audio 256 s, ReccoBeats par l'ISRC."""
+        durees = {"deezer": 255, "youtube": 256, "ytmusic": 294}
+        t = self._fiche("(Rap) Superstar", "deezer", durees, spotify_id=None)
+        assert self.juger(_cas("duree_isolee", t), t, None).action == "normal"
+
+    def test_le_clip_seul_a_grand_ecart_reste_a_l_humain(self):
+        t = self._fiche("Radio", "deezer", {"deezer": 267, "spotify_web": 267, "youtube": 333})
+        assert self.juger(_cas("duree_isolee", t), t, None) is None
+
+    @pytest.mark.parametrize(
+        "colonne, durees, kw",
+        [
+            # Le témoin tient la colonne (interdiction de `_colonne_impactee`).
+            ("ytmusic", {"deezer": 255, "reccobeats": 255, "ytmusic": 294}, {}),
+            # Une seule famille lue par son ID : page Spotify et ReccoBeats.
+            ("spotify_web", {"reccobeats": 255, "spotify_web": 255, "ytmusic": 294}, {}),
+            # ReccoBeats lu par l'ISRC ne compte pas contre l'audio de la page.
+            ("deezer", {"deezer": 255, "reccobeats": 255, "youtube": 294}, {"recco": "isrc"}),
+            # La fiche ne porte pas l'ID Deezer : sa durée n'a pas été lue par lui.
+            ("deezer", {"deezer": 255, "reccobeats": 255, "ytmusic": 294}, {"deezer_id": None}),
+            # Catalogues à plus de 2 s l'un de l'autre.
+            ("deezer", {"deezer": 255, "spotify_web": 259, "ytmusic": 294}, {}),
+            # Une saisie manuelle tranche déjà.
+            ("deezer", {"deezer": 255, "spotify_web": 255, "ytmusic": 294, "manual": 250}, {}),
+        ],
+    )
+    def test_reste_a_l_humain(self, colonne, durees, kw):
+        t = self._fiche("Only One", colonne, durees, **kw)
+        assert self.juger(_cas("duree_isolee", t), t, None) is None
+
+    def test_la_colonne_doit_avoir_la_duree_des_catalogues(self):
+        t = self._fiche("Only One", "deezer", {"deezer": 255, "spotify_web": 255, "ytmusic": 294})
+        t.duration = 240
+        assert self.juger(_cas("duree_isolee", t), t, None) is None
+
+    def test_regles_gelees(self):
+        assert {("duree_isolee", "normal")} == pol.REGLES_TEMOIN
+
+
 @pytest.fixture
 def artiste(data_manager):
     a = Artist(name="Kanye West")

@@ -112,6 +112,11 @@ REGLES_ETENDUES_BRANCHEES = True
 #: aux catalogues.
 REGLES_VIDEO_BRANCHEES = True
 
+#: Famille « piste YTM ou audio d'un autre montage » (`politiques_revue.REGLES_TEMOIN`,
+#: ✓ Normal seulement) : levé le 2026-11-06, validé par l'utilisateur sur la
+#: simulation (6 cas / 7).
+REGLES_TEMOIN_BRANCHEES = True
+
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.
 _SANS_FICHE = frozenset(
@@ -122,6 +127,7 @@ _SANS_FICHE = frozenset(
         "deezer_rattacher_edition",
         "deezer_edition",
         "confirmer_lien",
+        "confirmer_formation",
         "kworb_tiers",
         # Cas d'ARTISTE : ses fiches sont dans ses preuves.
         "retirer_video_partagee",
@@ -177,6 +183,7 @@ def cas_par_regle(
     catalogue: bool = False,
     compteur: bool = False,
     video: bool = False,
+    temoin: bool = False,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
@@ -188,6 +195,7 @@ def cas_par_regle(
         arbitrage_id_partage,
         arbitrage_id_propose,
         arbitrage_liens_deezer,
+        arbitrage_temoin_hors_colonne,
         arbitrage_valide,
         arbitrage_video_hors_colonne,
     )
@@ -218,6 +226,8 @@ def cas_par_regle(
             arbitrage = arbitrage_compteur(c, track, ctx)
         if arbitrage is None and video:
             arbitrage = arbitrage_video_hors_colonne(c, track, ctx)
+        if arbitrage is None and temoin:
+            arbitrage = arbitrage_temoin_hors_colonne(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -459,6 +469,34 @@ def _confirmer_lien(_dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
     }
 
 
+def _confirmer_formation(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Confirme une formation que MusicBrainz et Discogs donnent : la nature déjà
+    choisie pour elle chez un autre membre, sinon « collectif ». Un lien
+    `has_member` n'a pas de nature (il ne réunit rien). Rétablir rend le lien
+    « proposé », sans la nature posée ici."""
+    nom, kind = cas.preuves["nom"], cas.preuves["kind"]
+    nature = None
+    if kind == "member_of":
+        nature = dm.nature_connue_pour(nom) or "collectif"
+    relation = next(
+        (
+            r
+            for r in dm.get_artist_relations(artiste.id, status="proposed")
+            if r.kind == kind and r.related_name == nom
+        ),
+        None,
+    )
+    if relation is None:
+        raise LookupError(f"lien « {nom} » introuvable")
+    posee = bool(nature and not relation.formation)
+    if not dm.set_relation_status(artiste.id, nom, kind, "confirmed", formation=nature):
+        raise LookupError(f"lien « {nom} » introuvable")
+    return (
+        f"« {nom} » confirmé" + (f" ({nature})" if nature else ""),
+        {"type": "lien", "nom": nom, "kind": kind, "nature_posee": posee},
+    )
+
+
 def _kworb_tiers(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
     """Crée la fiche d'un remix par un tiers — la décision du panneau, telle
     quelle (`kworb_decisions.appliquer`, page Spotify lue). Rétablir supprime
@@ -622,12 +660,17 @@ def _deezer_rattacher_edition(dm, _track, cas: Cas, *, artiste) -> tuple[str, di
     from src.services.politiques_revue import fiche_de_l_edition_de_support
 
     preuve = cas.preuves["ecart"]
-    trouvee = fiche_de_l_edition_de_support(
-        preuve.get("piste") or {}, charger_contexte(dm, artiste).disco
-    )
-    if trouvee is None:
+    disco = charger_contexte(dm, artiste).disco
+    if cas.track_id is not None:
+        # Parution à confirmer : le cas désigne sa fiche
+        # (`_edition_a_la_duree_de_l_id_spotify`).
+        fiche = next((t for t in disco if t.id == cas.track_id), None)
+    else:
+        trouvee = fiche_de_l_edition_de_support(preuve.get("piste") or {}, disco)
+        fiche = trouvee[0] if trouvee else None
+    if fiche is None:
         raise LookupError("la fiche de l'édition n'est plus identifiable")
-    return _rattacher_a(dm, artiste, preuve, trouvee[0], "edition_de_support")
+    return _rattacher_a(dm, artiste, preuve, fiche, "edition_de_support")
 
 
 def _rattacher_a(dm, artiste, preuve: dict, fiche, matched_by: str) -> tuple[str, dict]:
@@ -832,6 +875,7 @@ _CORRECTEURS_DE_REGLE = {
     "retirer_identite_derivee": _retirer_identite_derivee,
     "retirer_lrc": _corriger_lrc,
     "confirmer_lien": _confirmer_lien,
+    "confirmer_formation": _confirmer_formation,
     "kworb_tiers": _kworb_tiers,
     "retirer_video_partagee": _retirer_video_partagee,
     # Même geste pour UNE fiche : `track_ids` = [la fiche], refus de règle.
@@ -885,6 +929,7 @@ def corriger(dm, artiste) -> BilanCorrections:
             or REGLES_CATALOGUE_BRANCHEES
             or REGLES_COMPTEUR_BRANCHEES
             or REGLES_VIDEO_BRANCHEES
+            or REGLES_TEMOIN_BRANCHEES
         ):
             rendus = _rendus_a_l_humain(dm, artiste.id)
             a_faire += [
@@ -902,6 +947,7 @@ def corriger(dm, artiste) -> BilanCorrections:
                     catalogue=REGLES_CATALOGUE_BRANCHEES,
                     compteur=REGLES_COMPTEUR_BRANCHEES,
                     video=REGLES_VIDEO_BRANCHEES,
+                    temoin=REGLES_TEMOIN_BRANCHEES,
                 )
                 if (c.detecteur, c.cle) not in rendus
             ]
@@ -1134,7 +1180,11 @@ def retablir(dm, artiste, correction: dict) -> str:
         compte_rendu = f"« {annulation['kworb_title']} » : fiche retirée, proposition rendue"
     elif annulation.get("type") == "lien":
         if not dm.set_relation_status(
-            artiste.id, annulation["nom"], annulation["kind"], "proposed"
+            artiste.id,
+            annulation["nom"],
+            annulation["kind"],
+            "proposed",
+            effacer_nature=bool(annulation.get("nature_posee")),
         ):
             raise LookupError(f"lien « {annulation['nom']} » introuvable")
         compte_rendu = f"« {annulation['nom']} » rendu « proposé »"

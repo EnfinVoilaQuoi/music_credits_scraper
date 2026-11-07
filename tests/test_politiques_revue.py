@@ -742,6 +742,133 @@ class TestRegleA1:
             assert regle in pol.REGLES_DEEZER
 
 
+class TestIntroDuMemeDisque:
+    """Trois « Intro » que `fiche_du_meme_disque` ratait (2026-11-06)."""
+
+    @staticmethod
+    def _piste(titre="Intro", duree=64):
+        return {"id": 9, "title": titre, "duration": duree}
+
+    def test_a_la_liaison_et_au_segment_pres(self):
+        """Kery James, #20864, *Savoir & vivre ensemble*."""
+        fiche = _t("Intro - Savoir et Vivre Ensemble", album="Savoir & vivre ensemble", duration=64)
+        assert pol.fiche_du_meme_disque(self._piste(), "Savoir & vivre ensemble", [fiche]) is fiche
+
+    def test_une_edition_double_contient_son_tome(self):
+        """The Game, #15206 : le disque est l'édition double des tomes 2 et 2.5."""
+        fiche = _t("Intro (The Documentary 2)", album="The Documentary 2", duration=59)
+        disque = "The Documentary 2 + 2.5 (Collector's Edition)"
+        assert pol.fiche_du_meme_disque(self._piste(duree=58), disque, [fiche]) is fiche
+
+    def test_le_generique_au_nom_du_disque(self):
+        """Logic, #19125 : « No Pressure Intro » sur *No Pressure*."""
+        fiche = _t("No Pressure", album="No Pressure", duration=175)
+        piste = self._piste("No Pressure Intro", 175)
+        assert pol.fiche_du_meme_disque(piste, "No Pressure", [fiche]) is fiche
+
+    @pytest.mark.parametrize(
+        "kw",
+        [
+            {"deezer_id": 5},  # la plage-titre a déjà sa page
+            {"duration": 200},  # une autre durée
+            {"album": "Under Pressure"},  # un autre disque
+        ],
+    )
+    def test_le_generique_au_nom_du_disque_exige_tout(self, kw):
+        fiche = _t("No Pressure", **{"album": "No Pressure", "duration": 175, **kw})
+        piste = self._piste("No Pressure Intro", 175)
+        assert pol.fiche_du_meme_disque(piste, "No Pressure", [fiche]) is None
+
+    def test_sans_fiche_rien_n_est_cree_par_regle(self):
+        """Keny Arkana « Intro » 88 s sur *État d'urgence* : #21024 « État
+        d'urgence » (clip 60 s, extraits sonores) est peut-être cette plage."""
+        fiche = _t("État d’urgence", album="État d’urgence", duration=60)
+        cas = _cas(
+            "deezer_absent",
+            None,
+            {
+                "ecart": {
+                    "piste": {"id": 9, "title": "Intro", "duration": 88},
+                    "album": {"id": 5, "title": "État d'urgence", "artist_id": 7},
+                }
+            },
+        )
+        ctx = SimpleNamespace(disco=[fiche])
+        assert pol.arbitrage_deezer(cas, None, ctx, {}, {7}, lire_deezer=lambda _i: None) is None
+
+
+class TestEditionALaDureeDeLIdSpotify:
+    """Kery James, *92.2012* : Spotify sert 537 s pour « 28 Décembre 1977 »,
+    Deezer a 537 s sur cette parution et 581 s sur la page de la fiche."""
+
+    @staticmethod
+    def _fiche(**kw):
+        kw.setdefault("spotify_id", "SP")
+        kw.setdefault("deezer_id", 100)
+        kw.setdefault("isrc", "FRN370102110")
+        kw.setdefault(
+            "durations_observees",
+            {"deezer": 581, "reccobeats": 581, "spotify_web": 537, "youtube": 582},
+        )
+        return _t("28 décembre 1977", duration=581, album="Si c'était à refaire", **kw)
+
+    @staticmethod
+    def _juger(track, titre="28 Décembre 1977", duree=537, matched_by="title", deezer_id=9):
+        ecart = {
+            "piste": {"id": deezer_id, "title": titre, "isrc": "FR9W11201876", "duration": duree},
+            "album": {"id": 5, "title": "92.2012", "artist_id": 7, "artist_name": "Kery James"},
+            "existing_track_id": track.id,
+            "matched_by": matched_by,
+        }
+        return pol.arbitrage_deezer(
+            _cas("deezer_link_candidate", track, {"ecart": ecart}),
+            track,
+            SimpleNamespace(disco=[track]),
+            {},
+            {7},
+        )
+
+    def test_rattache_en_edition(self):
+        arbitrage = self._juger(self._fiche())
+        assert arbitrage.action == "deezer_rattacher_edition"
+        assert "537" in arbitrage.raison
+
+    def test_a_deux_secondes(self):
+        assert self._juger(self._fiche(), duree=539).action == "deezer_rattacher_edition"
+
+    @pytest.mark.parametrize(
+        "kw",
+        [
+            # « Le ghetto français » : Spotify 120 s, la page proposée 355 s.
+            {"duree": 355},
+            {"duree": 540},
+            # Le rapprochement est ambigu : fiche d'invité chez Ideal J.
+            {"matched_by": "title_autre_principal"},
+            {"titre": "28 Décembre 1977 (Live)"},
+            # La page de la fiche elle-même.
+            {"deezer_id": 100},
+        ],
+    )
+    def test_pas_cette_regle(self, kw):
+        arbitrage = self._juger(self._fiche(), **kw)
+        assert arbitrage is None or arbitrage.action != "deezer_rattacher_edition"
+
+    def test_sans_page_spotify_lue(self):
+        fiche = self._fiche(durations_observees={"deezer": 581, "reccobeats": 537})
+        arbitrage = self._juger(fiche)
+        assert arbitrage is None or arbitrage.action != "deezer_rattacher_edition"
+
+    def test_une_page_refusee_n_est_pas_rattachee(self, monkeypatch):
+        from src.utils import corrections_fiches
+
+        monkeypatch.setattr(corrections_fiches, "deezer_refuses", lambda _t: {9})
+        arbitrage = self._juger(self._fiche())
+        assert arbitrage is None or arbitrage.action != "deezer_rattacher_edition"
+
+    def test_regle_listee(self):
+        assert ("deezer_link_candidate", "deezer_rattacher_edition") in pol.REGLES_DEEZER
+
+
 def test_kworb_seules_les_voies_qui_ne_creent_rien():
     rendition = _cas("kworb_proposition", None, {"proposition": "rendition", "parent_track_id": 3})
     tiers = _cas("kworb_proposition", None, {"proposition": "tiers"})
@@ -909,6 +1036,41 @@ def test_alias_confirme_par_deux_sources_ou_par_le_type_musicbrainz():
     assert juger("Go Getters", "member_of") is None  # une formation : jamais
 
 
+class TestFormationMbEtDiscogs:
+    """Décision utilisateur du 2026-11-06 : MusicBrainz et Discogs d'accord, la
+    formation est confirmée, « collectif » par défaut."""
+
+    @staticmethod
+    def _juger(kind="member_of", source="discogs+musicbrainz", formation=None):
+        rel = SimpleNamespace(
+            kind=kind, related_name="Sniper", source=source, formation=formation, detail=None
+        )
+        ctx = SimpleNamespace(relations_proposees=[rel], disco=[])
+        cas = _cas("liens_proposes", None, {"nom": "Sniper", "kind": kind})
+        return pol.politique_alias(cas, None, ctx)
+
+    @pytest.mark.parametrize("kind", ["member_of", "has_member"])
+    def test_les_deux_sources_confirment(self, kind):
+        arbitrage = self._juger(kind)
+        assert arbitrage.action == "confirmer_formation"
+        assert ("liens_proposes", "confirmer_formation") in pol.REGLES_ETENDUES
+
+    def test_une_nature_deja_collectif(self):
+        assert self._juger(formation="collectif").action == "confirmer_formation"
+
+    @pytest.mark.parametrize("source", ["musicbrainz", "discogs"])
+    def test_une_seule_source_reste_a_l_humain(self, source):
+        assert self._juger(source=source) is None
+
+    def test_une_autre_nature_proposee_reste_a_l_humain(self):
+        """N.H. (Médine) : proposé « groupe », confirmé il apporterait tout."""
+        assert self._juger(formation="groupe") is None
+
+    def test_interrupteur_baisse(self, monkeypatch):
+        monkeypatch.setattr(pol, "FORMATIONS_MB_ET_DISCOGS", False)
+        assert self._juger() is None
+
+
 def test_les_regles_validees_sont_gelees():
     """Une règle n'entre ici qu'après la validation de l'utilisateur (2026-10-20)."""
     assert {
@@ -997,6 +1159,43 @@ def test_id_propose_un_refus_de_duree_dementi_par_les_catalogues_va_a_l_humain()
     t.durations_observees = {"songbpm": 94}  # rien ne confirme : le refus tient
     arb = pol.arbitrage_id_propose(cas, t, None, lire=lire, gate=lambda *_: False)
     assert arb.action == "refuser_id"
+
+
+class TestIdProposeHomonyme:
+    """Sniper « Hustle Di Money » #20371 : Spotify crédite un autre « Sniper » ;
+    Deezer, Apple et YTM ont sa durée, car tous lisent le morceau de l'homonyme.
+    L'URI passe avant les durées (2026-11-06)."""
+
+    DUREES = {"apple_music": 245, "deezer": 244, "reccobeats": 244, "ytmusic": 245}
+
+    @staticmethod
+    def _identite(nom="Sniper", uri="HOMONYME"):
+        return {"name": "Hustle Di Money", "artists": [nom], "artist_ids": [uri], "duration": 245}
+
+    def _juger(self, identite, titre="Hustle Di Money", spotify_artiste="FRANCAIS"):
+        t = Track(title=titre, artist=Artist(name="Sniper", spotify_id=spotify_artiste))
+        t.id, t.durees_editions, t.durations_observees = 1, (), dict(self.DUREES)
+        cas = _cas("id_spotify_propose", t, {"spotify_id_propose": "SP"})
+        return pol.arbitrage_id_propose(
+            cas, t, None, lire=lambda _sid: identite, gate=lambda *_: False
+        )
+
+    def test_l_uri_passe_avant_les_durees(self):
+        arbitrage = self._juger(self._identite())
+        assert arbitrage.action == "refuser_id"
+        assert "homonyme" in arbitrage.raison
+
+    def test_une_version_aussi(self):
+        """Le refus sur le seul NOM d'une version reste à l'humain, pas l'URI."""
+        assert self._juger(self._identite(), titre="Hustle Di Money (Remix)").action == "refuser_id"
+
+    def test_un_refus_sans_homonyme_va_toujours_a_l_humain(self):
+        """Le gate refuse, deux catalogues confirment la durée (Kanye « Comfy ») :
+        c'est la colonne qui dément, pas l'ID."""
+        assert self._juger(self._identite(uri="FRANCAIS")) is None
+
+    def test_sans_profil_connu_rien_n_est_prouve(self):
+        assert self._juger(self._identite(), spotify_artiste=None) is None
 
 
 class TestIdProposeVersions:

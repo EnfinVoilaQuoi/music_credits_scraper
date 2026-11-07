@@ -607,6 +607,120 @@ def test_deezer_edition_de_support_rattachee_puis_retablie(data_manager, artiste
     assert revue_auto.corriger(data_manager, artiste).appliquees == []
 
 
+def test_formation_mb_discogs_confirmee_en_collectif_puis_retablie(
+    data_manager, artiste, monkeypatch
+):
+    """MusicBrainz et Discogs d'accord : « collectif », sans rien réunir de plus
+    que la part du membre. Rétablir rend le lien « proposé », SANS la nature."""
+    from src.models.artist import ArtistRelation
+
+    monkeypatch.setattr(revue_auto, "REGLES_ETENDUES_BRANCHEES", True)
+    data_manager.propose_artist_relations(
+        artiste.id,
+        [
+            ArtistRelation(related_name="Sniper", kind="member_of", source="discogs+musicbrainz"),
+            ArtistRelation(related_name="Aketo", kind="has_member", source="discogs+musicbrainz"),
+            ArtistRelation(related_name="Solo", kind="member_of", source="musicbrainz"),
+        ],
+    )
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 2 and not bilan.echecs, bilan
+    confirmes = {r.related_name: r for r in data_manager.get_artist_relations(artiste.id)}
+    assert confirmes["Sniper"].formation == "collectif"
+    assert confirmes["Aketo"].formation is None
+    assert "Solo" not in confirmes
+    assert data_manager.ids_discographie_reunie(artiste.id) == [artiste.id]
+
+    for correction in data_manager.corrections_revue(artiste.id):
+        revue_auto.retablir(data_manager, artiste, correction)
+    assert not data_manager.get_artist_relations(artiste.id)
+    proposes = {
+        r.related_name: r for r in data_manager.get_artist_relations(artiste.id, status="proposed")
+    }
+    assert proposes["Sniper"].formation is None
+    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+
+def test_formation_a_la_nature_deja_choisie_chez_un_autre_membre(
+    data_manager, artiste, monkeypatch
+):
+    """La nature est une propriété de la formation : un groupe confirmé par un
+    humain chez un membre le reste chez l'autre (`nature_connue_pour`)."""
+    from src.models.artist import ArtistRelation
+
+    monkeypatch.setattr(revue_auto, "REGLES_ETENDUES_BRANCHEES", True)
+    autre = data_manager.get_artist_by_name("Autre membre") or Artist(name="Autre membre")
+    data_manager.save_artist(autre)
+    data_manager.propose_artist_relations(
+        autre.id, [ArtistRelation(related_name="IAM", kind="member_of", source="musicbrainz")]
+    )
+    assert data_manager.set_relation_status(
+        autre.id, "IAM", "member_of", "confirmed", formation="groupe"
+    )
+    data_manager.propose_artist_relations(
+        artiste.id,
+        [ArtistRelation(related_name="IAM", kind="member_of", source="discogs+musicbrainz")],
+    )
+    _charger(data_manager, artiste)
+    assert not revue_auto.corriger(data_manager, artiste).echecs
+    (iam,) = data_manager.get_artist_relations(artiste.id)
+    assert iam.formation == "groupe"
+
+
+def test_edition_a_la_duree_de_l_id_spotify_rattachee_puis_retablie(
+    data_manager, artiste, monkeypatch
+):
+    """Kery James « 28 Décembre 1977 » : la page de *92.2012* a la durée de l'ID
+    Spotify. Notée en édition, elle garde la page de la fiche, et le
+    `duree_spotify` tombe seul. Rétablir retire l'édition."""
+    from src.services import ecarts_deezer as ed
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    _fiche_durees(
+        data_manager,
+        artiste,
+        "28 décembre 1977",
+        41,
+        {"deezer": 581, "spotify_web": 537, "youtube": 582, "ytmusic": 582},
+        duration=581,
+        isrc="FRN370102110",
+        deezer_id=100,
+        spotify_id="SP537",
+    )
+    fiche = _charger(data_manager, artiste)["28 décembre 1977"]
+    artiste.deezer_id = 77
+    album = ed.AlbumDeezer(id=501, title="92.2012", artist_id=77, artist_name=artiste.name)
+    piste = ed.PisteDeezer(id=9, title="28 Décembre 1977", duration=537, isrc="FR9W11201876")
+    bilan = ed.BilanEcarts(deezer_id=77, artiste=artiste.name)
+    bilan.ecarts = [
+        ed.Ecart("link_candidate", album, piste, existing_track=fiche, matched_by="title")
+    ]
+    ed.enregistrer_signalements(data_manager, artiste, bilan)
+    _charger(data_manager, artiste)
+    assert "duree_spotify" in {c.detecteur for c in revue.analyser(data_manager, artiste).actifs}
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert not bilan.echecs, bilan
+    assert 9 in data_manager.get_artist_edition_deezer_ids(artiste.id)
+    fiche = _charger(data_manager, artiste)["28 décembre 1977"]
+    assert fiche.deezer_id == 100 and fiche.durations_observees["deezer"] == 581
+    assert "duree_spotify" not in {
+        c.detecteur for c in revue.analyser(data_manager, artiste).actifs
+    }
+
+    correction = next(
+        c
+        for c in data_manager.corrections_revue(artiste.id)
+        if c["action"] == "regle:deezer_rattacher_edition"
+    )
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert 9 not in data_manager.get_artist_edition_deezer_ids(artiste.id)
+    fiche = _charger(data_manager, artiste)["28 décembre 1977"]
+    assert fiche.deezer_id == 100 and fiche.durations_observees["deezer"] == 581
+
+
 def test_deezer_version_sans_fiche_creee_en_secondaire_puis_retablie(
     data_manager, artiste, monkeypatch
 ):

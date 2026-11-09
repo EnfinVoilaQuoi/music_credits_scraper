@@ -769,3 +769,95 @@ def test_une_version_au_meme_lrc_et_a_la_meme_duree_est_indecidable():
         }
         (cas,) = [c for c in au.lrc(par) if c.famille == "lrc_version"]
         assert cas.nature == nature
+
+
+def _fiche_id(tid, artist_id, genius_id, **ids):
+    return {
+        "id": tid,
+        "title": "Gangsta Shit",
+        "artist_id": artist_id,
+        "artiste": f"A{artist_id}",
+        "genius_id": genius_id,
+        "spotify_id": None,
+        "deezer_id": None,
+        "isrc": None,
+        "apple_music_id": None,
+        **ids,
+    }
+
+
+class TestIdsPartagesEntreArtistes:
+    """2026-11-09 : `ids_partages` ne lit qu'un artiste à la fois."""
+
+    def test_deux_pages_de_deux_artistes_au_meme_id_apple(self):
+        """« Lollipop (French Remix) » de Booba sur l'ID Apple du « Lollipop
+        (Remix) » de Kanye West : une erreur."""
+        pistes = [
+            _fiche_id(6550, 1, 7, apple_music_id="1440737575"),
+            _fiche_id(8873, 2, 5463611, apple_music_id="1440737575"),
+        ]
+        (cas,) = au.ids_partages_entre_artistes(pistes)
+        assert (cas.famille, cas.nature, cas.pistes) == (
+            "id_partage_artistes",
+            au.ERREUR,
+            [6550, 8873],
+        )
+
+    def test_une_fiche_sans_page_a_l_isrc_d_une_page_d_un_autre(self):
+        """« Gangsta Shit » d'Isha, sans page, à l'ISRC de la page d'Aketo : une
+        ligne sœur non reliée — une décision, pas une donnée fausse."""
+        pistes = [
+            _fiche_id(9746, 1, None, isrc="FXR142300075"),
+            _fiche_id(21707, 2, 9183723, isrc="fxr142300075 "),
+        ]
+        (cas,) = au.ids_partages_entre_artistes(pistes)
+        assert (cas.famille, cas.nature) == ("soeur_non_reliee", au.DECISION)
+        assert "soeur_non_reliee" in au.FAMILLES_DECISION
+
+    @pytest.mark.parametrize(
+        "pistes",
+        [
+            # Lignes sœurs : même page.
+            [_fiche_id(1, 1, 10, isrc="X"), _fiche_id(2, 2, 10, isrc="X")],
+            # Deux fiches sans page : la piste vue chez chaque artiste crédité.
+            [_fiche_id(1, 1, None, deezer_id=5), _fiche_id(2, 2, None, deezer_id=5)],
+            # Un même artiste : `ids_partages` le compte.
+            [_fiche_id(1, 1, 10, isrc="X"), _fiche_id(2, 1, 11, isrc="X")],
+            # Deux pages chez A, leurs sœurs chez B (« 93 Empire », Sofiane et
+            # Kalash Criminel) : vu par `ids_partages` chez chacun.
+            [
+                _fiche_id(1, 1, 10, isrc="X"),
+                _fiche_id(2, 1, 11, isrc="X"),
+                _fiche_id(3, 2, 10, isrc="X"),
+                _fiche_id(4, 2, 11, isrc="X"),
+            ],
+        ],
+    )
+    def test_ce_qui_n_est_pas_un_cas(self, pistes):
+        assert au.ids_partages_entre_artistes(pistes) == []
+
+    def test_spotify_entre_pages_d_une_formation_laisse_au_panneau(self):
+        """Le panneau lit membre et groupe ensemble (`id_catalogue_partage`) ;
+        un ISRC n'y est pas jugé, il reste à l'audit."""
+        pistes = [
+            _fiche_id(1, 1, 10, spotify_id="SP", isrc="X"),
+            _fiche_id(2, 2, 11, spotify_id="SP", isrc="X"),
+        ]
+        liees = {frozenset((1, 2))}
+        cas = au.ids_partages_entre_artistes(pistes, liees)
+        assert [c.libelle.split(" ")[0] for c in cas] == ["isrc"]
+        assert len(au.ids_partages_entre_artistes(pistes)) == 2
+
+    def test_base_entiere_seulement(self, data_manager, isha):
+        _, t = isha
+        swing = Artist(name="Swing")
+        swing.id = data_manager.save_artist(swing)
+        autre = Track(title="Autre", artist=swing)
+        autre.genius_id = 999
+        data_manager.save_track(autre)
+        for tid in (t.id, autre.id):
+            _sql(data_manager, "UPDATE tracks SET apple_music_id = '42' WHERE id = :t", t=tid)
+        entiere = au.auditer(data_manager, revue=False, persistance=False)
+        assert _familles(entiere).get("id_partage_artistes") == 1
+        par_artiste = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        assert "id_partage_artistes" not in _familles(par_artiste)

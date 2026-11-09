@@ -161,6 +161,8 @@ class Audit:
 FAMILLES = {
     "doublon_equivalent": "fiche sans page Genius = page Genius au titre équivalent",
     "id_partage": "même ID Spotify/Deezer/ISRC/Apple sur deux pages Genius",
+    "id_partage_artistes": "même ID Spotify/Deezer/ISRC/Apple sur deux pages d'artistes différents",
+    "soeur_non_reliee": "fiche sans page au même ID qu'une fiche d'un autre artiste (relier ?)",
     "lrc_emprunte": "LRC d'une autre fiche qui le confirme (titres non équivalents)",
     "lrc_version": "version (remix, live…) au LRC exact de son original",
     "paroles_identiques": "mêmes paroles sur deux fiches aux titres non équivalents",
@@ -197,7 +199,9 @@ FAMILLES = {
 #: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
 #: `recherche_perimee` l'était jusqu'au 2026-10-29 : c'est désormais un
 #: détecteur du panneau (`revue:recherche_perimee`), qu'une règle tranche.
-FAMILLES_DECISION: tuple[str, ...] = ()
+#: `soeur_non_reliee` (2026-11-09) : relier une ligne sœur ou fusionner est une
+#: décision humaine (la fusion n'est pas réversible).
+FAMILLES_DECISION: tuple[str, ...] = ("soeur_non_reliee",)
 
 #: Les familles de l'audit dont AUCUN cas n'est une erreur (« à faire par un
 #: run », « pour information ») : hors du bloc des erreurs du tableau, où elles
@@ -301,6 +305,108 @@ def ids_partages(par) -> list[Cas]:
                             f"{col} {valeur} : " + " | ".join(_lib(t) for t in g),
                         )
                     )
+    return cas
+
+
+#: Colonnes d'identité comparées entre artistes (`ids_partages_entre_artistes`).
+COLONNES_D_ID_PARTAGE = ("spotify_id", "deezer_id", "isrc", "apple_music_id")
+
+
+def formations_liees(c) -> set[frozenset[int]]:
+    """Les paires {membre, formation} confirmées (groupe ou collectif) : le
+    panneau lit leurs fiches ENSEMBLE (`discographie_reunie`), un ID partagé
+    entre elles s'y voit déjà."""
+    return {
+        frozenset((r["artist_id"], r["related_artist_id"]))
+        for r in c.execute(
+            "SELECT artist_id, related_artist_id FROM artist_relations "
+            "WHERE kind = 'member_of' AND status = 'confirmed' AND related_artist_id IS NOT NULL"
+        )
+    }
+
+
+def ids_partages_entre_artistes(pistes, liees: set[frozenset[int]] = frozenset()) -> list[Cas]:
+    """PUR. Le même ID Spotify, Deezer, ISRC ou Apple sur des fiches
+    d'artistes DIFFÉRENTS qui ne sont pas des lignes sœurs (2026-11-09) — ce que
+    `ids_partages`, qui lit un artiste à la fois, ne voit pas. Base entière
+    seulement. Ne recompte ni une paire d'un même artiste (`ids_partages`), ni
+    un ID Spotify / Deezer entre deux PAGES d'artistes que le panneau lit ensemble
+    (`revue:id_catalogue_partage`, `liees`).
+
+    Deux natures, selon ce que les fiches sont :
+    - deux pages Genius différentes : l'une porte l'ID d'une autre — une ERREUR
+      (`id_partage_artistes` ; « Lollipop (French Remix) » de Booba sur l'ID
+      Apple du « Lollipop (Remix) » de Kanye West, 2026-11-09) ;
+    - une fiche SANS page au même ID qu'une fiche d'un autre artiste : le plus
+      souvent la même piste vue par la plateforme chez l'invité, une ligne sœur
+      que rien n'a reliée (« Gangsta Shit » d'Isha, sans page, à l'ISRC de la
+      page d'Aketo) — une DÉCISION (`soeur_non_reliee`) : relier ou fusionner.
+    Deux fiches SANS page de deux artistes au même ID ne sont pas un cas : la
+    piste vue chez chaque artiste crédité (18 groupes le 2026-11-09, tous des
+    collaborations sans page Genius)."""
+    cas = []
+    for col in COLONNES_D_ID_PARTAGE:
+        groupes = collections.defaultdict(list)
+        for t in pistes:
+            valeur = str(t[col] or "").strip().upper()
+            if valeur:
+                groupes[valeur].append(t)
+        for valeur, g in sorted(groupes.items()):
+            if len({t["artist_id"] for t in g}) < 2:
+                continue
+            # L'enregistrement d'une fiche : sa page, sinon elle-même. Un artiste
+            # qui porte déjà deux de ces enregistrements le montre à `ids_partages`.
+            par_artiste = collections.defaultdict(set)
+            for t in g:
+                par_artiste[t["artist_id"]].add(t["genius_id"] or f"#{t['id']}")
+            impliquees: dict[int, object] = {}
+            for i, a in enumerate(g):
+                for b in g[i + 1 :]:
+                    if a["artist_id"] == b["artist_id"]:
+                        continue
+                    if a["genius_id"] and a["genius_id"] == b["genius_id"]:
+                        continue  # lignes sœurs
+                    if not a["genius_id"] and not b["genius_id"]:
+                        # Deux fiches sans page : la même piste vue chez chaque
+                        # artiste crédité, des lignes sœurs que rien ne peut relier
+                        # (pas de page) — 18 cas le 2026-11-09, tous ainsi.
+                        continue
+                    paire = {a["genius_id"] or f"#{a['id']}", b["genius_id"] or f"#{b['id']}"}
+                    if any(paire <= portes for portes in par_artiste.values()):
+                        continue  # vu par `ids_partages` chez un artiste
+                    if (
+                        col in ("spotify_id", "deezer_id")
+                        and a["genius_id"]
+                        and b["genius_id"]
+                        and frozenset((a["artist_id"], b["artist_id"])) in liees
+                    ):
+                        continue  # le panneau lit les deux artistes ensemble
+                    impliquees[a["id"]] = a
+                    impliquees[b["id"]] = b
+            if not impliquees:
+                continue
+            fiches = sorted(impliquees.values(), key=lambda t: t["id"])
+            pages = {t["genius_id"] for t in fiches if t["genius_id"]}
+            sans_page = any(not t["genius_id"] for t in fiches)
+            famille, nature = (
+                ("soeur_non_reliee", DECISION)
+                if sans_page and len(pages) <= 1
+                else ("id_partage_artistes", ERREUR)
+            )
+            cas.append(
+                Cas(
+                    famille,
+                    fiches[0]["artiste"],
+                    [t["id"] for t in fiches],
+                    f"{col} {valeur} : "
+                    + " | ".join(
+                        f"{_lib(t)} {t['artiste']}"
+                        + (f" g{t['genius_id']}" if t["genius_id"] else " (sans page)")
+                        for t in fiches
+                    ),
+                    nature,
+                )
+            )
     return cas
 
 
@@ -1482,6 +1588,10 @@ def auditer(
             audit.cas += credits_en_double(c, pistes)
             if not noms:
                 audit.cas += orphelins(c)
+        if not noms:
+            # Entre artistes : seulement sur la base entière (un audit par
+            # artiste ne lit pas les fiches des autres).
+            audit.cas += ids_partages_entre_artistes(pistes, formations_liees(c))
     if persistance:
         audit.cas += colonnes_verdict(dm, pistes)
         if not noms:

@@ -1773,7 +1773,7 @@ def fiches_sans_participation(c, pistes) -> list[Cas]:
         noms = (t["artiste"], *alias[t["artist_id"]])
         if not sans_participation(
             t["primary_artist_name"], credites[t["id"]], noms, formations[t["artist_id"]]
-        ) or signe_son_disque(signatures[t["id"]], noms):
+        ) or signe_son_disque(signatures[t["id"]], noms, formations[t["artist_id"]]):
             continue
         cas.append(
             Cas(

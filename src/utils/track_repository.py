@@ -875,6 +875,21 @@ class TrackRepository:
                     signatures_by_track.setdefault(ligne.track_id, []).append(
                         (ligne.titre, ligne.credit)
                     )
+                # Toute formation connue, confirmée ou non : elle ne sert qu'à
+                # ÉCARTER le disque d'un collectif (`participation.signe_son_disque`).
+                formations_artiste = tuple(
+                    sorted(
+                        ligne.related_name
+                        for ligne in conn.execute(
+                            text(
+                                "SELECT DISTINCT related_name FROM artist_relations "
+                                "WHERE artist_id = :artiste AND kind = 'member_of' "
+                                "AND related_name IS NOT NULL"
+                            ),
+                            {"artiste": artist_id},
+                        )
+                    )
+                )
 
                 # e23 : IDs Spotify de tout l'artiste, même motif. C'est ce qui
                 # RANIME `Track.spotify_ids` — écrit et testé de longue date,
@@ -912,6 +927,7 @@ class TrackRepository:
                         # un cycle recharge la discographie une vingtaine de fois).
                         track.credits = credits_by_track.get(row["id"], [])
                         track.signatures_disque = signatures_by_track.get(row["id"], [])
+                        track.formations_artiste = formations_artiste
 
                         result.append(track)
 

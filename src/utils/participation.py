@@ -143,15 +143,38 @@ def _compilation_presentee(titre, noms) -> bool:
     )
 
 
-def signe_son_disque(signatures, noms) -> bool:
-    """PUR. L'artiste est-il EN TÊTE du crédit d'un des disques de la fiche ?
-    `signatures` : `(titre du disque, crédit)`. La tête seule : *JACKBOYS 2*
-    (« JACKBOYS & Travis Scott ») est le disque d'un collectif, *Anger Management 3*
-    celui de Clinton Sparks, même quand l'artiste y est nommé ensuite."""
+#: Au-delà, un crédit de disque n'est plus celui d'un duo ou d'un trio : filet pour
+#: le collectif que la base ne connaît pas encore comme formation.
+SIGNATAIRES_MAX = 3
+
+
+def _signe(credit, noms, formations) -> bool:
+    """L'artiste signe-t-il ce crédit ? En tête, toujours. Nommé ensuite, s'il le
+    COSIGNE : trois signataires au plus, dont aucun n'est une de ses formations."""
+    signataires = [s for s in _SEPARATEURS_DU_CREDIT.split(credit or "") if s and s.strip()]
+    if not signataires:
+        return False
+    if _est_l_artiste(signataires[0], noms):
+        return True
+    return (
+        len(signataires) <= SIGNATAIRES_MAX
+        and any(_est_l_artiste(s, noms) for s in signataires)
+        and not any(_est_l_artiste(s, formations) for s in signataires)
+    )
+
+
+def signe_son_disque(signatures, noms, formations=()) -> bool:
+    """PUR. L'artiste signe-t-il un des disques de la fiche ? `signatures` :
+    `(titre du disque, crédit)`. En tête du crédit, ou cosignataire d'un duo ou
+    d'un trio (*SVR* de « Kaaris & Kalash Criminel », *La plume et le brise-glace*
+    de « Lucio Bukowski, Oster Lapwass & Anton Serra » : décision utilisateur
+    2026-11-10). Pas le disque d'un collectif où il n'est que nommé ensuite :
+    *JACKBOYS 2* (« JACKBOYS & Travis Scott ») — un signataire est une de ses
+    `formations` — ni un crédit de plus de `SIGNATAIRES_MAX` noms."""
     noms = [n for n in noms if n]
+    formations = [f for f in formations if f]
     return any(
-        _est_l_artiste(_SEPARATEURS_DU_CREDIT.split(credit or "", maxsplit=1)[0], noms)
-        and not _compilation_presentee(titre, noms)
+        _signe(credit, noms, formations) and not _compilation_presentee(titre, noms)
         for titre, credit in signatures
     )
 
@@ -184,7 +207,9 @@ def participation(track: Track, noms, formations=()) -> Participation:
         if sans_participation(
             track.primary_artist_name, [c.name for c in track.credits], noms, formations
         ):
-            if signe_son_disque(track.signatures_disque, noms):
+            if signe_son_disque(
+                track.signatures_disque, noms, (*formations, *track.formations_artiste)
+            ):
                 return Participation.SUR_SON_DISQUE
             return Participation.SUR_LE_DISQUE
         return Participation.PRINCIPAL

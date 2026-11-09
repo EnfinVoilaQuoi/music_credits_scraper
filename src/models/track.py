@@ -776,6 +776,10 @@ class Track:
     # (`get_artist_tracks`), jamais en base sous cette forme. `participation` y lit
     # si le morceau d'un autre est sur un disque de l'artiste (2026-11-07).
     signatures_disque: list = field(default_factory=list, repr=False)
+    # Les formations de l'artiste de la ligne (groupes, collectifs), posées au même
+    # chargement : `participation` y lit qu'un disque cosigné avec l'une d'elles est
+    # celui du collectif, même pour un appelant qui ne les lui passe pas (2026-11-10).
+    formations_artiste: tuple = field(default=(), repr=False)
 
     def _identity(self) -> tuple:
         """Clé d'identité métier d'un morceau.

@@ -496,6 +496,41 @@ def test_deux_versions_aux_memes_paroles_pour_information():
     assert cas.nature == au.INFORMATION
 
 
+@pytest.mark.parametrize(
+    "durees, nature",
+    [
+        # « Best Day Ever » / « BDE Bonus » de Mac Miller : 159 / 243 s.
+        ({1: {"deezer": 159}, 2: {"spotify_web": 243}}, au.INFORMATION),
+        # Mêmes durées : un doublon peut-être, mais aucun cas ne l'a validé.
+        ({1: {"deezer": 159}, 2: {"spotify_web": 160}}, au.ERREUR),
+        # Sans durée lue par identifiant d'un côté : rien ne tranche.
+        ({1: {"deezer": 159}}, au.ERREUR),
+    ],
+)
+def test_paroles_identiques_aux_durees_differentes_version_non_nommee(durees, nature):
+    """2026-11-09, simulé : 3 cas sur 11, les faux positifs de CORRECTIFS."""
+    texte = "\n".join(
+        f"[Couplet {i}]\nligne numéro {i} du texte qui parle de la ville et du temps qui passe"
+        for i in range(12)
+    )
+    par = {
+        1: [
+            {
+                "id": i,
+                "title": titre,
+                "genius_id": i,
+                "lyrics": texte,
+                "lyrics_source": "genius",
+                "artiste": "Mac Miller",
+            }
+            for i, titre in ((1, "Best Day Ever"), (2, "BDE Bonus"))
+        ]
+    }
+    (cas,) = au.paroles_identiques(par, durees)
+    assert cas.nature == nature
+    assert ("version non nommée" in cas.libelle) is (nature == au.INFORMATION)
+
+
 def test_lrc_minute_au_dela_de_la_duree(data_manager, isha):
     """Un LRC qui court après la fin du morceau : l'un des deux est faux, et
     l'audit dit si la durée était confirmée (2026-10-13)."""

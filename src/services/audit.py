@@ -561,12 +561,19 @@ def _sans_groupes(titre: str | None) -> str:
     return normalize_title(re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", titre or ""))
 
 
-def paroles_identiques(par) -> list[Cas]:
+def paroles_identiques(par, durees: dict[int, dict] | None = None) -> list[Cas]:
     """Le même texte sur deux fiches d'un artiste aux titres NON équivalents
     (chantier D, 2026-10-13) : le pendant de `lrc_emprunte` pour les paroles
     — mesuré, 11 paires dont Josman « Fais le vide » / « Tous Les Jours ».
     Les lignes sœurs (même page Genius) et les versions d'un même socle n'en
-    sont pas."""
+    sont pas.
+
+    Deux fiches dont les durées lues par identifiant (`durees`) DIFFÈRENT
+    sont deux enregistrements : une version que le titre ne nomme pas (« Best
+    Day Ever » / « BDE Bonus », 159 / 243 s), pour information (règle du
+    2026-11-09, simulée : 3 cas sur 11, conformes à CORRECTIFS). Les mêmes
+    durées ne prouvent pas un doublon : aucun cas ne l'a validé, l'erreur reste."""
+    durees = durees or {}
     cas = []
     for ts in par.values():
         groupes = collections.defaultdict(list)
@@ -592,12 +599,19 @@ def paroles_identiques(par) -> list[Cas]:
                     # sienne (« Tous Les Jours (Remix) » aux paroles de « Fais le
                     # vide ») — une erreur, comme deux pages sans version.
                     version = porte_une_version(a["title"]) and porte_une_version(b["title"])
+                    libelle = f"{_lib(a)} et {_lib(b)} : mêmes paroles"
+                    if (
+                        not version
+                        and accord_des_durees(durees.get(a["id"]), durees.get(b["id"])) is False
+                    ):
+                        version = True
+                        libelle += " — durées différentes : version non nommée"
                     cas.append(
                         Cas(
                             "paroles_identiques",
                             a["artiste"],
                             [a["id"], b["id"]],
-                            f"{_lib(a)} et {_lib(b)} : mêmes paroles",
+                            libelle,
                             INFORMATION if version else ERREUR,
                         )
                     )
@@ -1746,7 +1760,7 @@ def auditer(
         audit.cas += doublons_equivalents(par)
         audit.cas += ids_partages(par, durees_id)
         audit.cas += lrc(par)
-        audit.cas += paroles_identiques(par)
+        audit.cas += paroles_identiques(par, durees_id)
         audit.cas += instrumentaux(pistes)
         audit.cas += durees(c, pistes)
         audit.cas += certifs(pistes)

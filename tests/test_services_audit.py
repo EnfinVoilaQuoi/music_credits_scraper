@@ -1106,6 +1106,53 @@ class TestFamillesNues:
         assert "streams_double" not in _familles(audit)
 
     @pytest.mark.parametrize(
+        "albums, pages_lues, nature, fin",
+        [
+            # Second signal : « Calypso I / II », même disque.
+            (("Caravelle", "Caravelle"), {"A" * 22, "B" * 22}, au.ERREUR, "même disque"),
+            # Aucun signal, les deux pages lues : le compteur est celui de Spotify.
+            (("X", "Y"), {"A" * 22, "B" * 22}, au.INFORMATION, "compteur de Spotify"),
+            # Aucun signal, une page jamais lue (« Vrai » d'Ol' Kainry).
+            (("X", "Y"), {"A" * 22}, au.ERREUR, "compteur sans page lue : #"),
+        ],
+    )
+    def test_streams_double_second_signal(
+        self, data_manager, isha, albums, pages_lues, nature, fin
+    ):
+        """2026-11-09, simulé sur 4 cas."""
+        from contextlib import closing
+
+        a, t = isha
+        autre = Track(title="Bavardage", artist=a)
+        autre.genius_id = 4243
+        data_manager.save_track(autre)
+        for tid, album, sid in ((t.id, albums[0], "A" * 22), (autre.id, albums[1], "B" * 22)):
+            _sql(
+                data_manager,
+                "UPDATE tracks SET spotify_streams = 123456, album = :a, spotify_id = :s "
+                "WHERE id = :t",
+                a=album,
+                s=sid,
+                t=tid,
+            )
+        with closing(au._connexion(data_manager.db_path)) as c:
+            par = au._par_artiste(au._pistes(c, [a.id]))
+            (cas,) = [x for x in au.streams(c, par, pages_lues) if x.famille == "streams_double"]
+        assert cas.nature == nature and fin in cas.libelle
+
+    def test_pages_spotify_lues_dans_le_brut(self, tmp_path):
+        from src.persistence import brut
+
+        brut.consigner(
+            "spotify_web", "https://open.spotify.com/intl-fr/track/" + "A" * 22, 200, b"x"
+        )
+        brut.consigner(
+            "spotify_web", "https://open.spotify.com/intl-fr/album/" + "B" * 22, 200, b"x"
+        )
+        brut.fermer()
+        assert au.pages_spotify_lues() == {"A" * 22}
+
+    @pytest.mark.parametrize(
         "piste, famille",
         [
             (_certif("Durag", "Durag", "album"), "certif_album"),

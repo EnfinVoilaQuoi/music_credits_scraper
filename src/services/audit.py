@@ -70,7 +70,7 @@ from src.utils.duree_youtube import (
 )
 from src.utils.lrc_garde import ACCORD_CATALOGUES_S, CATALOGUES_PAR_ID
 from src.utils.participation import SQL_SIGNATURES_DE_DISQUES, sans_participation, signe_son_disque
-from src.utils.title_matching import contains_as_words, normalize_title
+from src.utils.title_matching import contains_as_words, meme_album, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
@@ -822,7 +822,64 @@ def certifs(pistes) -> list[Cas]:
     return cas
 
 
-def streams(c, par) -> list[Cas]:
+#: Une page TITRE Spotify dans les clés du brut (`/intl-fr/track/{id}`).
+_PAGE_TITRE_SPOTIFY = re.compile(r"/track/([A-Za-z0-9]{22})$")
+
+
+def pages_spotify_lues(chemin: Path | None = None) -> set[str]:
+    """Les ID Spotify dont la page TITRE a été lue (`spotify_web`), d'après les
+    clés du brut (`persistence.brut`, lecture seule) : la preuve qu'un
+    compteur vient bien de la page de cet ID. Sans brut : aucun."""
+    from src.persistence import brut
+
+    return {
+        m[1]
+        for r in brut.requetes_gardees("spotify_web", chemin)
+        if (m := _PAGE_TITRE_SPOTIFY.search(r))
+    }
+
+
+def _ids_spotify(c, ids) -> dict[int, set[str]]:
+    """Les ID Spotify de chaque fiche : le principal et `track_spotify_ids`."""
+    out = collections.defaultdict(set)
+    for r in c.execute(
+        f"SELECT track_id, spotify_id FROM track_spotify_ids "
+        f"WHERE track_id IN ({','.join('?' * len(ids))})",
+        list(ids),
+    ):
+        out[r["track_id"]].add(r["spotify_id"])
+    return out
+
+
+def _seconds_signaux(c, g) -> list[str]:
+    """Ce qui, outre le compteur égal, relie des fiches : même disque, titres
+    parents, un ID Spotify partagé."""
+    ids = _ids_spotify(c, [t["id"] for t in g])
+    for t in g:
+        if t["spotify_id"]:
+            ids[t["id"]].add(t["spotify_id"])
+    paires = [(a, b) for i, a in enumerate(g) for b in g[i + 1 :]]
+    signaux = []
+    if all(meme_album(a["album"], b["album"]) for a, b in paires):
+        signaux.append("même disque")
+    if any(titres_parents(a["title"], b["title"]) for a, b in paires):
+        signaux.append("titres parents")
+    if set.intersection(*(ids[t["id"]] for t in g)):
+        signaux.append("ID Spotify partagé")
+    return signaux
+
+
+def streams(c, par, pages_lues: set[str] | None = None) -> list[Cas]:
+    """`streams_double` (règle du 2026-11-09, simulée sur 4 cas) : un compteur
+    Spotify égal sur deux pages n'est une erreur qu'avec un SECOND signal (même
+    disque, titres parents, ID partagé) — Spotify montre parfois le même
+    compteur pour deux enregistrements (« Calypso I / II »). Sans second signal,
+    « pour information » seulement si la page de l'ID principal de chaque fiche
+    a été lue (`pages_lues`, le brut) ; sinon le compteur ne se prouve pas lu sur
+    sa page (« Vrai » d'Ol' Kainry, 2026-11-09) : une erreur, dite telle.
+
+    `ytm_incoherent` : le total YTM de la colonne contre ses vidéos propres."""
+    pages_lues = pages_lues or set()
     cas = []
     for ts in par.values():
         groupes = collections.defaultdict(list)
@@ -834,13 +891,21 @@ def streams(c, par) -> list[Cas]:
                 # Titres parents : le panneau le juge (`revue:compteur_partage`).
                 continue
             if len(g) > 1 and len({t["genius_id"] for t in g}) > 1:
-                cas.append(
-                    Cas(
-                        "streams_double",
-                        g[0]["artiste"],
-                        [t["id"] for t in g],
-                        f"{n:,} : " + " | ".join(_lib(t) for t in g),
+                libelle = f"{n:,} : " + " | ".join(_lib(t) for t in g)
+                nature = ERREUR
+                signaux = _seconds_signaux(c, g)
+                sans_page = [t for t in g if t["spotify_id"] not in pages_lues]
+                if signaux:
+                    libelle += f" — {', '.join(signaux)}"
+                elif sans_page:
+                    libelle += " — compteur sans page lue : " + ", ".join(
+                        f"#{t['id']}" for t in sans_page
                     )
+                else:
+                    nature = INFORMATION
+                    libelle += " — pages lues, aucun autre signal : compteur de Spotify"
+                cas.append(
+                    Cas("streams_double", g[0]["artiste"], [t["id"] for t in g], libelle, nature)
                 )
     ids = {t["id"]: t for ts in par.values() for t in ts}
     vids = collections.defaultdict(list)
@@ -1764,7 +1829,7 @@ def auditer(
         audit.cas += instrumentaux(pistes)
         audit.cas += durees(c, pistes)
         audit.cas += certifs(pistes)
-        audit.cas += streams(c, par)
+        audit.cas += streams(c, par, pages_spotify_lues())
         audit.cas += echecs(c, pistes)
         audit.cas += studio_sur_live(c, pistes)
         audit.cas += disques_homonymes(pistes)

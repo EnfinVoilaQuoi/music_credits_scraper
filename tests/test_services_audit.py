@@ -307,6 +307,25 @@ class TestHausse:
         resume = au.resume_fin_de_run(audit, {"id_partage": (1, 1)}, True)
         assert "id_partage : 1 → 1 (1 nouveau(x))" in resume and "• y" in resume
 
+    def test_les_indecidables_en_hausse_avertissent_sans_monter(self):
+        """2026-11-09 : rien ne plafonnait les indécidables (31 → 55) — une ligne
+        d'avertissement, ni `en_hausse` ni code de sortie."""
+        ref = au.Audit(
+            date="d", perimetre="p", cas=[au.Cas("duree_video", "A", [1], "x", au.INDECIDABLE)]
+        )
+        audit = au.Audit(date="d", perimetre="p")
+        audit.cas = [au.Cas("duree_video", "A", [i], "x", au.INDECIDABLE) for i in (1, 2)]
+        assert au.en_hausse(audit, ref.vers_dict()) == {}
+        audit.indecidables_avant = au.indecidables_de(ref.vers_dict())
+        resume = au.resume_fin_de_run(audit, {}, True)
+        assert "⚠ Indécidables en hausse : 1 → 2" in resume
+        assert "✔ Aucune famille en hausse" in resume
+        # Stables, ou sans référence : rien.
+        audit.indecidables_avant = 2
+        assert "Indécidables" not in au.resume_fin_de_run(audit, {}, True)
+        assert au.indecidables_de(None) is None
+        assert "Indécidables" not in au.resume_fin_de_run(audit, {}, False)
+
     def test_le_libelle_d_un_cas_de_fiche_ne_fait_pas_un_cas_nouveau(self):
         """Durées et compteurs bougent dans le libellé : la fiche désigne le cas."""
         ref = au.Audit(date="d", perimetre="p", cas=[au.Cas("ytm_incoherent", "A", [1], "10")])

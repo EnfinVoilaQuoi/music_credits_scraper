@@ -130,6 +130,9 @@ class Audit:
     #: Les cas du critère ABSENTS de l'audit précédent (`apres_run`) : hors de
     #: `vers_dict`, ils ne servent qu'au compte rendu de fin de run.
     nouveaux: list[Cas] = field(default_factory=list)
+    #: Indécidables de l'audit précédent (`apres_run`), None sans référence :
+    #: hors de `vers_dict`, pour l'avertissement du compte rendu.
+    indecidables_avant: int | None = None
     #: Couverture des durées (`couverture_des_durees`) : une mesure, pas une
     #: famille — hors des cas et du critère.
     couverture_durees: dict[str, int] = field(default_factory=dict)
@@ -2101,6 +2104,7 @@ def apres_run(dm, artiste, dossier: Path | None = None) -> tuple[Audit, dict, bo
     audit = auditer(dm, [artiste.name])
     hausse = en_hausse(audit, reference)
     audit.nouveaux = cas_nouveaux(audit, reference)
+    audit.indecidables_avant = indecidables_de(reference)
     if hausse and reference is not None:
         _noter_hausse(audit, hausse, dossier)
     ecrire_reference(audit, artiste.id, dossier)
@@ -2148,4 +2152,23 @@ def resume_fin_de_run(audit: Audit, hausse: dict, avait_reference: bool) -> str:
             lignes.append(f"   {famille} : {avant} → {apres}{suffixe}")
             for cas in (nouveaux or [c for c in audit.cas if c.famille == famille])[:5]:
                 lignes.append(f"      • {cas.libelle}")
+    indecidables = audit.par_nature()[INDECIDABLE]
+    avant = audit.indecidables_avant
+    if avait_reference and avant is not None and indecidables > avant:
+        # Hors critère : ni `en_hausse`, ni le code de sortie — mais rien ne
+        # les plafonnait (31 le 2026-10-31, 55 le 2026-11-09).
+        lignes.append(
+            f"⚠ Indécidables en hausse : {avant} → {indecidables} (hors critère, à regarder)"
+        )
     return "\n".join(lignes)
+
+
+def indecidables_de(reference: dict | None) -> int | None:
+    """Le nombre d'indécidables d'un audit enregistré (`vers_dict`), None sans
+    référence ; une référence d'avant les natures n'en a aucun."""
+    if reference is None:
+        return None
+    par_nature = reference.get("par_nature")
+    if par_nature is not None:
+        return par_nature.get(INDECIDABLE, 0)
+    return sum(1 for c in reference.get("cas", []) if c.get("nature") == INDECIDABLE)

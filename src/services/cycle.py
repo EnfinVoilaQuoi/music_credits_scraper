@@ -316,6 +316,11 @@ def resume(bilan: BilanCycle, options: OptionsCycle) -> str:
 
 def resume_etape(etape: str, b: Bilan, options: OptionsCycle, artist: Artist) -> str:
     """Le compte rendu détaillé d'UNE étape, celui de son service."""
+    if type(b) is Bilan and etape in ETAPES:
+        # Étape qui a levé : `_run` lui a donné un `Bilan` nu, sans les champs
+        # du service ; le résumé du service planterait et priverait le run de
+        # son audit (Alpha Wann, coupure réseau du 2026-11-08).
+        return f"⚠️ étape en échec — {b.motif}"
     if etape == "disco":
         return discographie.resume(b, artist)
     if etape == "identite":

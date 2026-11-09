@@ -231,8 +231,55 @@ class TestHausse:
         assert avait and hausse["duree_aberrante"] == (0, 1)
         assert "duree_aberrante : 0 → 1" in au.resume_fin_de_run(audit, hausse, avait)
 
+        # La hausse laisse une trace : la référence, elle, vient d'être remplacée.
+        (ligne,) = (tmp_path / "hausses.jsonl").read_text(encoding="utf-8").splitlines()
+        trace = json.loads(ligne)
+        assert trace["hausse"] == {"duree_aberrante": [0, 1]}
+        assert [c["pistes"] for c in trace["nouveaux"]] == [[t.id]]
+
         _, hausse, _ = au.apres_run(data_manager, a, tmp_path)
         assert "duree_aberrante" not in hausse
+        assert len((tmp_path / "hausses.jsonl").read_text(encoding="utf-8").splitlines()) == 1
+
+    def test_un_cas_nouveau_monte_a_compte_egal(self):
+        """2026-11-09 : un cas réparé et un cas créé dans la même famille ne se
+        compensent pas — la comparaison se fait par CAS, pas au seul compte."""
+        ref = au.Audit(date="d", perimetre="p")
+        ref.cas = [au.Cas("id_partage", "A", [1, 2], "x"), au.Cas("orphelin", "—", [], "credits")]
+        audit = au.Audit(date="d", perimetre="p")
+        audit.cas = [
+            au.Cas("id_partage", "A", [3, 4], "y"),
+            au.Cas("orphelin", "—", [], "credits"),
+            au.Cas("revue:credits_api", "A", [9], "hors critère", au.RUN),
+        ]
+        assert au.en_hausse(audit, ref.vers_dict()) == {"id_partage": (1, 1)}
+        audit.nouveaux = au.cas_nouveaux(audit, ref.vers_dict())
+        assert [c.pistes for c in audit.nouveaux] == [[3, 4]]
+        resume = au.resume_fin_de_run(audit, {"id_partage": (1, 1)}, True)
+        assert "id_partage : 1 → 1 (1 nouveau(x))" in resume and "• y" in resume
+
+    def test_le_libelle_d_un_cas_de_fiche_ne_fait_pas_un_cas_nouveau(self):
+        """Durées et compteurs bougent dans le libellé : la fiche désigne le cas."""
+        ref = au.Audit(date="d", perimetre="p", cas=[au.Cas("ytm_incoherent", "A", [1], "10")])
+        audit = au.Audit(date="d", perimetre="p", cas=[au.Cas("ytm_incoherent", "A", [1], "12")])
+        assert au.en_hausse(audit, ref.vers_dict()) == {}
+
+    def test_le_tableau_montre_les_familles_hors_critere(self):
+        """2026-11-09 : elles s'affichaient à 0 parmi les erreurs, et nulle part
+        ailleurs (1 319 cas cachés)."""
+        audit = au.Audit(date="d", perimetre="p")
+        audit.cas = [
+            au.Cas("id_spotify_sans_compteur", "A", [1], "", au.RUN),
+            au.Cas("fiche_sans_participation", "A", [2], "", au.INFORMATION),
+            au.Cas("certif_autre", "A", [3], "", au.INFORMATION),
+        ]
+        erreurs, reste = au.tableau(audit).split("── indécidables")
+        assert "id_spotify_sans_compteur" not in erreurs
+        assert "fiche_sans_participation" not in erreurs
+        run = reste.split("à faire par un run (1)")[1].split("── panneau")[0]
+        assert "     1" in run and "id_spotify_sans_compteur" in run
+        info = reste.split("pour information (2)")[1]
+        assert "fiche_sans_participation" in info and "certif_autre" in info
 
 
 class TestATrancher:
@@ -663,6 +710,35 @@ def test_un_cas_tranche_indecidable_reste_compte_hors_critere(isha, data_manager
 
     assert [(c.famille, c.nature) for c in cas] == [("revue:lrc_douteux", au.INDECIDABLE)]
     assert au.INDECIDABLE not in au.NATURES_DU_CRITERE
+
+
+def test_un_cas_de_fiche_n_est_compte_qu_une_fois(data_manager, isha, monkeypatch):
+    """La discographie réunie montre le même cas chez l'artiste, son groupe et
+    ses lignes sœurs (16 cas du critère comptés deux ou trois fois, 2026-11-09) :
+    une décision, un cas. Un cas d'artiste et une certif restent par artiste."""
+    from src.services import revue
+
+    autre = Artist(name="Caballero")
+    autre.id = data_manager.save_artist(autre)
+    _, t = isha
+    partage = [
+        revue.Cas("lrc_douteux", t.id, "Durag", "LRC douteux", cle="g4242|lrc"),
+        revue.Cas("liens_proposes", None, "Sniper", "formation", cle="artiste|sniper"),
+        revue.Cas("certif_date", t.id, "Durag", "certif", cle="g4242|certif"),
+    ]
+    monkeypatch.setattr(
+        revue, "analyser", lambda dm, artiste: revue.Revue(actifs=list(partage), masques=[])
+    )
+
+    cas = au.a_trancher(data_manager, ["Isha", "Caballero"])
+
+    assert sorted((c.famille, c.artiste) for c in cas) == [
+        ("revue:certif_date", "Caballero"),
+        ("revue:certif_date", "Isha"),
+        ("revue:liens_proposes", "Caballero"),
+        ("revue:liens_proposes", "Isha"),
+        ("revue:lrc_douteux", "Isha"),
+    ]
 
 
 def test_une_version_au_meme_lrc_et_a_la_meme_duree_est_indecidable():

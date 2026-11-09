@@ -123,6 +123,9 @@ class Audit:
     date: str
     perimetre: str
     cas: list[Cas] = field(default_factory=list)
+    #: Les cas du critère ABSENTS de l'audit précédent (`apres_run`) : hors de
+    #: `vers_dict`, ils ne servent qu'au compte rendu de fin de run.
+    nouveaux: list[Cas] = field(default_factory=list)
 
     def compte(self) -> dict[str, int]:
         return dict(collections.Counter(c.famille for c in self.cas))
@@ -195,6 +198,16 @@ FAMILLES = {
 #: `recherche_perimee` l'était jusqu'au 2026-10-29 : c'est désormais un
 #: détecteur du panneau (`revue:recherche_perimee`), qu'une règle tranche.
 FAMILLES_DECISION: tuple[str, ...] = ()
+
+#: Les familles de l'audit dont AUCUN cas n'est une erreur (« à faire par un
+#: run », « pour information ») : hors du bloc des erreurs du tableau, où elles
+#: s'affichaient à 0 sans paraître ailleurs (1 319 cas cachés le 2026-11-09).
+FAMILLES_HORS_CRITERE = (
+    "colonne_sans_provenance",
+    "id_spotify_sans_compteur",
+    "fiche_sans_participation",
+    "lien_jamais_mesure",
+)
 
 #: Les familles dont la cible est zéro (une seule ligne = un défaut de code).
 INVARIANTS = (
@@ -1388,18 +1401,33 @@ def a_trancher(dm, noms: list[str]) -> list[Cas]:
         )
 
     cas = []
+    vus: set[tuple[str, str]] = set()
+
+    def _deja_compte(c) -> bool:
+        """Le même cas d'une FICHE, déjà compté chez un autre artiste : la
+        discographie réunie le montre chez l'artiste, son groupe et ses lignes
+        sœurs, et un verdict y vaut partout (même clé). Un cas d'artiste et une
+        certif (jugée par ligne) restent comptés chez chacun."""
+        if not c.cle or c.cle.startswith("artiste|") or c.detecteur.startswith("certif"):
+            return False
+        if (c.detecteur, c.cle) in vus:
+            return True
+        vus.add((c.detecteur, c.cle))
+        return False
+
     for nom in noms:
         artiste = dm.get_artist_by_name(nom)
         if artiste is None:
             continue
         artiste.tracks = dm.discographie_reunie(artiste)
         analyse = revue.analyser(dm, artiste)
-        cas += [_cas(artiste, c, c.nature) for c in analyse.actifs]
+        cas += [_cas(artiste, c, c.nature) for c in analyse.actifs if not _deja_compte(c)]
         verdicts = dm.verdicts_revue(artiste.id)
         cas += [
             _cas(artiste, c, INDECIDABLE)
             for c in analyse.masques
             if verdicts.get((c.detecteur, c.cle), {}).get("verdict") == VERDICT_INDECIDABLE
+            and not _deja_compte(c)
         ]
     return cas
 
@@ -1477,11 +1505,37 @@ def en_hausse(audit: Audit, reference: dict | None) -> dict[str, tuple[int, int]
     if reference is None:
         return {f: (0, compte[f]) for f in INVARIANTS if compte.get(f)}
     avant = reference.get("compte_critere", reference.get("compte", {}))
+    # Une famille monte aussi quand elle porte un cas NOUVEAU à compte égal : un
+    # cas réparé et un cas créé dans le même run ne se compensent pas (2026-11-09).
+    avec_nouveau = {c.famille for c in cas_nouveaux(audit, reference)}
     return {
         f: (avant.get(f, 0), compte.get(f, 0))
         for f in toutes_les_familles()
-        if compte.get(f, 0) > avant.get(f, 0)
+        if compte.get(f, 0) > avant.get(f, 0) or f in avec_nouveau
     }
+
+
+def _identite(cas) -> tuple:
+    """Ce qui désigne un cas d'un audit à l'autre (objet, ou dict d'un
+    `vers_dict`) : sa famille et ses fiches ; sans fiche, son libellé. Le libellé
+    d'un cas de fiche porte des valeurs qui bougent (durées, compteurs) : hors de
+    l'identité. Limite : un cas remplacé par un autre de la même famille sur la
+    MÊME fiche ne se voit qu'au compte."""
+    if isinstance(cas, dict):
+        famille, pistes, libelle = cas["famille"], cas.get("pistes"), cas.get("libelle")
+    else:
+        famille, pistes, libelle = cas.famille, cas.pistes, cas.libelle
+    return (famille, tuple(sorted(pistes))) if pistes else (famille, libelle or "")
+
+
+def cas_nouveaux(audit: Audit, reference: dict | None) -> list[Cas]:
+    """Les cas du CRITÈRE de `audit` que `reference` ne portait pas. Une
+    référence sans sa liste de cas ne permet pas de le dire : aucun."""
+    anciens = (reference or {}).get("cas")
+    if anciens is None:
+        return []
+    connus = {_identite(c) for c in anciens if c.get("nature") in (None, *NATURES_DU_CRITERE)}
+    return [c for c in audit.cas if c.nature in NATURES_DU_CRITERE and _identite(c) not in connus]
 
 
 def _par_nature_et_famille(cas) -> dict[str, collections.Counter]:
@@ -1518,7 +1572,7 @@ def tableau(audit: Audit, reference: dict | None = None) -> str:
 
     lignes.append(f"\n── erreurs : suspicions et invariants ({sum(par[ERREUR].values())}) ──")
     for code, libelle in FAMILLES.items():
-        if code not in FAMILLES_DECISION:
+        if code not in FAMILLES_DECISION and code not in FAMILLES_HORS_CRITERE:
             lignes.append(ligne(par[ERREUR][code], ref_par[ERREUR][code], code, libelle))
     indecis = par[INDECIDABLE]
     lignes.append(f"\n── {NATURES[INDECIDABLE]} ({sum(indecis.values())}) ──")
@@ -1527,8 +1581,9 @@ def tableau(audit: Audit, reference: dict | None = None) -> str:
         lignes.append(ligne(indecis[code], ref_par[INDECIDABLE][code], code, libelle))
     for nature in (DECISION, RUN, INFORMATION):
         lignes.append(f"\n── panneau : {NATURES[nature]} ({sum(par[nature].values())}) ──")
-        # Une famille de l'audit peut être une décision (`recherche_perimee`).
-        for code, libelle in {**{f: FAMILLES[f] for f in FAMILLES_DECISION}, **revue}.items():
+        # Une famille de l'audit a aussi des cas hors des erreurs : les familles
+        # hors critère, une certif que le juge admet (pour information).
+        for code, libelle in {**FAMILLES, **revue}.items():
             n, avant = par[nature][code], ref_par[nature][code]
             if n or avant:  # ~45 détecteurs : seuls ceux qui ont des cas s'affichent
                 lignes.append(ligne(n, avant, code, libelle))
@@ -1598,8 +1653,27 @@ def apres_run(dm, artiste, dossier: Path | None = None) -> tuple[Audit, dict, bo
     reference = lire_reference(artiste.id, dossier)
     audit = auditer(dm, [artiste.name])
     hausse = en_hausse(audit, reference)
+    audit.nouveaux = cas_nouveaux(audit, reference)
+    if hausse and reference is not None:
+        _noter_hausse(audit, hausse, dossier)
     ecrire_reference(audit, artiste.id, dossier)
     return audit, hausse, reference is not None
+
+
+def _noter_hausse(audit: Audit, hausse: dict, dossier: Path | None = None) -> None:
+    """Une ligne par hausse dans `hausses.jsonl`, à côté des références : la
+    référence est remplacée à chaque run et un lot ne garde qu'un « code 4 » —
+    sans cette trace, une dégradation de nuit ne se lisait qu'une fois."""
+    chemin = (dossier or _dossier_references()) / "hausses.jsonl"
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    ligne = {
+        "date": audit.date,
+        "artiste": audit.perimetre,
+        "hausse": {f: list(v) for f, v in hausse.items()},
+        "nouveaux": [asdict(c) for c in audit.nouveaux],
+    }
+    with chemin.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(ligne, ensure_ascii=False) + "\n")
 
 
 def resume_fin_de_run(audit: Audit, hausse: dict, avait_reference: bool) -> str:
@@ -1622,7 +1696,9 @@ def resume_fin_de_run(audit: Audit, hausse: dict, avait_reference: bool) -> str:
     else:
         lignes.append("⚠ EN HAUSSE depuis le run précédent :")
         for famille, (avant, apres) in hausse.items():
-            lignes.append(f"   {famille} : {avant} → {apres}")
-            for cas in [c for c in audit.cas if c.famille == famille][:5]:
+            nouveaux = [c for c in audit.nouveaux if c.famille == famille]
+            suffixe = f" ({len(nouveaux)} nouveau(x))" if nouveaux and apres <= avant else ""
+            lignes.append(f"   {famille} : {avant} → {apres}{suffixe}")
+            for cas in (nouveaux or [c for c in audit.cas if c.famille == famille])[:5]:
                 lignes.append(f"      • {cas.libelle}")
     return "\n".join(lignes)

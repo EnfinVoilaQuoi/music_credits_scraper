@@ -940,3 +940,105 @@ class TestIdsPartagesEntreArtistes:
         assert _familles(entiere).get("id_partage_artistes") == 1
         par_artiste = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
         assert "id_partage_artistes" not in _familles(par_artiste)
+
+
+def _certif(titre, titre_certif, categorie="single"):
+    return {
+        "id": 1,
+        "title": titre,
+        "artiste": "X",
+        "certifications": json.dumps(
+            [{"title": titre_certif, "category": categorie, "body": "SNEP"}]
+        ),
+    }
+
+
+class TestFamillesNues:
+    """2026-11-09 : six familles de l'audit qu'aucun test ne nommait."""
+
+    def test_duree_paroles(self, data_manager, isha):
+        """L'« Outro » de Di-Meh sous les 167 s de Népal : 1 350 mots en 167 s."""
+        a, t = isha
+        rapide = Track(title="Rapide", artist=a)
+        data_manager.save_track(rapide)
+        for tid, duree in ((t.id, 167), (rapide.id, 330)):
+            _sql(
+                data_manager,
+                "UPDATE tracks SET duration = :d, lyrics = :p, lyrics_source = 'genius' "
+                "WHERE id = :t",
+                d=duree,
+                p="mot " * 1350,
+                t=tid,
+            )
+        # Les mêmes paroles venues de YTM ne sont pas un oracle.
+        _sql(
+            data_manager,
+            "UPDATE tracks SET lyrics_source = 'ytmusic', duration = 100 WHERE id = :t",
+            t=rapide.id,
+        )
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        (cas,) = [c for c in audit.cas if c.famille == "duree_paroles"]
+        assert cas.pistes == [t.id] and cas.nature == au.ERREUR
+        assert cas.libelle.endswith("167s, 1350 mots")
+
+    def test_streams_double(self, data_manager, isha):
+        """Le même compteur Spotify sur deux pages aux titres sans parenté."""
+        a, t = isha
+        autre = Track(title="Bavardage", artist=a)
+        autre.genius_id = 4243
+        data_manager.save_track(autre)
+        for tid in (t.id, autre.id):
+            _sql(data_manager, "UPDATE tracks SET spotify_streams = 123456 WHERE id = :t", t=tid)
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        (cas,) = [c for c in audit.cas if c.famille == "streams_double"]
+        assert sorted(cas.pistes) == sorted([t.id, autre.id]) and "123,456" in cas.libelle
+        # Sous 1 000 streams, un compteur égal ne dit rien.
+        for tid in (t.id, autre.id):
+            _sql(data_manager, "UPDATE tracks SET spotify_streams = 900 WHERE id = :t", t=tid)
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        assert "streams_double" not in _familles(audit)
+
+    @pytest.mark.parametrize(
+        "piste, famille",
+        [
+            (_certif("Durag", "Durag", "album"), "certif_album"),
+            # Mots EN PLUS dans le titre certifié.
+            (_certif("Life", "TUBA LIFE"), "certif_plus_long"),
+            # La certif de l'original sur une version à descripteur.
+            (_certif("Suzy (Live 2006)", "SUZY"), "certif_version"),
+            (_certif("Durag", "Bandana"), "certif_autre"),
+        ],
+    )
+    def test_familles_de_certifs(self, piste, famille):
+        (cas,) = au.certifs([piste])
+        assert cas.famille == famille and "SNEP" in cas.libelle
+
+    def test_certif_au_bon_titre_ou_echo_n_est_pas_un_cas(self):
+        echo = _certif("Durag", "Bandana")
+        echo["certifications"] = json.dumps([{"title": "Bandana", "echo": True}])
+        assert au.certifs([_certif("Durag (feat. X)", "DURAG"), echo]) == []
+
+    def test_echec_mal_classe(self, data_manager, isha):
+        """Une absence (« pas de paroles ») ou une annulation rangée en `crash` ;
+        un vrai plantage n'en est pas un, et un (morceau, source) compte une fois."""
+        _, t = isha
+        for source, issue, message in (
+            ("lrclib", "crash", "Pas de paroles trouvées"),
+            ("genius", "crash", "CancelledError()"),
+            ("deezer", "crash", "KeyError: 'data'"),
+            ("ytmusic", "absent", "aucun résultat"),
+        ):
+            _sql(
+                data_manager,
+                "INSERT INTO source_track_failures (track_id, source_key, flow, issue, message, "
+                "n_echecs) VALUES (:t, :s, 'credits', :i, :m, 1)",
+                t=t.id,
+                s=source,
+                i=issue,
+                m=message,
+            )
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        cas = sorted(c.libelle for c in audit.cas if c.famille == "echec_mal_classe")
+        assert len(cas) == 2
+        assert "genius crash : CancelledError()" in cas[0]
+        assert "lrclib crash : Pas de paroles" in cas[1]

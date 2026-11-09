@@ -119,6 +119,21 @@ class TestInvariants:
         (cas,) = [c for c in audit.cas if c.famille == "refus_vivant"]
         assert cas.pistes == [soeur.id] and "video" in cas.libelle
 
+    def test_refus_vivant_id_apple(self, data_manager, isha):
+        """Nature `id_apple` (2026-11-09) : une fiche qui porte encore un ID Apple
+        refusé pour son enregistrement."""
+        _, t = isha
+        _sql(
+            data_manager,
+            "INSERT INTO refus (cle_fiche, genius_id, artiste, titre, nature, valeur) "
+            "VALUES ('g4242', 4242, 'Isha', 'Durag', 'id_apple', '1440')",
+        )
+        assert not _familles(au.auditer(data_manager, ["Isha"], revue=False)).get("refus_vivant")
+        _sql(data_manager, "UPDATE tracks SET apple_music_id = '1440' WHERE id = :t", t=t.id)
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        (cas,) = [c for c in audit.cas if c.famille == "refus_vivant"]
+        assert cas.pistes == [t.id] and "id_apple 1440" in cas.libelle
+
     def test_isrc_d_une_edition_porte_par_une_autre_fiche(self, data_manager, isha):
         """« La Gamberge - Live 2006 » (#8199) portait en édition les pages
         Deezer de l'EP (#12092, FRZ110600957) ; la même édition sur une SŒUR

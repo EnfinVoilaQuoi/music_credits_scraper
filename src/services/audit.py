@@ -1216,7 +1216,7 @@ def orphelins(c) -> list[Cas]:
 
 def refus_vivants(c, pistes) -> list[Cas]:
     """Une valeur REFUSÉE à la main (table `refus`, e48) encore portée : ID
-    Spotify, Deezer ou disque Discogs, vidéo, LRC, page SongBPM — sur la fiche désignée ou, pour ce que les
+    Spotify, Deezer, Apple ou disque Discogs, vidéo, LRC, page SongBPM — sur la fiche désignée ou, pour ce que les
     sœurs partagent, sur toute ligne de la même page Genius. Un écrivain de
     retrait qui oublie une ligne, ou un producteur qui ne relit pas le refus,
     se voit ici (CORRECTIFS : « valeur refusée encore vivante chez une sœur »)."""
@@ -1268,6 +1268,8 @@ def refus_vivants(c, pistes) -> list[Cas]:
             return t["spotify_id"] == valeur or valeur in spotify[t["id"]]
         if nature == "id_deezer":
             return str(t["deezer_id"] or "") == valeur
+        if nature == "id_apple":
+            return str(t["apple_music_id"] or "") == valeur
         if nature == "id_discogs":
             return str(t["discogs_id"] or "") == valeur
         if nature == "isrc":
@@ -1289,7 +1291,7 @@ def refus_vivants(c, pistes) -> list[Cas]:
     cas = []
     for r in c.execute(
         "SELECT genius_id, artiste, titre, album, nature, valeur FROM refus "
-        "WHERE nature IN ('id_spotify', 'id_deezer', 'id_discogs', 'isrc', 'video', 'lrc', 'paroles', "
+        "WHERE nature IN ('id_spotify', 'id_deezer', 'id_apple', 'id_discogs','isrc', 'video', 'lrc', 'paroles', "
         "'page_songbpm', "
         "'page_getsongbpm', 'mesure_songbpm')"
     ):

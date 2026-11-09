@@ -1458,3 +1458,99 @@ class TestPochettePhoto:
 
         par_artiste = au.auditer(data_manager, ["Isha"], revue=False)
         assert not [c for c in par_artiste.cas if c.famille == "pochette_photo"]
+
+
+class TestHorsDuDisque:
+    """Vague 3 (2026-11-10) : une fiche rangée sur un disque dont la liste
+    Deezer ne la contient pas, sa piste Deezer sur un autre disque (« Tulum,
+    México » sur M.A.N, 2026-11-03) — une DÉCISION, base entière et artiste."""
+
+    @staticmethod
+    def _brut(requete, corps):
+        from src.persistence import brut
+
+        brut.consigner("deezer", requete, 200, json.dumps(corps).encode())
+        brut.fermer()
+
+    def _disque(self, dm, t, *, album_de_la_piste="Tulum, México", place=None, override=0):
+        _sql(
+            dm,
+            "INSERT INTO releases (id, artist_id, title, deezer_album_id, identity_key) "
+            "VALUES (1, :a, 'M.A.N', 10, 'man')",
+            a=t.artist.id,
+        )
+        _sql(
+            dm,
+            "INSERT INTO release_tracks (release_id, track_id, source, position_source) "
+            "VALUES (1, :t, 'genius', :p)",
+            t=t.id,
+            p=place,
+        )
+        _sql(
+            dm,
+            "UPDATE tracks SET deezer_id = 2, album_override = :o WHERE id = :t",
+            t=t.id,
+            o=override,
+        )
+        self._brut(
+            "https://api.deezer.com/album/10/tracks?limit=100",
+            {"data": [{"id": 1, "title": "Bubble Prod", "isrc": "FR1"}]},
+        )
+        if album_de_la_piste:
+            self._brut(
+                "https://api.deezer.com/track/2",
+                {"id": 2, "album": {"id": 20, "title": album_de_la_piste}},
+            )
+
+    @staticmethod
+    def _cas(audit):
+        return [c for c in audit.cas if c.famille == "hors_du_disque"]
+
+    def test_piste_sur_un_autre_disque_est_une_decision(self, data_manager, isha):
+        _, t = isha
+        self._disque(data_manager, t)
+        for audit in (
+            au.auditer(data_manager, revue=False),
+            au.auditer(data_manager, ["Isha"], revue=False),
+        ):
+            (cas,) = self._cas(audit)
+            assert cas.pistes == [t.id] and cas.nature == au.DECISION
+            assert "M.A.N" in cas.libelle and "Tulum, México" in cas.libelle
+            assert audit.compte_critere()["hors_du_disque"] == 1
+        assert "hors_du_disque" in au.FAMILLES_DECISION
+
+    def test_autre_edition_du_disque_pour_information(self, data_manager, isha):
+        _, t = isha
+        self._disque(data_manager, t, album_de_la_piste="M.A.N (Deluxe)")
+        (cas,) = self._cas(au.auditer(data_manager, revue=False))
+        assert cas.nature == au.INFORMATION
+
+    @pytest.mark.parametrize(
+        "variante",
+        [
+            {"album_de_la_piste": None},  # piste Deezer inconnue : indécidable
+            {"place": "deezer"},  # placée par un catalogue
+            {"override": 1},  # album choisi à la main
+        ],
+    )
+    def test_pas_de_cas(self, data_manager, isha, variante):
+        _, t = isha
+        self._disque(data_manager, t, **variante)
+        assert not self._cas(au.auditer(data_manager, revue=False))
+
+    def test_dans_la_liste_par_le_titre(self, data_manager, isha):
+        _, t = isha
+        self._disque(data_manager, t)
+        self._brut(
+            "https://api.deezer.com/album/10/tracks?limit=100",
+            {"data": [{"id": 9, "title": "Durag", "isrc": None}]},
+        )
+        assert not self._cas(au.auditer(data_manager, revue=False))
+
+    def test_une_page_desactivee_n_est_pas_jugee(self, data_manager, isha):
+        from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+        _, t = isha
+        self._disque(data_manager, t)
+        DisabledTracksManager().desactiver("Isha", [t.id], "manuel", "manuel")
+        assert not self._cas(au.auditer(data_manager, revue=False))

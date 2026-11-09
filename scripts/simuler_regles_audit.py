@@ -46,6 +46,7 @@ from pathlib import Path
 from src.config import DATA_DIR
 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
 from src.services import audit
+from src.utils import appartenance_disque
 from src.utils.catalogue_designe import ECART_MEME_ENREGISTREMENT_S, PAROLES_MEME_ENREGISTREMENT
 from src.utils.compteurs_partages import titres_parents
 from src.utils.concordance_paroles import (
@@ -59,9 +60,7 @@ from src.utils.duree_youtube import segment_de_dj_mix
 from src.utils.lrc_garde import CATALOGUES_PAR_ID
 from src.utils.title_matching import normalize_title
 from src.utils.version_descriptors import (
-    meme_disque,
     meme_socle,
-    meme_titre_de_base,
     titres_equivalents,
 )
 
@@ -343,228 +342,33 @@ def regle_d(tm: Temoins, pistes) -> list[dict]:
 
 # ── e. appartenance à un disque ───────────────────────────────────────────────
 #
-# Cas d'origine (JOURNAL 2026-11-03) : « Tulum, México » (#250), rangé par sa
-# page Genius dans M.A.N, qu'aucune édition Deezer ne contient. La règle lit le
-# CATALOGUE : la liste des pistes Deezer de la parution (brut `album/N/tracks`)
-# et l'album de la piste Deezer de la fiche (brut `track/N`). Le témoin de
-# vérification est INDÉPENDANT de Deezer : la liste iTunes de la parution par
-# son code-barres (brut `lookup?upc=`) contre l'ID Apple de la fiche.
+# Le juge vit dans `src/utils/appartenance_disque.py` (famille d'audit
+# `hors_du_disque`, 2026-11-10) : un verdict, un seul endroit. Le script ajoute
+# le témoin de vérification, INDÉPENDANT de Deezer (liste iTunes de la parution).
 
-#: Sources de place d'un catalogue (`release_tracks.position_source`) : la
-#: piste a été vue dans la liste d'un catalogue, la fiche est sur le disque.
-PLACES_DE_CATALOGUE = frozenset({"deezer", "apple_music"})
-
-
-def _json_du_brut(corps: bytes) -> dict | None:
-    try:
-        d = json.loads(zlib.decompress(corps))
-    except (zlib.error, ValueError):
-        return None
-    return d if isinstance(d, dict) and "error" not in d else None
+PLACES_DE_CATALOGUE = appartenance_disque.PLACES_DE_CATALOGUE
+CatalogueDuBrut = appartenance_disque.CatalogueDuBrut
+verdict_e = appartenance_disque.verdict
+_dans_la_liste = appartenance_disque.dans_la_liste
+temoin_apple_e = appartenance_disque.temoin_apple
 
 
-class CatalogueDuBrut:
-    """Listes de pistes Deezer et iTunes lues UNE fois dans le brut (le brut
-    n'a pas d'index sur `requete` : un LIKE par parution prendrait des heures)."""
-
-    def __init__(self, brut: sqlite3.Connection | None):
-        #: album Deezer → [{id, title, isrc}]
-        self.albums: dict[str, list[dict]] = {}
-        #: piste Deezer → {album_id, album_title}
-        self.pistes: dict[str, dict] = {}
-        #: clé UPC → (IDs de pistes Apple, titres des pistes, noms de l'album)
-        self.itunes: dict[str, tuple[set[str], list[str], set[str]]] = {}
-        if brut is not None:
-            self._charger(brut)
-
-    def _charger(self, brut: sqlite3.Connection) -> None:
-        from src.utils.codes_barres import cle_upc
-
-        listes, fiches_album = {}, {}
-        for requete, corps in brut.execute(
-            "SELECT requete, corps FROM brut WHERE source = 'deezer' AND ("
-            "requete LIKE 'https://api.deezer.com/album/%' OR "
-            "requete LIKE 'https://api.deezer.com/track/%') ORDER BY derniere_lecture"
-        ):
-            m = re.match(r"https://api\.deezer\.com/(album|track)/(\d+)(/tracks)?", requete)
-            if not m or (d := _json_du_brut(corps)) is None:
-                continue
-            if m[1] == "track":
-                alb = d.get("album") or {}
-                if alb.get("id"):
-                    self.pistes[m[2]] = {
-                        "album_id": str(alb["id"]),
-                        "album_title": alb.get("title"),
-                    }
-            elif m[3]:
-                listes[m[2]] = d.get("data")
-            else:
-                fiches_album[m[2]] = (d.get("tracks") or {}).get("data")
-        for album, data in {**fiches_album, **listes}.items():
-            if isinstance(data, list):
-                self.albums[album] = [
-                    {"id": str(p.get("id")), "title": p.get("title"), "isrc": p.get("isrc")}
-                    for p in data
-                ]
-        for requete, corps in brut.execute(
-            "SELECT requete, corps FROM brut WHERE source = 'itunes' AND requete LIKE '%upc=%' "
-            "ORDER BY derniere_lecture"
-        ):
-            m = re.search(r"upc=(\d+)", requete)
-            if not m or (d := _json_du_brut(corps)) is None or not (cle := cle_upc(m[1])):
-                continue
-            res = d.get("results") or []
-            self.itunes[cle] = (
-                {str(x["trackId"]) for x in res if x.get("trackId")},
-                [x["trackName"] for x in res if x.get("trackName")],
-                {x["collectionName"] for x in res if x.get("collectionName")},
-            )
-
-
-def verdict_e(
-    dans_la_liste: bool | None,
-    place_par_un_catalogue: bool,
-    album_de_la_piste: str | None,
-    album_de_la_piste_est_la_parution: bool,
-    titre_de_la_parution: str | None,
-    liste_complete: bool = True,
-    dans_une_autre_edition: bool = False,
-) -> str | None:
-    """PUR. Règle candidate e : None = pas de cas.
-
-    `dans_la_liste` : la fiche est dans la liste Deezer de la parution (ID,
-    édition, ISRC ou titre équivalent ; None = liste inconnue). L'album de la
-    piste Deezer de la FICHE (lue par son ID) départage : le même disque sous
-    une autre édition est une information, un autre disque un cas.
-    `liste_complete` : faux quand l'album Deezer a moins de pistes que la moitié
-    des fiches de la parution (pré-sortie d'une piste, autre édition) ;
-    `dans_une_autre_edition` : une autre parution de l'artiste au même nom de
-    disque (`meme_disque`) la contient dans sa liste Deezer."""
-    if dans_la_liste is None or dans_la_liste or place_par_un_catalogue:
-        return None
-    if album_de_la_piste_est_la_parution:
-        return None  # la liste du brut est incomplète : rien à montrer
-    if dans_une_autre_edition:
-        return "information (autre édition du disque)"
-    if not liste_complete:
-        return "indécidable (liste Deezer plus courte que la parution)"
-    if not album_de_la_piste:
-        return "indécidable (piste Deezer de la fiche inconnue)"
-    if meme_disque(album_de_la_piste, titre_de_la_parution):
-        return "information (autre édition du disque)"
-    return "hors_du_disque"
-
-
-def _dans_la_liste(fiche, ids_deezer: set[str], isrcs: set[str], liste: list[dict]) -> bool:
-    for p in liste:
-        if p["id"] in ids_deezer or (p["isrc"] and p["isrc"] in isrcs):
-            return True
-        if titres_equivalents(fiche["title"], p["title"]) or meme_titre_de_base(
-            fiche["title"], p["title"]
-        ):
-            return True
-    return False
-
-
-def temoin_apple_e(cat: CatalogueDuBrut, upc: str | None, fiche) -> str:
-    """Témoin INDÉPENDANT de Deezer : la liste iTunes de la parution (code-barres),
-    par l'ID Apple de la fiche puis par le TITRE (l'ID de la fiche peut être
-    celui du single : il ne dit pas que l'album n'a pas le morceau)."""
-    from src.utils.codes_barres import cle_upc
-
-    cle = cle_upc(upc) if upc else None
-    if not cle or cle not in cat.itunes:
-        return "apple : parution inconnue"
-    ids, titres, _noms = cat.itunes[cle]
-    if fiche["apple_music_id"] and str(fiche["apple_music_id"]) in ids:
-        return "apple : dans le disque (ID)"
-    if _dans_la_liste(fiche, set(), set(), [{"id": "", "isrc": None, "title": t} for t in titres]):
-        return "apple : dans le disque (titre)"
-    return "apple : hors du disque"
-
-
-def regle_e(tm: Temoins, cat: CatalogueDuBrut, actives: set[int]) -> list[dict]:
-    c = tm.c
-    ids_parution = collections.defaultdict(set)
-    for r in c.execute("SELECT id, deezer_album_id FROM releases WHERE deezer_album_id"):
-        ids_parution[r[0]].add(str(r[1]))
-    for r in c.execute(
-        "SELECT release_id, external_id FROM release_identifiers WHERE source = 'deezer'"
-    ):
-        ids_parution[r[0]].add(str(r[1]))
-    editions = collections.defaultdict(lambda: (set(), set()))
-    for r in c.execute("SELECT track_id, deezer_id, isrc FROM track_editions"):
-        if r[1]:
-            editions[r[0]][0].add(str(r[1]))
-        if r[2]:
-            editions[r[0]][1].add(r[2])
-    sources_rt = collections.defaultdict(set)
-    for r in c.execute(
-        "SELECT release_track_id, external_track_id FROM release_track_sources WHERE source = 'deezer'"
-    ):
-        if r[1]:
-            sources_rt[r[0]].add(str(r[1]))
-    liees = collections.Counter(r[0] for r in c.execute("SELECT release_id FROM release_tracks"))
-    parutions_de = collections.defaultdict(list)  # artiste → [(id, titre)]
-    for r in c.execute("SELECT id, artist_id, title FROM releases"):
-        parutions_de[r[1]].append((r[0], r[2]))
+def regle_e(tm: Temoins, cat: CatalogueDuBrut, pistes) -> list[dict]:
     out = []
-    for rt in c.execute(
-        "SELECT rt.id AS rt_id, rt.track_id, rt.source, rt.external_track_id, rt.position_source, "
-        "r.id AS release_id, r.title AS parution, r.scope, r.upc, r.credited_artist_name, "
-        "r.artist_id AS artiste_parution "
-        "FROM release_tracks rt JOIN releases r ON r.id = rt.release_id"
-    ).fetchall():
-        if rt["track_id"] not in actives:
-            continue
-        albums = [a for a in ids_parution.get(rt["release_id"], ()) if a in cat.albums]
-        if not albums:
-            continue
-        f = tm.fiche(rt["track_id"])
-        eds_ids, eds_isrc = editions[f["id"]]
-        ids = (
-            eds_ids | sources_rt[rt["rt_id"]] | ({str(f["deezer_id"])} if f["deezer_id"] else set())
-        )
-        if rt["source"] == "deezer" and rt["external_track_id"]:
-            ids.add(str(rt["external_track_id"]))
-        isrcs = eds_isrc | ({f["isrc"]} if f["isrc"] else set())
-        liste = [p for a in albums for p in cat.albums[a]]
-        piste = cat.pistes.get(str(f["deezer_id"])) if f["deezer_id"] else None
-        dedans = _dans_la_liste(f, ids, isrcs, liste)
-        autre_edition = not dedans and any(
-            rid != rt["release_id"]
-            and meme_disque(titre, rt["parution"])
-            and _dans_la_liste(
-                f,
-                ids,
-                isrcs,
-                [p for a in ids_parution.get(rid, ()) if a in cat.albums for p in cat.albums[a]],
-            )
-            for rid, titre in parutions_de[rt["artiste_parution"]]
-        )
-        verdict = verdict_e(
-            dedans,
-            rt["position_source"] in PLACES_DE_CATALOGUE,
-            (piste or {}).get("album_title"),
-            bool(piste) and piste["album_id"] in albums,
-            rt["parution"],
-            liste_complete=len(liste) * 2 >= liees[rt["release_id"]],
-            dans_une_autre_edition=autre_edition,
-        )
-        if verdict is None:
-            continue
+    for x in appartenance_disque.liens_hors_liste(tm.c, cat, pistes):
+        f = x["fiche"]
         out.append(
             {
                 "fiche": _lib(f),
                 "artiste": f["artiste"],
-                "parution": f"r{rt['release_id']} «{rt['parution']}» ({rt['scope']}, "
-                f"{rt['credited_artist_name']})",
-                "lien": f"{rt['source']} / place {rt['position_source']}",
+                "parution": f"r{x['release_id']} «{x['parution']}» ({x['scope']}, "
+                f"{x['credite']})",
+                "lien": x["lien"],
                 "album_de_la_fiche": f["album"],
-                "album_deezer_de_la_fiche": (piste or {}).get("album_title"),
-                "regle": verdict,
-                "temoin": temoin_apple_e(cat, rt["upc"], f),
-                "pistes_deezer_de_la_parution": len(liste),
+                "album_deezer_de_la_fiche": x["album_deezer"],
+                "regle": x["verdict"],
+                "temoin": temoin_apple_e(cat, x["upc"], f),
+                "pistes_deezer_de_la_parution": x["pistes_deezer"],
             }
         )
     return out
@@ -826,7 +630,9 @@ def main() -> int:
         rapport["d_disque_homonyme"] = regle_d(tm, pistes)
     actives = {t["id"] for t in pistes} - pages_desactivees(args.desactivees)
     if "e" in regles:
-        rapport["e_appartenance_disque"] = regle_e(tm, CatalogueDuBrut(brut), actives)
+        rapport["e_appartenance_disque"] = regle_e(
+            tm, CatalogueDuBrut(brut), [t for t in pistes if t["id"] in actives]
+        )
     if "f" in regles:
         rapport["f_meme_enregistrement"] = regle_f(tm, pistes, par, actives)
 

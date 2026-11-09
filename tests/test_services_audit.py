@@ -1419,3 +1419,42 @@ class TestPhotoParDefaut:
         data_manager.set_artist_image_path(a.id, "artistes/Isha.png")
         audit = au.auditer(data_manager, revue=False)
         assert not [c for c in audit.cas if c.famille == "photo_par_defaut"]
+
+
+class TestPochettePhoto:
+    """2026-11-03 : Genius sert la photo d'un artiste crédité comme pochette
+    d'un morceau sans pochette. Juge du rattrapage, pas sûr : pour information,
+    sur la base entière seulement."""
+
+    @staticmethod
+    def _page(page, art, photo):
+        from src.persistence import brut
+
+        song = {"id": page, "song_art_image_url": art, "primary_artist": {"image_url": photo}}
+        corps = json.dumps({"response": {"song": song}}).encode()
+        brut.consigner("genius_api", f"https://api.genius.com/songs/{page}", 200, corps)
+        brut.fermer()
+
+    def test_photo_de_l_artiste_en_png(self, data_manager, isha):
+        from src.utils.image_downloader import cover_image_path
+
+        a, t = isha
+        autre = Track(title="Ailleurs", artist=a)
+        autre.genius_id = 4343
+        data_manager.save_track(autre)
+        self._page(4242, "https://g/photo.png", "https://g/photo.png")
+        self._page(4343, "https://g/pochette.png", "https://g/photo.png")
+        for titre in ("Durag", "Ailleurs"):
+            fichier = au.DOSSIER_IMAGES / "covers" / cover_image_path("Isha", titre).name
+            fichier = fichier.with_suffix(".png")
+            fichier.parent.mkdir(parents=True, exist_ok=True)
+            fichier.write_bytes(titre.encode())
+
+        base = au.auditer(data_manager, revue=False)
+        (cas,) = [c for c in base.cas if c.famille == "pochette_photo"]
+        assert cas.pistes == [t.id] and cas.nature == au.INFORMATION
+        assert "Isha - Durag.png" in cas.libelle
+        assert "pochette_photo" in au.FAMILLES_HORS_CRITERE and base.critere() == 0
+
+        par_artiste = au.auditer(data_manager, ["Isha"], revue=False)
+        assert not [c for c in par_artiste.cas if c.famille == "pochette_photo"]

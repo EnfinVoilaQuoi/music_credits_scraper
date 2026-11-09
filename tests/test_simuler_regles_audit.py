@@ -2,7 +2,10 @@
 simulées le 2026-11-09 (point critique de l'audit). Lecture seule, sans base."""
 
 import importlib.util
+import json
+import sqlite3
 import sys
+import zlib
 from pathlib import Path
 
 import pytest
@@ -50,6 +53,110 @@ class TestVerdictB:
 
     def test_sans_temoin(self):
         assert sim.verdict_b(None, None, None) == "indécidable"
+
+
+def _brut_en_memoire(lignes: list[tuple[str, str, dict]]) -> sqlite3.Connection:
+    """Un brut minimal (source, requête, corps JSON compressé), en mémoire."""
+    b = sqlite3.connect(":memory:")
+    b.execute(
+        "CREATE TABLE brut (id INTEGER PRIMARY KEY, source TEXT, requete TEXT, statut INT, "
+        "empreinte TEXT, corps BLOB, taille INT, premiere_lecture TEXT, derniere_lecture TEXT)"
+    )
+    for i, (source, requete, corps) in enumerate(lignes):
+        b.execute(
+            "INSERT INTO brut (source, requete, corps, derniere_lecture) VALUES (?, ?, ?, ?)",
+            (source, requete, zlib.compress(json.dumps(corps).encode()), f"2026-11-0{i + 1}"),
+        )
+    return b
+
+
+class TestVerdictE:
+    def test_dans_la_liste_ou_place_par_un_catalogue_pas_de_cas(self):
+        assert sim.verdict_e(True, False, "Autre", False, "M.A.N") is None
+        assert sim.verdict_e(None, False, "Autre", False, "M.A.N") is None
+        assert sim.verdict_e(False, True, "Autre", False, "M.A.N") is None
+
+    def test_la_piste_deezer_sur_la_parution_meme_pas_de_cas(self):
+        assert sim.verdict_e(False, False, "M.A.N", True, "M.A.N") is None
+
+    def test_tulum_hors_du_disque(self):
+        # Cas d'origine : la piste Deezer de la fiche est sur son single.
+        assert sim.verdict_e(False, False, "Tulum, México", False, "M.A.N") == "hors_du_disque"
+
+    def test_autre_edition_du_meme_disque(self):
+        assert sim.verdict_e(False, False, "OCHO (Deluxe)", False, "OCHO").startswith("information")
+        assert sim.verdict_e(
+            False, False, "Autre", False, "OCHO", dans_une_autre_edition=True
+        ).startswith("information")
+
+    def test_liste_courte_ou_piste_inconnue_indecidable(self):
+        assert sim.verdict_e(False, False, "Autre", False, "X", liste_complete=False).startswith(
+            "indécidable"
+        )
+        assert sim.verdict_e(False, False, None, False, "X").startswith("indécidable")
+
+
+class TestDansLaListe:
+    FICHE = {"title": "Tulum, México"}
+
+    def test_par_id_isrc_ou_titre(self):
+        liste = [{"id": "7", "title": "Autre", "isrc": "FR1"}]
+        assert sim._dans_la_liste(self.FICHE, {"7"}, set(), liste)
+        assert sim._dans_la_liste(self.FICHE, set(), {"FR1"}, liste)
+        assert sim._dans_la_liste(
+            self.FICHE, set(), set(), [{"id": "8", "title": "Tulum, Mexico", "isrc": None}]
+        )
+
+    def test_absente(self):
+        liste = [{"id": "7", "title": "Bubble Prod", "isrc": "FR1"}]
+        assert not sim._dans_la_liste(self.FICHE, {"9"}, {"FR2"}, liste)
+
+
+class TestCatalogueDuBrut:
+    def test_listes_pistes_et_itunes(self):
+        b = _brut_en_memoire(
+            [
+                (
+                    "deezer",
+                    "https://api.deezer.com/album/10/tracks?limit=100",
+                    {"data": [{"id": 1, "title": "Bubble Prod", "isrc": "FR1"}]},
+                ),
+                (
+                    "deezer",
+                    "https://api.deezer.com/track/2",
+                    {"album": {"id": 20, "title": "Tulum"}},
+                ),
+                ("deezer", "https://api.deezer.com/track/3", {"error": {"code": 800}}),
+                (
+                    "itunes",
+                    "https://itunes.apple.com/lookup?country=fr&entity=song&upc=0044003344761",
+                    {
+                        "results": [
+                            {"collectionName": "M.A.N"},
+                            {"trackId": 55, "trackName": "Bubble Prod", "collectionName": "M.A.N"},
+                        ]
+                    },
+                ),
+            ]
+        )
+        cat = sim.CatalogueDuBrut(b)
+        b.close()
+        assert cat.albums == {"10": [{"id": "1", "title": "Bubble Prod", "isrc": "FR1"}]}
+        assert cat.pistes == {"2": {"album_id": "20", "album_title": "Tulum"}}
+        assert cat.itunes["44003344761"][0] == {"55"}
+
+        fiche = {"title": "Tulum, México", "apple_music_id": "99"}
+        assert sim.temoin_apple_e(cat, "044003344761", fiche) == "apple : hors du disque"
+        assert sim.temoin_apple_e(cat, "044003344761", {**fiche, "apple_music_id": "55"}).endswith(
+            "(ID)"
+        )
+        assert sim.temoin_apple_e(
+            cat, "044003344761", {"title": "Bubble Prod", "apple_music_id": None}
+        ).endswith("(titre)")
+        assert sim.temoin_apple_e(cat, "12345678901", fiche) == "apple : parution inconnue"
+
+    def test_sans_brut(self):
+        assert sim.CatalogueDuBrut(None).albums == {}
 
 
 def test_accord_des_durees():

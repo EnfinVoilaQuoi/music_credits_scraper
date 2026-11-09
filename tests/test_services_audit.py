@@ -1294,3 +1294,27 @@ class TestDisqueHomonymeParLeProfil:
         )
         with closing(au._connexion(data_manager.db_path)) as c:
             assert "ALIAS" in au.profils_spotify_connus(c)[a.id]
+
+
+@pytest.mark.parametrize(
+    "titre, cas",
+    [
+        ("Boulbi (Instrumental)", 1),
+        # « (Version Instrumentale) » : le juge le dit instrumental.
+        ("Boulbi (Version Instrumentale)", 1),
+        # Un mot du titre, pas un descripteur : ni un instrumental, ni un cas.
+        ("Mon instru va craquer", 0),
+    ],
+)
+def test_instrumental_lrc_juge_le_titre_comme_le_constat(titre, cas):
+    """2026-11-09 : plus d'expression régulière nue, le juge du constat."""
+    piste = {
+        "id": 1,
+        "title": titre,
+        "artiste": "Booba",
+        "instrumental": 0,
+        "lyrics": "",
+        "lyrics_synced": "[00:01.00] la",
+        "lyrics_synced_source": "lrclib",
+    }
+    assert len(au.instrumentaux([piste])) == cas

@@ -81,6 +81,7 @@ from src.utils.version_descriptors import (
     titre_generique,
     titres_equivalents,
 )
+from src.utils.version_heritage import est_instrumental
 from src.utils.youtube_utils import extract_video_id
 
 #: Messages d'absence ou de refus rangés en échec de communication.
@@ -619,9 +620,12 @@ def paroles_identiques(par, durees: dict[int, dict] | None = None) -> list[Cas]:
 
 
 def instrumentaux(pistes) -> list[Cas]:
+    """Un instrumental (constaté, ou au titre instrumental) qui porte un LRC
+    ou des paroles. Le titre se juge comme au constat
+    (`versions.constater_instrumentaux`) : `version_heritage.est_instrumental`."""
     cas = []
     for t in pistes:
-        titre_instru = re.search(r"instrumental|instru\b", t["title"] or "", re.IGNORECASE)
+        titre_instru = est_instrumental(t["title"])
         a_paroles = bool((t["lyrics"] or "").strip())
         if (t["instrumental"] == 1 and (a_paroles or t["lyrics_synced"])) or (
             titre_instru and t["lyrics_synced"]

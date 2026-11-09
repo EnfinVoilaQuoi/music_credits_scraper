@@ -158,9 +158,15 @@ class TestClientsCollectifs:
     def test_le_succes_collectif_n_efface_pas_l_echec_du_morceau(self, tmp_path, monkeypatch):
         """Le masquage : sans `hors_morceau`, l'appel artiste qui réussit juste
         après l'échec du morceau retirerait la ligne à retenter."""
+        from sqlalchemy import text
+
         from src.api.musicbrainz_api import MusicBrainzAPI
 
-        repo = SourceUsageRepository(Database(str(tmp_path / "u.db")).engine)
+        engine = Database(str(tmp_path / "u.db")).engine
+        with engine.begin() as conn:  # le suivi ne vaut que pour une fiche qui existe
+            conn.execute(text("INSERT INTO artists (id, name) VALUES (1, 'A')"))
+            conn.execute(text("INSERT INTO tracks (id, title, artist_id) VALUES (42, 'T', 1)"))
+        repo = SourceUsageRepository(engine)
         monkeypatch.setattr(MusicBrainzAPI, "_get", lambda self, chemin, params: {"id": "x"})
         with su.track_scope(42):
             with su.observe("musicbrainz") as obs:

@@ -188,7 +188,7 @@ FAMILLES = {
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
     "soeurs_divergentes": "INVARIANT — lignes sœurs aux valeurs d'enregistrement différentes",
-    "orphelin": "INVARIANT — ligne liée à une fiche qui n'existe plus",
+    "orphelin": "INVARIANT — ligne liée à une fiche, un artiste ou une parution disparus",
     "schema": "INVARIANT — colonne de la base ≠ schema.py",
     "refus_vivant": "INVARIANT — valeur refusée à la main encore portée par la fiche ou une sœur",
     "isrc_edition_autre_fiche": "INVARIANT — ISRC d'une édition = celui d'une AUTRE fiche",
@@ -978,47 +978,83 @@ def _editions_par_ligne(c, ids) -> dict[int, frozenset]:
     return {tid: frozenset(jeu) for tid, jeu in jeux.items()}
 
 
-#: Tables liées à une fiche (aucune cascade : `PRAGMA foreign_keys` est éteint).
-TABLES_LIEES = (
-    "credits",
-    "observations",
-    "track_videos",
-    "track_spotify_ids",
-    "release_tracks",
-    "scraping_errors",
-    "source_track_failures",
-    "source_track_absences",
-    "track_editions",
-    # L'historique de santé des sources survit à la fiche, sans plus la désigner.
-    "source_usage_failures",
-    "revue_corrections",
-)
+#: Les colonnes qui DÉSIGNENT une ligne d'une autre table, et cette table.
+#: Toute table de la base qui en porte une est vérifiée (2026-11-09 : la liste
+#: fermée d'avant oubliait `revue_signalements`, `kworb_decisions` et tout
+#: `artist_id` / `release_id`). Vérifié table par table le 2026-11-09 : chaque
+#: `artist_id` désigne `artists.id` (pour `releases`, l'artiste dont on lit le
+#: catalogue, qui existe toujours). `release_tracks.source_track_id` et les
+#: `external_track_id` sont des ID de SOURCE, pas des clés de la base.
+CIBLES_DES_LIENS = {
+    "track_id": "tracks",
+    "artist_id": "artists",
+    "release_id": "releases",
+    "variant_track_id": "tracks",
+    "related_artist_id": "artists",
+    "release_track_id": "release_tracks",
+}
 
-#: Lignes d'une table liée qui ne désignent légitimement plus de fiche.
-#: `revue_corrections` : le journal d'une page `annotee` supprimée, écrit APRÈS la
-#: suppression ; « Rétablir » n'y relit que `annulation` (page Genius et titre,
-#: `revue_auto`), jamais `track_id` (8 lignes le 2026-11-06).
-EXCLUSIONS_D_ORPHELINS = {
-    "revue_corrections": "AND COALESCE(x.annulation, '') NOT LIKE '%page_supprimee%'"
+#: Lignes qui ne désignent légitimement plus rien : `(table, colonne)` → clause
+#: SQL qui les écarte, ou None pour toute la colonne. Aucune cascade en base
+#: (`PRAGMA foreign_keys` est éteint) : chaque exclusion dit pourquoi la ligne
+#: survit.
+EXCLUSIONS_D_ORPHELINS: dict[tuple[str, str], str | None] = {
+    # Le journal d'une page `annotee` supprimée, écrit APRÈS la suppression ;
+    # « Rétablir » n'y relit que `annulation` (page Genius et titre,
+    # `revue_auto`), jamais `track_id` (8 lignes le 2026-11-06, 9 le 2026-11-09).
+    ("revue_corrections", "track_id"): (
+        "AND COALESCE(x.annulation, '') NOT LIKE '%page_supprimee%'"
+    ),
+    # L'historique de santé des sources survit à l'artiste : `delete_artist` ne
+    # le purge pas (usage par jour, fenêtre des 50 derniers échecs par source).
+    # Son `track_id`, lui, est remis à NULL à la suppression : il reste vérifié.
+    ("source_usage_daily", "artist_id"): None,
+    ("source_usage_failures", "artist_id"): None,
 }
 
 
+def colonnes_liees(c) -> list[tuple[str, str, str]]:
+    """`(table, colonne, table visée)` pour chaque colonne de lien de la base
+    (`CIBLES_DES_LIENS`), exclusions entières retirées — dérivé de la base
+    elle-même, pour qu'une table neuve soit vérifiée sans qu'on y pense."""
+    liees = []
+    for (table,) in c.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name"
+    ):
+        for col in c.execute(f"PRAGMA table_info({table})"):  # noqa: S608 — nom lu de la base
+            nom = col[1]
+            cible = CIBLES_DES_LIENS.get(nom)
+            if cible is None:
+                continue
+            if (table, nom) in EXCLUSIONS_D_ORPHELINS and not EXCLUSIONS_D_ORPHELINS[table, nom]:
+                continue
+            liees.append((table, nom, cible))
+    return liees
+
+
 def orphelins(c) -> list[Cas]:
-    """Lignes liées à une fiche disparue — une suppression ou une fusion qui
-    a oublié une table (aucune cascade en base)."""
-    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    """Lignes liées à une fiche, un artiste ou une parution disparus — une
+    suppression ou une fusion qui a oublié une table (aucune cascade en base)."""
     cas = []
-    for table in TABLES_LIEES:
-        if table not in tables:
-            continue
+    for table, col, cible in colonnes_liees(c):
         n = c.execute(
-            f"SELECT COUNT(*) FROM {table} x "  # noqa: S608 — nom de table de la liste fermée
-            "WHERE x.track_id IS NOT NULL "
-            "AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.id = x.track_id) "
-            + EXCLUSIONS_D_ORPHELINS.get(table, "")
+            f"SELECT COUNT(*) FROM {table} x "  # noqa: S608 — noms lus de la base
+            f"WHERE x.{col} IS NOT NULL "
+            f"AND NOT EXISTS (SELECT 1 FROM {cible} t WHERE t.id = x.{col}) "
+            + (EXCLUSIONS_D_ORPHELINS.get((table, col)) or "")
         ).fetchone()[0]
         if n:
-            cas.append(Cas("orphelin", "—", [], f"{table} : {n} ligne(s) sans fiche"))
+            quoi = {
+                "tracks": "fiche",
+                "artists": "artiste",
+                "releases": "parution",
+                "release_tracks": "piste de parution",
+            }[cible]
+            libelle = f"{table} : {n} ligne(s) sans {quoi}"
+            if col != "track_id":
+                libelle = f"{table}.{col} : {n} ligne(s) sans {quoi}"
+            cas.append(Cas("orphelin", "—", [], libelle))
     return cas
 
 

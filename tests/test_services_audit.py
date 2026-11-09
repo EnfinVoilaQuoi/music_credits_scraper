@@ -163,6 +163,55 @@ class TestInvariants:
         # Sur un artiste, ni orphelins ni schéma : ils ne portent sur personne.
         assert "orphelin" not in _familles(au.auditer(data_manager, ["Isha"]))
 
+    def test_orphelins_derives_du_schema(self, data_manager, isha):
+        """2026-11-09 : `revue_signalements`, `kworb_decisions`, `artist_id` et
+        `release_id` n'étaient pas vérifiés ; les exclusions restent muettes."""
+        a, _ = isha
+        for sql in (
+            "INSERT INTO revue_signalements (artist_id, detecteur, cle, track_id) "
+            f"VALUES ({a.id}, 'kworb', 'k', 999)",
+            "INSERT INTO release_tracks (release_id, track_id) VALUES (777, 1)",
+            "INSERT INTO revue_verdicts (artist_id, detecteur, cle, verdict) "
+            "VALUES (888, 'd', 'c', 'normal')",
+            # Exclusions : l'historique d'usage survit à l'artiste, le journal
+            # d'une page supprimée à sa fiche.
+            "INSERT INTO source_usage_daily (day, source_key, artist_id, flow, issue) "
+            "VALUES ('2026-11-09', 's', 888, 'f', 'ok')",
+            "INSERT INTO revue_corrections (artist_id, detecteur, cle, track_id, action, "
+            f"annulation) VALUES ({a.id}, 'annotee', 'c', 999, 'x', "
+            """'{"type": "page_supprimee"}')""",
+        ):
+            _sql(data_manager, sql)
+        libelles = sorted(
+            c.libelle for c in au.auditer(data_manager).cas if c.famille == "orphelin"
+        )
+        assert libelles == [
+            "release_tracks.release_id : 1 ligne(s) sans parution",
+            "revue_signalements : 1 ligne(s) sans fiche",
+            "revue_verdicts.artist_id : 1 ligne(s) sans artiste",
+        ]
+
+    def test_toute_colonne_de_lien_est_verifiee_ou_exclue(self, data_manager):
+        """Garde : une table neuve qui désigne une fiche, un artiste ou une
+        parution (par son nom de colonne ou par une clé étrangère) est vérifiée
+        par `orphelins`, ou exclue avec sa raison dans `EXCLUSIONS_D_ORPHELINS`."""
+        from contextlib import closing
+
+        from src.persistence.schema import metadata
+
+        visees = set(au.CIBLES_DES_LIENS.values())
+        attendues = {
+            (table.name, col.name)
+            for table in metadata.tables.values()
+            for col in table.columns
+            if col.name in au.CIBLES_DES_LIENS
+            or any(fk.column.table.name in visees for fk in col.foreign_keys)
+        }
+        with closing(au._connexion(data_manager.db_path)) as c:
+            verifiees = {(t, k) for t, k, _ in au.colonnes_liees(c)}
+        assert attendues - verifiees - set(au.EXCLUSIONS_D_ORPHELINS) == set()
+        assert {"revue_signalements", "kworb_decisions", "releases"} <= {t for t, _ in verifiees}
+
     def test_artiste_inconnu(self, data_manager, isha):
         with pytest.raises(ValueError, match="Personne"):
             au.auditer(data_manager, ["Personne"])

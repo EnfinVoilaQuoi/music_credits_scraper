@@ -1339,3 +1339,42 @@ def test_instrumental_lrc_juge_le_titre_comme_le_constat(titre, cas):
         "lyrics_synced_source": "lrclib",
     }
     assert len(au.instrumentaux([piste])) == cas
+
+
+class TestTeteFabriquee:
+    """2026-11-07 : le scraper ajoutait « : <artiste de la ligne> » aux têtes
+    de section (« [Couplet 1 : Booba] » sur « Fenwick » de Niro). L'invariant
+    appelle le juge du rattrapage (`utils.tetes_de_paroles`), sans le brut."""
+
+    def _paroles(self, dm, t, paroles, principal="Niro", feat=False):
+        _sql(
+            dm,
+            "UPDATE tracks SET lyrics = :p, lyrics_source = 'genius', "
+            "primary_artist_name = :pr, is_featuring = :f WHERE id = :t",
+            p=paroles,
+            pr=principal,
+            f=feat,
+            t=t.id,
+        )
+
+    def test_le_nom_de_la_ligne_ajoute_a_la_tete_d_un_autre(self, data_manager, isha):
+        _, t = isha
+        self._paroles(data_manager, t, "[Couplet 1 : Isha]\nun\n[Refrain : Isha]\ndeux")
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        (cas,) = [c for c in audit.cas if c.famille == "tete_fabriquee"]
+        assert cas.pistes == [t.id] and cas.nature == au.ERREUR
+        assert "[Couplet 1 : Isha] → [Couplet 1 : Niro] (+1)" in cas.libelle
+        assert "tete_fabriquee" in au.INVARIANTS
+
+    def test_une_page_qui_nomme_elle_meme_les_interpretes(self, data_manager, isha):
+        """« [Couplet 2 : Niro] » : la page attribue elle-même, rien à dire."""
+        _, t = isha
+        self._paroles(data_manager, t, "[Couplet 1 : Isha]\nun\n[Couplet 2 : Niro]\ndeux")
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        assert not [c for c in audit.cas if c.famille == "tete_fabriquee"]
+
+    def test_un_feat_nomme_a_sa_tete(self, data_manager, isha):
+        _, t = isha
+        self._paroles(data_manager, t, "[Couplet 1 : Isha]\nun", feat=True)
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        assert not [c for c in audit.cas if c.famille == "tete_fabriquee"]

@@ -206,6 +206,7 @@ FAMILLES = {
     "isrc_edition_autre_fiche": "INVARIANT — ISRC d'une édition = celui d'une AUTRE fiche",
     "spotify_principal": "INVARIANT — ID Spotify principal sans sa ligne `track_spotify_ids` principale",
     "credit_doublon": "INVARIANT — crédit YouTube qui redit un crédit déjà porté, ou nom composé",
+    "tete_fabriquee": "INVARIANT — tête de section des paroles nommée à tort (« [Couplet 1 : <ligne>] »)",
 }
 
 #: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
@@ -236,6 +237,7 @@ INVARIANTS = (
     "isrc_edition_autre_fiche",
     "spotify_principal",
     "credit_doublon",
+    "tete_fabriquee",
 )
 
 _FEAT = re.compile(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", re.IGNORECASE)
@@ -1571,6 +1573,60 @@ class _LigneDeCredit:
     source: str | None
 
 
+def tetes_fabriquees(c, pistes) -> list[Cas]:
+    """Une tête de section des paroles à laquelle le scraper a ajouté à tort
+    « : <artiste de la ligne> » (« [Couplet 1 : Booba] » sur « Fenwick » de
+    Niro ; 379 noms faux réparés le 2026-11-07). Le juge est celui du
+    rattrapage (`utils.tetes_de_paroles`, `scripts/corriger_tetes_de_paroles.py`),
+    appelé SANS le brut : seul le témoin `pas_interprete` (la ligne n'est pas
+    un feat, le principal est un autre, la page ne nomme que la ligne), juste
+    50 fois sur 50 là où le brut départageait. Le témoin du brut (~1 min de
+    BeautifulSoup sur toute la base) reste au script.
+
+    Le juge lit la FAMILLE (lignes sœurs) pour connaître l'interprète : on lit
+    donc toutes les lignes des pages de `pistes`, mais on ne compte que les
+    leurs."""
+    from src.utils.tetes_de_paroles import (
+        COLONNES_DES_FICHES,
+        FICHES_A_TETES,
+        fiche_depuis,
+        planifier,
+    )
+
+    fiches = {t["id"]: t for t in pistes}
+    pages = {t["genius_id"] for t in pistes if t["genius_id"]}
+    # Lire les paroles de toute la base coûte ~11 s : un audit par artiste ne
+    # lit que ses lignes et leurs sœurs (table temporaire : pas de limite au
+    # nombre de paramètres).
+    c.execute("CREATE TEMP TABLE IF NOT EXISTS _audit_ids (id INTEGER, page INTEGER)")
+    c.execute("DELETE FROM _audit_ids")
+    c.executemany("INSERT INTO _audit_ids (id) VALUES (?)", [(i,) for i in fiches])
+    c.executemany("INSERT INTO _audit_ids (page) VALUES (?)", [(p,) for p in pages])
+    lues = [
+        fiche_depuis(r)
+        for r in c.execute(
+            f"SELECT {COLONNES_DES_FICHES} FROM tracks t JOIN artists a ON a.id = t.artist_id "
+            f"WHERE {FICHES_A_TETES} AND (t.id IN (SELECT id FROM _audit_ids) "
+            "OR t.genius_id IN (SELECT page FROM _audit_ids))"
+        )
+    ]
+    cas = []
+    for fiche, _, changements in planifier(lues, {}).plans:
+        if fiche.id not in fiches:
+            continue
+        premier = changements[0]
+        de_plus = f" (+{len(changements) - 1})" if len(changements) > 1 else ""
+        cas.append(
+            Cas(
+                "tete_fabriquee",
+                fiches[fiche.id]["artiste"],
+                [fiche.id],
+                f"{_lib(fiches[fiche.id])} {premier.ancienne} → {premier.nouvelle}{de_plus}",
+            )
+        )
+    return cas
+
+
 # ── Ce qu'aucune autre famille ne voit (hors critère) ─────────────────────────
 
 #: Colonnes dérivées dont le champ d'observation porte le même nom.
@@ -1904,6 +1960,7 @@ def auditer(
             audit.cas += isrc_d_une_autre_fiche(c, pistes)
             audit.cas += ids_spotify_principaux_desalignes(c, pistes)
             audit.cas += credits_en_double(c, pistes)
+            audit.cas += tetes_fabriquees(c, pistes)
             if not noms:
                 audit.cas += orphelins(c)
         if not noms:

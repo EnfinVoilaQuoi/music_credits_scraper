@@ -229,6 +229,15 @@ class TestResumes:
         b = Bilan()
         assert cycle.resume_etape("bidule", b, o, art) == str(b)
 
+    @pytest.mark.parametrize("etape", list(cycle.ETAPES))
+    def test_une_etape_qui_a_leve_se_resume_sans_planter(self, etape):
+        """2026-11-08 : crédits d'Alpha Wann en exception (coupure réseau) ; le
+        `Bilan` nu du cycle faisait planter `credits.resume`, donc le run, avant
+        son audit."""
+        b = Bilan(complete=False, motif="exception : ServerNotFoundError")
+        txt = cycle.resume_etape(etape, b, cycle.OptionsCycle(), _artist([]))
+        assert txt == "⚠️ étape en échec — exception : ServerNotFoundError"
+
     def test_etapes_disponibles(self):
         assert list(cycle.etapes_disponibles()) == list(cycle.ETAPES)
 

@@ -119,6 +119,21 @@ class TestInvariants:
         (cas,) = [c for c in audit.cas if c.famille == "refus_vivant"]
         assert cas.pistes == [soeur.id] and "video" in cas.libelle
 
+    def test_refus_vivant_id_apple(self, data_manager, isha):
+        """Nature `id_apple` (2026-11-09) : une fiche qui porte encore un ID Apple
+        refusé pour son enregistrement."""
+        _, t = isha
+        _sql(
+            data_manager,
+            "INSERT INTO refus (cle_fiche, genius_id, artiste, titre, nature, valeur) "
+            "VALUES ('g4242', 4242, 'Isha', 'Durag', 'id_apple', '1440')",
+        )
+        assert not _familles(au.auditer(data_manager, ["Isha"], revue=False)).get("refus_vivant")
+        _sql(data_manager, "UPDATE tracks SET apple_music_id = '1440' WHERE id = :t", t=t.id)
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        (cas,) = [c for c in audit.cas if c.famille == "refus_vivant"]
+        assert cas.pistes == [t.id] and "id_apple 1440" in cas.libelle
+
     def test_isrc_d_une_edition_porte_par_une_autre_fiche(self, data_manager, isha):
         """« La Gamberge - Live 2006 » (#8199) portait en édition les pages
         Deezer de l'EP (#12092, FRZ110600957) ; la même édition sur une SŒUR
@@ -306,6 +321,25 @@ class TestHausse:
         assert [c.pistes for c in audit.nouveaux] == [[3, 4]]
         resume = au.resume_fin_de_run(audit, {"id_partage": (1, 1)}, True)
         assert "id_partage : 1 → 1 (1 nouveau(x))" in resume and "• y" in resume
+
+    def test_les_indecidables_en_hausse_avertissent_sans_monter(self):
+        """2026-11-09 : rien ne plafonnait les indécidables (31 → 55) — une ligne
+        d'avertissement, ni `en_hausse` ni code de sortie."""
+        ref = au.Audit(
+            date="d", perimetre="p", cas=[au.Cas("duree_video", "A", [1], "x", au.INDECIDABLE)]
+        )
+        audit = au.Audit(date="d", perimetre="p")
+        audit.cas = [au.Cas("duree_video", "A", [i], "x", au.INDECIDABLE) for i in (1, 2)]
+        assert au.en_hausse(audit, ref.vers_dict()) == {}
+        audit.indecidables_avant = au.indecidables_de(ref.vers_dict())
+        resume = au.resume_fin_de_run(audit, {}, True)
+        assert "⚠ Indécidables en hausse : 1 → 2" in resume
+        assert "✔ Aucune famille en hausse" in resume
+        # Stables, ou sans référence : rien.
+        audit.indecidables_avant = 2
+        assert "Indécidables" not in au.resume_fin_de_run(audit, {}, True)
+        assert au.indecidables_de(None) is None
+        assert "Indécidables" not in au.resume_fin_de_run(audit, {}, False)
 
     def test_le_libelle_d_un_cas_de_fiche_ne_fait_pas_un_cas_nouveau(self):
         """Durées et compteurs bougent dans le libellé : la fiche désigne le cas."""
@@ -496,6 +530,41 @@ def test_deux_versions_aux_memes_paroles_pour_information():
     assert cas.nature == au.INFORMATION
 
 
+@pytest.mark.parametrize(
+    "durees, nature",
+    [
+        # « Best Day Ever » / « BDE Bonus » de Mac Miller : 159 / 243 s.
+        ({1: {"deezer": 159}, 2: {"spotify_web": 243}}, au.INFORMATION),
+        # Mêmes durées : un doublon peut-être, mais aucun cas ne l'a validé.
+        ({1: {"deezer": 159}, 2: {"spotify_web": 160}}, au.ERREUR),
+        # Sans durée lue par identifiant d'un côté : rien ne tranche.
+        ({1: {"deezer": 159}}, au.ERREUR),
+    ],
+)
+def test_paroles_identiques_aux_durees_differentes_version_non_nommee(durees, nature):
+    """2026-11-09, simulé : 3 cas sur 11, les faux positifs de CORRECTIFS."""
+    texte = "\n".join(
+        f"[Couplet {i}]\nligne numéro {i} du texte qui parle de la ville et du temps qui passe"
+        for i in range(12)
+    )
+    par = {
+        1: [
+            {
+                "id": i,
+                "title": titre,
+                "genius_id": i,
+                "lyrics": texte,
+                "lyrics_source": "genius",
+                "artiste": "Mac Miller",
+            }
+            for i, titre in ((1, "Best Day Ever"), (2, "BDE Bonus"))
+        ]
+    }
+    (cas,) = au.paroles_identiques(par, durees)
+    assert cas.nature == nature
+    assert ("version non nommée" in cas.libelle) is (nature == au.INFORMATION)
+
+
 def test_lrc_minute_au_dela_de_la_duree(data_manager, isha):
     """Un LRC qui court après la fin du morceau : l'un des deux est faux, et
     l'audit dit si la durée était confirmée (2026-10-13)."""
@@ -656,6 +725,78 @@ def test_id_de_catalogue_entre_pages_laisse_au_panneau():
     assert [c.libelle.split(" ")[0] for c in au.ids_partages(par)] == ["isrc"]
     sans_page = {1: [_r(1, 10, spotify_id="SP"), _r(2, None, spotify_id="SP")]}
     assert [c.libelle.split(" ")[0] for c in au.ids_partages(sans_page)] == ["spotify_id"]
+
+
+class TestIsrcDUnTitreJoint:
+    """2026-11-09, simulé : 5 cas sur 6. Même ISRC, l'un JOINT au bout de son
+    titre celui de l'autre, durées par identifiant à ± 2 s : le même
+    enregistrement sous deux pages — une décision de fusion, pas une erreur."""
+
+    @staticmethod
+    def _par(titre_a, titre_b):
+        def r(tid, titre):
+            return {
+                "id": tid,
+                "title": titre,
+                "artiste": "Sofiane",
+                "genius_id": 100 + tid,
+                "spotify_id": None,
+                "deezer_id": None,
+                "isrc": "FRPJW1600870",
+                "apple_music_id": None,
+            }
+
+        return {1: [r(1, titre_a), r(2, titre_b)]}
+
+    @pytest.mark.parametrize(
+        "titre_a, titre_b",
+        [
+            ("93 Empire", "#Jesuispasséchezso : Épisode 6 / 93 Empire"),
+            # Le titre de l'autre n'est que son SOUS-TITRE entre parenthèses.
+            (
+                "C’est nous les condés (Police Nationale)",
+                "#Jesuispasséchezso : Episode 5 / Police Nationale",
+            ),
+        ],
+    )
+    def test_titre_joint_et_memes_durees_decision(self, titre_a, titre_b):
+        (cas,) = au.ids_partages(
+            self._par(titre_a, titre_b), {1: {"deezer": 201}, 2: {"spotify_web": 199}}
+        )
+        assert cas.nature == au.DECISION and "fusionner ?" in cas.libelle
+
+    @pytest.mark.parametrize(
+        "titre_b, durees",
+        [
+            # Durées à plus de 2 s : deux enregistrements possibles.
+            (
+                "#Jesuispasséchezso : Épisode 6 / 93 Empire",
+                {1: {"deezer": 201}, 2: {"deezer": 230}},
+            ),
+            # Sans durée lue par identifiant d'un côté : rien ne le montre.
+            ("#Jesuispasséchezso : Épisode 6 / 93 Empire", {1: {"deezer": 201}}),
+            # « 24/7 » n'est pas une jointure.
+            ("24/7", {1: {"deezer": 201}, 2: {"deezer": 201}}),
+            # Même titre (« Tigini (Remix) », deux remix) : rien n'est joint.
+            ("93 Empire", {1: {"deezer": 201}, 2: {"deezer": 201}}),
+        ],
+    )
+    def test_sinon_erreur(self, titre_b, durees):
+        (cas,) = au.ids_partages(self._par("93 Empire", titre_b), durees)
+        assert cas.nature == au.ERREUR
+
+    def test_les_durees_lues_par_identifiant_seulement(self, data_manager, isha):
+        """`durees_par_identifiant` ne lit que les catalogues lus par ID."""
+        from src.enrichment.observation import Observation
+
+        _, t = isha
+        data_manager.record_discography_observations(
+            t.id, [Observation("duration", 201, "deezer"), Observation("duration", 150, "legacy")]
+        )
+        from contextlib import closing
+
+        with closing(au._connexion(data_manager.db_path)) as c:
+            assert au.durees_par_identifiant(c)[t.id] == {"deezer": 201}
 
 
 @pytest.mark.parametrize(
@@ -999,6 +1140,40 @@ class TestFamillesNues:
         assert "streams_double" not in _familles(audit)
 
     @pytest.mark.parametrize(
+        "albums, ids, nature, fin",
+        [
+            # Second signal : « Calypso I / II », même disque.
+            (("Caravelle", "Caravelle"), ("A" * 22, "B" * 22), au.ERREUR, "même disque"),
+            # Second signal : le même ID Spotify sur les deux fiches.
+            (("X", "Y"), ("A" * 22, "A" * 22), au.ERREUR, "ID Spotify partagé"),
+            # Aucun autre signal (« Vrai » / « Demolition man ») : le hasard.
+            (("X", "Y"), ("A" * 22, "B" * 22), au.INFORMATION, "égalité de hasard"),
+        ],
+    )
+    def test_streams_double_second_signal(self, data_manager, isha, albums, ids, nature, fin):
+        """2026-11-09, simulé sur 4 cas ; la condition « page lue » abandonnée
+        (un compteur se récolte normalement dans la ligne d'une autre page)."""
+        from contextlib import closing
+
+        a, t = isha
+        autre = Track(title="Bavardage", artist=a)
+        autre.genius_id = 4243
+        data_manager.save_track(autre)
+        for tid, album, sid in ((t.id, albums[0], ids[0]), (autre.id, albums[1], ids[1])):
+            _sql(
+                data_manager,
+                "UPDATE tracks SET spotify_streams = 123456, album = :a, spotify_id = :s "
+                "WHERE id = :t",
+                a=album,
+                s=sid,
+                t=tid,
+            )
+        with closing(au._connexion(data_manager.db_path)) as c:
+            par = au._par_artiste(au._pistes(c, [a.id]))
+            (cas,) = [x for x in au.streams(c, par) if x.famille == "streams_double"]
+        assert cas.nature == nature and fin in cas.libelle
+
+    @pytest.mark.parametrize(
         "piste, famille",
         [
             (_certif("Durag", "Durag", "album"), "certif_album"),
@@ -1064,3 +1239,103 @@ def test_date_ancienne_pour_information(data_manager, isha):
     assert "1861-01-01 (genius 1861-01-01)" in cas.libelle
     assert "date_ancienne" in au.FAMILLES_HORS_CRITERE
     assert audit.critere() == 0
+
+
+class TestDisqueHomonymeParLeProfil:
+    """2026-11-09 : un ID Spotify ne prouve l'artiste d'un disque que si son
+    embed crédite un profil CONNU de l'artiste (simulé : neutre, 22 / 22)."""
+
+    @staticmethod
+    def _p(i, spotify=None):
+        return {
+            "id": i,
+            "artist_id": 1,
+            "artiste": "Anton Serra",
+            "title": f"Piste {i}",
+            "album": "Flute and Piano",
+            "genius_id": None,
+            "spotify_id": spotify,
+        }
+
+    @pytest.mark.parametrize("prouve, cas", [(True, 0), (False, 1)])
+    def test_un_id_ne_suffit_que_s_il_credite_un_profil_connu(self, prouve, cas):
+        pistes = [self._p(0), self._p(1), self._p(2, "x")]
+        assert len(au.disques_homonymes(pistes, lambda aid, sid: prouve)) == cas
+
+    @staticmethod
+    def _embed(*uris):
+        import json as _json
+
+        entity = {
+            "type": "track",
+            "name": "Piste",
+            "artists": [{"name": f"A{u}", "uri": f"spotify:artist:{u}"} for u in uris],
+            "duration": 200000,
+        }
+        data = {"props": {"pageProps": {"state": {"data": {"entity": entity}}}}}
+        return (
+            '<script id="__NEXT_DATA__" type="application/json">' + _json.dumps(data) + "</script>"
+        ).encode()
+
+    def test_juge_par_l_embed_du_brut(self, data_manager, isha):
+        from contextlib import closing
+
+        from src.persistence import brut
+
+        a, _ = isha
+        _sql(data_manager, "UPDATE artists SET spotify_id = 'PROFIL' WHERE id = :a", a=a.id)
+        for sid, uri in (("BON", "PROFIL"), ("AUTRE", "HOMONYME")):
+            brut.consigner(
+                "spotify_embed",
+                f"https://open.spotify.com/embed/track/{sid}",
+                200,
+                self._embed(uri),
+            )
+        brut.fermer()
+        with closing(au._connexion(data_manager.db_path)) as c:
+            juge = au.juge_des_ids_spotify(c)
+            assert juge(a.id, "BON") is True
+            assert juge(a.id, "AUTRE") is False
+            assert juge(a.id, "JAMAIS_LU") is False
+            # Un artiste sans profil connu ne se juge pas à l'URI.
+            assert juge(a.id + 999, "AUTRE") is True
+
+    def test_profil_d_un_alias_confirme(self, data_manager, isha):
+        from contextlib import closing
+
+        a, _ = isha
+        alias = Artist(name="Isha Alias")
+        data_manager.save_artist(alias)
+        _sql(data_manager, "UPDATE artists SET spotify_id = 'ALIAS' WHERE name = 'Isha Alias'")
+        _sql(
+            data_manager,
+            "INSERT INTO artist_relations (artist_id, related_name, kind, status) "
+            "VALUES (:a, 'Isha Alias', 'alias', 'confirmed')",
+            a=a.id,
+        )
+        with closing(au._connexion(data_manager.db_path)) as c:
+            assert "ALIAS" in au.profils_spotify_connus(c)[a.id]
+
+
+@pytest.mark.parametrize(
+    "titre, cas",
+    [
+        ("Boulbi (Instrumental)", 1),
+        # « (Version Instrumentale) » : le juge le dit instrumental.
+        ("Boulbi (Version Instrumentale)", 1),
+        # Un mot du titre, pas un descripteur : ni un instrumental, ni un cas.
+        ("Mon instru va craquer", 0),
+    ],
+)
+def test_instrumental_lrc_juge_le_titre_comme_le_constat(titre, cas):
+    """2026-11-09 : plus d'expression régulière nue, le juge du constat."""
+    piste = {
+        "id": 1,
+        "title": titre,
+        "artiste": "Booba",
+        "instrumental": 0,
+        "lyrics": "",
+        "lyrics_synced": "[00:01.00] la",
+        "lyrics_synced_source": "lrclib",
+    }
+    assert len(au.instrumentaux([piste])) == cas

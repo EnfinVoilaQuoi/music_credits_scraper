@@ -56,6 +56,7 @@ from src.utils.concordance_paroles import (
     paroles_de_reference,
     recouvrement_bigrammes,
 )
+from src.utils.contenants import parties_du_titre
 from src.utils.duree_youtube import (
     DUREE_MAX_MORCEAU,
     DUREE_MIN_MORCEAU,
@@ -67,17 +68,20 @@ from src.utils.duree_youtube import (
     segment_de_dj_mix,
     trop_courte_pour_les_paroles,
 )
+from src.utils.lrc_garde import ACCORD_CATALOGUES_S, CATALOGUES_PAR_ID
 from src.utils.participation import SQL_SIGNATURES_DE_DISQUES, sans_participation, signe_son_disque
-from src.utils.title_matching import contains_as_words, normalize_title
+from src.utils.title_matching import contains_as_words, meme_album, normalize_name, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
     meme_socle,
     porte_une_version,
+    sous_titres,
     studio_sur_disque_live,
     titre_generique,
     titres_equivalents,
 )
+from src.utils.version_heritage import est_instrumental
 from src.utils.youtube_utils import extract_video_id
 
 #: Messages d'absence ou de refus rangés en échec de communication.
@@ -126,6 +130,9 @@ class Audit:
     #: Les cas du critère ABSENTS de l'audit précédent (`apres_run`) : hors de
     #: `vers_dict`, ils ne servent qu'au compte rendu de fin de run.
     nouveaux: list[Cas] = field(default_factory=list)
+    #: Indécidables de l'audit précédent (`apres_run`), None sans référence :
+    #: hors de `vers_dict`, pour l'avertissement du compte rendu.
+    indecidables_avant: int | None = None
     #: Couverture des durées (`couverture_des_durees`) : une mesure, pas une
     #: famille — hors des cas et du critère.
     couverture_durees: dict[str, int] = field(default_factory=dict)
@@ -183,7 +190,7 @@ FAMILLES = {
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
-    "disque_homonyme": "disque d'au moins 3 fiches, aucune avec page Genius ni ID Spotify (homonyme ?)",
+    "disque_homonyme": "disque d'au moins 3 fiches, ni page Genius ni ID Spotify d'un profil connu (homonyme ?)",
     # ── Hors critère (natures `RUN` et `INFORMATION`) ──
     "colonne_sans_provenance": "durée, date, ISRC ou LRC en colonne sans aucune observation",
     "id_spotify_sans_compteur": "ID Spotify posé, aucun compteur (plafond de pages du run)",
@@ -289,7 +296,61 @@ def doublons_equivalents(par) -> list[Cas]:
     return cas
 
 
-def ids_partages(par) -> list[Cas]:
+def durees_par_identifiant(c, ids=None) -> dict[int, dict[str, int]]:
+    """`{fiche: {source: secondes}}` des durées lues par l'IDENTIFIANT de la
+    fiche (`lrc_garde.CATALOGUES_PAR_ID`), jamais par une recherche de titre :
+    le témoin indépendant des règles d'audit qui jugent deux fiches."""
+    out: dict[int, dict[str, int]] = collections.defaultdict(dict)
+    sources = ",".join("?" * len(CATALOGUES_PAR_ID))
+    for r in c.execute(
+        "SELECT track_id, source, value FROM observations "
+        f"WHERE field = 'duration' AND source IN ({sources})",
+        CATALOGUES_PAR_ID,
+    ):
+        if ids is not None and r["track_id"] not in ids:
+            continue
+        try:
+            out[r["track_id"]][r["source"]] = int(float(r["value"]))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def accord_des_durees(da: dict | None, db: dict | None) -> bool | None:
+    """PUR. Deux fiches ont-elles une durée lue par identifiant commune à
+    ± `ACCORD_CATALOGUES_S` ? None si l'une n'en a aucune (rien à comparer)."""
+    va, vb = set((da or {}).values()), set((db or {}).values())
+    if not va or not vb:
+        return None
+    return min(abs(x - y) for x in va for y in vb) <= ACCORD_CATALOGUES_S
+
+
+def titre_joint_a_l_autre(a: str | None, b: str | None) -> bool:
+    """PUR. L'un des titres JOINT des parties (`contenants.parties_du_titre`,
+    jamais « 24/7 ») dont la dernière est l'autre titre, ou l'un de ses
+    sous-titres : « #Jesuispasséchezso : Épisode 6 / 93 Empire » et « 93
+    Empire », « Episode 5 / Police Nationale » et « C'est nous les condés
+    (Police Nationale) »."""
+    for long, court in ((a, b), (b, a)):
+        parties = parties_du_titre(long)
+        if parties and court:
+            dernier = parties[-1]
+            if any(titres_equivalents(dernier, f) for f in (court, *sous_titres(court))):
+                return True
+    return False
+
+
+def ids_partages(par, durees: dict[int, dict] | None = None) -> list[Cas]:
+    """Le même ID sur deux fiches d'un artiste qui ne sont pas lignes sœurs.
+
+    Branche ISRC (règle du 2026-11-09, simulée : 5 cas sur 6) : deux fiches
+    dont l'une JOINT au bout de son titre celui de l'autre (`titre_joint_a_l_autre`)
+    et dont les durées lues par identifiant (`durees`) concordent à ± 2 s sont
+    le MÊME enregistrement sous deux pages (« 93 Empire » de Kery James) : une
+    DÉCISION de fusion, pas une erreur — la fusion reste humaine (elle n'est pas
+    réversible). « Tigini (Remix) » (même ISRC, deux remix différents) reste
+    une erreur."""
+    durees = durees or {}
     cas = []
     for ts in par.values():
         for col in ("spotify_id", "deezer_id", "isrc", "apple_music_id"):
@@ -303,13 +364,20 @@ def ids_partages(par) -> list[Cas]:
                     # Entre pages Genius : le panneau le juge (`revue:id_catalogue_partage`).
                     continue
                 if len(g) > 1 and (len(pages) > 1 or None in pages):
-                    cas.append(
-                        Cas(
-                            "id_partage",
-                            g[0]["artiste"],
-                            [t["id"] for t in g],
-                            f"{col} {valeur} : " + " | ".join(_lib(t) for t in g),
+                    libelle = f"{col} {valeur} : " + " | ".join(_lib(t) for t in g)
+                    nature = ERREUR
+                    if (
+                        col == "isrc"
+                        and len(g) == 2
+                        and titre_joint_a_l_autre(g[0]["title"], g[1]["title"])
+                        and accord_des_durees(durees.get(g[0]["id"]), durees.get(g[1]["id"]))
+                    ):
+                        nature = DECISION
+                        libelle += (
+                            " — même enregistrement (titre joint, durées à ± 2 s) : fusionner ?"
                         )
+                    cas.append(
+                        Cas("id_partage", g[0]["artiste"], [t["id"] for t in g], libelle, nature)
                     )
     return cas
 
@@ -497,12 +565,19 @@ def _sans_groupes(titre: str | None) -> str:
     return normalize_title(re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", titre or ""))
 
 
-def paroles_identiques(par) -> list[Cas]:
+def paroles_identiques(par, durees: dict[int, dict] | None = None) -> list[Cas]:
     """Le même texte sur deux fiches d'un artiste aux titres NON équivalents
     (chantier D, 2026-10-13) : le pendant de `lrc_emprunte` pour les paroles
     — mesuré, 11 paires dont Josman « Fais le vide » / « Tous Les Jours ».
     Les lignes sœurs (même page Genius) et les versions d'un même socle n'en
-    sont pas."""
+    sont pas.
+
+    Deux fiches dont les durées lues par identifiant (`durees`) DIFFÈRENT
+    sont deux enregistrements : une version que le titre ne nomme pas (« Best
+    Day Ever » / « BDE Bonus », 159 / 243 s), pour information (règle du
+    2026-11-09, simulée : 3 cas sur 11, conformes à CORRECTIFS). Les mêmes
+    durées ne prouvent pas un doublon : aucun cas ne l'a validé, l'erreur reste."""
+    durees = durees or {}
     cas = []
     for ts in par.values():
         groupes = collections.defaultdict(list)
@@ -528,12 +603,19 @@ def paroles_identiques(par) -> list[Cas]:
                     # sienne (« Tous Les Jours (Remix) » aux paroles de « Fais le
                     # vide ») — une erreur, comme deux pages sans version.
                     version = porte_une_version(a["title"]) and porte_une_version(b["title"])
+                    libelle = f"{_lib(a)} et {_lib(b)} : mêmes paroles"
+                    if (
+                        not version
+                        and accord_des_durees(durees.get(a["id"]), durees.get(b["id"])) is False
+                    ):
+                        version = True
+                        libelle += " — durées différentes : version non nommée"
                     cas.append(
                         Cas(
                             "paroles_identiques",
                             a["artiste"],
                             [a["id"], b["id"]],
-                            f"{_lib(a)} et {_lib(b)} : mêmes paroles",
+                            libelle,
                             INFORMATION if version else ERREUR,
                         )
                     )
@@ -541,9 +623,12 @@ def paroles_identiques(par) -> list[Cas]:
 
 
 def instrumentaux(pistes) -> list[Cas]:
+    """Un instrumental (constaté, ou au titre instrumental) qui porte un LRC
+    ou des paroles. Le titre se juge comme au constat
+    (`versions.constater_instrumentaux`) : `version_heritage.est_instrumental`."""
     cas = []
     for t in pistes:
-        titre_instru = re.search(r"instrumental|instru\b", t["title"] or "", re.IGNORECASE)
+        titre_instru = est_instrumental(t["title"])
         a_paroles = bool((t["lyrics"] or "").strip())
         if (t["instrumental"] == 1 and (a_paroles or t["lyrics_synced"])) or (
             titre_instru and t["lyrics_synced"]
@@ -744,7 +829,48 @@ def certifs(pistes) -> list[Cas]:
     return cas
 
 
+def _ids_spotify(c, ids) -> dict[int, set[str]]:
+    """Les ID Spotify de chaque fiche : le principal et `track_spotify_ids`."""
+    out = collections.defaultdict(set)
+    for r in c.execute(
+        f"SELECT track_id, spotify_id FROM track_spotify_ids "
+        f"WHERE track_id IN ({','.join('?' * len(ids))})",
+        list(ids),
+    ):
+        out[r["track_id"]].add(r["spotify_id"])
+    return out
+
+
+def _seconds_signaux(c, g) -> list[str]:
+    """Ce qui, outre le compteur égal, relie des fiches : même disque, titres
+    parents, un ID Spotify partagé."""
+    ids = _ids_spotify(c, [t["id"] for t in g])
+    for t in g:
+        if t["spotify_id"]:
+            ids[t["id"]].add(t["spotify_id"])
+    paires = [(a, b) for i, a in enumerate(g) for b in g[i + 1 :]]
+    signaux = []
+    if all(meme_album(a["album"], b["album"]) for a, b in paires):
+        signaux.append("même disque")
+    if any(titres_parents(a["title"], b["title"]) for a, b in paires):
+        signaux.append("titres parents")
+    if set.intersection(*(ids[t["id"]] for t in g)):
+        signaux.append("ID Spotify partagé")
+    return signaux
+
+
 def streams(c, par) -> list[Cas]:
+    """`streams_double` (règle du 2026-11-09, simulée sur 4 cas) : un compteur
+    Spotify égal sur deux pages n'est une erreur qu'avec un SECOND signal (même
+    disque, titres parents, ID partagé) — Spotify montre parfois le même
+    compteur pour deux enregistrements (« Calypso I / II »). Sans second
+    signal, « pour information » : une égalité au niveau du hasard (« Vrai » /
+    « Demolition man », « Animaniax » / « Longueur d'avance »). Un compteur
+    récolté dans la ligne d'une AUTRE page (6 852 fiches sur 13 348 sans page à
+    elles dans le brut) n'est pas une lecture fausse : la récolte concorde avec
+    la page du morceau (session compteurs-temoin, 2026-11-09).
+
+    `ytm_incoherent` : le total YTM de la colonne contre ses vidéos propres."""
     cas = []
     for ts in par.values():
         groupes = collections.defaultdict(list)
@@ -756,13 +882,16 @@ def streams(c, par) -> list[Cas]:
                 # Titres parents : le panneau le juge (`revue:compteur_partage`).
                 continue
             if len(g) > 1 and len({t["genius_id"] for t in g}) > 1:
+                libelle = f"{n:,} : " + " | ".join(_lib(t) for t in g)
+                nature = ERREUR
+                signaux = _seconds_signaux(c, g)
+                if signaux:
+                    libelle += f" — {', '.join(signaux)}"
+                else:
+                    nature = INFORMATION
+                    libelle += " — aucun autre signal : égalité de hasard"
                 cas.append(
-                    Cas(
-                        "streams_double",
-                        g[0]["artiste"],
-                        [t["id"] for t in g],
-                        f"{n:,} : " + " | ".join(_lib(t) for t in g),
-                    )
+                    Cas("streams_double", g[0]["artiste"], [t["id"] for t in g], libelle, nature)
                 )
     ids = {t["id"]: t for ts in par.values() for t in ts}
     vids = collections.defaultdict(list)
@@ -1066,7 +1195,7 @@ def orphelins(c) -> list[Cas]:
 
 def refus_vivants(c, pistes) -> list[Cas]:
     """Une valeur REFUSÉE à la main (table `refus`, e48) encore portée : ID
-    Spotify, Deezer ou disque Discogs, vidéo, LRC, page SongBPM — sur la fiche désignée ou, pour ce que les
+    Spotify, Deezer, Apple ou disque Discogs, vidéo, LRC, page SongBPM — sur la fiche désignée ou, pour ce que les
     sœurs partagent, sur toute ligne de la même page Genius. Un écrivain de
     retrait qui oublie une ligne, ou un producteur qui ne relit pas le refus,
     se voit ici (CORRECTIFS : « valeur refusée encore vivante chez une sœur »)."""
@@ -1118,6 +1247,8 @@ def refus_vivants(c, pistes) -> list[Cas]:
             return t["spotify_id"] == valeur or valeur in spotify[t["id"]]
         if nature == "id_deezer":
             return str(t["deezer_id"] or "") == valeur
+        if nature == "id_apple":
+            return str(t["apple_music_id"] or "") == valeur
         if nature == "id_discogs":
             return str(t["discogs_id"] or "") == valeur
         if nature == "isrc":
@@ -1139,7 +1270,7 @@ def refus_vivants(c, pistes) -> list[Cas]:
     cas = []
     for r in c.execute(
         "SELECT genius_id, artiste, titre, album, nature, valeur FROM refus "
-        "WHERE nature IN ('id_spotify', 'id_deezer', 'id_discogs', 'isrc', 'video', 'lrc', 'paroles', "
+        "WHERE nature IN ('id_spotify', 'id_deezer', 'id_apple', 'id_discogs','isrc', 'video', 'lrc', 'paroles', "
         "'page_songbpm', "
         "'page_getsongbpm', 'mesure_songbpm')"
     ):
@@ -1230,11 +1361,73 @@ def _disque_de_sessions(album: str, fiches) -> bool:
     )
 
 
-def disques_homonymes(pistes) -> list[Cas]:
-    """Un disque dont aucune fiche n'a de page Genius ni d'ID Spotify : posé par
-    le seul Deezer, dont un profil peut mêler deux homonymes. Les données d'un
-    autre artiste, que rien d'autre ne signalait (le flûtiste Anton Serra n'est
-    apparu que par des désaccords de BPM, 22 fiches)."""
+def profils_spotify_connus(c) -> dict[int, set[str]]:
+    """`{artiste: profils Spotify}` connus : le sien (`artists.spotify_id`),
+    ceux que lie MusicBrainz (`artist_spotify_ids`, e53) et celui de ses ALIAS
+    confirmés — ce que le gate d'identité attend
+    (`ArtistRepository.ids_spotify_connus`, alias résolu par son nom normalisé
+    quand le lien n'a pas d'ID)."""
+    connus = collections.defaultdict(set)
+    par_nom = {}
+    for r in c.execute("SELECT id, name, spotify_id FROM artists"):
+        par_nom.setdefault(normalize_name(r["name"]), r["id"])
+        if r["spotify_id"]:
+            connus[r["id"]].add(r["spotify_id"])
+    for r in c.execute("SELECT artist_id, spotify_id FROM artist_spotify_ids"):
+        connus[r["artist_id"]].add(r["spotify_id"])
+    propres = {a: set(ids) for a, ids in connus.items()}
+    for r in c.execute(
+        "SELECT artist_id, related_artist_id, related_name FROM artist_relations "
+        "WHERE kind = 'alias' AND status = 'confirmed'"
+    ):
+        alias = r["related_artist_id"] or par_nom.get(normalize_name(r["related_name"]))
+        connus[r["artist_id"]] |= propres.get(alias, set())
+    return connus
+
+
+def uris_de_l_embed(spotify_id: str, chemin: Path | None = None) -> set[str]:
+    """Les URI d'artistes que l'embed de l'ID crédite, d'après ses lectures
+    gardées dans le brut (`spotify_embed`, lecture seule) ; vide sans lecture."""
+    from src.persistence import brut
+    from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
+
+    uris = set()
+    url = f"https://open.spotify.com/embed/track/{spotify_id}"
+    for corps in brut.corps_gardes("spotify_embed", url, chemin):
+        identite = SpotifyIDScraper._identite_depuis_embed(corps.decode("utf-8", "replace"))
+        uris |= {u for u in (identite or {}).get("artist_ids") or () if u}
+    return uris
+
+
+def juge_des_ids_spotify(c, chemin: Path | None = None):
+    """`(artiste, ID Spotify) → bool` : l'embed de l'ID crédite-t-il un profil
+    CONNU de l'artiste ? Un artiste sans profil connu ne se juge pas à l'URI
+    (comme le gate, `ids_artiste_attendus` vide) : l'ID suffit. Un embed jamais
+    lu ne prouve rien."""
+    connus = profils_spotify_connus(c)
+    cache: dict[str, set[str]] = {}
+
+    def credite_un_profil_connu(artist_id: int, spotify_id: str) -> bool:
+        profils = connus.get(artist_id)
+        if not profils:
+            return True
+        if spotify_id not in cache:
+            cache[spotify_id] = uris_de_l_embed(spotify_id, chemin)
+        return bool(cache[spotify_id] & profils)
+
+    return credite_un_profil_connu
+
+
+def disques_homonymes(pistes, credite_un_profil_connu=None) -> list[Cas]:
+    """Un disque dont aucune fiche n'a de page Genius ni d'ID Spotify qui prouve
+    l'artiste : posé par le seul Deezer, dont un profil peut mêler deux
+    homonymes. Les données d'un autre artiste, que rien d'autre ne signalait (le
+    flûtiste Anton Serra n'est apparu que par des désaccords de BPM, 22 fiches).
+
+    Un ID Spotify ne prouve l'artiste que si son embed crédite un profil connu
+    de l'artiste (`credite_un_profil_connu`, `juge_des_ids_spotify` ; règle du
+    2026-11-09 : un profil Spotify mêle aussi des homonymes). Sans ce juge
+    (appel pur), un ID suffit, comme avant."""
     disques = collections.defaultdict(list)
     for t in pistes:
         if t["album"]:
@@ -1243,7 +1436,16 @@ def disques_homonymes(pistes) -> list[Cas]:
     for (_, album), fiches in sorted(disques.items(), key=lambda x: str(x[0])):
         if len(fiches) < FICHES_MIN_DISQUE_HOMONYME:
             continue
-        if any(f["genius_id"] or f["spotify_id"] for f in fiches):
+        if any(f["genius_id"] for f in fiches):
+            continue
+        if any(
+            f["spotify_id"]
+            and (
+                credite_un_profil_connu is None
+                or credite_un_profil_connu(f["artist_id"], f["spotify_id"])
+            )
+            for f in fiches
+        ):
             continue
         if _disque_de_sessions(album, fiches):
             continue
@@ -1252,7 +1454,7 @@ def disques_homonymes(pistes) -> list[Cas]:
                 "disque_homonyme",
                 fiches[0]["artiste"],
                 [f["id"] for f in fiches],
-                f"« {album} » : {len(fiches)} fiches, aucune avec page Genius ni ID Spotify",
+                f"« {album} » : {len(fiches)} fiches, aucune avec page Genius ni ID Spotify d'un profil connu",
             )
         )
     return cas
@@ -1678,17 +1880,18 @@ def auditer(
             date=datetime.now().isoformat(timespec="seconds"),
             perimetre=", ".join(noms) if noms else "base entière",
         )
+        durees_id = durees_par_identifiant(c, {t["id"] for t in pistes} if artistes else None)
         audit.cas += doublons_equivalents(par)
-        audit.cas += ids_partages(par)
+        audit.cas += ids_partages(par, durees_id)
         audit.cas += lrc(par)
-        audit.cas += paroles_identiques(par)
+        audit.cas += paroles_identiques(par, durees_id)
         audit.cas += instrumentaux(pistes)
         audit.cas += durees(c, pistes)
         audit.cas += certifs(pistes)
         audit.cas += streams(c, par)
         audit.cas += echecs(c, pistes)
         audit.cas += studio_sur_live(c, pistes)
-        audit.cas += disques_homonymes(pistes)
+        audit.cas += disques_homonymes(pistes, juge_des_ids_spotify(c))
         audit.cas += colonnes_sans_provenance(c, pistes)
         audit.cas += ids_spotify_sans_compteur(c, pistes)
         audit.cas += fiches_sans_participation(c, pistes)
@@ -1882,6 +2085,7 @@ def apres_run(dm, artiste, dossier: Path | None = None) -> tuple[Audit, dict, bo
     audit = auditer(dm, [artiste.name])
     hausse = en_hausse(audit, reference)
     audit.nouveaux = cas_nouveaux(audit, reference)
+    audit.indecidables_avant = indecidables_de(reference)
     if hausse and reference is not None:
         _noter_hausse(audit, hausse, dossier)
     ecrire_reference(audit, artiste.id, dossier)
@@ -1929,4 +2133,23 @@ def resume_fin_de_run(audit: Audit, hausse: dict, avait_reference: bool) -> str:
             lignes.append(f"   {famille} : {avant} → {apres}{suffixe}")
             for cas in (nouveaux or [c for c in audit.cas if c.famille == famille])[:5]:
                 lignes.append(f"      • {cas.libelle}")
+    indecidables = audit.par_nature()[INDECIDABLE]
+    avant = audit.indecidables_avant
+    if avait_reference and avant is not None and indecidables > avant:
+        # Hors critère : ni `en_hausse`, ni le code de sortie — mais rien ne
+        # les plafonnait (31 le 2026-10-31, 55 le 2026-11-09).
+        lignes.append(
+            f"⚠ Indécidables en hausse : {avant} → {indecidables} (hors critère, à regarder)"
+        )
     return "\n".join(lignes)
+
+
+def indecidables_de(reference: dict | None) -> int | None:
+    """Le nombre d'indécidables d'un audit enregistré (`vers_dict`), None sans
+    référence ; une référence d'avant les natures n'en a aucun."""
+    if reference is None:
+        return None
+    par_nature = reference.get("par_nature")
+    if par_nature is not None:
+        return par_nature.get(INDECIDABLE, 0)
+    return sum(1 for c in reference.get("cas", []) if c.get("nature") == INDECIDABLE)

@@ -1042,3 +1042,25 @@ class TestFamillesNues:
         assert len(cas) == 2
         assert "genius crash : CancelledError()" in cas[0]
         assert "lrclib crash : Pas de paroles" in cas[1]
+
+
+def test_date_ancienne_pour_information(data_manager, isha):
+    """2026-11-09 : « Lacrimosa » 1792 (juste), « Suicide » 1861 chez Kanye West
+    (douteux) — montrés avec leurs sources, hors critère."""
+    from src.enrichment.observation import Observation
+
+    a, t = isha
+    recente = Track(title="Récente", artist=a)
+    data_manager.save_track(recente)
+    data_manager.record_discography_observations(
+        t.id, [Observation("release_date", "1861-01-01", "genius")]
+    )
+    data_manager.record_discography_observations(
+        recente.id, [Observation("release_date", "1950-03-01", "deezer")]
+    )
+    audit = au.auditer(data_manager, ["Isha"], revue=False)
+    (cas,) = [c for c in audit.cas if c.famille == "date_ancienne"]
+    assert cas.pistes == [t.id] and cas.nature == au.INFORMATION
+    assert "1861-01-01 (genius 1861-01-01)" in cas.libelle
+    assert "date_ancienne" in au.FAMILLES_HORS_CRITERE
+    assert audit.critere() == 0

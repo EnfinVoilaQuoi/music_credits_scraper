@@ -189,6 +189,7 @@ FAMILLES = {
     "id_spotify_sans_compteur": "ID Spotify posé, aucun compteur (plafond de pages du run)",
     "fiche_sans_participation": "morceau d'un autre sur le disque de l'artiste, hors de ses totaux",
     "lien_jamais_mesure": "lien YouTube sans ligne `track_videos` : vues jamais relevées",
+    "date_ancienne": "date de sortie avant 1950 (juste pour une œuvre ancienne, sinon douteuse)",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
     "soeurs_divergentes": "INVARIANT — lignes sœurs aux valeurs d'enregistrement différentes",
@@ -215,6 +216,7 @@ FAMILLES_HORS_CRITERE = (
     "id_spotify_sans_compteur",
     "fiche_sans_participation",
     "lien_jamais_mesure",
+    "date_ancienne",
 )
 
 #: Les familles dont la cible est zéro (une seule ligne = un défaut de code).
@@ -1540,6 +1542,43 @@ def _ligne_de_couverture(couverture: dict) -> str | None:
     )
 
 
+#: Une date de sortie avant cette année se montre (`dates_anciennes`).
+ANNEE_ANCIENNE = 1950
+_ANNEE = re.compile(r"^(\d{4})")
+
+
+def dates_anciennes(c, pistes) -> list[Cas]:
+    """Une date de sortie avant 1950 (2026-11-09) : juste pour une œuvre
+    ancienne reprise (« Lacrimosa », 1792), douteuse ailleurs (« Suicide (dont
+    wanna die anymore) », 1861, chez Kanye West). Le verdict rend irrecevable
+    une année < 1000 (`reconcile`) ; cette famille montre ce qui reste, avec les
+    sources qui la donnent. Rien à trancher par l'audit : `INFORMATION`."""
+    anciennes = {}
+    for t in pistes:
+        m = _ANNEE.match(str(t["release_date"] or ""))
+        if m and int(m.group(1)) < ANNEE_ANCIENNE:
+            anciennes[t["id"]] = t
+    if not anciennes:
+        return []
+    sources = collections.defaultdict(list)
+    for r in c.execute(
+        "SELECT track_id, source, value FROM observations WHERE field = 'release_date' "
+        "ORDER BY track_id, source"
+    ):
+        if r["track_id"] in anciennes:
+            sources[r["track_id"]].append(f"{r['source']} {r['value']}")
+    return [
+        Cas(
+            "date_ancienne",
+            t["artiste"],
+            [tid],
+            f"{_lib(t)} {t['release_date']} ({', '.join(sources[tid]) or 'sans observation'})",
+            INFORMATION,
+        )
+        for tid, t in sorted(anciennes.items())
+    ]
+
+
 def ecarts_de_schema(db_path) -> list[Cas]:
     from src.persistence.bootstrap import ecarts_au_schema
 
@@ -1654,6 +1693,7 @@ def auditer(
         audit.cas += ids_spotify_sans_compteur(c, pistes)
         audit.cas += fiches_sans_participation(c, pistes)
         audit.cas += liens_jamais_mesures(c, pistes)
+        audit.cas += dates_anciennes(c, pistes)
         audit.couverture_durees = couverture_des_durees(c, pistes)
         if persistance:
             audit.cas += soeurs_divergentes(c, pistes)

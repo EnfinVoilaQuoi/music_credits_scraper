@@ -1218,3 +1218,79 @@ def test_date_ancienne_pour_information(data_manager, isha):
     assert "1861-01-01 (genius 1861-01-01)" in cas.libelle
     assert "date_ancienne" in au.FAMILLES_HORS_CRITERE
     assert audit.critere() == 0
+
+
+class TestDisqueHomonymeParLeProfil:
+    """2026-11-09 : un ID Spotify ne prouve l'artiste d'un disque que si son
+    embed crédite un profil CONNU de l'artiste (simulé : neutre, 22 / 22)."""
+
+    @staticmethod
+    def _p(i, spotify=None):
+        return {
+            "id": i,
+            "artist_id": 1,
+            "artiste": "Anton Serra",
+            "title": f"Piste {i}",
+            "album": "Flute and Piano",
+            "genius_id": None,
+            "spotify_id": spotify,
+        }
+
+    @pytest.mark.parametrize("prouve, cas", [(True, 0), (False, 1)])
+    def test_un_id_ne_suffit_que_s_il_credite_un_profil_connu(self, prouve, cas):
+        pistes = [self._p(0), self._p(1), self._p(2, "x")]
+        assert len(au.disques_homonymes(pistes, lambda aid, sid: prouve)) == cas
+
+    @staticmethod
+    def _embed(*uris):
+        import json as _json
+
+        entity = {
+            "type": "track",
+            "name": "Piste",
+            "artists": [{"name": f"A{u}", "uri": f"spotify:artist:{u}"} for u in uris],
+            "duration": 200000,
+        }
+        data = {"props": {"pageProps": {"state": {"data": {"entity": entity}}}}}
+        return (
+            '<script id="__NEXT_DATA__" type="application/json">' + _json.dumps(data) + "</script>"
+        ).encode()
+
+    def test_juge_par_l_embed_du_brut(self, data_manager, isha):
+        from contextlib import closing
+
+        from src.persistence import brut
+
+        a, _ = isha
+        _sql(data_manager, "UPDATE artists SET spotify_id = 'PROFIL' WHERE id = :a", a=a.id)
+        for sid, uri in (("BON", "PROFIL"), ("AUTRE", "HOMONYME")):
+            brut.consigner(
+                "spotify_embed",
+                f"https://open.spotify.com/embed/track/{sid}",
+                200,
+                self._embed(uri),
+            )
+        brut.fermer()
+        with closing(au._connexion(data_manager.db_path)) as c:
+            juge = au.juge_des_ids_spotify(c)
+            assert juge(a.id, "BON") is True
+            assert juge(a.id, "AUTRE") is False
+            assert juge(a.id, "JAMAIS_LU") is False
+            # Un artiste sans profil connu ne se juge pas à l'URI.
+            assert juge(a.id + 999, "AUTRE") is True
+
+    def test_profil_d_un_alias_confirme(self, data_manager, isha):
+        from contextlib import closing
+
+        a, _ = isha
+        alias = Artist(name="Isha Alias")
+        data_manager.save_artist(alias)
+        _sql(data_manager, "UPDATE artists SET spotify_id = 'ALIAS' WHERE name = 'Isha Alias'")
+        _sql(
+            data_manager,
+            "INSERT INTO artist_relations (artist_id, related_name, kind, status) "
+            "VALUES (:a, 'Isha Alias', 'alias', 'confirmed')",
+            a=a.id,
+        )
+        with closing(au._connexion(data_manager.db_path)) as c:
+            assert "ALIAS" in au.profils_spotify_connus(c)[a.id]

@@ -70,7 +70,7 @@ from src.utils.duree_youtube import (
 )
 from src.utils.lrc_garde import ACCORD_CATALOGUES_S, CATALOGUES_PAR_ID
 from src.utils.participation import SQL_SIGNATURES_DE_DISQUES, sans_participation, signe_son_disque
-from src.utils.title_matching import contains_as_words, meme_album, normalize_title
+from src.utils.title_matching import contains_as_words, meme_album, normalize_name, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
@@ -186,7 +186,7 @@ FAMILLES = {
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
-    "disque_homonyme": "disque d'au moins 3 fiches, aucune avec page Genius ni ID Spotify (homonyme ?)",
+    "disque_homonyme": "disque d'au moins 3 fiches, ni page Genius ni ID Spotify d'un profil connu (homonyme ?)",
     # ── Hors critère (natures `RUN` et `INFORMATION`) ──
     "colonne_sans_provenance": "durée, date, ISRC ou LRC en colonne sans aucune observation",
     "id_spotify_sans_compteur": "ID Spotify posé, aucun compteur (plafond de pages du run)",
@@ -1373,11 +1373,73 @@ def _disque_de_sessions(album: str, fiches) -> bool:
     )
 
 
-def disques_homonymes(pistes) -> list[Cas]:
-    """Un disque dont aucune fiche n'a de page Genius ni d'ID Spotify : posé par
-    le seul Deezer, dont un profil peut mêler deux homonymes. Les données d'un
-    autre artiste, que rien d'autre ne signalait (le flûtiste Anton Serra n'est
-    apparu que par des désaccords de BPM, 22 fiches)."""
+def profils_spotify_connus(c) -> dict[int, set[str]]:
+    """`{artiste: profils Spotify}` connus : le sien (`artists.spotify_id`),
+    ceux que lie MusicBrainz (`artist_spotify_ids`, e53) et celui de ses ALIAS
+    confirmés — ce que le gate d'identité attend
+    (`ArtistRepository.ids_spotify_connus`, alias résolu par son nom normalisé
+    quand le lien n'a pas d'ID)."""
+    connus = collections.defaultdict(set)
+    par_nom = {}
+    for r in c.execute("SELECT id, name, spotify_id FROM artists"):
+        par_nom.setdefault(normalize_name(r["name"]), r["id"])
+        if r["spotify_id"]:
+            connus[r["id"]].add(r["spotify_id"])
+    for r in c.execute("SELECT artist_id, spotify_id FROM artist_spotify_ids"):
+        connus[r["artist_id"]].add(r["spotify_id"])
+    propres = {a: set(ids) for a, ids in connus.items()}
+    for r in c.execute(
+        "SELECT artist_id, related_artist_id, related_name FROM artist_relations "
+        "WHERE kind = 'alias' AND status = 'confirmed'"
+    ):
+        alias = r["related_artist_id"] or par_nom.get(normalize_name(r["related_name"]))
+        connus[r["artist_id"]] |= propres.get(alias, set())
+    return connus
+
+
+def uris_de_l_embed(spotify_id: str, chemin: Path | None = None) -> set[str]:
+    """Les URI d'artistes que l'embed de l'ID crédite, d'après ses lectures
+    gardées dans le brut (`spotify_embed`, lecture seule) ; vide sans lecture."""
+    from src.persistence import brut
+    from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
+
+    uris = set()
+    url = f"https://open.spotify.com/embed/track/{spotify_id}"
+    for corps in brut.corps_gardes("spotify_embed", url, chemin):
+        identite = SpotifyIDScraper._identite_depuis_embed(corps.decode("utf-8", "replace"))
+        uris |= {u for u in (identite or {}).get("artist_ids") or () if u}
+    return uris
+
+
+def juge_des_ids_spotify(c, chemin: Path | None = None):
+    """`(artiste, ID Spotify) → bool` : l'embed de l'ID crédite-t-il un profil
+    CONNU de l'artiste ? Un artiste sans profil connu ne se juge pas à l'URI
+    (comme le gate, `ids_artiste_attendus` vide) : l'ID suffit. Un embed jamais
+    lu ne prouve rien."""
+    connus = profils_spotify_connus(c)
+    cache: dict[str, set[str]] = {}
+
+    def credite_un_profil_connu(artist_id: int, spotify_id: str) -> bool:
+        profils = connus.get(artist_id)
+        if not profils:
+            return True
+        if spotify_id not in cache:
+            cache[spotify_id] = uris_de_l_embed(spotify_id, chemin)
+        return bool(cache[spotify_id] & profils)
+
+    return credite_un_profil_connu
+
+
+def disques_homonymes(pistes, credite_un_profil_connu=None) -> list[Cas]:
+    """Un disque dont aucune fiche n'a de page Genius ni d'ID Spotify qui prouve
+    l'artiste : posé par le seul Deezer, dont un profil peut mêler deux
+    homonymes. Les données d'un autre artiste, que rien d'autre ne signalait (le
+    flûtiste Anton Serra n'est apparu que par des désaccords de BPM, 22 fiches).
+
+    Un ID Spotify ne prouve l'artiste que si son embed crédite un profil connu
+    de l'artiste (`credite_un_profil_connu`, `juge_des_ids_spotify` ; règle du
+    2026-11-09 : un profil Spotify mêle aussi des homonymes). Sans ce juge
+    (appel pur), un ID suffit, comme avant."""
     disques = collections.defaultdict(list)
     for t in pistes:
         if t["album"]:
@@ -1386,7 +1448,16 @@ def disques_homonymes(pistes) -> list[Cas]:
     for (_, album), fiches in sorted(disques.items(), key=lambda x: str(x[0])):
         if len(fiches) < FICHES_MIN_DISQUE_HOMONYME:
             continue
-        if any(f["genius_id"] or f["spotify_id"] for f in fiches):
+        if any(f["genius_id"] for f in fiches):
+            continue
+        if any(
+            f["spotify_id"]
+            and (
+                credite_un_profil_connu is None
+                or credite_un_profil_connu(f["artist_id"], f["spotify_id"])
+            )
+            for f in fiches
+        ):
             continue
         if _disque_de_sessions(album, fiches):
             continue
@@ -1395,7 +1466,7 @@ def disques_homonymes(pistes) -> list[Cas]:
                 "disque_homonyme",
                 fiches[0]["artiste"],
                 [f["id"] for f in fiches],
-                f"« {album} » : {len(fiches)} fiches, aucune avec page Genius ni ID Spotify",
+                f"« {album} » : {len(fiches)} fiches, aucune avec page Genius ni ID Spotify d'un profil connu",
             )
         )
     return cas
@@ -1832,7 +1903,7 @@ def auditer(
         audit.cas += streams(c, par, pages_spotify_lues())
         audit.cas += echecs(c, pistes)
         audit.cas += studio_sur_live(c, pistes)
-        audit.cas += disques_homonymes(pistes)
+        audit.cas += disques_homonymes(pistes, juge_des_ids_spotify(c))
         audit.cas += colonnes_sans_provenance(c, pistes)
         audit.cas += ids_spotify_sans_compteur(c, pistes)
         audit.cas += fiches_sans_participation(c, pistes)

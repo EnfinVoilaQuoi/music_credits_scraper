@@ -65,6 +65,9 @@ COUNTED = BENIGN | FAILURES
 #: sous l'un d'eux ne vaut pas constat d'absence. `indeterminate` en fait partie —
 #: sans signal on ne conclut pas, et encore moins on ne date un constat.
 SANS_REPONSE = FAILURES | {IssueKind.INDETERMINATE}
+#: Détail du verdict `skipped` d'une source que le morceau n'a plus besoin
+#: d'appeler (`source_usage.sans_besoin`) : il solde l'échec suivi du morceau.
+SANS_BESOIN = "sans besoin : données déjà présentes"
 
 
 class SansReponse(Exception):
@@ -129,10 +132,40 @@ def _class_names(exc: BaseException) -> set[str]:
     return {cls.__name__ for cls in type(exc).__mro__}
 
 
-def _from_playwright(names: set[str]) -> IssueKind:
+#: Les erreurs du navigateur qui disent une coupure du RÉSEAU : le DNS, la carte,
+#: la connexion. Un délai dépassé n'en est pas (un défi Cloudflare peut faire
+#: attendre la page). Seul référentiel, partagé avec l'échelle du crawl.
+ERREURS_RESEAU_NAVIGATEUR = (
+    "net::ERR_NAME_NOT_RESOLVED",
+    "net::ERR_INTERNET_DISCONNECTED",
+    "net::ERR_NETWORK_CHANGED",
+    "net::ERR_NETWORK_IO_SUSPENDED",
+    "net::ERR_ADDRESS_UNREACHABLE",
+    "net::ERR_CONNECTION_REFUSED",
+    "net::ERR_CONNECTION_RESET",
+    "net::ERR_CONNECTION_CLOSED",
+    "net::ERR_CONNECTION_ABORTED",
+    "net::ERR_CONNECTION_FAILED",
+    "net::ERR_PROXY_CONNECTION_FAILED",
+)
+
+
+def erreur_reseau_navigateur(exc: BaseException) -> bool:
+    """PUR. Le message de l'erreur du navigateur nomme une coupure réseau."""
+    texte = str(exc)
+    return any(code in texte for code in ERREURS_RESEAU_NAVIGATEUR)
+
+
+def _from_playwright(exc: BaseException, names: set[str]) -> IssueKind:
     # Un timeout Playwright est ambigu (page qui ne vient pas VS sélecteur qui ne
     # matche plus) : on rend TIMEOUT, au scraper de préciser s'il sait lequel.
-    return IssueKind.TIMEOUT if "TimeoutError" in names else IssueKind.CRASH
+    if "TimeoutError" in names:
+        return IssueKind.TIMEOUT
+    # Une coupure réseau n'est pas un process cassé (2026-11-08 : 71 échecs
+    # SongBPM rangés en `crash` pendant une panne DNS).
+    if erreur_reseau_navigateur(exc):
+        return IssueKind.UNREACHABLE
+    return IssueKind.CRASH
 
 
 def _from_requests(names: set[str]) -> IssueKind:
@@ -188,7 +221,7 @@ def classify_exception(
     names = _class_names(exc)
 
     if roots & {"playwright", "patchright"}:
-        return _from_playwright(names)
+        return _from_playwright(exc, names)
     if "requests" in roots:
         return _from_requests(names)
     if "httpx" in roots:

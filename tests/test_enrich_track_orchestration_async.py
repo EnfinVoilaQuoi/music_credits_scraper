@@ -233,6 +233,30 @@ def test_consensus_bpm_saute_songbpm():
     assert track.audio.bpm == 100
 
 
+def test_une_source_sans_besoin_solde_son_echec_suivi(monkeypatch):
+    """Le gate qui saute une source (« not_needed ») le dit au suivi des échecs."""
+    from src.observability import source_usage
+
+    soldes = []
+    monkeypatch.setattr(source_usage, "sans_besoin", lambda s, t: soldes.append((s, t)))
+
+    def _vote_100(name):
+        def inner(track, ctx):
+            ctx.bpm_ballot.add(name, 100)
+            return True
+
+        return inner
+
+    enricher, fakes, _ = _enricher()
+    fakes["reccobeats"]._on_enrich = _vote_100("reccobeats")
+    fakes["getsongbpm"]._on_enrich = _vote_100("getsongbpm")
+    track = _track(key=5, mode=1, duration=200)
+    track.id = 7
+    results = _run(enricher, track)
+    assert results["songbpm"] == "not_needed"
+    assert ("songbpm", 7) in soldes
+
+
 def test_forcer_sans_reponse_n_efface_rien():
     # Voie async : même règle (2026-09-27), voir la jumelle sync.
     calls = []

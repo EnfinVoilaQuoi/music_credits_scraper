@@ -135,6 +135,39 @@ def test_playwright_et_patchright_sont_tous_deux_reconnus(module):
     assert classify(exc=erreur()) == IssueKind.CRASH
 
 
+@pytest.mark.parametrize("module", ["playwright._impl._errors", "patchright._impl._errors"])
+def test_une_coupure_reseau_du_navigateur_est_injoignable(module):
+    """2026-11-08 : `Page.goto: net::ERR_NAME_NOT_RESOLVED` pendant une panne DNS
+    rangeait 71 échecs SongBPM en `crash` (process cassé) au lieu d'injoignable."""
+    erreur = _fausse_classe(module, "Error")
+    coupure = erreur("Page.goto: net::ERR_NAME_NOT_RESOLVED at https://songbpm.com/")
+    assert classify(exc=coupure) == IssueKind.UNREACHABLE
+    ferme = erreur("Target page, context or browser has been closed")
+    assert classify(exc=ferme) == IssueKind.CRASH
+
+
+def test_l_echelle_du_crawl_partage_le_referentiel_reseau():
+    from src.observability.issues import ERREURS_RESEAU_NAVIGATEUR
+    from src.scrapers.crawl4ai_scraper_base import erreur_reseau
+
+    for code in ERREURS_RESEAU_NAVIGATEUR:
+        assert erreur_reseau(Exception(f"Page.goto: {code} at https://x"))
+
+
+def test_une_absence_dementie_garde_le_motif_de_l_echec():
+    """« aucun résultat » derrière une coupure n'est pas une absence : le verdict
+    est l'échec, et son détail celui de l'échec (sinon l'audit le prend pour une
+    absence mal classée)."""
+    from src.observability.source_usage import Observation
+
+    obs = Observation("songbpm")
+    obs.note_attempt(IssueKind.UNREACHABLE, detail="net::ERR_NAME_NOT_RESOLVED")
+    obs.absent("aucun résultat retenu")
+    v = obs.resolve()
+    assert v.issue == IssueKind.UNREACHABLE
+    assert v.detail == "net::ERR_NAME_NOT_RESOLVED"
+
+
 # ── blocked explicite et absence de signal ─────────────────────────────────────
 def test_blocked_explicite_prime():
     assert classify(blocked=True, status_code=200) == IssueKind.BLOCKED

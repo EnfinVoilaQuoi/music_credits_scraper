@@ -82,6 +82,20 @@ class TestSuivi:
         repo.record([_v(neutre, track_id=1)])
         assert [r["track_id"] for r in repo.echecs_suivis()] == [1]
 
+    def test_une_source_sans_besoin_solde_l_echec(self, repo, data_manager):
+        """2026-11-08 : SongBPM, sauté parce que BPM, tonalité et durée sont là,
+        ne répondait plus jamais ; son échec restait suivi à vie (71 lignes)."""
+        from src.observability.issues import SANS_BESOIN
+
+        repo.record([_v(IssueKind.UNREACHABLE, source="songbpm")])
+        repo.record([_v(IssueKind.SKIPPED, source="songbpm", detail="autre motif")])
+        assert len(repo.echecs_suivis()) == 1
+        repo.record([_v(IssueKind.SKIPPED, source="songbpm", detail=SANS_BESOIN)])
+        assert repo.echecs_suivis() == []
+        with data_manager.engine.connect() as conn:
+            constats = conn.execute(text("SELECT COUNT(*) FROM source_track_absences")).scalar()
+        assert constats == 0  # elle n'a rien répondu : aucun constat d'absence
+
     def test_un_verdict_sans_morceau_est_ignore(self, repo):
         repo.record([_v(IssueKind.TIMEOUT, track_id=None)])
         assert repo.echecs_suivis() == []

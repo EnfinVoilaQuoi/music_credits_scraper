@@ -159,6 +159,60 @@ class TestCatalogueDuBrut:
         assert sim.CatalogueDuBrut(None).albums == {}
 
 
+class TestRegleF:
+    def test_identifiants_communs(self):
+        a = {"isrc": {"FR1"}, "spotify": {"s1", "s2"}, "deezer": {"7"}}
+        b = {"isrc": {"FR2"}, "spotify": {"s2"}, "apple": {"9"}}
+        assert sim.identifiants_communs(a, b) == {"spotify": {"s2"}}
+
+    def test_une_duree_lue_par_l_id_partage_ne_corrobore_pas(self):
+        da, db = {"deezer": 200, "spotify_web": 150}, {"deezer": 200, "spotify_web": 180}
+        assert sim.durees_hors_identifiants(da, db, {"deezer": {"7"}}) == (False, 30)
+        assert sim.durees_hors_identifiants(da, db, {}) == (True, 0)
+        assert sim.durees_hors_identifiants(
+            {"deezer": 200}, {"deezer": 200}, {"deezer": {"7"}}
+        ) == (None, None)
+
+    def test_verdict_identifiant(self):
+        assert sim.verdict_f({"isrc": {"FR1"}}, None, True, 0) == "meme_enregistrement"
+        assert sim.verdict_f({"isrc": {"FR1"}}, 0.95, None, None) == "meme_enregistrement"
+        assert sim.verdict_f({"isrc": {"FR1"}}, None, None, None).startswith("indécidable")
+        assert sim.verdict_f({"isrc": {"FR1"}}, 0.95, False, 40).startswith("identifiant démenti")
+
+    def test_verdict_paroles(self):
+        assert sim.verdict_f({}, 0.95, True, 1) == "meme_enregistrement (paroles + durée)"
+        assert sim.verdict_f({}, 0.95, False, 60).startswith("information")
+        assert sim.verdict_f({}, 0.95, None, None).startswith("indécidable")
+        assert sim.verdict_f({}, 0.5, True, 0) is None
+        assert sim.verdict_f({}, None, True, 0) is None
+
+    @pytest.mark.parametrize(
+        ("a", "b", "rapproches"),
+        [
+            ("Ok Ok", "Ok Ok (Radio Edit)", True),
+            ("A + B", "B", True),
+            ("DCR (Dolce Camara Remix)", "Dolce Camara (Snight B Remix)", False),
+            ("Be Eazy", "Be Easy", False),
+        ],
+    )
+    def test_rapproches_par_le_juge(self, a, b, rapproches):
+        assert sim._rapproches_par_le_juge(a, b) is rapproches
+
+    def test_paires_par_paroles(self):
+        texte = " ".join(f"mot{i} suite{i}" for i in range(60))
+        autre = " ".join(f"autre{i} chose{i}" for i in range(60))
+        fiches = [{"id": 1}, {"id": 2}, {"id": 3}]
+        paires = sim._paires_par_paroles(fiches, {1: texte, 2: texte + " fin", 3: autre})
+        assert paires == {frozenset((1, 2))}
+
+
+def test_pages_desactivees(tmp_path):
+    (tmp_path / "x_disabled.json").write_text(json.dumps({"disabled_track_ids": [4, "5"]}), "utf-8")
+    (tmp_path / "y_disabled.json").write_text("{illisible", "utf-8")
+    assert sim.pages_desactivees(tmp_path) == {4, 5}
+    assert sim.pages_desactivees(tmp_path / "absent") == set()
+
+
 def test_accord_des_durees():
     assert sim._accord({"deezer": 200}, {"spotify_web": 202}) == (
         True,

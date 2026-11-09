@@ -12,6 +12,7 @@ from src.api.getsongbpm_api import GetSongBPMFetcher
 from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 from src.concurrency.serial_worker import SerialWorker
 from src.models import Track
+from src.observability import source_usage
 from src.utils.bpm_vote import BpmBallot
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_title
@@ -488,6 +489,9 @@ class DataEnricher:
         verdict = provider.gate(track, ctx)
         if verdict is not None:
             results[name] = verdict
+            if verdict == "not_needed":
+                # Plus rien à apporter : l'échec suivi de la source est soldé.
+                source_usage.sans_besoin(name, track.id)
             return
 
         try:

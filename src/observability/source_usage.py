@@ -28,6 +28,7 @@ from datetime import datetime
 
 from src.observability.issues import (
     DEFAULT_ABSENT_STATUSES,
+    SANS_BESOIN,
     SANS_REPONSE,
     IssueKind,
     SansReponse,
@@ -218,6 +219,13 @@ class Observation:
             # Sauf absence déclarée sur une réponse qui couvre les précédentes.
             repondu = self._absence_repondue or pire in (None, IssueKind.OK, IssueKind.ABSENT)
             issue = IssueKind.ABSENT if repondu else pire
+            if not repondu:
+                # L'échec dit pourquoi : garder « aucun résultat » le ferait lire
+                # comme une absence mal classée (`echec_mal_classe`, 2026-11-08).
+                detail = next(
+                    (a.detail for a in reversed(counted) if a.kind == pire and a.detail),
+                    detail,
+                )
         elif self._declared is not None:
             issue = self._declared
         elif pire is None:
@@ -521,6 +529,25 @@ def a_repondu(obs: Observation) -> bool:
     de mémoriser une absence (cache négatif, date de constat) : un « rien » rendu
     sur une panne ne se mémorise pas. Verdict provisoire, jamais émis."""
     return (obs.verdict or obs.resolve()).issue not in SANS_REPONSE
+
+
+def sans_besoin(source_key: str, track_id: int | None) -> None:
+    """La source n'est plus appelée pour ce morceau : ce qu'elle apporterait est
+    déjà là. Son échec suivi n'a plus d'objet ; sans ce verdict, il restait à
+    jamais (le morceau, relu « en échec », sautait la source à chaque run : 71
+    échecs SongBPM de la coupure du 2026-11-08)."""
+    if track_id is None:
+        return
+    _emit(
+        Verdict(
+            source_key=source_key,
+            issue=IssueKind.SKIPPED,
+            flow=current_flow(),
+            artist_id=current_artist_id(),
+            track_id=track_id,
+            detail=SANS_BESOIN,
+        )
+    )
 
 
 def note_failure(source_key: str | None, exc: BaseException, *, detail: str = "") -> None:

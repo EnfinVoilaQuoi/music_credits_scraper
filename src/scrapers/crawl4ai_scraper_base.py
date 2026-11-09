@@ -23,7 +23,7 @@ from crawl4ai import BrowserConfig
 from src.concurrency import async_loop
 from src.config import DATA_PATH, settings
 from src.observability import source_usage
-from src.observability.issues import IssueKind, classify
+from src.observability.issues import IssueKind, classify, erreur_reseau_navigateur
 from src.utils.logger import get_logger
 
 # patchright (undetected Chromium) est importé en lazy dans _patchright_fetch : on
@@ -733,29 +733,12 @@ _PREMIER_PLAN_APRES_S = 15
 #: Hors de tout écran, même à gauche d'un écran principal (coordonnées négatives).
 _POSITION_HORS_ECRAN = "--window-position=-10000,-10000"
 
-#: Les erreurs du navigateur qui disent une coupure du RÉSEAU, jamais un défi :
-#: le DNS, la carte, la connexion. Un délai dépassé n'en est pas (un défi peut
-#: faire attendre la page).
-_ERREURS_RESEAU = (
-    "net::ERR_NAME_NOT_RESOLVED",
-    "net::ERR_INTERNET_DISCONNECTED",
-    "net::ERR_NETWORK_CHANGED",
-    "net::ERR_NETWORK_IO_SUSPENDED",
-    "net::ERR_ADDRESS_UNREACHABLE",
-    "net::ERR_CONNECTION_REFUSED",
-    "net::ERR_CONNECTION_RESET",
-    "net::ERR_CONNECTION_CLOSED",
-    "net::ERR_CONNECTION_ABORTED",
-    "net::ERR_CONNECTION_FAILED",
-    "net::ERR_PROXY_CONNECTION_FAILED",
-)
-
 
 def erreur_reseau(exc: BaseException) -> bool:
     """PUR. L'erreur du navigateur dit une coupure réseau : la page n'est pas venue,
-    aucune fenêtre visible n'y changera rien."""
-    texte = str(exc)
-    return any(code in texte for code in _ERREURS_RESEAU)
+    aucune fenêtre visible n'y changera rien. Le référentiel est celui du
+    classement des verdicts (`issues.erreur_reseau_navigateur`)."""
+    return erreur_reseau_navigateur(exc)
 
 
 class _BrowserSession:

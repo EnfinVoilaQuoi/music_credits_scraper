@@ -23,7 +23,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.observability.issues import BENIGN, FAILURES, IssueKind
+from src.observability.issues import BENIGN, FAILURES, SANS_BESOIN, IssueKind
 
 #: Nombre d'échecs conservés PAR SOURCE — plafond dur d'environ 800 lignes.
 FAILURE_WINDOW = 50
@@ -162,7 +162,8 @@ class SourceUsageRepository:
     def suivre_morceaux(self, verdicts: Sequence[Any]) -> None:
         """Tient `source_track_failures` : un échec de communication pose ou met à
         jour la ligne (morceau, source), une RÉPONSE de la source (`ok`,
-        `absent`) la retire. Les autres natures ne touchent à rien.
+        `absent`) la retire, comme un `skipped` « sans besoin » (la source n'a
+        plus rien à apporter au morceau). Les autres natures ne touchent à rien.
 
         Seuls les verdicts portant un morceau comptent — un appel `hors_morceau`
         (artiste, disque, lot) n'y entre jamais et n'en efface jamais rien. Les
@@ -172,7 +173,8 @@ class SourceUsageRepository:
         lot = [
             v
             for v in verdicts
-            if v.track_id is not None and (v.issue in FAILURES or v.issue in BENIGN)
+            if v.track_id is not None
+            and (v.issue in FAILURES or v.issue in BENIGN or _sans_besoin(v))
         ]
         if not lot:
             return
@@ -180,6 +182,17 @@ class SourceUsageRepository:
             with self.engine.begin() as conn:
                 for v in lot:
                     cle = {"tid": v.track_id, "src": v.source_key}
+                    if _sans_besoin(v):
+                        # La source n'a plus rien à apporter : l'échec est soldé,
+                        # sans constat d'absence (elle n'a rien répondu).
+                        conn.execute(
+                            text(
+                                "DELETE FROM source_track_failures "
+                                "WHERE track_id = :tid AND source_key = :src"
+                            ),
+                            cle,
+                        )
+                        continue
                     if v.issue in BENIGN:
                         conn.execute(
                             text(
@@ -542,6 +555,11 @@ def _aggregate(verdicts: Sequence[Any]) -> list[DailyCounter]:
         counter.last_seen = _isoformat(moment)
 
     return list(groupes.values())
+
+
+def _sans_besoin(v) -> bool:
+    """Le verdict d'une source que le morceau n'a plus besoin d'appeler."""
+    return v.issue == IssueKind.SKIPPED and v.detail == SANS_BESOIN
 
 
 def _isoformat(moment) -> str:

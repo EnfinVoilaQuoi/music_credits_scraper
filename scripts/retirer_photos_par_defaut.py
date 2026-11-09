@@ -22,16 +22,7 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from src.config import ARTIST_IMAGES_DIR, IMAGES_DIR
-from src.utils.image_downloader import IMAGE_EXTENSIONS, est_image_par_defaut
-
-
-def silhouettes(dossier: Path) -> list[Path]:
-    """Les fichiers du dossier qui sont l'image par défaut d'une source, triés."""
-    return sorted(
-        p
-        for p in dossier.iterdir()
-        if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS and est_image_par_defaut(p)
-    )
+from src.utils.image_downloader import images_par_defaut as silhouettes
 
 
 def artistes_sur_silhouette(dm, fichiers: list[Path]) -> list[tuple[int, str]]:

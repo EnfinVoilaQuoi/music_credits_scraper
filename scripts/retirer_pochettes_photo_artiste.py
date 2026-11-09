@@ -19,46 +19,15 @@ cherchera la pochette Deezer.
 """
 
 import argparse
-import hashlib
-import json
-import sqlite3
 import sys
-import zlib
-from collections import defaultdict
-from contextlib import closing
 from pathlib import Path
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from src.api.genius_api import GeniusAPI
 from src.config import IMAGES_DIR
 from src.persistence import brut
-from src.utils.image_downloader import cover_image_path, existing_image
-
-
-def pages_a_photo(chemin_brut: Path) -> set[int]:
-    """Les pages Genius dont la « pochette » est la photo d'un artiste crédité."""
-    pages: set[int] = set()
-    vues: set[str] = set()
-    with closing(sqlite3.connect(f"file:{chemin_brut}?mode=ro", uri=True)) as conn:
-        lignes = conn.execute(
-            "SELECT requete, corps FROM brut WHERE source = 'genius_api' "
-            "AND requete LIKE 'https://api.genius.com/songs/%'"
-        )
-        for requete, corps in lignes:
-            page = requete.split("/songs/", 1)[1].split("?", 1)[0]
-            if page in vues or not page.isdigit():
-                continue
-            try:
-                song = json.loads(zlib.decompress(corps))["response"]["song"]
-            except (zlib.error, ValueError, KeyError, TypeError):
-                continue
-            vues.add(page)
-            art = song.get("song_art_image_url")
-            if art and art in GeniusAPI._photos_des_artistes(song):
-                pages.add(int(page))
-    return pages
+from src.utils.pochettes_photo import pages_a_photo, pochettes_a_photo
 
 
 def candidats(dm, pages: set[int]) -> tuple[list[Path], list[Path]]:
@@ -73,21 +42,8 @@ def candidats(dm, pages: set[int]) -> tuple[list[Path], list[Path]]:
             .join(artists, artists.c.id == tracks.c.artist_id)
             .where(tracks.c.genius_id.in_(sorted(pages)), tracks.c.album.is_(None))
         ).fetchall()
-    pages_par_fichier: dict[Path, set[int]] = defaultdict(set)
-    for nom, titre, page in lignes:
-        fichier = existing_image(cover_image_path(nom, titre))
-        if fichier:
-            pages_par_fichier[fichier].add(page)
-    pages_par_contenu: dict[str, set[int]] = defaultdict(set)
-    empreintes = {}
-    for fichier, pages_du_fichier in pages_par_fichier.items():
-        empreintes[fichier] = hashlib.sha256(fichier.read_bytes()).hexdigest()
-        pages_par_contenu[empreintes[fichier]] |= pages_du_fichier
-    prouves, laisses = [], []
-    for fichier in sorted(pages_par_fichier):
-        partage = len(pages_par_contenu[empreintes[fichier]]) > 1
-        (prouves if partage or fichier.suffix.lower() != ".jpg" else laisses).append(fichier)
-    return prouves, laisses
+    prouves, laisses = pochettes_a_photo(lignes)
+    return sorted(prouves), sorted(laisses)
 
 
 def main(argv: list[str] | None = None) -> int:

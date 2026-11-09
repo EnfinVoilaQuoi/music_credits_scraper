@@ -73,6 +73,16 @@ def est_image_par_defaut(path: Path) -> bool:
     return empreinte in IMAGES_PAR_DEFAUT_SHA256 or _ressemble_a_la_silhouette(path)
 
 
+def images_par_defaut(dossier: Path) -> list[Path]:
+    """Les fichiers du dossier qui sont l'image par défaut d'une source, triés
+    (`scripts/retirer_photos_par_defaut.py`, famille d'audit `photo_par_defaut`)."""
+    return sorted(
+        p
+        for p in Path(dossier).iterdir()
+        if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS and est_image_par_defaut(p)
+    )
+
+
 def _ressemble_a_la_silhouette(path: Path) -> bool:
     """Le fichier est-il la silhouette Deezer, quel que soit son encodage ?"""
     try:

@@ -39,6 +39,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from src.config import IMAGES_DIR
 from src.services import vues_comptees
 from src.services.revue import (
     DECISION,
@@ -197,6 +198,7 @@ FAMILLES = {
     "fiche_sans_participation": "morceau d'un autre sur le disque de l'artiste, hors de ses totaux",
     "lien_jamais_mesure": "lien YouTube sans ligne `track_videos` : vues jamais relevées",
     "date_ancienne": "date de sortie avant 1950 (juste pour une œuvre ancienne, sinon douteuse)",
+    "pochette_photo": "pochette d'un morceau isolé qui serait la photo d'un artiste crédité (Genius)",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
     "soeurs_divergentes": "INVARIANT — lignes sœurs aux valeurs d'enregistrement différentes",
@@ -206,6 +208,8 @@ FAMILLES = {
     "isrc_edition_autre_fiche": "INVARIANT — ISRC d'une édition = celui d'une AUTRE fiche",
     "spotify_principal": "INVARIANT — ID Spotify principal sans sa ligne `track_spotify_ids` principale",
     "credit_doublon": "INVARIANT — crédit YouTube qui redit un crédit déjà porté, ou nom composé",
+    "tete_fabriquee": "INVARIANT — tête de section des paroles nommée à tort (« [Couplet 1 : <ligne>] »)",
+    "photo_par_defaut": "INVARIANT — silhouette Deezer gardée comme photo d'artiste ou de personne",
 }
 
 #: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
@@ -224,6 +228,7 @@ FAMILLES_HORS_CRITERE = (
     "fiche_sans_participation",
     "lien_jamais_mesure",
     "date_ancienne",
+    "pochette_photo",
 )
 
 #: Les familles dont la cible est zéro (une seule ligne = un défaut de code).
@@ -236,6 +241,8 @@ INVARIANTS = (
     "isrc_edition_autre_fiche",
     "spotify_principal",
     "credit_doublon",
+    "tete_fabriquee",
+    "photo_par_defaut",
 )
 
 _FEAT = re.compile(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", re.IGNORECASE)
@@ -1571,6 +1578,97 @@ class _LigneDeCredit:
     source: str | None
 
 
+def tetes_fabriquees(c, pistes) -> list[Cas]:
+    """Une tête de section des paroles à laquelle le scraper a ajouté à tort
+    « : <artiste de la ligne> » (« [Couplet 1 : Booba] » sur « Fenwick » de
+    Niro ; 379 noms faux réparés le 2026-11-07). Le juge est celui du
+    rattrapage (`utils.tetes_de_paroles`, `scripts/corriger_tetes_de_paroles.py`),
+    appelé SANS le brut : seul le témoin `pas_interprete` (la ligne n'est pas
+    un feat, le principal est un autre, la page ne nomme que la ligne), juste
+    50 fois sur 50 là où le brut départageait. Le témoin du brut (~1 min de
+    BeautifulSoup sur toute la base) reste au script.
+
+    Le juge lit la FAMILLE (lignes sœurs) pour connaître l'interprète : on lit
+    donc toutes les lignes des pages de `pistes`, mais on ne compte que les
+    leurs."""
+    from src.utils.tetes_de_paroles import (
+        COLONNES_DES_FICHES,
+        FICHES_A_TETES,
+        fiche_depuis,
+        planifier,
+    )
+
+    fiches = {t["id"]: t for t in pistes}
+    pages = {t["genius_id"] for t in pistes if t["genius_id"]}
+    # Lire les paroles de toute la base coûte ~11 s : un audit par artiste ne
+    # lit que ses lignes et leurs sœurs (table temporaire : pas de limite au
+    # nombre de paramètres).
+    c.execute("CREATE TEMP TABLE IF NOT EXISTS _audit_ids (id INTEGER, page INTEGER)")
+    c.execute("DELETE FROM _audit_ids")
+    c.executemany("INSERT INTO _audit_ids (id) VALUES (?)", [(i,) for i in fiches])
+    c.executemany("INSERT INTO _audit_ids (page) VALUES (?)", [(p,) for p in pages])
+    lues = [
+        fiche_depuis(r)
+        for r in c.execute(
+            f"SELECT {COLONNES_DES_FICHES} FROM tracks t JOIN artists a ON a.id = t.artist_id "
+            f"WHERE {FICHES_A_TETES} AND (t.id IN (SELECT id FROM _audit_ids) "
+            "OR t.genius_id IN (SELECT page FROM _audit_ids))"
+        )
+    ]
+    cas = []
+    for fiche, _, changements in planifier(lues, {}).plans:
+        if fiche.id not in fiches:
+            continue
+        premier = changements[0]
+        de_plus = f" (+{len(changements) - 1})" if len(changements) > 1 else ""
+        cas.append(
+            Cas(
+                "tete_fabriquee",
+                fiches[fiche.id]["artiste"],
+                [fiche.id],
+                f"{_lib(fiches[fiche.id])} {premier.ancienne} → {premier.nouvelle}{de_plus}",
+            )
+        )
+    return cas
+
+
+#: Le dossier des images (`config.IMAGES_DIR`) ; les tests l'isolent.
+DOSSIER_IMAGES = IMAGES_DIR
+
+
+def photos_par_defaut(
+    c, artistes: list[int] | None, *, images: Path | None = None, dossier_entier: bool = False
+) -> list[Cas]:
+    """Une silhouette grise de Deezer gardée comme photo (545 fichiers sur
+    6 228 le 2026-11-03). Le juge est celui du téléchargement, qui la refuse
+    depuis (`image_downloader.est_image_par_defaut` : empreinte, sinon l'image
+    en 8 × 8 — silhouettes à 1 au plus, la photo la plus proche à 13).
+
+    Toujours : la photo de profil des `artistes` (`artists.image_path`, None =
+    tous), une fraction de seconde. `dossier_entier` : aussi les photos des
+    invités et producteurs, qui n'ont pas de ligne (le FICHIER fait l'état) —
+    ~1 min pour ~5 700 fichiers, donc sur la base entière seulement."""
+    from src.utils.image_downloader import est_image_par_defaut, images_par_defaut
+
+    images = Path(images or DOSSIER_IMAGES)
+    sql = "SELECT id, name, image_path FROM artists WHERE image_path IS NOT NULL"
+    if artistes is not None:
+        sql += f" AND id IN ({','.join('?' * len(artistes))})"
+    cas, vus = [], set()
+    for r in c.execute(sql, artistes or []):
+        fichier = images / r["image_path"]
+        vus.add(fichier.resolve())
+        if est_image_par_defaut(fichier):
+            cas.append(Cas("photo_par_defaut", r["name"], [], f"photo de profil {r['image_path']}"))
+    if dossier_entier and (images / "artistes").is_dir():
+        cas += [
+            Cas("photo_par_defaut", "—", [], f"photo de personne {f.name}")
+            for f in images_par_defaut(images / "artistes")
+            if f.resolve() not in vus
+        ]
+    return cas
+
+
 # ── Ce qu'aucune autre famille ne voit (hors critère) ─────────────────────────
 
 #: Colonnes dérivées dont le champ d'observation porte le même nom.
@@ -1749,6 +1847,40 @@ ANNEE_ANCIENNE = 1950
 _ANNEE = re.compile(r"^(\d{4})")
 
 
+def pochettes_photo(c, pistes, chemin_brut: Path | None = None) -> list[Cas]:
+    """La pochette d'un morceau isolé que Genius servait comme photo d'un
+    artiste crédité (`media_enricher` la gardait jusqu'au 2026-11-03 ;
+    `_extract_song_art` l'écarte depuis). Le juge est celui du rattrapage
+    (`utils.pochettes_photo`, `scripts/retirer_pochettes_photo_artiste.py`).
+
+    `INFORMATION`, pas un invariant : le juge n'est pas sûr. Ses 5 cas du
+    2026-11-10 (Mac Miller, Swift Guad) sont des fichiers téléchargés APRÈS le
+    correctif, où la photo de l'artiste est la pochette d'un de ses disques ;
+    les 3 PNG de Mac Miller ont trois tailles pour UNE adresse de photo.
+    Lit tout le brut Genius (~6 s) : base entière seulement."""
+    from src.persistence import brut
+    from src.utils.pochettes_photo import pages_a_photo, pochettes_a_photo
+
+    pages = pages_a_photo(chemin_brut or brut.CHEMIN)
+    isoles = [
+        (t["artiste"], t["title"], t["genius_id"], t)
+        for t in pistes
+        if t["genius_id"] in pages and t["album"] is None
+    ]
+    prouves, _ = pochettes_a_photo(isoles, DOSSIER_IMAGES / "covers")
+    return [
+        Cas(
+            "pochette_photo",
+            ligne[0],
+            [ligne[3]["id"]],
+            f"{_lib(ligne[3])} {fichier.name}",
+            INFORMATION,
+        )
+        for fichier, lignes in prouves.items()
+        for ligne in lignes
+    ]
+
+
 def dates_anciennes(c, pistes) -> list[Cas]:
     """Une date de sortie avant 1950 (2026-11-09) : juste pour une œuvre
     ancienne reprise (« Lacrimosa », 1792), douteuse ailleurs (« Suicide (dont
@@ -1897,6 +2029,9 @@ def auditer(
         audit.cas += fiches_sans_participation(c, pistes)
         audit.cas += liens_jamais_mesures(c, pistes)
         audit.cas += dates_anciennes(c, pistes)
+        if not noms:
+            # Tout le brut Genius (~6 s) : base entière seulement.
+            audit.cas += pochettes_photo(c, pistes)
         audit.couverture_durees = couverture_des_durees(c, pistes)
         if persistance:
             audit.cas += soeurs_divergentes(c, pistes)
@@ -1904,6 +2039,9 @@ def auditer(
             audit.cas += isrc_d_une_autre_fiche(c, pistes)
             audit.cas += ids_spotify_principaux_desalignes(c, pistes)
             audit.cas += credits_en_double(c, pistes)
+            audit.cas += tetes_fabriquees(c, pistes)
+            # Le dossier des photos de personnes (~1 min) : base entière seule.
+            audit.cas += photos_par_defaut(c, artistes, dossier_entier=not noms)
             if not noms:
                 audit.cas += orphelins(c)
         if not noms:

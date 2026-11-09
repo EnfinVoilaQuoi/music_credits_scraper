@@ -1339,3 +1339,122 @@ def test_instrumental_lrc_juge_le_titre_comme_le_constat(titre, cas):
         "lyrics_synced_source": "lrclib",
     }
     assert len(au.instrumentaux([piste])) == cas
+
+
+class TestTeteFabriquee:
+    """2026-11-07 : le scraper ajoutait « : <artiste de la ligne> » aux têtes
+    de section (« [Couplet 1 : Booba] » sur « Fenwick » de Niro). L'invariant
+    appelle le juge du rattrapage (`utils.tetes_de_paroles`), sans le brut."""
+
+    def _paroles(self, dm, t, paroles, principal="Niro", feat=False):
+        _sql(
+            dm,
+            "UPDATE tracks SET lyrics = :p, lyrics_source = 'genius', "
+            "primary_artist_name = :pr, is_featuring = :f WHERE id = :t",
+            p=paroles,
+            pr=principal,
+            f=feat,
+            t=t.id,
+        )
+
+    def test_le_nom_de_la_ligne_ajoute_a_la_tete_d_un_autre(self, data_manager, isha):
+        _, t = isha
+        self._paroles(data_manager, t, "[Couplet 1 : Isha]\nun\n[Refrain : Isha]\ndeux")
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        (cas,) = [c for c in audit.cas if c.famille == "tete_fabriquee"]
+        assert cas.pistes == [t.id] and cas.nature == au.ERREUR
+        assert "[Couplet 1 : Isha] → [Couplet 1 : Niro] (+1)" in cas.libelle
+        assert "tete_fabriquee" in au.INVARIANTS
+
+    def test_une_page_qui_nomme_elle_meme_les_interpretes(self, data_manager, isha):
+        """« [Couplet 2 : Niro] » : la page attribue elle-même, rien à dire."""
+        _, t = isha
+        self._paroles(data_manager, t, "[Couplet 1 : Isha]\nun\n[Couplet 2 : Niro]\ndeux")
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        assert not [c for c in audit.cas if c.famille == "tete_fabriquee"]
+
+    def test_un_feat_nomme_a_sa_tete(self, data_manager, isha):
+        _, t = isha
+        self._paroles(data_manager, t, "[Couplet 1 : Isha]\nun", feat=True)
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        assert not [c for c in audit.cas if c.famille == "tete_fabriquee"]
+
+
+class TestPhotoParDefaut:
+    """2026-11-03 : 545 silhouettes grises de Deezer gardées comme photos.
+    L'invariant appelle le juge du téléchargement (`est_image_par_defaut`)."""
+
+    @staticmethod
+    def _image(chemin, silhouette):
+        from PIL import Image
+
+        from src.utils.image_downloader import _SILHOUETTE_8X8
+
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        image = Image.new("L", (8, 8))
+        if silhouette:
+            image.putdata([v for ligne in _SILHOUETTE_8X8 for v in ligne])
+        image.save(chemin)
+
+    def test_photo_de_profil_et_photo_de_personne(self, data_manager, isha):
+        a, _ = isha
+        images = au.DOSSIER_IMAGES
+        self._image(images / "artistes" / "Isha.png", silhouette=True)
+        self._image(images / "artistes" / "Laylow.png", silhouette=True)
+        self._image(images / "artistes" / "Niro.png", silhouette=False)
+        data_manager.set_artist_image_path(a.id, "artistes/Isha.png")
+
+        par_artiste = au.auditer(data_manager, ["Isha"], revue=False)
+        (cas,) = [c for c in par_artiste.cas if c.famille == "photo_par_defaut"]
+        assert cas.artiste == "Isha" and "artistes/Isha.png" in cas.libelle
+
+        base = au.auditer(data_manager, revue=False)
+        libelles = sorted(c.libelle for c in base.cas if c.famille == "photo_par_defaut")
+        assert libelles == ["photo de personne Laylow.png", "photo de profil artistes/Isha.png"]
+        assert "photo_par_defaut" in au.INVARIANTS
+
+    def test_une_vraie_photo_n_est_rien(self, data_manager, isha):
+        a, _ = isha
+        self._image(au.DOSSIER_IMAGES / "artistes" / "Isha.png", silhouette=False)
+        data_manager.set_artist_image_path(a.id, "artistes/Isha.png")
+        audit = au.auditer(data_manager, revue=False)
+        assert not [c for c in audit.cas if c.famille == "photo_par_defaut"]
+
+
+class TestPochettePhoto:
+    """2026-11-03 : Genius sert la photo d'un artiste crédité comme pochette
+    d'un morceau sans pochette. Juge du rattrapage, pas sûr : pour information,
+    sur la base entière seulement."""
+
+    @staticmethod
+    def _page(page, art, photo):
+        from src.persistence import brut
+
+        song = {"id": page, "song_art_image_url": art, "primary_artist": {"image_url": photo}}
+        corps = json.dumps({"response": {"song": song}}).encode()
+        brut.consigner("genius_api", f"https://api.genius.com/songs/{page}", 200, corps)
+        brut.fermer()
+
+    def test_photo_de_l_artiste_en_png(self, data_manager, isha):
+        from src.utils.image_downloader import cover_image_path
+
+        a, t = isha
+        autre = Track(title="Ailleurs", artist=a)
+        autre.genius_id = 4343
+        data_manager.save_track(autre)
+        self._page(4242, "https://g/photo.png", "https://g/photo.png")
+        self._page(4343, "https://g/pochette.png", "https://g/photo.png")
+        for titre in ("Durag", "Ailleurs"):
+            fichier = au.DOSSIER_IMAGES / "covers" / cover_image_path("Isha", titre).name
+            fichier = fichier.with_suffix(".png")
+            fichier.parent.mkdir(parents=True, exist_ok=True)
+            fichier.write_bytes(titre.encode())
+
+        base = au.auditer(data_manager, revue=False)
+        (cas,) = [c for c in base.cas if c.famille == "pochette_photo"]
+        assert cas.pistes == [t.id] and cas.nature == au.INFORMATION
+        assert "Isha - Durag.png" in cas.libelle
+        assert "pochette_photo" in au.FAMILLES_HORS_CRITERE and base.critere() == 0
+
+        par_artiste = au.auditer(data_manager, ["Isha"], revue=False)
+        assert not [c for c in par_artiste.cas if c.famille == "pochette_photo"]

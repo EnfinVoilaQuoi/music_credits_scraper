@@ -440,6 +440,12 @@ def resoudre_date_de_sortie(observations: list, ordre=None) -> Resolution | None
     if manual is not None:
         return Resolution("release_date", manual.value, MANUAL_SOURCE)
 
+    # Une année avant l'an 1000 n'est pas une sortie : Genius sert tel quel ce
+    # qu'un contributeur a saisi (« 0011-04-24 », « 0001-01-10 », mesuré dans
+    # le brut le 2026-11-09). Irrecevable ici, dans le VERDICT, pour que le
+    # recalcul rattrape les fiches déjà écrites ; la colonne suit alors la
+    # meilleure autre observation, ou se vide.
+    observations = [o for o in observations if _dates.recevable(o.value)]
     reelles = [o for o in observations if o.source != LEGACY_SOURCE and _dates.precision(o.value)]
     if not reelles:
         legacy = [o for o in observations if o.value is not None]

@@ -67,6 +67,46 @@ def test_a_blanc_ne_garde_pas_le_verrou_entre_deux_fiches(data_manager, monkeypa
     assert _col(data_manager, t.id, "spotify_streams") is None
 
 
+def test_une_date_a_l_annee_absurde_deja_ecrite_est_rattrapee(data_manager):
+    """2026-11-09 : « 0011-04-24 » (Genius) posée avant la règle ; le recalcul
+    la remplace par la meilleure autre observation, ou vide la colonne."""
+    a = Artist(name="Kaishakuninja")
+    a.id = data_manager.save_artist(a)
+    seule = Track(title="KAVKAZ DRILL", artist=a)
+    data_manager.save_track(seule)
+    avec = Track(title="Libre Maintenant", artist=a)
+    data_manager.save_track(avec)
+    with data_manager.engine.begin() as conn:
+        data_manager._upsert_observations(
+            conn,
+            seule.id,
+            [
+                Observation("release_date", "0011-04-24", "genius"),
+                Observation("release_date", "0011-04-24 00:00:00", "legacy"),
+            ],
+        )
+        data_manager._upsert_observations(
+            conn,
+            avec.id,
+            [
+                Observation("release_date", "0001-01-10", "genius"),
+                Observation("release_date", "2009-03-02", "deezer"),
+            ],
+        )
+        conn.execute(
+            text("UPDATE tracks SET release_date = '0011-04-24' WHERE id = :t"), {"t": seule.id}
+        )
+        conn.execute(
+            text("UPDATE tracks SET release_date = '0001-01-10' WHERE id = :t"), {"t": avec.id}
+        )
+    changements = data_manager.rematerialiser([seule.id, avec.id])
+    assert changements[seule.id]["release_date"] == ("0011-04-24", None)
+    assert changements[avec.id]["release_date"] == ("0001-01-10", "2009-03-02")
+    data_manager.rematerialiser([seule.id, avec.id], appliquer=True)
+    assert _col(data_manager, seule.id, "release_date") is None
+    assert str(_col(data_manager, avec.id, "release_date"))[:10] == "2009-03-02"
+
+
 def test_appliquer_recale_toutes_les_colonnes_et_est_idempotent(data_manager):
     t = _fiche_decalee(data_manager)
     data_manager.rematerialiser([t.id], appliquer=True)

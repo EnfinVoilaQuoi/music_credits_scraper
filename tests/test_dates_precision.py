@@ -153,6 +153,59 @@ class TestResolveur:
         assert verdict.value == "2018-05-14"
 
 
+class TestAnneeAbsurde:
+    """2026-11-09 : Genius sert tel quel « 0011-04-24 » (KAVKAZ DRILL),
+    « 0001-01-10 » (Libre Maintenant) — saisies de contributeurs, lues dans le
+    brut. Une année avant 1000 est irrecevable dans le VERDICT."""
+
+    @pytest.mark.parametrize(
+        ("valeur", "attendu"),
+        [
+            ("0011-04-24", False),
+            ("0001", False),
+            ("0020-02", False),
+            ("0999-12-31 00:00:00", False),
+            (datetime(13, 1, 29), False),
+            ("1000", True),
+            ("1792-12-05", True),
+            ("2031-01-01", True),
+            (None, True),
+            ("pas une date", True),
+        ],
+    )
+    def test_recevable(self, valeur, attendu):
+        assert dates.recevable(valeur) is attendu
+
+    def test_la_colonne_suit_la_meilleure_autre_observation(self):
+        verdict = resoudre_date_de_sortie(
+            [
+                Observation("release_date", "0011-04-24", "genius"),
+                Observation("release_date", "2021-04-24", "deezer"),
+            ]
+        )
+        assert verdict.value == "2021-04-24" and verdict.source == "deezer"
+
+    def test_seule_elle_ne_donne_rien_meme_avec_legacy(self):
+        assert (
+            resoudre_date_de_sortie(
+                [
+                    Observation("release_date", "0011-04-24", "genius"),
+                    Observation("release_date", "0011-04-24 00:00:00", "legacy"),
+                ]
+            )
+            is None
+        )
+
+    def test_les_dates_anciennes_justes_et_futures_restent(self):
+        for valeur in ("1792-12-05", "1965", "2031-03-01"):
+            verdict = resoudre_date_de_sortie([Observation("release_date", valeur, "genius")])
+            assert verdict.value == valeur
+
+    def test_manual_reste_souverain(self):
+        verdict = resoudre_date_de_sortie([Observation("release_date", "0500", MANUAL_SOURCE)])
+        assert verdict.source == MANUAL_SOURCE
+
+
 def test_les_DEUX_chemins_d_arbitrage_partagent_la_MEME_fonction():
     """`reconcile()` (enrichissement) et `_arbitrer_discographie` (écriture en
     base) doivent rendre le même verdict : en brancher un seul ferait dépendre

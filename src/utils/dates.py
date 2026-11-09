@@ -76,6 +76,29 @@ def precision(valeur) -> int | None:
     return JOUR if parse_flexible(texte) else None
 
 
+#: Plus petite année recevable pour une date de sortie. Les dates anciennes
+#: justes (« Lacrimosa » 1792) restent ; « 0011 » est une saisie Genius.
+ANNEE_MINIMALE = 1000
+
+
+def recevable(valeur) -> bool:
+    """Faux pour une date LISIBLE dont l'année est avant `ANNEE_MINIMALE`.
+
+    Une valeur illisible ou vide n'est pas jugée ici (le verdict l'écarte par
+    sa précision) ; une date future reste recevable (sortie annoncée).
+    """
+    if valeur is None:
+        return True
+    if isinstance(valeur, datetime):
+        return valeur.year >= ANNEE_MINIMALE
+    if not isinstance(valeur, str):
+        return True
+    texte = valeur.strip()
+    if len(texte) >= 4 and texte[:4].isdigit() and (len(texte) == 4 or not texte[4].isdigit()):
+        return int(texte[:4]) >= ANNEE_MINIMALE
+    return True
+
+
 def normaliser_observation(valeur, prec: int | None = None) -> str | None:
     """Forme canonique d'une observation de date : `"2018"`, `"2018-05"` ou
     `"2018-05-14"`. C'est la FORME qui porte la précision — pas une colonne de

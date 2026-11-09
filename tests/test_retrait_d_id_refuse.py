@@ -25,6 +25,7 @@ _REFUS_ATTENDU = {
     "rejeter_spotify_id": "memoriser_id_refuse",
     "clear_track_deezer_id": "memoriser_deezer_refuse",
     "clear_track_discogs_release": "memoriser_discogs_refuse",
+    "clear_track_apple_music_id": "memoriser_apple_refuse",
 }
 
 #: (fichier, fonction) qui retirent un ID SANS le refuser. Liste FERMÉE : une
@@ -36,6 +37,21 @@ EXCEPTIONS: dict[tuple[str, str], str] = {
     ("src/services/revue_auto.py", "retablir"): (
         "ANNULE la pose d'un ID par une règle (`pose_spotify`) : rien n'a été "
         "jugé faux, l'ID peut revenir"
+    ),
+    ("scripts/ponctuels/decisions_humaines_20261030b.py", "forever_et_might_go"): (
+        "one-shot appliqué AVANT le refus d'un ID Apple (2026-11-09) ; ses ID sont refusés après coup (`scripts/ponctuels/refuser_ids_apple_retires.py`)"
+    ),
+    ("scripts/ponctuels/decisions_humaines_20261030b.py", "industry"): (
+        "one-shot appliqué AVANT le refus d'un ID Apple (2026-11-09) ; ses ID sont refusés après coup (`scripts/ponctuels/refuser_ids_apple_retires.py`)"
+    ),
+    ("scripts/ponctuels/refuser_autres_remix.py", "reparer"): (
+        "one-shot appliqué AVANT le refus d'un ID Apple (2026-11-09) ; ses ID sont refusés après coup (`scripts/ponctuels/refuser_ids_apple_retires.py`)"
+    ),
+    ("scripts/ponctuels/refuser_autres_remix_2.py", "reparer"): (
+        "one-shot appliqué AVANT le refus d'un ID Apple (2026-11-09) ; ses ID sont refusés après coup (`scripts/ponctuels/refuser_ids_apple_retires.py`)"
+    ),
+    ("scripts/ponctuels/retirer_temoins_autres_remix.py", "main"): (
+        "one-shot appliqué AVANT le refus d'un ID Apple (2026-11-09) ; ses ID sont refusés après coup (`scripts/ponctuels/refuser_ids_apple_retires.py`)"
     ),
     ("scripts/ponctuels/make_her_say_originale.py", "reparer"): (
         "l'ID retiré devient une ÉDITION de la même fiche (gardé en "

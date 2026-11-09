@@ -509,6 +509,7 @@ def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client
         fiche_concorde,
         parution_de,
     )
+    from src.utils.corrections_fiches import apple_refuses
 
     dm = runtime.data_manager
     obs = dm.get_artist_observations(artist.id)
@@ -569,6 +570,13 @@ def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client
             logger.info(
                 f"Apple Music {am} proposé par plusieurs fiches : « {track.title} » laissée"
             )
+            continue
+        # Un ID retiré à la main ou par une règle se REFUSE (nature `id_apple`) :
+        # la fiche iTunes concorderait encore, la date de vérification expire.
+        if am in apple_refuses(track):
+            dementis += 1
+            dm.record_apple_music(tid, None)
+            logger.info(f"Apple Music {am} refusé pour « {track.title} » : refus mémorisé")
             continue
         ok, motif = fiche_concorde(track, fiches.get(am))
         if ok:

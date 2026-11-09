@@ -785,6 +785,8 @@ def _retirer_identite_derivee(dm, track, cas: Cas) -> tuple[str, dict]:
     """L'ISRC et / ou l'ID Apple de l'autre page partent (`identite_derivee`),
     avec ce qui a été lu par eux (mesures ReccoBeats par l'ISRC, durée Apple) ;
     les observations sont lues AVANT, de quoi rétablir."""
+    from src.utils.corrections_fiches import memoriser_apple_refuse
+
     isrc, apple = cas.preuves.get("isrc"), cas.preuves.get("apple_music_id")
     if isrc and (track.isrc or "").upper() != isrc:
         isrc = None
@@ -817,6 +819,7 @@ def _retirer_identite_derivee(dm, track, cas: Cas) -> tuple[str, dict]:
         retraits.append(f"ISRC {isrc}")
     if apple:
         dm.clear_track_apple_music_id(track.id)
+        memoriser_apple_refuse(track, apple, origine=f"{PREFIXE_REGLE}{cas.detecteur}")
         retraits.append(f"ID Apple {apple}")
     deplacees = [lab for lab in editions if dm.deplacer_edition(track.id, lab, autre)]
     retraits += [f"édition « {lab} »" for lab in deplacees]
@@ -1101,6 +1104,9 @@ def retablir(dm, artiste, correction: dict) -> str:
         if annulation.get("isrc"):
             dm.fill_track_identities(track.id, isrc=annulation["isrc"])
         if annulation.get("apple_music_id"):
+            from src.utils.corrections_fiches import oublier_apple_refuse
+
+            oublier_apple_refuse(track, annulation["apple_music_id"])
             dm.record_apple_music(track.id, annulation["apple_music_id"])
         dm.restaurer_observations(annulation.get("observations") or [])
         for label in annulation.get("editions") or ():

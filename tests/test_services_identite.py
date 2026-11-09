@@ -740,6 +740,21 @@ class TestAppleMusic:
         identite.verifier_apple_music(rt, artist, client=client)
         assert dm.ecrits == {1: "15", 2: None}
 
+    def test_un_id_apple_refuse_n_est_pas_repose(self, monkeypatch):
+        """2026-11-09 : « Lollipop (French Remix) » de Booba portait la piste de
+        « Tha Carter III ». Retiré, l'ID reste proposé par Genius et la fiche
+        iTunes concorde : seul le refus (nature `id_apple`) l'empêche de revenir
+        quand la date de vérification expire."""
+        artist, dm, client = self._cas()
+        monkeypatch.setattr(
+            "src.utils.corrections_fiches.apple_refuses",
+            lambda track: {"11"} if track.title == "Stronger" else set(),
+        )
+        rt = SimpleNamespace(data_manager=dm)
+        assert identite.verifier_apple_music(rt, artist, client=client) == (0, 2)
+        assert dm.ecrits == {1: None, 2: None}
+        assert dm.durees == {} and dm.parutions == {}
+
 
 class TestIsrcVersSpotify:
     """3d (lot B2) : l'ISRC désigne l'enregistrement, ReccoBeats ses pressings."""
@@ -789,3 +804,29 @@ def test_retirer_un_id_apple_emporte_sa_duree(data_manager):
             {"i": t.id},
         ).one()
     assert ligne[0] is None and ligne[1] is None and ligne[2] is not None
+
+
+def test_le_refus_d_un_id_apple_vaut_pour_l_enregistrement(data_manager):
+    """Le refus se lit chez la ligne sœur (même page Genius), s'oublie pour
+    rétablir, et ne vaut pas pour une autre page."""
+    from src.models import Artist
+    from src.utils.corrections_fiches import (
+        apple_refuses,
+        memoriser_apple_refuse,
+        oublier_apple_refuse,
+    )
+
+    booba, wayne = Artist(name="Booba"), Artist(name="Lil Wayne")
+    booba.id, wayne.id = data_manager.save_artist(booba), data_manager.save_artist(wayne)
+    fiche = Track(title="Lollipop (French Remix)", artist=booba, genius_id=5463611)
+    soeur = Track(title="Lollipop (French Remix)", artist=wayne, genius_id=5463611)
+    autre = Track(title="Lollipop (Remix)", artist=wayne, genius_id=7)
+    for t in (fiche, soeur, autre):
+        data_manager.save_track(t)
+
+    memoriser_apple_refuse(fiche, "1440737575")
+    assert apple_refuses(fiche) == apple_refuses(soeur) == {"1440737575"}
+    assert apple_refuses(autre) == set()
+    # L'oubli se fait depuis la ligne qui a posé le refus (`_oublier`).
+    assert oublier_apple_refuse(fiche, "1440737575")
+    assert apple_refuses(fiche) == apple_refuses(soeur) == set()

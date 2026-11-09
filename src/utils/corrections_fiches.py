@@ -141,7 +141,15 @@ NATURES = {
 #: même la mesure SongBPM refusée champ par champ (`mesure_songbpm`).
 PAR_ENREGISTREMENT = frozenset(
     set(NATURES.values()) - {"certif"}
-    | {"compteur_spotify", "page_songbpm", "mesure_songbpm", "contenu", "id_discogs", "isrc"}
+    | {
+        "compteur_spotify",
+        "page_songbpm",
+        "mesure_songbpm",
+        "contenu",
+        "id_discogs",
+        "id_apple",
+        "isrc",
+    }
 )
 
 #: Champ d'observation (source `songbpm`, DÉCLARÉ, jamais arbitré) qui garde la
@@ -415,6 +423,12 @@ def discogs_refuses(track) -> set[int]:
     return {int(r["valeur"]) for r in _lignes(track, "id_discogs")}
 
 
+def apple_refuses(track) -> set[str]:
+    """Les ID Apple Music refusés pour la fiche : la vérification Apple de
+    l'étape identité (`identite.verifier_apple_music`) ne les repose pas."""
+    return {str(r["valeur"]) for r in _lignes(track, "id_apple")}
+
+
 def credits_refuses(track) -> set[tuple[str, str]]:
     """{(nom normalisé, rôle)} — le rôle est la valeur de `CreditRole`."""
     return {tuple(json.loads(r["valeur"])) for r in _lignes(track, "credit")}
@@ -673,6 +687,20 @@ def oublier_disque_refuse(artiste: str, album_deezer: int) -> bool:
                 {"a": artiste, "v": str(int(album_deezer))},
             ).rowcount
         )
+
+
+def memoriser_apple_refuse(track, apple_music_id, origine: str | None = None) -> None:
+    """Consigne un ID Apple Music retiré de la fiche (`clear_track_apple_music_id`).
+    Sans refus, seule la date de vérification le retenait, et elle EXPIRE
+    (`constat_perime`) : Genius le propose toujours (`apple_music_id_propose`) et
+    la fiche iTunes concorde — « Lollipop (French Remix) » de Booba portait la
+    piste de « Tha Carter III » (2026-11-09)."""
+    _memoriser(track, "id_apple", str(apple_music_id), origine=origine)
+
+
+def oublier_apple_refuse(track, apple_music_id) -> bool:
+    """Pendant : un ID Apple retiré par une règle, qu'on RÉTABLIT."""
+    return _oublier(track, "id_apple", str(apple_music_id))
 
 
 def memoriser_discogs_refuse(track, discogs_id: int, origine: str | None = None) -> None:

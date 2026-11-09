@@ -1378,3 +1378,44 @@ class TestTeteFabriquee:
         self._paroles(data_manager, t, "[Couplet 1 : Isha]\nun", feat=True)
         audit = au.auditer(data_manager, ["Isha"], revue=False)
         assert not [c for c in audit.cas if c.famille == "tete_fabriquee"]
+
+
+class TestPhotoParDefaut:
+    """2026-11-03 : 545 silhouettes grises de Deezer gardées comme photos.
+    L'invariant appelle le juge du téléchargement (`est_image_par_defaut`)."""
+
+    @staticmethod
+    def _image(chemin, silhouette):
+        from PIL import Image
+
+        from src.utils.image_downloader import _SILHOUETTE_8X8
+
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        image = Image.new("L", (8, 8))
+        if silhouette:
+            image.putdata([v for ligne in _SILHOUETTE_8X8 for v in ligne])
+        image.save(chemin)
+
+    def test_photo_de_profil_et_photo_de_personne(self, data_manager, isha):
+        a, _ = isha
+        images = au.DOSSIER_IMAGES
+        self._image(images / "artistes" / "Isha.png", silhouette=True)
+        self._image(images / "artistes" / "Laylow.png", silhouette=True)
+        self._image(images / "artistes" / "Niro.png", silhouette=False)
+        data_manager.set_artist_image_path(a.id, "artistes/Isha.png")
+
+        par_artiste = au.auditer(data_manager, ["Isha"], revue=False)
+        (cas,) = [c for c in par_artiste.cas if c.famille == "photo_par_defaut"]
+        assert cas.artiste == "Isha" and "artistes/Isha.png" in cas.libelle
+
+        base = au.auditer(data_manager, revue=False)
+        libelles = sorted(c.libelle for c in base.cas if c.famille == "photo_par_defaut")
+        assert libelles == ["photo de personne Laylow.png", "photo de profil artistes/Isha.png"]
+        assert "photo_par_defaut" in au.INVARIANTS
+
+    def test_une_vraie_photo_n_est_rien(self, data_manager, isha):
+        a, _ = isha
+        self._image(au.DOSSIER_IMAGES / "artistes" / "Isha.png", silhouette=False)
+        data_manager.set_artist_image_path(a.id, "artistes/Isha.png")
+        audit = au.auditer(data_manager, revue=False)
+        assert not [c for c in audit.cas if c.famille == "photo_par_defaut"]

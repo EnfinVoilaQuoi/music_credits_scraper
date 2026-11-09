@@ -39,6 +39,7 @@ from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
+from src.config import IMAGES_DIR
 from src.services import vues_comptees
 from src.services.revue import (
     DECISION,
@@ -207,6 +208,7 @@ FAMILLES = {
     "spotify_principal": "INVARIANT — ID Spotify principal sans sa ligne `track_spotify_ids` principale",
     "credit_doublon": "INVARIANT — crédit YouTube qui redit un crédit déjà porté, ou nom composé",
     "tete_fabriquee": "INVARIANT — tête de section des paroles nommée à tort (« [Couplet 1 : <ligne>] »)",
+    "photo_par_defaut": "INVARIANT — silhouette Deezer gardée comme photo d'artiste ou de personne",
 }
 
 #: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
@@ -238,6 +240,7 @@ INVARIANTS = (
     "spotify_principal",
     "credit_doublon",
     "tete_fabriquee",
+    "photo_par_defaut",
 )
 
 _FEAT = re.compile(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", re.IGNORECASE)
@@ -1627,6 +1630,43 @@ def tetes_fabriquees(c, pistes) -> list[Cas]:
     return cas
 
 
+#: Le dossier des images (`config.IMAGES_DIR`) ; les tests l'isolent.
+DOSSIER_IMAGES = IMAGES_DIR
+
+
+def photos_par_defaut(
+    c, artistes: list[int] | None, *, images: Path | None = None, dossier_entier: bool = False
+) -> list[Cas]:
+    """Une silhouette grise de Deezer gardée comme photo (545 fichiers sur
+    6 228 le 2026-11-03). Le juge est celui du téléchargement, qui la refuse
+    depuis (`image_downloader.est_image_par_defaut` : empreinte, sinon l'image
+    en 8 × 8 — silhouettes à 1 au plus, la photo la plus proche à 13).
+
+    Toujours : la photo de profil des `artistes` (`artists.image_path`, None =
+    tous), une fraction de seconde. `dossier_entier` : aussi les photos des
+    invités et producteurs, qui n'ont pas de ligne (le FICHIER fait l'état) —
+    ~1 min pour ~5 700 fichiers, donc sur la base entière seulement."""
+    from src.utils.image_downloader import est_image_par_defaut, images_par_defaut
+
+    images = Path(images or DOSSIER_IMAGES)
+    sql = "SELECT id, name, image_path FROM artists WHERE image_path IS NOT NULL"
+    if artistes is not None:
+        sql += f" AND id IN ({','.join('?' * len(artistes))})"
+    cas, vus = [], set()
+    for r in c.execute(sql, artistes or []):
+        fichier = images / r["image_path"]
+        vus.add(fichier.resolve())
+        if est_image_par_defaut(fichier):
+            cas.append(Cas("photo_par_defaut", r["name"], [], f"photo de profil {r['image_path']}"))
+    if dossier_entier and (images / "artistes").is_dir():
+        cas += [
+            Cas("photo_par_defaut", "—", [], f"photo de personne {f.name}")
+            for f in images_par_defaut(images / "artistes")
+            if f.resolve() not in vus
+        ]
+    return cas
+
+
 # ── Ce qu'aucune autre famille ne voit (hors critère) ─────────────────────────
 
 #: Colonnes dérivées dont le champ d'observation porte le même nom.
@@ -1961,6 +2001,8 @@ def auditer(
             audit.cas += ids_spotify_principaux_desalignes(c, pistes)
             audit.cas += credits_en_double(c, pistes)
             audit.cas += tetes_fabriquees(c, pistes)
+            # Le dossier des photos de personnes (~1 min) : base entière seule.
+            audit.cas += photos_par_defaut(c, artistes, dossier_entier=not noms)
             if not noms:
                 audit.cas += orphelins(c)
         if not noms:

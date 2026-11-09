@@ -148,6 +148,15 @@ def _brut_isole(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _images_isolees(tmp_path, monkeypatch):
+    """AUCUN test ne lit `data/images/` réel : l'audit y juge les photos
+    (`audit.photos_par_defaut`, ~1 min sur le vrai dossier, 2026-11-10)."""
+    from src.services import audit
+
+    monkeypatch.setattr(audit, "DOSSIER_IMAGES", tmp_path / "images")
+
+
+@pytest.fixture(autouse=True)
 def _pages_desactivees_isolees(tmp_path, monkeypatch):
     """AUCUN test ne lit `data/disabled_tracks/` réel : le panneau les relit
     (`revue.fiches_actives`, 2026-10-31)."""

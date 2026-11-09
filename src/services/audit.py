@@ -829,23 +829,6 @@ def certifs(pistes) -> list[Cas]:
     return cas
 
 
-#: Une page TITRE Spotify dans les clés du brut (`/intl-fr/track/{id}`).
-_PAGE_TITRE_SPOTIFY = re.compile(r"/track/([A-Za-z0-9]{22})$")
-
-
-def pages_spotify_lues(chemin: Path | None = None) -> set[str]:
-    """Les ID Spotify dont la page TITRE a été lue (`spotify_web`), d'après les
-    clés du brut (`persistence.brut`, lecture seule) : la preuve qu'un
-    compteur vient bien de la page de cet ID. Sans brut : aucun."""
-    from src.persistence import brut
-
-    return {
-        m[1]
-        for r in brut.requetes_gardees("spotify_web", chemin)
-        if (m := _PAGE_TITRE_SPOTIFY.search(r))
-    }
-
-
 def _ids_spotify(c, ids) -> dict[int, set[str]]:
     """Les ID Spotify de chaque fiche : le principal et `track_spotify_ids`."""
     out = collections.defaultdict(set)
@@ -876,17 +859,18 @@ def _seconds_signaux(c, g) -> list[str]:
     return signaux
 
 
-def streams(c, par, pages_lues: set[str] | None = None) -> list[Cas]:
+def streams(c, par) -> list[Cas]:
     """`streams_double` (règle du 2026-11-09, simulée sur 4 cas) : un compteur
     Spotify égal sur deux pages n'est une erreur qu'avec un SECOND signal (même
     disque, titres parents, ID partagé) — Spotify montre parfois le même
-    compteur pour deux enregistrements (« Calypso I / II »). Sans second signal,
-    « pour information » seulement si la page de l'ID principal de chaque fiche
-    a été lue (`pages_lues`, le brut) ; sinon le compteur ne se prouve pas lu sur
-    sa page (« Vrai » d'Ol' Kainry, 2026-11-09) : une erreur, dite telle.
+    compteur pour deux enregistrements (« Calypso I / II »). Sans second
+    signal, « pour information » : une égalité au niveau du hasard (« Vrai » /
+    « Demolition man », « Animaniax » / « Longueur d'avance »). Un compteur
+    récolté dans la ligne d'une AUTRE page (6 852 fiches sur 13 348 sans page à
+    elles dans le brut) n'est pas une lecture fausse : la récolte concorde avec
+    la page du morceau (session compteurs-temoin, 2026-11-09).
 
     `ytm_incoherent` : le total YTM de la colonne contre ses vidéos propres."""
-    pages_lues = pages_lues or set()
     cas = []
     for ts in par.values():
         groupes = collections.defaultdict(list)
@@ -901,16 +885,11 @@ def streams(c, par, pages_lues: set[str] | None = None) -> list[Cas]:
                 libelle = f"{n:,} : " + " | ".join(_lib(t) for t in g)
                 nature = ERREUR
                 signaux = _seconds_signaux(c, g)
-                sans_page = [t for t in g if t["spotify_id"] not in pages_lues]
                 if signaux:
                     libelle += f" — {', '.join(signaux)}"
-                elif sans_page:
-                    libelle += " — compteur sans page lue : " + ", ".join(
-                        f"#{t['id']}" for t in sans_page
-                    )
                 else:
                     nature = INFORMATION
-                    libelle += " — pages lues, aucun autre signal : compteur de Spotify"
+                    libelle += " — aucun autre signal : égalité de hasard"
                 cas.append(
                     Cas("streams_double", g[0]["artiste"], [t["id"] for t in g], libelle, nature)
                 )
@@ -1909,7 +1888,7 @@ def auditer(
         audit.cas += instrumentaux(pistes)
         audit.cas += durees(c, pistes)
         audit.cas += certifs(pistes)
-        audit.cas += streams(c, par, pages_spotify_lues())
+        audit.cas += streams(c, par)
         audit.cas += echecs(c, pistes)
         audit.cas += studio_sur_live(c, pistes)
         audit.cas += disques_homonymes(pistes, juge_des_ids_spotify(c))

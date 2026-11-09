@@ -49,6 +49,28 @@ def cle_video_morte(video_id: str) -> str:
     return f"{PREFIXE_VIDEO_MORTE}{video_id}"
 
 
+def _fiches_existantes(conn, ids: Iterable[int]) -> set[int]:
+    """Les fiches de `ids` qui existent encore. Les verdicts sont mis en tampon
+    (`source_usage._buffer`) et vidés plus tard : une fiche supprimée entre
+    temps n'a plus à recevoir d'échec suivi ni de constat d'absence — sinon la
+    ligne reste orpheline (2026-11-08, « Vidéo Clash Booba », #25232 : absence
+    LRCLIB lue à 02:41:37, page supprimée par la règle non-musique à 02:42:31,
+    constat écrit au vidage suivant). Pas de cascade FK dans ce schéma."""
+    ids = sorted({int(i) for i in ids if i is not None})
+    vivantes: set[int] = set()
+    for debut in range(0, len(ids), 500):
+        tranche = ids[debut : debut + 500]
+        noms = {f"i{n}": v for n, v in enumerate(tranche)}
+        vivantes.update(
+            r[0]
+            for r in conn.execute(
+                text(f"SELECT id FROM tracks WHERE id IN ({', '.join(':' + n for n in noms)})"),
+                noms,
+            )
+        )
+    return vivantes
+
+
 class SourceUsageRepository:
     """Lecture/écriture des compteurs d'usage. Ne lève jamais vers l'appelant."""
 
@@ -180,7 +202,12 @@ class SourceUsageRepository:
             return
         try:
             with self.engine.begin() as conn:
+                vivantes = _fiches_existantes(conn, {v.track_id for v in lot})
                 for v in lot:
+                    if v.track_id not in vivantes:
+                        # Fiche supprimée entre la lecture et le vidage du
+                        # tampon (règle non-musique, fusion) : rien à suivre.
+                        continue
                     cle = {"tid": v.track_id, "src": v.source_key}
                     if _sans_besoin(v):
                         # La source n'a plus rien à apporter : l'échec du MÊME
@@ -292,7 +319,10 @@ class SourceUsageRepository:
                         ),
                         {"tid": tid, "src": cle},
                     )
+                vivantes = _fiches_existantes(conn, {tid for tid, _at in poser})
                 for tid, at in poser:
+                    if tid not in vivantes:
+                        continue
                     params = {"tid": tid, "src": cle, "at": at}
                     maj = conn.execute(
                         text(

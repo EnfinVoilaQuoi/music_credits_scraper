@@ -42,8 +42,24 @@ def _v(issue, track_id=1, source="deezer", at=_T0, **extra):
     )
 
 
+#: Fiches posées d'office (IDs 1 à 9) : le suivi ne vaut que pour une fiche
+#: qui existe (`_fiches_existantes`, 2026-11-09).
+_FICHES_D_OFFICE = range(1, 10)
+
+
+def _poser_fiches(engine, ids=_FICHES_D_OFFICE):
+    with engine.begin() as conn:
+        conn.execute(text("INSERT INTO artists (id, name) VALUES (900, 'Témoin')"))
+        for i in ids:
+            conn.execute(
+                text("INSERT INTO tracks (id, title, artist_id) VALUES (:i, :t, 900)"),
+                {"i": i, "t": f"Fiche {i}"},
+            )
+
+
 @pytest.fixture
 def repo(data_manager):
+    _poser_fiches(data_manager.engine)
     return SourceUsageRepository(data_manager.engine)
 
 
@@ -162,8 +178,14 @@ class TestSuivi:
         assert repo.morceaux_en_echec([]) == set()
         assert [r["source_key"] for r in repo.echecs_suivis(track_ids=[1])] == ["deezer"]
 
-    def test_rien_n_est_rogne(self, repo):
+    def test_rien_n_est_rogne(self, repo, data_manager):
         """Contrairement à la fenêtre de diagnostic (50 par source)."""
+        with data_manager.engine.begin() as conn:
+            for i in range(10, 121):
+                conn.execute(
+                    text("INSERT INTO tracks (id, title, artist_id) VALUES (:i, :t, 900)"),
+                    {"i": i, "t": f"Fiche {i}"},
+                )
         repo.record([_v(IssueKind.TIMEOUT, track_id=i) for i in range(1, 121)])
         assert len(repo.morceaux_en_echec(["deezer"])) == 120
 
@@ -183,6 +205,38 @@ def _lignes(dm):
 
 
 class TestFiches:
+    def test_un_verdict_vide_du_tampon_apres_la_suppression_n_ecrit_rien(
+        self, data_manager, repo, monkeypatch
+    ):
+        """2026-11-08, « Vidéo Clash Booba » (#25232) : l'absence LRCLIB lue à
+        02:41:37 attendait dans le tampon de `source_usage` ; la règle
+        non-musique a supprimé la page à 02:42:31, puis le vidage a écrit le
+        constat sur une fiche qui n'existait plus (ligne orpheline)."""
+        from src.observability import source_usage as su
+
+        a = Artist(name="Booba")
+        a.id = data_manager.save_artist(a)
+        fiche = _fiche(data_manager, a, "Vidéo Clash Booba")
+        monkeypatch.setattr(su, "_sink", None)
+        su.reset()
+        try:
+            with su.track_scope(fiche):
+                with su.observe("lrclib") as obs:
+                    obs.absent("aucune parole")
+                with su.observe("deezer") as obs:
+                    obs.fail(IssueKind.TIMEOUT, "délai")
+            assert data_manager.delete_track(fiche)
+            repo.record(su.flush())
+        finally:
+            su.reset()
+        repo.constater_absences(ABSENCE_CREDITS_GENIUS, [(fiche, datetime.now())])
+        with data_manager.engine.connect() as conn:
+            for table in ("source_track_absences", "source_track_failures"):
+                n = conn.execute(
+                    text(f"SELECT COUNT(*) FROM {table} WHERE track_id = :t"), {"t": fiche}
+                ).scalar()
+                assert n == 0, table
+
     def test_delete_track_purge(self, data_manager, repo):
         a = Artist(name="ISHA")
         a.id = data_manager.save_artist(a)

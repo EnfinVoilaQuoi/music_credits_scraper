@@ -941,3 +941,20 @@ class TestPasseFeatsDeLEnrichissement:
 
     def test_morceau_principal_jamais_concerne(self):
         assert self._passe(_track(is_featuring=False)) == []
+
+    def test_un_detail_lu_solde_l_echec_genius_des_flux_qui_le_lisent(self, monkeypatch):
+        """2026-11-07 : 3 fiches de Kaaris en échec `genius_api` (coupure DNS),
+        détail relu depuis : l'échec restait à vie."""
+        from src.observability import source_usage
+
+        soldes = []
+        monkeypatch.setattr(
+            source_usage, "sans_besoin", lambda s, t, flux=None: soldes.append((s, t, flux))
+        )
+        t = _track(is_featuring=False, genius_detail_checked_at=datetime.now().isoformat())
+        t.id = 9
+        self._passe(t)
+        assert soldes == [("genius_api", 9, ("disco", "identite", "enrichment"))]
+        soldes.clear()
+        self._passe(_track(is_featuring=True))  # détail à lire : rien de soldé
+        assert soldes == []

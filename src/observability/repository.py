@@ -183,14 +183,16 @@ class SourceUsageRepository:
                 for v in lot:
                     cle = {"tid": v.track_id, "src": v.source_key}
                     if _sans_besoin(v):
-                        # La source n'a plus rien à apporter : l'échec est soldé,
-                        # sans constat d'absence (elle n'a rien répondu).
+                        # La source n'a plus rien à apporter : l'échec du MÊME
+                        # flux est soldé, sans constat d'absence (elle n'a rien
+                        # répondu).
                         conn.execute(
                             text(
                                 "DELETE FROM source_track_failures "
-                                "WHERE track_id = :tid AND source_key = :src"
+                                "WHERE track_id = :tid AND source_key = :src "
+                                "AND flow = :flow"
                             ),
-                            cle,
+                            {**cle, "flow": str(v.flow)},
                         )
                         continue
                     if v.issue in BENIGN:

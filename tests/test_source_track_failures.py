@@ -96,6 +96,43 @@ class TestSuivi:
             constats = conn.execute(text("SELECT COUNT(*) FROM source_track_absences")).scalar()
         assert constats == 0  # elle n'a rien répondu : aucun constat d'absence
 
+    def test_le_solde_ne_vaut_que_pour_le_meme_flux(self, repo):
+        """`spotify_embed` sert l'identité ET les streams : une fiche qui n'a
+        plus d'ID à chercher ne solde pas l'échec d'une lecture de streams."""
+        from src.observability.issues import SANS_BESOIN
+
+        repo.record(
+            [
+                _v(IssueKind.UNREACHABLE, source="spotify_embed", flow="identite"),
+                _v(IssueKind.TIMEOUT, source="spotify_embed", flow="streams", track_id=2),
+            ]
+        )
+        for tid in (1, 2):
+            repo.record(
+                [
+                    _v(
+                        IssueKind.SKIPPED,
+                        source="spotify_embed",
+                        flow="identite",
+                        track_id=tid,
+                        detail=SANS_BESOIN,
+                    )
+                ]
+            )
+        assert [(r["track_id"], r["flow"]) for r in repo.echecs_suivis()] == [(2, "streams")]
+
+    def test_sans_besoin_emet_un_verdict_par_flux(self, monkeypatch):
+        from src.observability import source_usage
+
+        emis = []
+        monkeypatch.setattr(source_usage, "_emit", emis.append)
+        source_usage.sans_besoin("genius_api", 4, flux=("disco", "identite"))
+        source_usage.sans_besoin("genius_api", None)
+        assert [(v.flow, v.track_id, v.issue) for v in emis] == [
+            ("disco", 4, IssueKind.SKIPPED),
+            ("identite", 4, IssueKind.SKIPPED),
+        ]
+
     def test_un_verdict_sans_morceau_est_ignore(self, repo):
         repo.record([_v(IssueKind.TIMEOUT, track_id=None)])
         assert repo.echecs_suivis() == []

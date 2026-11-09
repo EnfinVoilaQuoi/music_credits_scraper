@@ -21,7 +21,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -531,23 +531,30 @@ def a_repondu(obs: Observation) -> bool:
     return (obs.verdict or obs.resolve()).issue not in SANS_REPONSE
 
 
-def sans_besoin(source_key: str, track_id: int | None) -> None:
+def sans_besoin(
+    source_key: str, track_id: int | None, *, flux: Iterable[str] | None = None
+) -> None:
     """La source n'est plus appelée pour ce morceau : ce qu'elle apporterait est
     déjà là. Son échec suivi n'a plus d'objet ; sans ce verdict, il restait à
     jamais (le morceau, relu « en échec », sautait la source à chaque run : 71
-    échecs SongBPM de la coupure du 2026-11-08)."""
+    échecs SongBPM de la coupure du 2026-11-08).
+
+    Le solde ne vaut que pour l'échec du MÊME flux (`spotify_embed` sert aussi
+    les streams) ; `flux` nomme les flux d'un même geste partagé (la passe
+    Genius des feats tourne dans l'identité ET l'enrichissement)."""
     if track_id is None:
         return
-    _emit(
-        Verdict(
-            source_key=source_key,
-            issue=IssueKind.SKIPPED,
-            flow=current_flow(),
-            artist_id=current_artist_id(),
-            track_id=track_id,
-            detail=SANS_BESOIN,
+    for flow in flux or (current_flow(),):
+        _emit(
+            Verdict(
+                source_key=source_key,
+                issue=IssueKind.SKIPPED,
+                flow=flow,
+                artist_id=current_artist_id(),
+                track_id=track_id,
+                detail=SANS_BESOIN,
+            )
         )
-    )
 
 
 def note_failure(source_key: str | None, exc: BaseException, *, detail: str = "") -> None:

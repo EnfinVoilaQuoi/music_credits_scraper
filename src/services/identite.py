@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 
 from src.models import Artist, Track
 from src.observability import source_usage
+from src.observability.registry import Flow
 from src.services.runtime import (
     Bilan,
     Hooks,
@@ -472,6 +473,13 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
             bilan.spotify_morceaux = b.traites
             if not b.complete:
                 panne("Spotify par morceau", b.motif)
+        # Une fiche qui a son ID (ou un « pas sur Spotify » récent) ne cherche
+        # plus : l'échec d'une recherche d'avant n'a plus d'objet (6 fiches de
+        # Kaaris, coupure du 2026-11-07, restées « en échec » à vie).
+        choisies = {t.id for t in tracks}
+        for t in selection_morceaux(runtime, artist, track_ids=options.track_ids):
+            if t.id not in choisies:
+                source_usage.sans_besoin("spotify_embed", t.id, flux=(Flow.IDENTITY,))
         _recharger(runtime, artist)
         bilan.spotify_sans_duree = sum(
             1 for t in artist.tracks if t.id in sans_duree and t.spotify_id

@@ -13,6 +13,7 @@ from src.api.reccobeats_api import ReccoBeatsIntegratedClient
 from src.concurrency.serial_worker import SerialWorker
 from src.models import Track
 from src.observability import source_usage
+from src.observability.registry import Flow
 from src.utils.bpm_vote import BpmBallot
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_title
@@ -22,6 +23,10 @@ from src.utils.title_matching import normalize_title
 # et src.enrichment ré-importe src.utils → un import module-niveau ici bouclerait.
 
 logger = get_logger(__name__)
+
+#: Clé d'observabilité des échecs suivis d'un provider, quand elle diffère de
+#: son nom : le scraper Spotify ID observe sous `spotify_embed`.
+_CLE_SUIVIE = {"spotify_id": "spotify_embed"}
 
 
 class DataEnricher:
@@ -491,7 +496,7 @@ class DataEnricher:
             results[name] = verdict
             if verdict == "not_needed":
                 # Plus rien à apporter : l'échec suivi de la source est soldé.
-                source_usage.sans_besoin(name, track.id)
+                source_usage.sans_besoin(_CLE_SUIVIE.get(name, name), track.id)
             return
 
         try:
@@ -536,6 +541,13 @@ class DataEnricher:
         Avant le constat daté (e45), elle refaisait l'appel de l'import pour
         ~1 400 feats à chaque run.
         """
+        if self.genius_client and not track.detail_genius_a_lire():
+            # Détail lu récemment : l'échec d'une lecture d'avant n'a plus
+            # d'objet, dans aucun des flux qui font cette lecture (3 fiches de
+            # Kaaris, coupure du 2026-11-07).
+            source_usage.sans_besoin(
+                "genius_api", track.id, flux=(Flow.DISCO, Flow.IDENTITY, Flow.ENRICHMENT)
+            )
         if not (track.is_featuring and self.genius_client and track.detail_genius_a_lire()):
             return
         try:

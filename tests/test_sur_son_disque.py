@@ -30,16 +30,48 @@ class TestSigneSonDisque:
             ("ISHA", True),
             ("Lucio Bukowski, Oster Lapwass & Anton Serra", True),
             ("Dr. Dre", False),
-            # Nommé APRÈS le collectif : son disque à lui reste celui du collectif.
-            ("JACKBOYS & Travis Scott", False),
-            ("Clinton Sparks, Vald", False),
             ("Multi-interprètes", False),
             (None, False),
         ],
     )
-    def test_la_tete_du_credit_seule(self, credit, attendu):
+    def test_la_tete_du_credit(self, credit, attendu):
         noms = ("Vald", "ISHA", "Lucio Bukowski", "Travis Scott")
         assert signe_son_disque([("Un disque", credit)], noms) is attendu
+
+    @pytest.mark.parametrize(
+        "credit, noms",
+        [
+            ("Kaaris & Kalash Criminel", ("Kalash Criminel",)),
+            ("Lucio Bukowski, Oster Lapwass & Anton Serra", ("Anton Serra",)),
+            ("Isha et Limsa d'Aulnay", ("Limsa d'Aulnay", "Limsa")),
+        ],
+    )
+    def test_le_cosignataire_d_un_duo_ou_d_un_trio_signe(self, credit, noms):
+        assert signe_son_disque([("Un disque", credit)], noms)
+
+    def test_nomme_apres_sa_formation_il_ne_signe_pas(self):
+        # *JACKBOYS 2* : le disque du collectif, pas le sien.
+        signatures = [("JACKBOYS 2", "JACKBOYS & Travis Scott")]
+        assert not signe_son_disque(signatures, ("Travis Scott",), ("JACKBOYS",))
+        # La formation en tête, lui absent du crédit : toujours pas.
+        assert not signe_son_disque([("JACKBOYS", "JACKBOYS")], ("Travis Scott",), ("JACKBOYS",))
+
+    def test_la_fiche_porte_les_formations_pour_qui_ne_les_passe_pas(self):
+        # La Timeline du studio appelle `participation(track, noms)` sans formations.
+        t = Track(title="VELOUR", artist=Artist(name="Travis Scott"))
+        t.primary_artist_name = "Don Toliver"
+        t.signatures_disque = [("JACKBOYS 2", "JACKBOYS & Travis Scott")]
+        assert participation(t, ("Travis Scott",)) is Participation.SUR_SON_DISQUE
+        t.formations_artiste = ("JACKBOYS",)
+        assert participation(t, ("Travis Scott",)) is Participation.SUR_LE_DISQUE
+
+    def test_au_dela_de_trois_signataires_c_est_un_collectif(self):
+        credit = "Alpha, Beta, Gamma & Vald"
+        assert not signe_son_disque([("Un disque", credit)], ("Vald",))
+        assert signe_son_disque([("Un disque", "Vald, Alpha, Beta & Gamma")], ("Vald",))
+
+    def test_absent_du_credit_il_ne_signe_pas(self):
+        assert not signe_son_disque([("Un disque", "Kaaris & Kalash Criminel")], ("Vald",))
 
     def test_un_alias_confirme_vaut_le_nom(self):
         assert signe_son_disque([("Graduation", "Ye")], ("Kanye West", "Ye"))

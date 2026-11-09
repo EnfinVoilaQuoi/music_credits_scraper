@@ -6,6 +6,7 @@ pour un feat, clients fermés même en cas d'échec, et — nouveauté du servic
 le travail fait est SAUVÉ même sur arrêt demandé.
 """
 
+import zlib
 from types import SimpleNamespace
 
 import pytest
@@ -94,7 +95,9 @@ def _rt(dm=None):
 
 def _track(title, **kw):
     t = Track(title=title, artist=Artist(name="Swing"))
-    t.id = hash(title) % 1000
+    # `zlib.crc32`, pas `hash()` : celui-ci change à chaque processus et tombait
+    # parfois sur 0 (« pas d'identifiant »), d'où un test instable sous xdist.
+    t.id = zlib.crc32(title.encode()) % 100000 + 1
     # Une page Genius : sans elle, le run ne la lirait pas (`avec_page_genius`).
     t.genius_url = f"https://genius.com/Swing-{t.id}-lyrics"
     for k, v in kw.items():

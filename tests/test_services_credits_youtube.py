@@ -4,6 +4,8 @@ Vérifie la sélection ``manque`` vs ``tout``, l'ordre des voies (Topic → clip
 le batching, la dédup et l'arrêt.
 """
 
+import zlib
+
 from src.models import Artist, Track
 from src.models.track import Credit, CreditRole, TrackVideo
 from src.services import credits
@@ -13,7 +15,7 @@ from tests.test_services_credits import _rt
 
 def _track(title, videos=None, youtube_url=None, creds=None):
     t = Track(title=title, artist=Artist(name="Booba"))
-    t.id = hash(title) % 10000
+    t.id = zlib.crc32(title.encode()) % 100000 + 1
     t.videos = videos or []
     t.youtube_url = youtube_url
     t.credits = list(creds or [])

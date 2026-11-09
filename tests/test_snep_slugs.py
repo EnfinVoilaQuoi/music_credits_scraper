@@ -6,6 +6,7 @@ slug s'arrête au même mot — « Tu le C » de Lorenzo est un vrai titre).
 """
 
 import json
+import zlib
 
 import pytest
 import requests
@@ -15,7 +16,12 @@ from src.utils.cert_fixes_io import candidats_a_corriger
 
 
 def _post(slug, title, id=None, modified="2020-01-01T00:00:00"):
-    return {"id": id or hash(slug) % 10**6, "slug": slug, "title": title, "modified": modified}
+    return {
+        "id": id or zlib.crc32(slug.encode()) % 10**6 + 1,
+        "slug": slug,
+        "title": title,
+        "modified": modified,
+    }
 
 
 class TestSlugifier:

@@ -222,6 +222,35 @@ def test_selection_manquants_et_force(monkeypatch):
     assert recus == {"deezer": [[1, 2, 3]], "spotify_id": [[2, 3]]}
 
 
+def test_une_fiche_qui_ne_cherche_plus_solde_son_echec_spotify(monkeypatch):
+    """2026-11-07 : 6 fiches de Kaaris en échec `spotify_embed` (coupure DNS)
+    avaient trouvé leur ID ensuite ; l'étape ne les cherchait plus, l'échec
+    restait à vie. Seule l'identité est soldée (l'embed sert aussi les streams)."""
+    from src.observability import source_usage
+
+    lie = _t(1, deezer_id=5, spotify_id="sp")
+    maintenant = datetime.now().isoformat(timespec="seconds")
+    date = _t(2, deezer_id=6, spotify_id_checked_at=maintenant)  # « pas sur Spotify »
+    vierge = _t(3)
+    rt = _runtime([lie, date, vierge])
+    soldes = []
+    monkeypatch.setattr(
+        source_usage, "sans_besoin", lambda s, t, flux=None: soldes.append((s, t, flux))
+    )
+    monkeypatch.setattr(
+        identite,
+        "_passage",
+        lambda *a: SimpleNamespace(traites=1, complete=True, motif=""),
+    )
+    monkeypatch.setattr(identite, "catalogue_deezer", lambda *a, **k: identite.CatalogueDeezer())
+    base = dict(musicbrainz=False, spotify_artiste=False, nature_disques=False)
+    identite.run(rt, _artist(rt), identite.OptionsIdentite(**base), Hooks())
+    assert sorted(soldes) == [
+        ("spotify_embed", 1, ("identite",)),
+        ("spotify_embed", 2, ("identite",)),
+    ]
+
+
 def test_predicats_manque():
     assert est_manquant(_t(1), Manque.IDENTITE_DEEZER)
     assert not est_manquant(_t(1, deezer_id=3), Manque.IDENTITE_DEEZER)

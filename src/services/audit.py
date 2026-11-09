@@ -126,6 +126,9 @@ class Audit:
     #: Les cas du critère ABSENTS de l'audit précédent (`apres_run`) : hors de
     #: `vers_dict`, ils ne servent qu'au compte rendu de fin de run.
     nouveaux: list[Cas] = field(default_factory=list)
+    #: Couverture des durées (`couverture_des_durees`) : une mesure, pas une
+    #: famille — hors des cas et du critère.
+    couverture_durees: dict[str, int] = field(default_factory=dict)
 
     def compte(self) -> dict[str, int]:
         return dict(collections.Counter(c.famille for c in self.cas))
@@ -154,6 +157,7 @@ class Audit:
             "compte_critere": self.compte_critere(),
             "par_nature": self.par_nature(),
             "critere": self.critere(),
+            "couverture_durees": self.couverture_durees,
             "cas": [asdict(x) for x in self.cas],
         }
 
@@ -1502,6 +1506,40 @@ def liens_jamais_mesures(c, pistes) -> list[Cas]:
     return cas
 
 
+def couverture_des_durees(c, pistes) -> dict[str, int]:
+    """Combien de durées en colonne n'ont AUCUNE source qui fait foi
+    (`SOURCES_DUREE_PLATEFORME`) — une mesure de couverture, pas une famille :
+    une durée lue sur une vidéo ou Discogs n'est pas fausse pour autant, elle
+    n'est juste démentie par personne (2026-11-09 : 5 565 / 22 067, dont 4 009
+    sur la seule vidéo). Rend `{durees, sans_source_qui_fait_foi,
+    seule_youtube_video}`."""
+    sources = collections.defaultdict(set)
+    for r in c.execute("SELECT track_id, source FROM observations WHERE field = 'duration'"):
+        sources[r["track_id"]].add(r["source"])
+    avec = [t for t in pistes if t["duration"] not in (None, "")]
+    sans = [t for t in avec if not SOURCES_DUREE_PLATEFORME & sources[t["id"]]]
+    return {
+        "durees": len(avec),
+        "sans_source_qui_fait_foi": len(sans),
+        "seule_youtube_video": sum(1 for t in sans if sources[t["id"]] == {"youtube_video"}),
+    }
+
+
+def _ligne_de_couverture(couverture: dict) -> str | None:
+    if not couverture.get("durees"):
+        return None
+    n, total = couverture["sans_source_qui_fait_foi"], couverture["durees"]
+
+    def nombre(x: int) -> str:
+        return f"{x:,}".replace(",", " ")
+
+    return (
+        f"Couverture des durées : {nombre(n)} / {nombre(total)} ({n / total:.0%}) sans source "
+        f"qui fait foi (Deezer, Spotify, Apple, manuel), dont "
+        f"{nombre(couverture['seule_youtube_video'])} sur la seule vidéo — hors critère"
+    )
+
+
 def ecarts_de_schema(db_path) -> list[Cas]:
     from src.persistence.bootstrap import ecarts_au_schema
 
@@ -1616,6 +1654,7 @@ def auditer(
         audit.cas += ids_spotify_sans_compteur(c, pistes)
         audit.cas += fiches_sans_participation(c, pistes)
         audit.cas += liens_jamais_mesures(c, pistes)
+        audit.couverture_durees = couverture_des_durees(c, pistes)
         if persistance:
             audit.cas += soeurs_divergentes(c, pistes)
             audit.cas += refus_vivants(c, pistes)
@@ -1741,6 +1780,9 @@ def tableau(audit: Audit, reference: dict | None = None) -> str:
     if reference and "critere" in reference:
         critere += f" (avant : {reference['critere']})"
     lignes.append(critere)
+    couverture = _ligne_de_couverture(audit.couverture_durees)
+    if couverture:
+        lignes.append(couverture)
     return "\n".join(lignes)
 
 

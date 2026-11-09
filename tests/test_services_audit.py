@@ -331,6 +331,36 @@ class TestHausse:
         assert "fiche_sans_participation" in info and "certif_autre" in info
 
 
+def test_couverture_des_durees_hors_critere(data_manager, isha):
+    """2026-11-09 : une durée qu'aucune source qui fait foi ne porte n'est pas
+    une erreur, mais la part de ces durées se suit — une ligne du tableau, un
+    champ de `vers_dict`, aucun cas."""
+    from src.enrichment.observation import Observation
+
+    a, t = isha
+    for titre, sources in (("Vidéo", ["youtube_video"]), ("Discogs", ["discogs", "legacy"])):
+        f = Track(title=titre, artist=a)
+        data_manager.save_track(f)
+        data_manager.record_discography_observations(
+            f.id, [Observation("duration", 200, s) for s in sources]
+        )
+    data_manager.record_discography_observations(
+        t.id,
+        [Observation("duration", 200, "deezer"), Observation("duration", 201, "youtube_video")],
+    )
+    audit = au.auditer(data_manager, revue=False)
+    assert audit.couverture_durees == {
+        "durees": 3,
+        "sans_source_qui_fait_foi": 2,
+        "seule_youtube_video": 1,
+    }
+    assert audit.vers_dict()["couverture_durees"] == audit.couverture_durees
+    assert "Couverture des durées : 2 / 3 (67%)" in au.tableau(audit)
+    assert "dont 1 sur la seule vidéo" in au.tableau(audit)
+    # Sans durée en base, pas de ligne.
+    assert "Couverture" not in au.tableau(au.Audit(date="d", perimetre="p"))
+
+
 class TestATrancher:
     """Chantier B, lot 3 : l'audit compte ce que le panneau « À trancher »
     montre — un « ✓ Normal » le retire du compte, comme du panneau."""

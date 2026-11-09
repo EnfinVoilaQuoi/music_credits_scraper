@@ -56,6 +56,7 @@ from src.utils.concordance_paroles import (
     paroles_de_reference,
     recouvrement_bigrammes,
 )
+from src.utils.contenants import parties_du_titre
 from src.utils.duree_youtube import (
     DUREE_MAX_MORCEAU,
     DUREE_MIN_MORCEAU,
@@ -67,6 +68,7 @@ from src.utils.duree_youtube import (
     segment_de_dj_mix,
     trop_courte_pour_les_paroles,
 )
+from src.utils.lrc_garde import ACCORD_CATALOGUES_S, CATALOGUES_PAR_ID
 from src.utils.participation import SQL_SIGNATURES_DE_DISQUES, sans_participation, signe_son_disque
 from src.utils.title_matching import contains_as_words, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
@@ -74,6 +76,7 @@ from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, 
 from src.utils.version_descriptors import (
     meme_socle,
     porte_une_version,
+    sous_titres,
     studio_sur_disque_live,
     titre_generique,
     titres_equivalents,
@@ -289,7 +292,61 @@ def doublons_equivalents(par) -> list[Cas]:
     return cas
 
 
-def ids_partages(par) -> list[Cas]:
+def durees_par_identifiant(c, ids=None) -> dict[int, dict[str, int]]:
+    """`{fiche: {source: secondes}}` des durées lues par l'IDENTIFIANT de la
+    fiche (`lrc_garde.CATALOGUES_PAR_ID`), jamais par une recherche de titre :
+    le témoin indépendant des règles d'audit qui jugent deux fiches."""
+    out: dict[int, dict[str, int]] = collections.defaultdict(dict)
+    sources = ",".join("?" * len(CATALOGUES_PAR_ID))
+    for r in c.execute(
+        "SELECT track_id, source, value FROM observations "
+        f"WHERE field = 'duration' AND source IN ({sources})",
+        CATALOGUES_PAR_ID,
+    ):
+        if ids is not None and r["track_id"] not in ids:
+            continue
+        try:
+            out[r["track_id"]][r["source"]] = int(float(r["value"]))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def accord_des_durees(da: dict | None, db: dict | None) -> bool | None:
+    """PUR. Deux fiches ont-elles une durée lue par identifiant commune à
+    ± `ACCORD_CATALOGUES_S` ? None si l'une n'en a aucune (rien à comparer)."""
+    va, vb = set((da or {}).values()), set((db or {}).values())
+    if not va or not vb:
+        return None
+    return min(abs(x - y) for x in va for y in vb) <= ACCORD_CATALOGUES_S
+
+
+def titre_joint_a_l_autre(a: str | None, b: str | None) -> bool:
+    """PUR. L'un des titres JOINT des parties (`contenants.parties_du_titre`,
+    jamais « 24/7 ») dont la dernière est l'autre titre, ou l'un de ses
+    sous-titres : « #Jesuispasséchezso : Épisode 6 / 93 Empire » et « 93
+    Empire », « Episode 5 / Police Nationale » et « C'est nous les condés
+    (Police Nationale) »."""
+    for long, court in ((a, b), (b, a)):
+        parties = parties_du_titre(long)
+        if parties and court:
+            dernier = parties[-1]
+            if any(titres_equivalents(dernier, f) for f in (court, *sous_titres(court))):
+                return True
+    return False
+
+
+def ids_partages(par, durees: dict[int, dict] | None = None) -> list[Cas]:
+    """Le même ID sur deux fiches d'un artiste qui ne sont pas lignes sœurs.
+
+    Branche ISRC (règle du 2026-11-09, simulée : 5 cas sur 6) : deux fiches
+    dont l'une JOINT au bout de son titre celui de l'autre (`titre_joint_a_l_autre`)
+    et dont les durées lues par identifiant (`durees`) concordent à ± 2 s sont
+    le MÊME enregistrement sous deux pages (« 93 Empire » de Kery James) : une
+    DÉCISION de fusion, pas une erreur — la fusion reste humaine (elle n'est pas
+    réversible). « Tigini (Remix) » (même ISRC, deux remix différents) reste
+    une erreur."""
+    durees = durees or {}
     cas = []
     for ts in par.values():
         for col in ("spotify_id", "deezer_id", "isrc", "apple_music_id"):
@@ -303,13 +360,20 @@ def ids_partages(par) -> list[Cas]:
                     # Entre pages Genius : le panneau le juge (`revue:id_catalogue_partage`).
                     continue
                 if len(g) > 1 and (len(pages) > 1 or None in pages):
-                    cas.append(
-                        Cas(
-                            "id_partage",
-                            g[0]["artiste"],
-                            [t["id"] for t in g],
-                            f"{col} {valeur} : " + " | ".join(_lib(t) for t in g),
+                    libelle = f"{col} {valeur} : " + " | ".join(_lib(t) for t in g)
+                    nature = ERREUR
+                    if (
+                        col == "isrc"
+                        and len(g) == 2
+                        and titre_joint_a_l_autre(g[0]["title"], g[1]["title"])
+                        and accord_des_durees(durees.get(g[0]["id"]), durees.get(g[1]["id"]))
+                    ):
+                        nature = DECISION
+                        libelle += (
+                            " — même enregistrement (titre joint, durées à ± 2 s) : fusionner ?"
                         )
+                    cas.append(
+                        Cas("id_partage", g[0]["artiste"], [t["id"] for t in g], libelle, nature)
                     )
     return cas
 
@@ -1678,8 +1742,9 @@ def auditer(
             date=datetime.now().isoformat(timespec="seconds"),
             perimetre=", ".join(noms) if noms else "base entière",
         )
+        durees_id = durees_par_identifiant(c, {t["id"] for t in pistes} if artistes else None)
         audit.cas += doublons_equivalents(par)
-        audit.cas += ids_partages(par)
+        audit.cas += ids_partages(par, durees_id)
         audit.cas += lrc(par)
         audit.cas += paroles_identiques(par)
         audit.cas += instrumentaux(pistes)

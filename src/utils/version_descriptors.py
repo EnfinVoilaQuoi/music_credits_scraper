@@ -296,6 +296,20 @@ def titre_sans_sous_titre(titre: str | None) -> str | None:
     return sans
 
 
+def sous_titres(titre: str | None) -> list[str]:
+    """PUR. Les SOUS-TITRES du titre, tels qu'écrits : ses groupes entre
+    parenthèses ou crochets qui ne portent aucun mot de version, featuring
+    retiré (« C'est nous les condés (Police Nationale) » → [« Police
+    Nationale »] ; « Suzy (Live) » → []). Le pendant de `titre_sans_sous_titre`."""
+    if not titre:
+        return []
+    return [
+        m[1].strip()
+        for m in _GROUPE.finditer(strip_featuring(titre))
+        if m[1].strip() and not _porte_vocabulaire(m[1])
+    ]
+
+
 def _tokens(texte: str) -> list[str]:
     """Mots normalisés d'un descripteur (ascii, minuscules, ponctuation écrasée).
 

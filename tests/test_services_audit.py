@@ -658,6 +658,78 @@ def test_id_de_catalogue_entre_pages_laisse_au_panneau():
     assert [c.libelle.split(" ")[0] for c in au.ids_partages(sans_page)] == ["spotify_id"]
 
 
+class TestIsrcDUnTitreJoint:
+    """2026-11-09, simulé : 5 cas sur 6. Même ISRC, l'un JOINT au bout de son
+    titre celui de l'autre, durées par identifiant à ± 2 s : le même
+    enregistrement sous deux pages — une décision de fusion, pas une erreur."""
+
+    @staticmethod
+    def _par(titre_a, titre_b):
+        def r(tid, titre):
+            return {
+                "id": tid,
+                "title": titre,
+                "artiste": "Sofiane",
+                "genius_id": 100 + tid,
+                "spotify_id": None,
+                "deezer_id": None,
+                "isrc": "FRPJW1600870",
+                "apple_music_id": None,
+            }
+
+        return {1: [r(1, titre_a), r(2, titre_b)]}
+
+    @pytest.mark.parametrize(
+        "titre_a, titre_b",
+        [
+            ("93 Empire", "#Jesuispasséchezso : Épisode 6 / 93 Empire"),
+            # Le titre de l'autre n'est que son SOUS-TITRE entre parenthèses.
+            (
+                "C’est nous les condés (Police Nationale)",
+                "#Jesuispasséchezso : Episode 5 / Police Nationale",
+            ),
+        ],
+    )
+    def test_titre_joint_et_memes_durees_decision(self, titre_a, titre_b):
+        (cas,) = au.ids_partages(
+            self._par(titre_a, titre_b), {1: {"deezer": 201}, 2: {"spotify_web": 199}}
+        )
+        assert cas.nature == au.DECISION and "fusionner ?" in cas.libelle
+
+    @pytest.mark.parametrize(
+        "titre_b, durees",
+        [
+            # Durées à plus de 2 s : deux enregistrements possibles.
+            (
+                "#Jesuispasséchezso : Épisode 6 / 93 Empire",
+                {1: {"deezer": 201}, 2: {"deezer": 230}},
+            ),
+            # Sans durée lue par identifiant d'un côté : rien ne le montre.
+            ("#Jesuispasséchezso : Épisode 6 / 93 Empire", {1: {"deezer": 201}}),
+            # « 24/7 » n'est pas une jointure.
+            ("24/7", {1: {"deezer": 201}, 2: {"deezer": 201}}),
+            # Même titre (« Tigini (Remix) », deux remix) : rien n'est joint.
+            ("93 Empire", {1: {"deezer": 201}, 2: {"deezer": 201}}),
+        ],
+    )
+    def test_sinon_erreur(self, titre_b, durees):
+        (cas,) = au.ids_partages(self._par("93 Empire", titre_b), durees)
+        assert cas.nature == au.ERREUR
+
+    def test_les_durees_lues_par_identifiant_seulement(self, data_manager, isha):
+        """`durees_par_identifiant` ne lit que les catalogues lus par ID."""
+        from src.enrichment.observation import Observation
+
+        _, t = isha
+        data_manager.record_discography_observations(
+            t.id, [Observation("duration", 201, "deezer"), Observation("duration", 150, "legacy")]
+        )
+        from contextlib import closing
+
+        with closing(au._connexion(data_manager.db_path)) as c:
+            assert au.durees_par_identifiant(c)[t.id] == {"deezer": 201}
+
+
 @pytest.mark.parametrize(
     "titre, titre_certif, nature",
     [

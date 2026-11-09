@@ -163,6 +163,55 @@ class TestInvariants:
         # Sur un artiste, ni orphelins ni schéma : ils ne portent sur personne.
         assert "orphelin" not in _familles(au.auditer(data_manager, ["Isha"]))
 
+    def test_orphelins_derives_du_schema(self, data_manager, isha):
+        """2026-11-09 : `revue_signalements`, `kworb_decisions`, `artist_id` et
+        `release_id` n'étaient pas vérifiés ; les exclusions restent muettes."""
+        a, _ = isha
+        for sql in (
+            "INSERT INTO revue_signalements (artist_id, detecteur, cle, track_id) "
+            f"VALUES ({a.id}, 'kworb', 'k', 999)",
+            "INSERT INTO release_tracks (release_id, track_id) VALUES (777, 1)",
+            "INSERT INTO revue_verdicts (artist_id, detecteur, cle, verdict) "
+            "VALUES (888, 'd', 'c', 'normal')",
+            # Exclusions : l'historique d'usage survit à l'artiste, le journal
+            # d'une page supprimée à sa fiche.
+            "INSERT INTO source_usage_daily (day, source_key, artist_id, flow, issue) "
+            "VALUES ('2026-11-09', 's', 888, 'f', 'ok')",
+            "INSERT INTO revue_corrections (artist_id, detecteur, cle, track_id, action, "
+            f"annulation) VALUES ({a.id}, 'annotee', 'c', 999, 'x', "
+            """'{"type": "page_supprimee"}')""",
+        ):
+            _sql(data_manager, sql)
+        libelles = sorted(
+            c.libelle for c in au.auditer(data_manager).cas if c.famille == "orphelin"
+        )
+        assert libelles == [
+            "release_tracks.release_id : 1 ligne(s) sans parution",
+            "revue_signalements : 1 ligne(s) sans fiche",
+            "revue_verdicts.artist_id : 1 ligne(s) sans artiste",
+        ]
+
+    def test_toute_colonne_de_lien_est_verifiee_ou_exclue(self, data_manager):
+        """Garde : une table neuve qui désigne une fiche, un artiste ou une
+        parution (par son nom de colonne ou par une clé étrangère) est vérifiée
+        par `orphelins`, ou exclue avec sa raison dans `EXCLUSIONS_D_ORPHELINS`."""
+        from contextlib import closing
+
+        from src.persistence.schema import metadata
+
+        visees = set(au.CIBLES_DES_LIENS.values())
+        attendues = {
+            (table.name, col.name)
+            for table in metadata.tables.values()
+            for col in table.columns
+            if col.name in au.CIBLES_DES_LIENS
+            or any(fk.column.table.name in visees for fk in col.foreign_keys)
+        }
+        with closing(au._connexion(data_manager.db_path)) as c:
+            verifiees = {(t, k) for t, k, _ in au.colonnes_liees(c)}
+        assert attendues - verifiees - set(au.EXCLUSIONS_D_ORPHELINS) == set()
+        assert {"revue_signalements", "kworb_decisions", "releases"} <= {t for t, _ in verifiees}
+
     def test_artiste_inconnu(self, data_manager, isha):
         with pytest.raises(ValueError, match="Personne"):
             au.auditer(data_manager, ["Personne"])
@@ -280,6 +329,36 @@ class TestHausse:
         assert "     1" in run and "id_spotify_sans_compteur" in run
         info = reste.split("pour information (2)")[1]
         assert "fiche_sans_participation" in info and "certif_autre" in info
+
+
+def test_couverture_des_durees_hors_critere(data_manager, isha):
+    """2026-11-09 : une durée qu'aucune source qui fait foi ne porte n'est pas
+    une erreur, mais la part de ces durées se suit — une ligne du tableau, un
+    champ de `vers_dict`, aucun cas."""
+    from src.enrichment.observation import Observation
+
+    a, t = isha
+    for titre, sources in (("Vidéo", ["youtube_video"]), ("Discogs", ["discogs", "legacy"])):
+        f = Track(title=titre, artist=a)
+        data_manager.save_track(f)
+        data_manager.record_discography_observations(
+            f.id, [Observation("duration", 200, s) for s in sources]
+        )
+    data_manager.record_discography_observations(
+        t.id,
+        [Observation("duration", 200, "deezer"), Observation("duration", 201, "youtube_video")],
+    )
+    audit = au.auditer(data_manager, revue=False)
+    assert audit.couverture_durees == {
+        "durees": 3,
+        "sans_source_qui_fait_foi": 2,
+        "seule_youtube_video": 1,
+    }
+    assert audit.vers_dict()["couverture_durees"] == audit.couverture_durees
+    assert "Couverture des durées : 2 / 3 (67%)" in au.tableau(audit)
+    assert "dont 1 sur la seule vidéo" in au.tableau(audit)
+    # Sans durée en base, pas de ligne.
+    assert "Couverture" not in au.tableau(au.Audit(date="d", perimetre="p"))
 
 
 class TestATrancher:
@@ -769,3 +848,219 @@ def test_une_version_au_meme_lrc_et_a_la_meme_duree_est_indecidable():
         }
         (cas,) = [c for c in au.lrc(par) if c.famille == "lrc_version"]
         assert cas.nature == nature
+
+
+def _fiche_id(tid, artist_id, genius_id, **ids):
+    return {
+        "id": tid,
+        "title": "Gangsta Shit",
+        "artist_id": artist_id,
+        "artiste": f"A{artist_id}",
+        "genius_id": genius_id,
+        "spotify_id": None,
+        "deezer_id": None,
+        "isrc": None,
+        "apple_music_id": None,
+        **ids,
+    }
+
+
+class TestIdsPartagesEntreArtistes:
+    """2026-11-09 : `ids_partages` ne lit qu'un artiste à la fois."""
+
+    def test_deux_pages_de_deux_artistes_au_meme_id_apple(self):
+        """« Lollipop (French Remix) » de Booba sur l'ID Apple du « Lollipop
+        (Remix) » de Kanye West : une erreur."""
+        pistes = [
+            _fiche_id(6550, 1, 7, apple_music_id="1440737575"),
+            _fiche_id(8873, 2, 5463611, apple_music_id="1440737575"),
+        ]
+        (cas,) = au.ids_partages_entre_artistes(pistes)
+        assert (cas.famille, cas.nature, cas.pistes) == (
+            "id_partage_artistes",
+            au.ERREUR,
+            [6550, 8873],
+        )
+
+    def test_une_fiche_sans_page_a_l_isrc_d_une_page_d_un_autre(self):
+        """« Gangsta Shit » d'Isha, sans page, à l'ISRC de la page d'Aketo : une
+        ligne sœur non reliée — une décision, pas une donnée fausse."""
+        pistes = [
+            _fiche_id(9746, 1, None, isrc="FXR142300075"),
+            _fiche_id(21707, 2, 9183723, isrc="fxr142300075 "),
+        ]
+        (cas,) = au.ids_partages_entre_artistes(pistes)
+        assert (cas.famille, cas.nature) == ("soeur_non_reliee", au.DECISION)
+        assert "soeur_non_reliee" in au.FAMILLES_DECISION
+
+    @pytest.mark.parametrize(
+        "pistes",
+        [
+            # Lignes sœurs : même page.
+            [_fiche_id(1, 1, 10, isrc="X"), _fiche_id(2, 2, 10, isrc="X")],
+            # Deux fiches sans page : la piste vue chez chaque artiste crédité.
+            [_fiche_id(1, 1, None, deezer_id=5), _fiche_id(2, 2, None, deezer_id=5)],
+            # Un même artiste : `ids_partages` le compte.
+            [_fiche_id(1, 1, 10, isrc="X"), _fiche_id(2, 1, 11, isrc="X")],
+            # Deux pages chez A, leurs sœurs chez B (« 93 Empire », Sofiane et
+            # Kalash Criminel) : vu par `ids_partages` chez chacun.
+            [
+                _fiche_id(1, 1, 10, isrc="X"),
+                _fiche_id(2, 1, 11, isrc="X"),
+                _fiche_id(3, 2, 10, isrc="X"),
+                _fiche_id(4, 2, 11, isrc="X"),
+            ],
+        ],
+    )
+    def test_ce_qui_n_est_pas_un_cas(self, pistes):
+        assert au.ids_partages_entre_artistes(pistes) == []
+
+    def test_spotify_entre_pages_d_une_formation_laisse_au_panneau(self):
+        """Le panneau lit membre et groupe ensemble (`id_catalogue_partage`) ;
+        un ISRC n'y est pas jugé, il reste à l'audit."""
+        pistes = [
+            _fiche_id(1, 1, 10, spotify_id="SP", isrc="X"),
+            _fiche_id(2, 2, 11, spotify_id="SP", isrc="X"),
+        ]
+        liees = {frozenset((1, 2))}
+        cas = au.ids_partages_entre_artistes(pistes, liees)
+        assert [c.libelle.split(" ")[0] for c in cas] == ["isrc"]
+        assert len(au.ids_partages_entre_artistes(pistes)) == 2
+
+    def test_base_entiere_seulement(self, data_manager, isha):
+        _, t = isha
+        swing = Artist(name="Swing")
+        swing.id = data_manager.save_artist(swing)
+        autre = Track(title="Autre", artist=swing)
+        autre.genius_id = 999
+        data_manager.save_track(autre)
+        for tid in (t.id, autre.id):
+            _sql(data_manager, "UPDATE tracks SET apple_music_id = '42' WHERE id = :t", t=tid)
+        entiere = au.auditer(data_manager, revue=False, persistance=False)
+        assert _familles(entiere).get("id_partage_artistes") == 1
+        par_artiste = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        assert "id_partage_artistes" not in _familles(par_artiste)
+
+
+def _certif(titre, titre_certif, categorie="single"):
+    return {
+        "id": 1,
+        "title": titre,
+        "artiste": "X",
+        "certifications": json.dumps(
+            [{"title": titre_certif, "category": categorie, "body": "SNEP"}]
+        ),
+    }
+
+
+class TestFamillesNues:
+    """2026-11-09 : six familles de l'audit qu'aucun test ne nommait."""
+
+    def test_duree_paroles(self, data_manager, isha):
+        """L'« Outro » de Di-Meh sous les 167 s de Népal : 1 350 mots en 167 s."""
+        a, t = isha
+        rapide = Track(title="Rapide", artist=a)
+        data_manager.save_track(rapide)
+        for tid, duree in ((t.id, 167), (rapide.id, 330)):
+            _sql(
+                data_manager,
+                "UPDATE tracks SET duration = :d, lyrics = :p, lyrics_source = 'genius' "
+                "WHERE id = :t",
+                d=duree,
+                p="mot " * 1350,
+                t=tid,
+            )
+        # Les mêmes paroles venues de YTM ne sont pas un oracle.
+        _sql(
+            data_manager,
+            "UPDATE tracks SET lyrics_source = 'ytmusic', duration = 100 WHERE id = :t",
+            t=rapide.id,
+        )
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        (cas,) = [c for c in audit.cas if c.famille == "duree_paroles"]
+        assert cas.pistes == [t.id] and cas.nature == au.ERREUR
+        assert cas.libelle.endswith("167s, 1350 mots")
+
+    def test_streams_double(self, data_manager, isha):
+        """Le même compteur Spotify sur deux pages aux titres sans parenté."""
+        a, t = isha
+        autre = Track(title="Bavardage", artist=a)
+        autre.genius_id = 4243
+        data_manager.save_track(autre)
+        for tid in (t.id, autre.id):
+            _sql(data_manager, "UPDATE tracks SET spotify_streams = 123456 WHERE id = :t", t=tid)
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        (cas,) = [c for c in audit.cas if c.famille == "streams_double"]
+        assert sorted(cas.pistes) == sorted([t.id, autre.id]) and "123,456" in cas.libelle
+        # Sous 1 000 streams, un compteur égal ne dit rien.
+        for tid in (t.id, autre.id):
+            _sql(data_manager, "UPDATE tracks SET spotify_streams = 900 WHERE id = :t", t=tid)
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        assert "streams_double" not in _familles(audit)
+
+    @pytest.mark.parametrize(
+        "piste, famille",
+        [
+            (_certif("Durag", "Durag", "album"), "certif_album"),
+            # Mots EN PLUS dans le titre certifié.
+            (_certif("Life", "TUBA LIFE"), "certif_plus_long"),
+            # La certif de l'original sur une version à descripteur.
+            (_certif("Suzy (Live 2006)", "SUZY"), "certif_version"),
+            (_certif("Durag", "Bandana"), "certif_autre"),
+        ],
+    )
+    def test_familles_de_certifs(self, piste, famille):
+        (cas,) = au.certifs([piste])
+        assert cas.famille == famille and "SNEP" in cas.libelle
+
+    def test_certif_au_bon_titre_ou_echo_n_est_pas_un_cas(self):
+        echo = _certif("Durag", "Bandana")
+        echo["certifications"] = json.dumps([{"title": "Bandana", "echo": True}])
+        assert au.certifs([_certif("Durag (feat. X)", "DURAG"), echo]) == []
+
+    def test_echec_mal_classe(self, data_manager, isha):
+        """Une absence (« pas de paroles ») ou une annulation rangée en `crash` ;
+        un vrai plantage n'en est pas un, et un (morceau, source) compte une fois."""
+        _, t = isha
+        for source, issue, message in (
+            ("lrclib", "crash", "Pas de paroles trouvées"),
+            ("genius", "crash", "CancelledError()"),
+            ("deezer", "crash", "KeyError: 'data'"),
+            ("ytmusic", "absent", "aucun résultat"),
+        ):
+            _sql(
+                data_manager,
+                "INSERT INTO source_track_failures (track_id, source_key, flow, issue, message, "
+                "n_echecs) VALUES (:t, :s, 'credits', :i, :m, 1)",
+                t=t.id,
+                s=source,
+                i=issue,
+                m=message,
+            )
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        cas = sorted(c.libelle for c in audit.cas if c.famille == "echec_mal_classe")
+        assert len(cas) == 2
+        assert "genius crash : CancelledError()" in cas[0]
+        assert "lrclib crash : Pas de paroles" in cas[1]
+
+
+def test_date_ancienne_pour_information(data_manager, isha):
+    """2026-11-09 : « Lacrimosa » 1792 (juste), « Suicide » 1861 chez Kanye West
+    (douteux) — montrés avec leurs sources, hors critère."""
+    from src.enrichment.observation import Observation
+
+    a, t = isha
+    recente = Track(title="Récente", artist=a)
+    data_manager.save_track(recente)
+    data_manager.record_discography_observations(
+        t.id, [Observation("release_date", "1861-01-01", "genius")]
+    )
+    data_manager.record_discography_observations(
+        recente.id, [Observation("release_date", "1950-03-01", "deezer")]
+    )
+    audit = au.auditer(data_manager, ["Isha"], revue=False)
+    (cas,) = [c for c in audit.cas if c.famille == "date_ancienne"]
+    assert cas.pistes == [t.id] and cas.nature == au.INFORMATION
+    assert "1861-01-01 (genius 1861-01-01)" in cas.libelle
+    assert "date_ancienne" in au.FAMILLES_HORS_CRITERE
+    assert audit.critere() == 0

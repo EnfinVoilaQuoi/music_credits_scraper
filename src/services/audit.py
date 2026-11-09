@@ -126,6 +126,9 @@ class Audit:
     #: Les cas du critère ABSENTS de l'audit précédent (`apres_run`) : hors de
     #: `vers_dict`, ils ne servent qu'au compte rendu de fin de run.
     nouveaux: list[Cas] = field(default_factory=list)
+    #: Couverture des durées (`couverture_des_durees`) : une mesure, pas une
+    #: famille — hors des cas et du critère.
+    couverture_durees: dict[str, int] = field(default_factory=dict)
 
     def compte(self) -> dict[str, int]:
         return dict(collections.Counter(c.famille for c in self.cas))
@@ -154,6 +157,7 @@ class Audit:
             "compte_critere": self.compte_critere(),
             "par_nature": self.par_nature(),
             "critere": self.critere(),
+            "couverture_durees": self.couverture_durees,
             "cas": [asdict(x) for x in self.cas],
         }
 
@@ -161,6 +165,8 @@ class Audit:
 FAMILLES = {
     "doublon_equivalent": "fiche sans page Genius = page Genius au titre équivalent",
     "id_partage": "même ID Spotify/Deezer/ISRC/Apple sur deux pages Genius",
+    "id_partage_artistes": "même ID Spotify/Deezer/ISRC/Apple sur deux pages d'artistes différents",
+    "soeur_non_reliee": "fiche sans page au même ID qu'une fiche d'un autre artiste (relier ?)",
     "lrc_emprunte": "LRC d'une autre fiche qui le confirme (titres non équivalents)",
     "lrc_version": "version (remix, live…) au LRC exact de son original",
     "paroles_identiques": "mêmes paroles sur deux fiches aux titres non équivalents",
@@ -183,10 +189,11 @@ FAMILLES = {
     "id_spotify_sans_compteur": "ID Spotify posé, aucun compteur (plafond de pages du run)",
     "fiche_sans_participation": "morceau d'un autre sur le disque de l'artiste, hors de ses totaux",
     "lien_jamais_mesure": "lien YouTube sans ligne `track_videos` : vues jamais relevées",
+    "date_ancienne": "date de sortie avant 1950 (juste pour une œuvre ancienne, sinon douteuse)",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
     "soeurs_divergentes": "INVARIANT — lignes sœurs aux valeurs d'enregistrement différentes",
-    "orphelin": "INVARIANT — ligne liée à une fiche qui n'existe plus",
+    "orphelin": "INVARIANT — ligne liée à une fiche, un artiste ou une parution disparus",
     "schema": "INVARIANT — colonne de la base ≠ schema.py",
     "refus_vivant": "INVARIANT — valeur refusée à la main encore portée par la fiche ou une sœur",
     "isrc_edition_autre_fiche": "INVARIANT — ISRC d'une édition = celui d'une AUTRE fiche",
@@ -197,7 +204,9 @@ FAMILLES = {
 #: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
 #: `recherche_perimee` l'était jusqu'au 2026-10-29 : c'est désormais un
 #: détecteur du panneau (`revue:recherche_perimee`), qu'une règle tranche.
-FAMILLES_DECISION: tuple[str, ...] = ()
+#: `soeur_non_reliee` (2026-11-09) : relier une ligne sœur ou fusionner est une
+#: décision humaine (la fusion n'est pas réversible).
+FAMILLES_DECISION: tuple[str, ...] = ("soeur_non_reliee",)
 
 #: Les familles de l'audit dont AUCUN cas n'est une erreur (« à faire par un
 #: run », « pour information ») : hors du bloc des erreurs du tableau, où elles
@@ -207,6 +216,7 @@ FAMILLES_HORS_CRITERE = (
     "id_spotify_sans_compteur",
     "fiche_sans_participation",
     "lien_jamais_mesure",
+    "date_ancienne",
 )
 
 #: Les familles dont la cible est zéro (une seule ligne = un défaut de code).
@@ -301,6 +311,108 @@ def ids_partages(par) -> list[Cas]:
                             f"{col} {valeur} : " + " | ".join(_lib(t) for t in g),
                         )
                     )
+    return cas
+
+
+#: Colonnes d'identité comparées entre artistes (`ids_partages_entre_artistes`).
+COLONNES_D_ID_PARTAGE = ("spotify_id", "deezer_id", "isrc", "apple_music_id")
+
+
+def formations_liees(c) -> set[frozenset[int]]:
+    """Les paires {membre, formation} confirmées (groupe ou collectif) : le
+    panneau lit leurs fiches ENSEMBLE (`discographie_reunie`), un ID partagé
+    entre elles s'y voit déjà."""
+    return {
+        frozenset((r["artist_id"], r["related_artist_id"]))
+        for r in c.execute(
+            "SELECT artist_id, related_artist_id FROM artist_relations "
+            "WHERE kind = 'member_of' AND status = 'confirmed' AND related_artist_id IS NOT NULL"
+        )
+    }
+
+
+def ids_partages_entre_artistes(pistes, liees: set[frozenset[int]] = frozenset()) -> list[Cas]:
+    """PUR. Le même ID Spotify, Deezer, ISRC ou Apple sur des fiches
+    d'artistes DIFFÉRENTS qui ne sont pas des lignes sœurs (2026-11-09) — ce que
+    `ids_partages`, qui lit un artiste à la fois, ne voit pas. Base entière
+    seulement. Ne recompte ni une paire d'un même artiste (`ids_partages`), ni
+    un ID Spotify / Deezer entre deux PAGES d'artistes que le panneau lit ensemble
+    (`revue:id_catalogue_partage`, `liees`).
+
+    Deux natures, selon ce que les fiches sont :
+    - deux pages Genius différentes : l'une porte l'ID d'une autre — une ERREUR
+      (`id_partage_artistes` ; « Lollipop (French Remix) » de Booba sur l'ID
+      Apple du « Lollipop (Remix) » de Kanye West, 2026-11-09) ;
+    - une fiche SANS page au même ID qu'une fiche d'un autre artiste : le plus
+      souvent la même piste vue par la plateforme chez l'invité, une ligne sœur
+      que rien n'a reliée (« Gangsta Shit » d'Isha, sans page, à l'ISRC de la
+      page d'Aketo) — une DÉCISION (`soeur_non_reliee`) : relier ou fusionner.
+    Deux fiches SANS page de deux artistes au même ID ne sont pas un cas : la
+    piste vue chez chaque artiste crédité (18 groupes le 2026-11-09, tous des
+    collaborations sans page Genius)."""
+    cas = []
+    for col in COLONNES_D_ID_PARTAGE:
+        groupes = collections.defaultdict(list)
+        for t in pistes:
+            valeur = str(t[col] or "").strip().upper()
+            if valeur:
+                groupes[valeur].append(t)
+        for valeur, g in sorted(groupes.items()):
+            if len({t["artist_id"] for t in g}) < 2:
+                continue
+            # L'enregistrement d'une fiche : sa page, sinon elle-même. Un artiste
+            # qui porte déjà deux de ces enregistrements le montre à `ids_partages`.
+            par_artiste = collections.defaultdict(set)
+            for t in g:
+                par_artiste[t["artist_id"]].add(t["genius_id"] or f"#{t['id']}")
+            impliquees: dict[int, object] = {}
+            for i, a in enumerate(g):
+                for b in g[i + 1 :]:
+                    if a["artist_id"] == b["artist_id"]:
+                        continue
+                    if a["genius_id"] and a["genius_id"] == b["genius_id"]:
+                        continue  # lignes sœurs
+                    if not a["genius_id"] and not b["genius_id"]:
+                        # Deux fiches sans page : la même piste vue chez chaque
+                        # artiste crédité, des lignes sœurs que rien ne peut relier
+                        # (pas de page) — 18 cas le 2026-11-09, tous ainsi.
+                        continue
+                    paire = {a["genius_id"] or f"#{a['id']}", b["genius_id"] or f"#{b['id']}"}
+                    if any(paire <= portes for portes in par_artiste.values()):
+                        continue  # vu par `ids_partages` chez un artiste
+                    if (
+                        col in ("spotify_id", "deezer_id")
+                        and a["genius_id"]
+                        and b["genius_id"]
+                        and frozenset((a["artist_id"], b["artist_id"])) in liees
+                    ):
+                        continue  # le panneau lit les deux artistes ensemble
+                    impliquees[a["id"]] = a
+                    impliquees[b["id"]] = b
+            if not impliquees:
+                continue
+            fiches = sorted(impliquees.values(), key=lambda t: t["id"])
+            pages = {t["genius_id"] for t in fiches if t["genius_id"]}
+            sans_page = any(not t["genius_id"] for t in fiches)
+            famille, nature = (
+                ("soeur_non_reliee", DECISION)
+                if sans_page and len(pages) <= 1
+                else ("id_partage_artistes", ERREUR)
+            )
+            cas.append(
+                Cas(
+                    famille,
+                    fiches[0]["artiste"],
+                    [t["id"] for t in fiches],
+                    f"{col} {valeur} : "
+                    + " | ".join(
+                        f"{_lib(t)} {t['artiste']}"
+                        + (f" g{t['genius_id']}" if t["genius_id"] else " (sans page)")
+                        for t in fiches
+                    ),
+                    nature,
+                )
+            )
     return cas
 
 
@@ -872,47 +984,83 @@ def _editions_par_ligne(c, ids) -> dict[int, frozenset]:
     return {tid: frozenset(jeu) for tid, jeu in jeux.items()}
 
 
-#: Tables liées à une fiche (aucune cascade : `PRAGMA foreign_keys` est éteint).
-TABLES_LIEES = (
-    "credits",
-    "observations",
-    "track_videos",
-    "track_spotify_ids",
-    "release_tracks",
-    "scraping_errors",
-    "source_track_failures",
-    "source_track_absences",
-    "track_editions",
-    # L'historique de santé des sources survit à la fiche, sans plus la désigner.
-    "source_usage_failures",
-    "revue_corrections",
-)
+#: Les colonnes qui DÉSIGNENT une ligne d'une autre table, et cette table.
+#: Toute table de la base qui en porte une est vérifiée (2026-11-09 : la liste
+#: fermée d'avant oubliait `revue_signalements`, `kworb_decisions` et tout
+#: `artist_id` / `release_id`). Vérifié table par table le 2026-11-09 : chaque
+#: `artist_id` désigne `artists.id` (pour `releases`, l'artiste dont on lit le
+#: catalogue, qui existe toujours). `release_tracks.source_track_id` et les
+#: `external_track_id` sont des ID de SOURCE, pas des clés de la base.
+CIBLES_DES_LIENS = {
+    "track_id": "tracks",
+    "artist_id": "artists",
+    "release_id": "releases",
+    "variant_track_id": "tracks",
+    "related_artist_id": "artists",
+    "release_track_id": "release_tracks",
+}
 
-#: Lignes d'une table liée qui ne désignent légitimement plus de fiche.
-#: `revue_corrections` : le journal d'une page `annotee` supprimée, écrit APRÈS la
-#: suppression ; « Rétablir » n'y relit que `annulation` (page Genius et titre,
-#: `revue_auto`), jamais `track_id` (8 lignes le 2026-11-06).
-EXCLUSIONS_D_ORPHELINS = {
-    "revue_corrections": "AND COALESCE(x.annulation, '') NOT LIKE '%page_supprimee%'"
+#: Lignes qui ne désignent légitimement plus rien : `(table, colonne)` → clause
+#: SQL qui les écarte, ou None pour toute la colonne. Aucune cascade en base
+#: (`PRAGMA foreign_keys` est éteint) : chaque exclusion dit pourquoi la ligne
+#: survit.
+EXCLUSIONS_D_ORPHELINS: dict[tuple[str, str], str | None] = {
+    # Le journal d'une page `annotee` supprimée, écrit APRÈS la suppression ;
+    # « Rétablir » n'y relit que `annulation` (page Genius et titre,
+    # `revue_auto`), jamais `track_id` (8 lignes le 2026-11-06, 9 le 2026-11-09).
+    ("revue_corrections", "track_id"): (
+        "AND COALESCE(x.annulation, '') NOT LIKE '%page_supprimee%'"
+    ),
+    # L'historique de santé des sources survit à l'artiste : `delete_artist` ne
+    # le purge pas (usage par jour, fenêtre des 50 derniers échecs par source).
+    # Son `track_id`, lui, est remis à NULL à la suppression : il reste vérifié.
+    ("source_usage_daily", "artist_id"): None,
+    ("source_usage_failures", "artist_id"): None,
 }
 
 
+def colonnes_liees(c) -> list[tuple[str, str, str]]:
+    """`(table, colonne, table visée)` pour chaque colonne de lien de la base
+    (`CIBLES_DES_LIENS`), exclusions entières retirées — dérivé de la base
+    elle-même, pour qu'une table neuve soit vérifiée sans qu'on y pense."""
+    liees = []
+    for (table,) in c.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY name"
+    ):
+        for col in c.execute(f"PRAGMA table_info({table})"):  # noqa: S608 — nom lu de la base
+            nom = col[1]
+            cible = CIBLES_DES_LIENS.get(nom)
+            if cible is None:
+                continue
+            if (table, nom) in EXCLUSIONS_D_ORPHELINS and not EXCLUSIONS_D_ORPHELINS[table, nom]:
+                continue
+            liees.append((table, nom, cible))
+    return liees
+
+
 def orphelins(c) -> list[Cas]:
-    """Lignes liées à une fiche disparue — une suppression ou une fusion qui
-    a oublié une table (aucune cascade en base)."""
-    tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    """Lignes liées à une fiche, un artiste ou une parution disparus — une
+    suppression ou une fusion qui a oublié une table (aucune cascade en base)."""
     cas = []
-    for table in TABLES_LIEES:
-        if table not in tables:
-            continue
+    for table, col, cible in colonnes_liees(c):
         n = c.execute(
-            f"SELECT COUNT(*) FROM {table} x "  # noqa: S608 — nom de table de la liste fermée
-            "WHERE x.track_id IS NOT NULL "
-            "AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.id = x.track_id) "
-            + EXCLUSIONS_D_ORPHELINS.get(table, "")
+            f"SELECT COUNT(*) FROM {table} x "  # noqa: S608 — noms lus de la base
+            f"WHERE x.{col} IS NOT NULL "
+            f"AND NOT EXISTS (SELECT 1 FROM {cible} t WHERE t.id = x.{col}) "
+            + (EXCLUSIONS_D_ORPHELINS.get((table, col)) or "")
         ).fetchone()[0]
         if n:
-            cas.append(Cas("orphelin", "—", [], f"{table} : {n} ligne(s) sans fiche"))
+            quoi = {
+                "tracks": "fiche",
+                "artists": "artiste",
+                "releases": "parution",
+                "release_tracks": "piste de parution",
+            }[cible]
+            libelle = f"{table} : {n} ligne(s) sans {quoi}"
+            if col != "track_id":
+                libelle = f"{table}.{col} : {n} ligne(s) sans {quoi}"
+            cas.append(Cas("orphelin", "—", [], libelle))
     return cas
 
 
@@ -1360,6 +1508,77 @@ def liens_jamais_mesures(c, pistes) -> list[Cas]:
     return cas
 
 
+def couverture_des_durees(c, pistes) -> dict[str, int]:
+    """Combien de durées en colonne n'ont AUCUNE source qui fait foi
+    (`SOURCES_DUREE_PLATEFORME`) — une mesure de couverture, pas une famille :
+    une durée lue sur une vidéo ou Discogs n'est pas fausse pour autant, elle
+    n'est juste démentie par personne (2026-11-09 : 5 565 / 22 067, dont 4 009
+    sur la seule vidéo). Rend `{durees, sans_source_qui_fait_foi,
+    seule_youtube_video}`."""
+    sources = collections.defaultdict(set)
+    for r in c.execute("SELECT track_id, source FROM observations WHERE field = 'duration'"):
+        sources[r["track_id"]].add(r["source"])
+    avec = [t for t in pistes if t["duration"] not in (None, "")]
+    sans = [t for t in avec if not SOURCES_DUREE_PLATEFORME & sources[t["id"]]]
+    return {
+        "durees": len(avec),
+        "sans_source_qui_fait_foi": len(sans),
+        "seule_youtube_video": sum(1 for t in sans if sources[t["id"]] == {"youtube_video"}),
+    }
+
+
+def _ligne_de_couverture(couverture: dict) -> str | None:
+    if not couverture.get("durees"):
+        return None
+    n, total = couverture["sans_source_qui_fait_foi"], couverture["durees"]
+
+    def nombre(x: int) -> str:
+        return f"{x:,}".replace(",", " ")
+
+    return (
+        f"Couverture des durées : {nombre(n)} / {nombre(total)} ({n / total:.0%}) sans source "
+        f"qui fait foi (Deezer, Spotify, Apple, manuel), dont "
+        f"{nombre(couverture['seule_youtube_video'])} sur la seule vidéo — hors critère"
+    )
+
+
+#: Une date de sortie avant cette année se montre (`dates_anciennes`).
+ANNEE_ANCIENNE = 1950
+_ANNEE = re.compile(r"^(\d{4})")
+
+
+def dates_anciennes(c, pistes) -> list[Cas]:
+    """Une date de sortie avant 1950 (2026-11-09) : juste pour une œuvre
+    ancienne reprise (« Lacrimosa », 1792), douteuse ailleurs (« Suicide (dont
+    wanna die anymore) », 1861, chez Kanye West). Le verdict rend irrecevable
+    une année < 1000 (`reconcile`) ; cette famille montre ce qui reste, avec les
+    sources qui la donnent. Rien à trancher par l'audit : `INFORMATION`."""
+    anciennes = {}
+    for t in pistes:
+        m = _ANNEE.match(str(t["release_date"] or ""))
+        if m and int(m.group(1)) < ANNEE_ANCIENNE:
+            anciennes[t["id"]] = t
+    if not anciennes:
+        return []
+    sources = collections.defaultdict(list)
+    for r in c.execute(
+        "SELECT track_id, source, value FROM observations WHERE field = 'release_date' "
+        "ORDER BY track_id, source"
+    ):
+        if r["track_id"] in anciennes:
+            sources[r["track_id"]].append(f"{r['source']} {r['value']}")
+    return [
+        Cas(
+            "date_ancienne",
+            t["artiste"],
+            [tid],
+            f"{_lib(t)} {t['release_date']} ({', '.join(sources[tid]) or 'sans observation'})",
+            INFORMATION,
+        )
+        for tid, t in sorted(anciennes.items())
+    ]
+
+
 def ecarts_de_schema(db_path) -> list[Cas]:
     from src.persistence.bootstrap import ecarts_au_schema
 
@@ -1474,6 +1693,8 @@ def auditer(
         audit.cas += ids_spotify_sans_compteur(c, pistes)
         audit.cas += fiches_sans_participation(c, pistes)
         audit.cas += liens_jamais_mesures(c, pistes)
+        audit.cas += dates_anciennes(c, pistes)
+        audit.couverture_durees = couverture_des_durees(c, pistes)
         if persistance:
             audit.cas += soeurs_divergentes(c, pistes)
             audit.cas += refus_vivants(c, pistes)
@@ -1482,6 +1703,10 @@ def auditer(
             audit.cas += credits_en_double(c, pistes)
             if not noms:
                 audit.cas += orphelins(c)
+        if not noms:
+            # Entre artistes : seulement sur la base entière (un audit par
+            # artiste ne lit pas les fiches des autres).
+            audit.cas += ids_partages_entre_artistes(pistes, formations_liees(c))
     if persistance:
         audit.cas += colonnes_verdict(dm, pistes)
         if not noms:
@@ -1595,6 +1820,9 @@ def tableau(audit: Audit, reference: dict | None = None) -> str:
     if reference and "critere" in reference:
         critere += f" (avant : {reference['critere']})"
     lignes.append(critere)
+    couverture = _ligne_de_couverture(audit.couverture_durees)
+    if couverture:
+        lignes.append(couverture)
     return "\n".join(lignes)
 
 

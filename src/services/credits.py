@@ -701,6 +701,16 @@ def run(
             from src.services.versions import constater_instrumentaux
 
             constater_instrumentaux(runtime.data_manager, tracks)
+        if artist.id:
+            # Les crédits des originaux viennent d'être relus : l'héritage de
+            # leurs versions se recalcule (ce qui n'a plus de source part,
+            # 2026-11-10), sur TOUTE la discographie — l'original d'une version
+            # n'est pas forcément parmi les fiches de ce passage.
+            from src.services.versions import heriter_versions
+
+            heriter_versions(
+                runtime.data_manager, runtime.data_manager.get_artist_tracks(artist.id)
+            )
         if options.sync or options.paroles:
             # Un LRC fraîchement posé peut être celui d'une autre fiche.
             from src.services import revue_auto

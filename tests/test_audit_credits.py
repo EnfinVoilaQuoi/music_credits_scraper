@@ -124,3 +124,31 @@ def test_familles_de_credits_dans_l_audit(data_manager):
     assert graphie.nature == au.INFORMATION and graphie.pistes == [fiches["Fugitif"]]
     assert "credit_graphie" in au.FAMILLES_HORS_CRITERE
     assert audit.critere() == 1
+
+
+def test_production_heritee_d_une_reprise_sans_original_est_une_erreur(data_manager):
+    """Chez Kid Cudi, huit « Heartless » : la reprise de Kris Allen n'a pas
+    d'original unique, mais sa production héritée reste fausse (2026-11-10)."""
+    a = Artist(name="Kid Cudi")
+    a.id = data_manager.save_artist(a)
+    fiches = {}
+    for gid, titre in ((1, "Heartless"), (2, "Heartless"), (3, "Heartless (Studio Version)")):
+        t = Track(title=titre, artist=a, genius_id=gid)
+        data_manager.save_track(t)
+        fiches[titre] = t.id
+    with data_manager.engine.begin() as conn:
+        conn.execute(
+            text("UPDATE tracks SET relationships = :r WHERE id = :id"),
+            {
+                "r": '[{"type": "cover_of", "title": "Heartless", "artist": "Kanye West"}]',
+                "id": fiches["Heartless (Studio Version)"],
+            },
+        )
+    _credit(
+        data_manager, fiches["Heartless (Studio Version)"], "No I.D.", "Co-Producer", "heritage"
+    )
+    _credit(data_manager, fiches["Heartless (Studio Version)"], "Kid Cudi", "Writer", "heritage")
+    audit = au.auditer(data_manager, ["Kid Cudi"], revue=False, persistance=False)
+    (cas,) = [c for c in audit.cas if c.famille == "heritage_sans_source"]
+    assert cas.nature == au.ERREUR and cas.pistes == [fiches["Heartless (Studio Version)"]]
+    assert "No I.D. Co-Producer" in cas.libelle and "Kid Cudi" not in cas.libelle

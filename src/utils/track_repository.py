@@ -2864,14 +2864,17 @@ class TrackRepository:
             logger.error(f"Erreur retirer_mesures_heritees({track_id}): {e}")
             return 0
 
-    def retirer_heritage(self, track_id: int, *, garder_ecriture: bool) -> tuple[int, bool]:
+    def retirer_heritage(
+        self, track_id: int, *, garder_ecriture: bool, garder_paroles: bool = False
+    ) -> tuple[int, bool]:
         """Retire ce qu'une fiche a HÉRITÉ à tort de son original, sœurs
         comprises : les crédits `source='heritage'` (sauf l'écriture si
         `garder_ecriture`) et des paroles `heritage:<id>`. Décision utilisateur
         2026-09-28 : une démo, une prise alternative, un snippet n'héritent que
         de l'écriture ; une référence de rien — jusque-là ils retombaient sur
         « edition » (paroles ET production). Rend (crédits retirés, paroles
-        retirées)."""
+        retirées). `garder_paroles` : une reprise (2026-11-10) garde les paroles
+        et l'écriture, seule la production part."""
         from src.models.track import _WRITER_ROLES
 
         gardes = sorted(r.value for r in _WRITER_ROLES) if garder_ecriture else []
@@ -2891,6 +2894,8 @@ class TrackRepository:
                         ),
                         {"id": tid, **params},
                     ).rowcount
+                    if garder_paroles:
+                        return
                     bilan[1] |= (
                         conn.execute(
                             text(

@@ -1126,8 +1126,9 @@ def heritage_sans_source(c, pistes) -> list[Cas]:
     porte plus). Une version dont l'original n'est plus UNIQUE (huit
     « Heartless » chez Kid Cudi) ou plus retrouvé : rien ne dit d'où viennent
     ses crédits, pour information (2026-11-10 : 2 345 crédits hérités, 37 sans
-    source, 35 sans original unique)."""
-    from src.utils.version_heritage import IndexSocles, socle_parmi
+    source, 35 sans original unique). Une REPRISE (relation `cover_of`) n'hérite
+    jamais de la production : jugée même sans original unique."""
+    from src.utils.version_heritage import ROLE_NON_TRANSMIS, IndexSocles, socle_parmi
     from src.utils.version_heritage import heritage_sans_source as juger
 
     ids = {t["id"]: t for t in pistes}
@@ -1148,7 +1149,30 @@ def heritage_sans_source(c, pistes) -> list[Cas]:
     cas = []
     for tid, credits in herites.items():
         t, socle = ids[tid], socles[tid]
+        relations = _champ(t, "relationships")
         if socle is None:
+            # Sans original, un rôle que la famille ne transmet pas reste
+            # jugeable : la production héritée d'une REPRISE (Kid Cudi, huit
+            # « Heartless », 2026-11-10).
+            non_transmis = [
+                p
+                for p in juger(
+                    t["title"], [(x["name"], x["role"]) for x in credits], [], relations=relations
+                )
+                if p[2] == ROLE_NON_TRANSMIS
+            ]
+            if non_transmis:
+                detail = ", ".join(f"{n} {r}" for n, r, _m in non_transmis[:4])
+                cas.append(
+                    Cas(
+                        "heritage_sans_source",
+                        t["artiste"],
+                        [tid],
+                        f"{_lib(t)} : {len(non_transmis)} crédit(s) hérité(s) que sa "
+                        f"famille ne transmet pas — {detail}",
+                    )
+                )
+                continue
             cas.append(
                 Cas(
                     "heritage_sans_source",
@@ -1164,6 +1188,7 @@ def heritage_sans_source(c, pistes) -> list[Cas]:
             t["title"],
             [(x["name"], x["role"]) for x in credits],
             [(x["name"], x["role"], x["source"]) for x in du_socle.get(socle.id, [])],
+            relations=relations,
         )
         if perimes:
             detail = ", ".join(f"{n} {r} ({m})" for n, r, m in perimes[:4])

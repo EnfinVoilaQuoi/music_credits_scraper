@@ -350,26 +350,30 @@ def ids_partages(par, durees: dict[int, dict] | None = None) -> list[Cas]:
 COLONNES_D_ID_PARTAGE = ("spotify_id", "deezer_id", "isrc", "apple_music_id")
 
 
-def formations_liees(c) -> set[frozenset[int]]:
-    """Les paires {membre, formation} confirmées (groupe ou collectif) : le
-    panneau lit leurs fiches ENSEMBLE (`discographie_reunie`), un ID partagé
-    entre elles s'y voit déjà."""
-    return {
-        frozenset((r["artist_id"], r["related_artist_id"]))
-        for r in c.execute(
-            "SELECT artist_id, related_artist_id FROM artist_relations "
-            "WHERE kind = 'member_of' AND status = 'confirmed' AND related_artist_id IS NOT NULL"
-        )
-    }
+def fiches_lues_par_le_panneau(dm, noms: list[str]) -> dict[str, set[int]]:
+    """`{nom: ID des fiches}` que la fenêtre « À trancher » ouvre pour chaque
+    artiste — sa discographie RÉUNIE (`discographie_reunie` : groupes entiers,
+    part dans ses collectifs, périodes datées). Un artiste à la fois, seuls les
+    ID gardés (toute la base en objets : ~950 Mo, 2026-11-10). `a_trancher` les
+    note au passage ; cette fonction ne sert que sans le panneau."""
+    lues = {}
+    for nom in noms:
+        artiste = dm.get_artist_by_name(nom)
+        if artiste is not None:
+            lues[nom] = {t.id for t in dm.discographie_reunie(artiste)}
+    return lues
 
 
-def ids_partages_entre_artistes(pistes, liees: set[frozenset[int]] = frozenset()) -> list[Cas]:
+def ids_partages_entre_artistes(pistes, lus_ensemble=()) -> list[Cas]:
     """PUR. Le même ID Spotify, Deezer, ISRC ou Apple sur des fiches
     d'artistes DIFFÉRENTS qui ne sont pas des lignes sœurs (2026-11-09) — ce que
     `ids_partages`, qui lit un artiste à la fois, ne voit pas. Base entière
     seulement. Ne recompte ni une paire d'un même artiste (`ids_partages`), ni
-    un ID Spotify / Deezer entre deux PAGES d'artistes que le panneau lit ensemble
-    (`revue:id_catalogue_partage`, `liees`).
+    un ID Spotify / Deezer entre deux PAGES que le panneau lit ENSEMBLE
+    (`revue:id_catalogue_partage`) : `lus_ensemble` porte, par artiste, les ID
+    des fiches de sa discographie réunie — la règle exacte du panneau, pas une
+    approximation par les liens de formation (un collectif n'apporte que les
+    morceaux où le membre est présent, 2026-11-10).
 
     Deux natures, selon ce que les fiches sont :
     - deux pages Genius différentes : l'une porte l'ID d'une autre — une ERREUR
@@ -382,6 +386,10 @@ def ids_partages_entre_artistes(pistes, liees: set[frozenset[int]] = frozenset()
     Deux fiches SANS page de deux artistes au même ID ne sont pas un cas : la
     piste vue chez chaque artiste crédité (18 groupes le 2026-11-09, tous des
     collaborations sans page Genius)."""
+    lectures: dict[int, set[int]] = collections.defaultdict(set)
+    for i, fiches in enumerate(lus_ensemble):
+        for tid in fiches:
+            lectures[tid].add(i)
     cas = []
     for col in COLONNES_D_ID_PARTAGE:
         groupes = collections.defaultdict(list)
@@ -416,9 +424,9 @@ def ids_partages_entre_artistes(pistes, liees: set[frozenset[int]] = frozenset()
                         col in ("spotify_id", "deezer_id")
                         and a["genius_id"]
                         and b["genius_id"]
-                        and frozenset((a["artist_id"], b["artist_id"])) in liees
+                        and lectures[a["id"]] & lectures[b["id"]]
                     ):
-                        continue  # le panneau lit les deux artistes ensemble
+                        continue  # une même fenêtre du panneau lit les deux fiches
                     impliquees[a["id"]] = a
                     impliquees[b["id"]] = b
             if not impliquees:
@@ -2200,7 +2208,7 @@ def toutes_les_familles() -> dict[str, str]:
     return {**FAMILLES, **familles_revue()}
 
 
-def a_trancher(dm, noms: list[str]) -> list[Cas]:
+def a_trancher(dm, noms: list[str], lues: dict[str, set[int]] | None = None) -> list[Cas]:
     """Les cas ACTIFS du panneau pour chaque artiste — sa discographie RÉUNIE
     (la sienne + groupes + part dans ses collectifs), exactement ce que la
     fenêtre ouvre. Zéro réseau, zéro écriture (`revue.analyser`). Un cas tranché
@@ -2246,6 +2254,8 @@ def a_trancher(dm, noms: list[str]) -> list[Cas]:
         if artiste is None:
             continue
         artiste.tracks = dm.discographie_reunie(artiste)
+        if lues is not None:  # ce que cette fenêtre lit (`ids_partages_entre_artistes`)
+            lues[nom] = {t.id for t in artiste.tracks}
         ctx = revue.charger_contexte(dm, artiste)
         analyse = revue.analyser(dm, artiste, ctx)
         with brut.rejeu():
@@ -2416,17 +2426,24 @@ def auditer(
             audit.cas += photos_par_defaut(c, artistes, dossier_entier=not noms)
             if not noms:
                 audit.cas += orphelins(c)
-        if not noms:
-            # Entre artistes : seulement sur la base entière (un audit par
-            # artiste ne lit pas les fiches des autres).
-            audit.cas += ids_partages_entre_artistes(pistes, formations_liees(c))
         audit.cas = un_cas_par_enregistrement(audit.cas, pistes)
     if persistance:
         audit.cas += colonnes_verdict(dm, pistes)
         if not noms:
             audit.cas += ecarts_de_schema(dm.db_path)
+    # Entre artistes : seulement sur la base entière (un audit par artiste ne
+    # lit pas les fiches des autres). Les paires qu'une même fenêtre du panneau
+    # lit sont les siennes : `a_trancher` note ce que chaque fenêtre lit.
+    lues: dict[str, set[int]] | None = None if noms else {}
     if revue:
-        audit.cas += a_trancher(dm, noms or dm.get_artist_names())
+        audit.cas += a_trancher(dm, noms or dm.get_artist_names(), lues)
+    if not noms:
+        if not revue:
+            lues = fiches_lues_par_le_panneau(dm, dm.get_artist_names())
+        audit.cas += un_cas_par_enregistrement(
+            ids_partages_entre_artistes(pistes, list(lues.values())), pistes
+        )
+    if revue:
         audit.cas = montres_par_le_panneau(audit.cas)
     return audit
 

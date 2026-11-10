@@ -812,10 +812,50 @@ class TestIsrcDUnTitreJoint:
         ],
     )
     def test_titre_joint_et_memes_durees_decision(self, titre_a, titre_b):
-        (cas,) = au.ids_partages(
-            self._par(titre_a, titre_b), {1: {"deezer": 201}, 2: {"spotify_web": 199}}
-        )
-        assert cas.nature == au.DECISION and "fusionner ?" in cas.libelle
+        # La décision est au panneau (`revue:meme_enregistrement`) : plus de cas
+        # d'audit, et le juge commun dit la fusion.
+        from src.utils.meme_enregistrement import fusion_par_isrc, paires_au_meme_isrc
+
+        par = self._par(titre_a, titre_b)
+        durees = {1: {"deezer": 201}, 2: {"spotify_web": 199}}
+        assert not au.ids_partages(par, durees)
+        ((a, b),) = paires_au_meme_isrc(par[1])
+        assert (a["id"], b["id"]) == (1, 2) and fusion_par_isrc(a, b, durees)
+
+    def test_la_fusion_par_l_isrc_est_au_panneau(self, data_manager, isha):
+        # « 93 Empire » / « … : Épisode 6 / 93 Empire » : comptée par le panneau,
+        # une fois, et « ✓ Normal » retient le non.
+        from src.services import revue
+
+        a, t = isha
+        autre = Track(title=f"#Jesuispasséchezso : Épisode 6 / {t.title}", artist=a)
+        autre.genius_id = 4343
+        data_manager.save_track(autre)
+        for tid, source, duree in ((t.id, "deezer", 201), (autre.id, "spotify_web", 199)):
+            _sql(data_manager, "UPDATE tracks SET isrc = 'FRPJW1600870' WHERE id = :t", t=tid)
+            _sql(
+                data_manager,
+                "INSERT INTO observations (track_id, field, value, source) "
+                "VALUES (:t, 'duration', :v, :s)",
+                t=tid,
+                v=str(duree),
+                s=source,
+            )
+        audit = au.auditer(data_manager)
+        (cas,) = [c for c in audit.cas if c.famille == "revue:meme_enregistrement"]
+        assert cas.pistes == [t.id] and "ISRC" in cas.libelle and cas.nature == au.DECISION
+        assert not [c for c in audit.cas if c.famille == "id_partage"]
+        a.tracks = data_manager.discographie_reunie(a)
+        (du_panneau,) = [
+            c
+            for c in revue.analyser(data_manager, a).actifs
+            if c.detecteur == "meme_enregistrement"
+        ]
+        data_manager.trancher_cas(a.id, du_panneau.detecteur, du_panneau.cle)
+        audit = au.auditer(data_manager)
+        assert not [
+            c for c in audit.cas if c.famille.endswith(("meme_enregistrement", "id_partage"))
+        ]
 
     @pytest.mark.parametrize(
         "titre_b, durees",

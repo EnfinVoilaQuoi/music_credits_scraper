@@ -2721,7 +2721,8 @@ _EN_TETE = re.compile(r"^\s*\[([^\]:]*)")
 def nature_non_musique(titre: str | None, paroles: str | None) -> str | None:
     """PUR. Ce qu'est une page Genius « Non-Music » sans trace de plateforme
     (règle décidée par l'utilisateur le 2026-11-01, sur 10 pages tranchées à
-    la main) : « chant » (couplets, refrain ; un freestyle) → gardée ;
+    la main) : « chant » (couplets, refrain ; un freestyle) → gardée, même sans sortie
+    officielle (mixtape, live filmé, CD bonus ; décision utilisateur 2026-11-10) ;
     « sketch » (skit, interlude, intro, outro, au titre ou en section) et
     « sans_texte » → désactivées ; « texte » (un sample, une prose : entretien,
     article, liste, notes de pochette) → supprimée. Des lignes courtes sans

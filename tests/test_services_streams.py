@@ -90,6 +90,46 @@ class TestHookKworb:
         assert vus == [(["s"], "2026-09-14")]
 
 
+class TestFichesNommees:
+    """`--fiches` descend jusqu'au crawl Spotify ; `track_ids` (aussi l'ensemble
+    des actifs d'un artiste à pages désactivées) n'y descend jamais."""
+
+    def _lancer(self, options):
+        recu = {}
+        p = _Provider({"matched": 0})
+        p.fetch_spotify_web = lambda artist, dm, **kw: recu.update(kw) or {"pages": 1}
+        rt = Runtime(
+            data_manager=None, genius_api=None, data_enricher=None, deleted=None, disabled=None
+        )
+        streams.run(rt, _artist(), options, Hooks(), provider=p)
+        return recu
+
+    def test_les_fiches_nommees_arrivent_au_crawl(self):
+        recu = self._lancer(streams.OptionsStreams(kworb=False, ytm=False, fiches=frozenset({2})))
+        assert recu["fiches"] == frozenset({2})
+
+    def test_track_ids_seul_ne_restreint_pas_le_crawl(self):
+        recu = self._lancer(
+            streams.OptionsStreams(kworb=False, ytm=False, track_ids=frozenset({1, 2}))
+        )
+        assert "fiches" not in recu
+
+    def test_le_cli_nomme_les_fiches(self):
+        from src import cli
+
+        a = SimpleNamespace(
+            kworb=True,
+            spotify_web=True,
+            spotify_full=True,
+            ytm_streams=True,
+            ytm_channel="",
+            fiches="20658",
+        )
+        assert cli.options_streams(a).fiches == frozenset({20658})
+        a.fiches = None
+        assert cli.options_streams(a).fiches is None
+
+
 class TestCanalYtmIntrouvable:
     def test_signale_au_bilan(self):
         """« Aucun canal lisible » n'est pas « zéro stream » : un bilan propre

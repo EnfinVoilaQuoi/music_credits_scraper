@@ -192,6 +192,11 @@ def executer_etape(
                 ytm=options.streams.ytm,
                 ytm_channel=options.streams.ytm_channel,
                 track_ids=streams.track_ids_actifs(runtime, artist, ids),
+                fiches=(
+                    None
+                    if options.streams.fiches is None
+                    else streams.track_ids_actifs(runtime, artist, options.streams.fiches)
+                ),
             )
             return streams.run(runtime, artist, opts, hooks)
         if etape == "certifs":

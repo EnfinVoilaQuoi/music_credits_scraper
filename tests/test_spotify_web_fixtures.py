@@ -148,6 +148,28 @@ _LIGNE_ARTISTE = """
 """
 
 
+#: Forme lue dans le brut du 2026-11-10 (album 1gKfmHEnAa7oMb1g46tGYf, ligne
+#: 11) : le titre n'est pas un lien, les artistes le restent.
+_LIGNE_INDISPONIBLE = """
+<div data-testid="tracklist-row">
+  <div>11</div>
+  <div><div>C'est trop (feat. Ninho et Leto)</div>
+    <a href="/intl-fr/artist/6S0Y5OO7MUCEOGMQ1Tckzf">Sadek</a></div>
+  <div>4:33</div>
+</div>
+"""
+
+
+def test_une_ligne_sans_lien_de_piste_est_comptee_a_part():
+    """Piste indisponible sur Spotify : rendue, mais sans page ni compteur. Ce
+    n'est ni une piste lisible, ni une ligne que le rendu aurait oubliée."""
+    html = _LIGNE_ALBUM + _LIGNE_INDISPONIBLE
+    assert [t for _, t in parse.parse_album_tracks(html)] == ["Un titre"]
+    sans_lien = parse.parse_album_rows_sans_lien(html)
+    assert len(sans_lien) == 1 and "C'est trop" in sans_lien[0]
+    assert parse.parse_album_rows_sans_lien(_LIGNE_ALBUM) == []
+
+
 def test_le_rang_n_est_jamais_pris_pour_un_compteur():
     """Sur une page ALBUM les cellules sont `[rang, titre, durée]` : sans la règle
     du premier enfant, le rang « 1 » serait écrit comme un nombre de streams —

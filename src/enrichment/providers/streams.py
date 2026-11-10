@@ -66,7 +66,7 @@ class StreamsProvider:
         return update_kworb_streams(artist, data_manager, scraper=self._kworb_client())
 
     def fetch_spotify_web(
-        self, artist, data_manager, stop_requested=None, full_crawl: bool = True
+        self, artist, data_manager, stop_requested=None, full_crawl: bool = True, fiches=None
     ) -> dict:
         """Streams lus sur open.spotify.com — repli quand Kworb ignore l'artiste.
 
@@ -82,6 +82,7 @@ class StreamsProvider:
             scraper=self._spotify_web_client(),
             stop_requested=stop_requested,
             full_crawl=full_crawl,
+            fiches=fiches,
         )
 
     def fetch_ytm(self, artist, data_manager, track_ids=None) -> dict:

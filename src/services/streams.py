@@ -49,6 +49,11 @@ class OptionsStreams:
     ytm: bool = True
     ytm_channel: str = ""
     track_ids: frozenset[int] | None = None
+    #: Les fiches NOMMÉES (`--fiches`), à part de `track_ids` : celui-ci est
+    #: aussi l'ensemble des actifs dès qu'un artiste a une page désactivée, et
+    #: ne dit donc pas « ces seules fiches ». Restreint le crawl Spotify à
+    #: leurs pages titre (ni file par péremption, ni passe des albums).
+    fiches: frozenset[int] | None = None
 
     @property
     def spotify_web_effectif(self) -> bool:
@@ -105,11 +110,13 @@ def run(
                         results[cle] = provider.fetch_spotify(artist, dm)
                         _signalements_kworb(dm, artist, results[cle])
                     else:
+                        nommees = {} if options.fiches is None else {"fiches": options.fiches}
                         results[cle] = provider.fetch_spotify_web(
                             artist,
                             dm,
                             stop_requested=hooks.should_stop,
                             full_crawl=options.spotify_full,
+                            **nommees,
                         )
                 except Exception as e:
                     logger.exception(f"Source streams {source} en échec")

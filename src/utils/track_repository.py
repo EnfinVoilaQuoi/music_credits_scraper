@@ -26,6 +26,7 @@ from src.utils.corrections_fiches import (
     comptes_ailleurs,
     compteurs_refuses,
     credits_refuses,
+    parutions_refusees_de,
     refus_videos_a_la_fusion,
     videos_refusees,
 )
@@ -5018,6 +5019,16 @@ class TrackRepository:
             logger.error(f"Erreur update_track_spotify_id (track_id={track_id}): {e}")
             return False
 
+    def album_de_la_fiche(self, track_id: int) -> tuple[str | None, int | None] | None:
+        """`(album, album_override)` tels qu'écrits, None si la fiche manque —
+        pour l'appelant qui vient de changer l'album repère et tient la fiche
+        en mémoire (`revue_actions._sortir_du_disque`)."""
+        with self.engine.connect() as conn:
+            ligne = conn.execute(
+                select(tracks.c.album, tracks.c.album_override).where(tracks.c.id == track_id)
+            ).first()
+        return (ligne[0], ligne[1]) if ligne is not None else None
+
     def clear_track_album(self, track_id: int) -> bool:
         """Détache un morceau de son album (édition MANUELLE : album_override=1
         empêche l'API de re-remplir le champ au prochain prefill). Par `_ecrire`
@@ -5081,14 +5092,34 @@ class TrackRepository:
             return False
         return meme_jour(left, right)
 
+    @staticmethod
+    def _parutions_refusees(conn, track_id: int) -> set[str]:
+        """Les disques dont la fiche a été sortie à la main (refus `parution`,
+        `corrections_fiches.cle_parution`)."""
+        fiche = conn.execute(
+            text(
+                "SELECT t.genius_id, t.title, t.album, a.name FROM tracks t "
+                "JOIN artists a ON a.id = t.artist_id WHERE t.id = :track_id"
+            ),
+            {"track_id": track_id},
+        ).first()
+        if fiche is None:
+            return set()
+        return parutions_refusees_de(fiche[3], fiche[0], fiche[1], fiche[2])
+
     def _persist_release_observations(
         self, conn, track_id: int, artist_id: int, observations: list[ReleaseObservation]
     ) -> None:
+        refusees = self._parutions_refusees(conn, track_id) if observations else set()
         for observation in observations:
             if observation.scope not in ("own", "appearance"):
                 raise ValueError(f"scope de parution inconnu: {observation.scope!r}")
             title = clean_stored_title(observation.title)
             if not title:
+                continue
+            if normalize_title(title) in refusees:
+                # Sortie de ce disque à la main (💿 du panneau) : la page
+                # Genius l'y range toujours, le lien ne se repose pas.
                 continue
             if observation.rattacher_seulement:
                 release_id = self._release_designee(conn, artist_id, title, observation)

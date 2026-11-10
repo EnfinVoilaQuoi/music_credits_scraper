@@ -689,6 +689,45 @@ def oublier_disque_refuse(artiste: str, album_deezer: int) -> bool:
         )
 
 
+def cle_parution(titre: str | None) -> str:
+    """La valeur d'un refus `parution` : le titre normalisé du disque (une
+    autre édition — « M.A.N (Deluxe) » — est un autre disque)."""
+    return normalize_title(titre or "")
+
+
+def parutions_refusees_de(artiste: str | None, genius_id, titre, album) -> set[str]:
+    """Les disques (`cle_parution`) dont la fiche a été SORTIE à la main : aucun
+    producteur de parutions ne l'y remet (`_persist_release_observations`).
+    Par LIGNE : une parution appartient à un artiste, la ligne sœur d'un autre
+    artiste se décide dans son propre panneau."""
+    from types import SimpleNamespace
+
+    fiche = SimpleNamespace(
+        artist=SimpleNamespace(name=artiste), genius_id=genius_id, title=titre, album=album
+    )
+    return {r["valeur"] for r in _lignes(fiche, "parution")}
+
+
+def parutions_refusees(track) -> set[str]:
+    return {r["valeur"] for r in _lignes(track, "parution")}
+
+
+def memoriser_parution_refusee(track, titre: str, origine: str | None = None) -> bool:
+    """Consigne une fiche sortie d'un disque (panneau « À trancher », 💿
+    `hors_du_disque`, 2026-11-11) : sa page Genius l'y range toujours, et sans
+    refus la discographie suivante reposerait le lien (« Tulum, México » sur
+    M.A.N). À appeler APRÈS le retrait : une fiche sans page se désigne par son
+    album, que le retrait peut changer."""
+    return _memoriser(
+        track, "parution", cle_parution(titre), origine=origine, detail={"titre": titre}
+    )
+
+
+def oublier_parution_refusee(track, titre: str) -> bool:
+    """Pendant : la fiche pourra être rangée de nouveau sur ce disque."""
+    return _oublier(track, "parution", cle_parution(titre))
+
+
 def memoriser_apple_refuse(track, apple_music_id, origine: str | None = None) -> None:
     """Consigne un ID Apple Music retiré de la fiche (`clear_track_apple_music_id`).
     Sans refus, seule la date de vérification le retenait, et elle EXPIRE

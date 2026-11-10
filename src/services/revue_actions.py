@@ -143,6 +143,37 @@ def _delier_deezer(ctx: ContexteAction, cas: Cas) -> str:
     )
 
 
+def _sortir_du_disque(ctx: ContexteAction, cas: Cas) -> str:
+    """La fiche quitte le disque où sa page Genius la range (💿
+    `hors_du_disque`) : l'écrivain du geste de la vue Albums
+    (`unlink_track_from_release`, celui de « Tulum, México » le 2026-11-03).
+    Si ce disque était son album repère, le repère passe à la parution de sa
+    piste Deezer quand la fiche y est liée, sinon il se vide (`album_override`).
+    Le retrait se REFUSE (nature `parution`) : sans lui, la discographie
+    suivante reposerait le lien."""
+    from src.utils.corrections_fiches import memoriser_parution_refusee
+
+    track = _fiche(ctx, cas)
+    p = cas.preuves
+    statut = ctx.data_manager.unlink_track_from_release(
+        p["release_id"],
+        track.id,
+        replacement_release_id=p.get("remplacement"),
+        clear_reference=True,
+    )
+    if statut != "removed":
+        raise LookupError(f"« {track.title} » n'est plus liée à « {p['parution']} »")
+    # L'album de la fiche en mémoire suit la base : une fiche sans page se
+    # désigne par son album, le refus doit la désigner telle qu'elle est écrite.
+    etat = ctx.data_manager.album_de_la_fiche(track.id)
+    if etat is not None:
+        track.album, track.album_override = etat
+    memoriser_parution_refusee(track, p["parution"])
+    return f"« {track.title} » sortie de « {p['parution']} »" + (
+        f" (album : « {track.album} »)" if track.album else ""
+    )
+
+
 def _choisir_discogs(cle: str):
     """Tranche l'identité Discogs contredite : la page choisie devient
     `manuelle` (plus jamais révisée par le vote)."""
@@ -525,6 +556,16 @@ def actions_pour(cas: Cas) -> list[Action]:
             # Pas le même morceau après examen : c'est alors le LRC qui est faux.
             return [fusion, _action_retirer_lrc()]
         return [fusion]
+    if d == "hors_du_disque":
+        return [
+            Action(
+                "sortir_du_disque",
+                "💿 Sortir du disque",
+                _sortir_du_disque,
+                f"Sortir cette fiche de « {cas.preuves['parution']} » ? Elle n'y sera plus "
+                "rangée, même si sa page Genius l'y range encore.",
+            )
+        ]
     if d == "liens_proposes":
         refuser = Action("refuser_lien", "✖️ Refuser", _statut_lien("refused"))
         if cas.preuves.get("kind") == "alias":

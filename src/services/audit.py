@@ -190,7 +190,7 @@ FAMILLES = {
     "(rôle non transmis, absent de l'original)",
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
     "disque_homonyme": "disque d'au moins 3 fiches, ni page Genius ni ID Spotify d'un profil connu (homonyme ?)",
-    "hors_du_disque": "DÉCISION — fiche absente de la liste Deezer de sa parution, sa piste sur un autre disque",
+    "hors_du_disque": "fiche absente de la liste Deezer de sa parution, sa piste sur un autre disque",
     # ── Hors critère (natures `RUN` et `INFORMATION`) ──
     "meme_enregistrement": "titres non équivalents, paroles à ≥ 90 %, autre durée (version non nommée)",
     "colonne_sans_provenance": "durée, date, ISRC ou LRC en colonne sans aucune observation",
@@ -705,9 +705,13 @@ def meme_enregistrement(
     for x in me.juger_paires(_par_artiste(jugees), me.Identifiants(c, jugees), durees):
         if x["communs"] or x["paire"] in deja:
             continue  # branche identifiant : `id_partage`
-        if x["verdict"] != me.VERSION:
+        if x["verdict"] == me.VERSION:
+            quoi = "durées différentes : version non nommée"
+        elif x["verdict"] == me.DEUX_ENREGISTREMENTS:
+            quoi = "ISRC et compteurs Spotify différents : autre version"
+        else:
             continue  # `me.MEME` : la décision de fusion est au panneau
-        nature, quoi = INFORMATION, "durées différentes : version non nommée"
+        nature = INFORMATION
         a, b = x["fiches"]
         cas.append(
             Cas(
@@ -961,8 +965,9 @@ def _seconds_signaux(c, g) -> list[str]:
 
 def streams(c, par) -> list[Cas]:
     """`streams_double` (règle du 2026-11-09, simulée sur 4 cas) : un compteur
-    Spotify égal sur deux pages n'est une erreur qu'avec un SECOND signal (même
-    disque, titres parents, ID partagé) — Spotify montre parfois le même
+    Spotify égal sur deux pages n'est une erreur qu'avec un ID Spotify PARTAGÉ ;
+    avec un autre second signal (même disque, titres parents) c'est une
+    décision (2026-11-10) — Spotify montre parfois le même
     compteur pour deux enregistrements (« Calypso I / II »). Sans second
     signal, « pour information » : une égalité au niveau du hasard (« Vrai » /
     « Demolition man », « Animaniax » / « Longueur d'avance »). Un compteur
@@ -987,6 +992,14 @@ def streams(c, par) -> list[Cas]:
                 signaux = _seconds_signaux(c, g)
                 if signaux:
                     libelle += f" — {', '.join(signaux)}"
+                    if "ID Spotify partagé" not in signaux:
+                        # Même disque ou titres parents : Spotify affiche
+                        # lui-même un compteur commun (« Calypso I » / « II »,
+                        # chaque page lue à part), ou c'est un doublon à
+                        # fusionner (« À la vibe et mektoub ») — à l'humain
+                        # (2026-11-10). Seul l'ID partagé est une donnée fausse.
+                        nature = DECISION
+                        libelle += " : doublon ou compteur que Spotify partage ?"
                 else:
                     nature = INFORMATION
                     libelle += " — aucun autre signal : égalité de hasard"
@@ -2242,6 +2255,79 @@ def a_trancher(dm, noms: list[str]) -> list[Cas]:
     return cas
 
 
+#: Les familles jugées PAR LIGNE (artiste, page) : une certif vaut par ligne
+#: (`verdicts_revue`), la participation dépend de l'artiste, un invariant dit
+#: un défaut d'écriture de CETTE ligne. Les autres jugent l'enregistrement.
+FAMILLES_PAR_LIGNE = ("fiche_sans_participation",)
+
+
+def _par_ligne(famille: str) -> bool:
+    return famille.startswith("certif") or famille in FAMILLES_PAR_LIGNE or famille in INVARIANTS
+
+
+def un_cas_par_enregistrement(cas: list[Cas], pistes) -> list[Cas]:
+    """Le même cas d'une famille de l'audit chez deux LIGNES SŒURS (même page
+    Genius, une ligne par artiste crédité) ne compte qu'une fois, comme les cas
+    du panneau (`a_trancher`) : « Le vent souffle sur le temps » chez Furax
+    Barbarossa et chez Scylla, « 93 Empire » chez Kalash Criminel et chez
+    Sofiane (2026-11-10). Clé : la famille, la nature et l'ensemble des pages
+    (l'ID de la fiche pour une fiche sans page). Le premier cas reste ; deux
+    cas des MÊMES fiches (deux sources en échec sur une fiche) en sont deux."""
+    page = {t["id"]: t["genius_id"] for t in pistes}
+    premier: dict[tuple, frozenset] = {}
+    gardes = []
+    for x in cas:
+        if not _par_ligne(x.famille) and x.pistes:
+            cle = (
+                x.famille,
+                x.nature,
+                frozenset(f"g{page[p]}" if page.get(p) else f"t{p}" for p in x.pistes),
+            )
+            fiches = frozenset(x.pistes)
+            if premier.setdefault(cle, fiches) != fiches:
+                continue
+        gardes.append(x)
+    return gardes
+
+
+#: Les détecteurs du panneau qui jugent le MÊME problème qu'une famille de
+#: l'audit : un doublon de pages, un ID ou un texte partagés.
+_DOUBLONS = frozenset({"doublon", "page_et_plateforme", "meme_place", "meme_enregistrement"})
+MEMES_SUJETS: dict[str, frozenset[str]] = {
+    "id_partage": _DOUBLONS
+    | {"id_catalogue_partage", "id_spotify_partage", "kworb_doublon", "compteur_partage"},
+    "lrc_version": frozenset({"lrc_autre_fiche", "lrc_original", "paroles_autre_fiche"}),
+    "lrc_emprunte": _DOUBLONS | {"lrc_autre_fiche", "lrc_original", "paroles_autre_fiche"},
+    "paroles_identiques": _DOUBLONS | {"paroles_autre_fiche"},
+    "streams_double": _DOUBLONS
+    | {"compteur_partage", "kworb_doublon", "id_spotify_partage", "id_catalogue_partage"},
+}
+
+
+def montres_par_le_panneau(cas: list[Cas]) -> list[Cas]:
+    """Une ERREUR de l'audit dont une fiche porte déjà un cas du panneau (au
+    critère) sur le même sujet (`MEMES_SUJETS`) n'est pas comptée deux fois :
+    elle passe en information, le panneau la montre (« Tigini (Remix) » :
+    `id_partage` et `revue:id_catalogue_partage` ; « LOUIE BAGS (The Game
+    Reference) » : `lrc_version` et `revue:lrc_autre_fiche` — 2026-11-10,
+    3 erreurs sur 16). Même principe que `ids_partages`, qui laisse au panneau
+    les ID partagés entre pages Genius."""
+    panneau: dict[int, set[str]] = collections.defaultdict(set)
+    for x in cas:
+        if x.famille.startswith("revue:") and x.nature in NATURES_DU_CRITERE:
+            for p in x.pistes:
+                panneau[p].add(x.famille.removeprefix("revue:"))
+    for x in cas:
+        sujets = MEMES_SUJETS.get(x.famille)
+        if x.nature != ERREUR or not sujets:
+            continue
+        vus = sorted({d for p in x.pistes for d in panneau.get(p, ()) if d in sujets})
+        if vus:
+            x.nature = INFORMATION
+            x.libelle += " — montré par le panneau (" + ", ".join(vus) + ")"
+    return cas
+
+
 # ── Orchestration ───────────────────────────────────────────────────────────
 
 
@@ -2310,12 +2396,14 @@ def auditer(
             # Entre artistes : seulement sur la base entière (un audit par
             # artiste ne lit pas les fiches des autres).
             audit.cas += ids_partages_entre_artistes(pistes, formations_liees(c))
+        audit.cas = un_cas_par_enregistrement(audit.cas, pistes)
     if persistance:
         audit.cas += colonnes_verdict(dm, pistes)
         if not noms:
             audit.cas += ecarts_de_schema(dm.db_path)
     if revue:
         audit.cas += a_trancher(dm, noms or dm.get_artist_names())
+        audit.cas = montres_par_le_panneau(audit.cas)
     return audit
 
 

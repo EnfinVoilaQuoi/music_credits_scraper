@@ -1193,9 +1193,10 @@ class TestFamillesNues:
     @pytest.mark.parametrize(
         "albums, ids, nature, fin",
         [
-            # Second signal : « Calypso I / II », même disque.
-            (("Caravelle", "Caravelle"), ("A" * 22, "B" * 22), au.ERREUR, "même disque"),
-            # Second signal : le même ID Spotify sur les deux fiches.
+            # Même disque seul : « Calypso I / II » (Spotify affiche lui-même le
+            # compteur commun) ou un doublon à fusionner — une décision.
+            (("Caravelle", "Caravelle"), ("A" * 22, "B" * 22), au.DECISION, "même disque"),
+            # Le même ID Spotify sur les deux fiches : une donnée fausse.
             (("X", "Y"), ("A" * 22, "A" * 22), au.ERREUR, "ID Spotify partagé"),
             # Aucun autre signal (« Vrai » / « Demolition man ») : le hasard.
             (("X", "Y"), ("A" * 22, "B" * 22), au.INFORMATION, "égalité de hasard"),

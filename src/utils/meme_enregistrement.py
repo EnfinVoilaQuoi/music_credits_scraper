@@ -48,6 +48,15 @@ PAROLES_MIN = 200
 
 MEME = "meme_enregistrement (paroles + durée)"
 VERSION = "information (mêmes paroles, autre durée : version non nommée)"
+#: Deux ISRC différents et deux compteurs Spotify différents : Spotify tient
+#: deux enregistrements (il montre le même compteur pour les parutions d'un
+#: même enregistrement) — une version retravaillée, pas une fusion
+#: (« INTERLUDE RELOADED » / « interlude » de Vald, 4,0 M contre 2,8 M,
+#: remix confirmé par l'utilisateur le 2026-11-10).
+DEUX_ENREGISTREMENTS = "information (ISRC et compteurs Spotify différents : autre version)"
+#: Deux compteurs plus proches que cette part l'un de l'autre sont « égaux » :
+#: lus à des jours différents, ceux d'un même enregistrement ont bougé.
+ECART_COMPTEURS = 0.02
 PAROLES_SEULES = "indécidable (paroles seules)"
 MEME_PAR_ID = "meme_enregistrement"
 ID_DEMENTI = "identifiant démenti (durées indépendantes > 10 s)"
@@ -84,10 +93,25 @@ def durees_hors_identifiants(
     return ecart <= ECART_MEME_ENREGISTREMENT_S, ecart
 
 
+def deux_enregistrements(isrc_a, isrc_b, streams_a, streams_b) -> bool:
+    """PUR. ISRC des deux côtés, aucun en commun, et deux compteurs Spotify qui
+    diffèrent de plus de `ECART_COMPTEURS` : deux enregistrements. Un seul
+    compteur ne dit rien (« WTC » / « Astronaut pussy »)."""
+    if not isrc_a or not isrc_b or set(isrc_a) & set(isrc_b):
+        return False
+    if not streams_a or not streams_b:
+        return False
+    return abs(streams_a - streams_b) > ECART_COMPTEURS * max(streams_a, streams_b)
+
+
 def verdict(
-    communs: dict[str, set], paroles: float | None, meme_duree: bool | None, ecart: int | None
+    communs: dict[str, set],
+    paroles: float | None,
+    meme_duree: bool | None,
+    ecart: int | None,
+    deux: bool = False,
 ) -> str | None:
-    """PUR. None = pas de cas."""
+    """PUR. None = pas de cas. `deux` : `deux_enregistrements`."""
     paroles_memes = paroles is not None and paroles >= PAROLES_MEME_ENREGISTREMENT
     if communs:
         if meme_duree is False and ecart is not None and ecart > ECART_DEMENTI_S:
@@ -98,7 +122,7 @@ def verdict(
     if not paroles_memes:
         return None
     if meme_duree:
-        return MEME
+        return DEUX_ENREGISTREMENTS if deux else MEME
     if meme_duree is False:
         return VERSION
     return PAROLES_SEULES
@@ -341,7 +365,13 @@ def juger_paires(par, ids: Identifiants, durees: dict[int, dict]) -> list[dict]:
                 durees.get(b["id"], {}),
                 {**communs, "video": videos} if videos else communs,
             )
-            v = verdict(communs, score, meme, ecart)
+            deux = deux_enregistrements(
+                ids.de(a["id"]).get("isrc"),
+                ids.de(b["id"]).get("isrc"),
+                a["spotify_streams"],
+                b["spotify_streams"],
+            )
+            v = verdict(communs, score, meme, ecart, deux)
             if v is None:
                 continue
             out.append(

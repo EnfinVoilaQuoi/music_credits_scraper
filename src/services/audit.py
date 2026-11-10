@@ -2210,8 +2210,16 @@ def a_trancher(dm, noms: list[str]) -> list[Cas]:
     (la sienne + groupes + part dans ses collectifs), exactement ce que la
     fenêtre ouvre. Zéro réseau, zéro écriture (`revue.analyser`). Un cas tranché
     « indécidable » (`VERDICT_INDECIDABLE`) reste compté, parmi les indécidables :
-    hors critère, mais visible (décision utilisateur 2026-10-31)."""
-    from src.services import revue
+    hors critère, mais visible (décision utilisateur 2026-10-31).
+
+    Un cas que le correcteur trancherait à son prochain passage — détecteur
+    formel ou règle VALIDÉE et branchée (`revue_auto.a_corriger`) — n'est pas
+    une décision humaine : « à faire par un run » (`RUN`), hors critère
+    (2026-11-10 : traductions laissées par des lots au code figé d'avant leur
+    règle). Les règles se jugent sur la MÊME analyse, en rejeu du brut (les
+    lecteurs d'embed n'atteignent jamais le réseau)."""
+    from src.persistence import brut
+    from src.services import revue, revue_auto
     from src.utils.revue_repository import VERDICT_INDECIDABLE
 
     def _cas(artiste, c, nature):
@@ -2243,8 +2251,29 @@ def a_trancher(dm, noms: list[str]) -> list[Cas]:
         if artiste is None:
             continue
         artiste.tracks = dm.discographie_reunie(artiste)
-        analyse = revue.analyser(dm, artiste)
-        cas += [_cas(artiste, c, c.nature) for c in analyse.actifs if not _deja_compte(c)]
+        ctx = revue.charger_contexte(dm, artiste)
+        analyse = revue.analyser(dm, artiste, ctx)
+        with brut.rejeu():
+            par_le_correcteur = {
+                (c.detecteur, c.cle)
+                for c, _ in revue_auto.a_corriger(
+                    dm, artiste, analyse, ctx, {t.id: t for t in artiste.tracks}
+                )
+            }
+
+        cas += [
+            _cas(
+                artiste,
+                c,
+                (
+                    RUN
+                    if c.nature in NATURES_DU_CRITERE and (c.detecteur, c.cle) in par_le_correcteur
+                    else c.nature
+                ),
+            )
+            for c in analyse.actifs
+            if not _deja_compte(c)
+        ]
         verdicts = dm.verdicts_revue(artiste.id)
         cas += [
             _cas(artiste, c, INDECIDABLE)

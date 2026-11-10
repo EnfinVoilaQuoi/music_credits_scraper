@@ -907,6 +907,49 @@ _CORRECTEURS = {
 }
 
 
+def a_corriger(dm, artiste, revue, ctx, tracks) -> list[tuple]:
+    """Ce que le correcteur ferait des cas de `revue` (l'analyse de `artiste`
+    sous `ctx`) : `(cas, None)` pour un détecteur formel (`cas_surs`), `(cas,
+    arbitrage)` pour une règle branchée, hors cas rendus à l'humain. Le point
+    unique lu par `corriger` et par l'audit (`audit.a_trancher`), qui range ces
+    cas « à faire par un run » : ce n'est pas une décision humaine
+    (2026-11-10)."""
+    a_faire = [(c, None) for c in cas_surs(revue)]
+    if (
+        REGLES_BRANCHEES
+        or REGLES_ID_PROPOSE_BRANCHEES
+        or REGLES_DEEZER_BRANCHEES
+        or REGLES_LIENS_DEEZER_BRANCHEES
+        or REGLES_ID_PARTAGE_BRANCHEES
+        or REGLES_ETENDUES_BRANCHEES
+        or REGLES_CATALOGUE_BRANCHEES
+        or REGLES_COMPTEUR_BRANCHEES
+        or REGLES_VIDEO_BRANCHEES
+        or REGLES_TEMOIN_BRANCHEES
+    ):
+        rendus = _rendus_a_l_humain(dm, artiste.id)
+        a_faire += [
+            (c, a)
+            for c, a in cas_par_regle(
+                revue,
+                tracks,
+                ctx,
+                durees=REGLES_BRANCHEES,
+                id_propose=REGLES_ID_PROPOSE_BRANCHEES,
+                deezer=contexte_deezer(dm, artiste) if REGLES_DEEZER_BRANCHEES else None,
+                liens_deezer=REGLES_LIENS_DEEZER_BRANCHEES,
+                id_partage=REGLES_ID_PARTAGE_BRANCHEES,
+                etendues=REGLES_ETENDUES_BRANCHEES,
+                catalogue=REGLES_CATALOGUE_BRANCHEES,
+                compteur=REGLES_COMPTEUR_BRANCHEES,
+                video=REGLES_VIDEO_BRANCHEES,
+                temoin=REGLES_TEMOIN_BRANCHEES,
+            )
+            if (c.detecteur, c.cle) not in rendus
+        ]
+    return a_faire
+
+
 @etape_de_flux(
     "Corrections automatiques",
     verdict=lambda r: (not r.echecs, f"{len(r.echecs)} échec(s)"),
@@ -922,39 +965,7 @@ def corriger(dm, artiste, seulement: frozenset[str] | None = None) -> BilanCorre
     for _ in range(_PASSES_MAX):
         ctx = charger_contexte(dm, artiste)
         revue = analyser(dm, artiste, ctx)
-        a_faire = [(c, None) for c in cas_surs(revue)]
-        if (
-            REGLES_BRANCHEES
-            or REGLES_ID_PROPOSE_BRANCHEES
-            or REGLES_DEEZER_BRANCHEES
-            or REGLES_LIENS_DEEZER_BRANCHEES
-            or REGLES_ID_PARTAGE_BRANCHEES
-            or REGLES_ETENDUES_BRANCHEES
-            or REGLES_CATALOGUE_BRANCHEES
-            or REGLES_COMPTEUR_BRANCHEES
-            or REGLES_VIDEO_BRANCHEES
-            or REGLES_TEMOIN_BRANCHEES
-        ):
-            rendus = _rendus_a_l_humain(dm, artiste.id)
-            a_faire += [
-                (c, a)
-                for c, a in cas_par_regle(
-                    revue,
-                    tracks,
-                    ctx,
-                    durees=REGLES_BRANCHEES,
-                    id_propose=REGLES_ID_PROPOSE_BRANCHEES,
-                    deezer=contexte_deezer(dm, artiste) if REGLES_DEEZER_BRANCHEES else None,
-                    liens_deezer=REGLES_LIENS_DEEZER_BRANCHEES,
-                    id_partage=REGLES_ID_PARTAGE_BRANCHEES,
-                    etendues=REGLES_ETENDUES_BRANCHEES,
-                    catalogue=REGLES_CATALOGUE_BRANCHEES,
-                    compteur=REGLES_COMPTEUR_BRANCHEES,
-                    video=REGLES_VIDEO_BRANCHEES,
-                    temoin=REGLES_TEMOIN_BRANCHEES,
-                )
-                if (c.detecteur, c.cle) not in rendus
-            ]
+        a_faire = a_corriger(dm, artiste, revue, ctx, tracks)
         nouveaux = [
             (c, a)
             for c, a in a_faire

@@ -144,3 +144,20 @@ def test_une_page_desactivee_partagerait_encore_la_video(data_manager, vald):
 def test_sans_page_genius_rien(vald):
     fiche = Track(title="Seum (english translate)", artist=vald)
     assert revue.page_traduction(fiche) is None
+
+
+def test_l_audit_range_la_traduction_a_faire_par_un_run(data_manager, vald):
+    """Une traduction que la règle supprime au prochain passage du correcteur
+    n'est pas une décision humaine (2026-11-10 : 7 traductions laissées par des
+    lots au code figé d'avant la règle)."""
+    from src.services import audit as au
+
+    _page(
+        data_manager,
+        vald,
+        "Seum (english translate)",
+        101,
+        "https://genius.com/Vald-seum-english-translate-lyrics",
+    )
+    (cas,) = [c for c in au.a_trancher(data_manager, ["Vald"]) if "traduction" in c.famille]
+    assert cas.nature == au.RUN and au.RUN not in au.NATURES_DU_CRITERE

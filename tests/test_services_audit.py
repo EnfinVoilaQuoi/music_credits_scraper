@@ -692,10 +692,11 @@ class TestRecherchePerimee:
         assert "ytm_incoherent" not in _familles(sans_revue)
         audit = au.auditer(data_manager, ["Django"])
         (cas,) = [c for c in audit.cas if c.famille == "revue:recherche_perimee"]
-        assert cas.nature == au.DECISION and "Jango Jack" in cas.libelle
-        # Affichée dans le bloc des décisions.
-        decisions = au.tableau(audit).split("panneau : décisions")[1].split("── panneau")[0]
-        assert "revue:recherche_perimee" in decisions
+        # La règle `recherche_perimee` retire ce lien (artiste étranger) au
+        # prochain passage du correcteur : à faire par un run (2026-11-10).
+        assert cas.nature == au.RUN and "Jango Jack" in cas.libelle
+        bloc = au.tableau(audit).split("panneau : à faire par un run")[1].split("── panneau")[0]
+        assert "revue:recherche_perimee" in bloc
 
 
 class TestVideoPartagee:
@@ -972,7 +973,7 @@ def test_un_cas_tranche_indecidable_reste_compte_hors_critere(isha, data_manager
     lrc = revue.Cas("lrc_douteux", t.id, "Durag", "LRC douteux", cle="g4242|lrc")
     bpm = revue.Cas("bpm", t.id, "Durag", "BPM en désaccord", cle="g4242|bpm")
     monkeypatch.setattr(
-        revue, "analyser", lambda dm, artiste: revue.Revue(actifs=[], masques=[lrc, bpm])
+        revue, "analyser", lambda dm, artiste, ctx=None: revue.Revue(actifs=[], masques=[lrc, bpm])
     )
     data_manager.trancher_cas(a.id, "lrc_douteux", lrc.cle, verdict=VERDICT_INDECIDABLE)
     data_manager.trancher_cas(a.id, "bpm", bpm.cle)
@@ -998,7 +999,9 @@ def test_un_cas_de_fiche_n_est_compte_qu_une_fois(data_manager, isha, monkeypatc
         revue.Cas("certif_date", t.id, "Durag", "certif", cle="g4242|certif"),
     ]
     monkeypatch.setattr(
-        revue, "analyser", lambda dm, artiste: revue.Revue(actifs=list(partage), masques=[])
+        revue,
+        "analyser",
+        lambda dm, artiste, ctx=None: revue.Revue(actifs=list(partage), masques=[]),
     )
 
     cas = au.a_trancher(data_manager, ["Isha", "Caballero"])

@@ -40,6 +40,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from src.config import IMAGES_DIR
+from src.observability.issues import requalification_du_message
 from src.services import vues_comptees
 from src.services.revue import (
     DECISION,
@@ -85,12 +86,6 @@ from src.utils.version_descriptors import (
 )
 from src.utils.version_heritage import est_instrumental
 from src.utils.youtube_utils import extract_video_id
-
-#: Messages d'absence ou de refus rangés en échec de communication.
-_ABSENCE = re.compile(
-    r"pas de paroles|aucun r[ée]sultat|non confirm[ée]|aucune parole", re.IGNORECASE
-)
-
 
 #: Nature des cas des familles de l'audit (suspicions et invariants).
 ERREUR = "erreur"
@@ -1022,14 +1017,18 @@ def echecs(c, pistes) -> list[Cas]:
     ids = {t["id"]: t for t in pistes}
     cas, vus = [], set()
     for r in c.execute(
-        "SELECT DISTINCT track_id, source_key, issue, message FROM source_track_failures "
-        "WHERE issue = 'crash'"
+        "SELECT DISTINCT track_id, source_key, issue, status_code, message "
+        "FROM source_track_failures WHERE issue = 'crash'"
     ):
         t = ids.get(r["track_id"])
         msg = r["message"] or ""
         if (r["track_id"], r["source_key"]) in vus:
             continue
-        if t is not None and (msg.startswith("CancelledError") or _ABSENCE.search(msg)):
+        # Le référentiel de la requalification (`requalifier_anciens_echecs`) :
+        # est mal classé ce qu'elle requalifierait, rien d'autre.
+        if t is not None and requalification_du_message(
+            msg, source=r["source_key"], statut=r["status_code"], issue=r["issue"]
+        ):
             vus.add((r["track_id"], r["source_key"]))
             cas.append(
                 Cas(

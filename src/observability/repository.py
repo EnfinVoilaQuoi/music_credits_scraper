@@ -23,7 +23,14 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
-from src.observability.issues import BENIGN, FAILURES, SANS_BESOIN, IssueKind
+from src.observability.issues import (
+    BENIGN,
+    FAILURES,
+    SANS_BESOIN,
+    IssueKind,
+    Requalification,
+    clause_sql,
+)
 
 #: Nombre d'échecs conservés PAR SOURCE — plafond dur d'environ 800 lignes.
 FAILURE_WINDOW = 50
@@ -388,20 +395,15 @@ class SourceUsageRepository:
         après un `/get` tombé est une réponse — elle devient un CONSTAT
         d'absence (e46), daté comme l'échec ; les lignes d'une source RETIRÉE
         du projet (BPM Finder) partent. Rend (retirées, requalifiées)."""
-        reponses = (
-            "message LIKE 'pas de paroles%' OR message LIKE '%non confirmé%' "
-            "OR message LIKE 'aucun résultat%'"
-        )
-        lrclib_repondu = (
-            "source_key = 'lrclib' AND status_code = 200 " "AND message LIKE 'aucune parole%'"
-        )
+        # Les messages reconnus : UN référentiel, partagé avec l'audit
+        # (`issues.REGLES_DES_MESSAGES`, `echec_mal_classe`).
+        reponses, p_reponses = clause_sql(Requalification.REPONSE)
+        lrclib_repondu, p_absences = clause_sql(Requalification.ABSENCE)
+        annulations, p_delais = clause_sql(Requalification.DELAI)
         try:
             with self.engine.begin() as conn:
                 retirees = conn.execute(
-                    text(
-                        "DELETE FROM source_track_failures "
-                        f"WHERE issue = 'crash' AND ({reponses})"
-                    )
+                    text(f"DELETE FROM source_track_failures WHERE {reponses}"), p_reponses
                 ).rowcount
                 conn.execute(
                     text(
@@ -411,10 +413,11 @@ class SourceUsageRepository:
                         f"FROM source_track_failures f WHERE {lrclib_repondu} "
                         "AND NOT EXISTS (SELECT 1 FROM source_track_absences a "
                         "WHERE a.track_id = f.track_id AND a.source_key = f.source_key)"
-                    )
+                    ),
+                    p_absences,
                 )
                 retirees += conn.execute(
-                    text(f"DELETE FROM source_track_failures WHERE {lrclib_repondu}")
+                    text(f"DELETE FROM source_track_failures WHERE {lrclib_repondu}"), p_absences
                 ).rowcount
                 retirees += conn.execute(
                     text(
@@ -423,10 +426,8 @@ class SourceUsageRepository:
                     )
                 ).rowcount
                 requalifiees = conn.execute(
-                    text(
-                        "UPDATE source_track_failures SET issue = 'timeout' "
-                        "WHERE issue = 'crash' AND message LIKE 'CancelledError%'"
-                    )
+                    text(f"UPDATE source_track_failures SET issue = 'timeout' WHERE {annulations}"),
+                    p_delais,
                 ).rowcount
         except SQLAlchemyError:
             _log().exception("source_usage: requalification des échecs suivis impossible")

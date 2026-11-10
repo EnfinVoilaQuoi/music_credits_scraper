@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from enum import StrEnum
 
 # Marqueurs de challenge Cloudflare cherchés dans le début d'un corps 403.
@@ -305,3 +306,109 @@ def classify(
             status_code, headers=headers, body_head=body_head, absent_statuses=absent_statuses
         )
     return IssueKind.INDETERMINATE
+
+
+# ── Messages STOCKÉS d'un échec suivi (`source_track_failures.message`) ────────
+#
+# Le classifieur ci-dessus juge des exceptions VIVANTES. Les lignes suivies
+# écrites avant les règles du 2026-10-10 / 11 gardent, elles, un MESSAGE rangé
+# à tort : une réponse de la source ou notre délai de garde pris pour un crash.
+# UN référentiel, lu par la requalification (`requalifier_anciens_echecs`, en
+# SQL) et par l'audit (`echec_mal_classe`, en Python) — avant le 2026-11-10,
+# deux listes qui divergeaient (l'audit cherchait les motifs partout dans le
+# message et voyait une absence LRCLIB quel que soit le code de réponse).
+
+
+class Requalification(StrEnum):
+    """Ce qu'est VRAIMENT un échec suivi au message reconnu."""
+
+    REPONSE = "reponse"  # la source a répondu (absence, refus) : la ligne part
+    ABSENCE = "absence"  # une réponse qui devient un constat d'absence daté
+    DELAI = "timeout"  # notre délai de garde (annulation) : un `timeout`
+
+
+@dataclass(frozen=True)
+class RegleDeMessage:
+    """Un motif LIKE de SQLite (`%` = n'importe quelle suite, `_` = un
+    caractère, casse ignorée pour l'ASCII seulement, comme SQLite), restreint
+    s'il le faut à une source, un code de réponse et un verdict rangé."""
+
+    motif: str
+    requalification: Requalification
+    source: str | None = None
+    statut: int | None = None
+    #: Le verdict rangé auquel la règle s'applique (None = tout verdict).
+    issue: str | None = "crash"
+
+
+REGLES_DES_MESSAGES: tuple[RegleDeMessage, ...] = (
+    # YTM : « pas de paroles pour cette vidéo », « <motif> non confirmé sur les
+    # résultats », « aucun résultat » (CORRECTIFS 1.13, 2026-10-10).
+    RegleDeMessage("pas de paroles%", Requalification.REPONSE),
+    RegleDeMessage("%non confirmé%", Requalification.REPONSE),
+    RegleDeMessage("aucun résultat%", Requalification.REPONSE),
+    # LRCLIB : `/search` en 200 après un `/get` tombé (2026-10-11), quel que
+    # soit le verdict rangé.
+    RegleDeMessage("aucune parole%", Requalification.ABSENCE, "lrclib", 200, None),
+    # Annulation par notre délai de garde.
+    RegleDeMessage("CancelledError%", Requalification.DELAI),
+)
+
+_ASCII_MINUSCULES = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")
+
+
+def _like(motif: str, texte: str) -> bool:
+    """`texte LIKE motif` comme SQLite (sans ESCAPE) : casse ignorée pour
+    l'ASCII seul (« É » ≠ « é »)."""
+    expression = "".join(
+        ".*" if c == "%" else "." if c == "_" else re.escape(c)
+        for c in motif.translate(_ASCII_MINUSCULES)
+    )
+    return re.fullmatch(expression, texte.translate(_ASCII_MINUSCULES), re.DOTALL) is not None
+
+
+def requalification_du_message(
+    message: str | None,
+    *,
+    source: str | None = None,
+    statut: int | None = None,
+    issue: str | None = "crash",
+) -> Requalification | None:
+    """PUR. Ce qu'est un échec suivi rangé `issue`, de `source`, au code
+    `statut`, dont le message stocké est `message` ; None = rien à requalifier.
+    Même verdict que les clauses SQL de `clause_sql` (→ garde :
+    `tests/test_requalification_des_messages.py`)."""
+    texte = message or ""
+    for regle in REGLES_DES_MESSAGES:
+        if regle.issue is not None and issue != regle.issue:
+            continue
+        if regle.source is not None and source != regle.source:
+            continue
+        if regle.statut is not None and statut != regle.statut:
+            continue
+        if _like(regle.motif, texte):
+            return regle.requalification
+    return None
+
+
+def clause_sql(requalification: Requalification) -> tuple[str, dict[str, object]]:
+    """La clause WHERE (colonnes `issue`, `source_key`, `status_code`,
+    `message` de `source_track_failures`) des lignes que les règles de
+    `requalification` reconnaissent, et ses paramètres liés."""
+    clauses, params = [], {}
+    for i, regle in enumerate(REGLES_DES_MESSAGES):
+        if regle.requalification is not requalification:
+            continue
+        conditions = [f"message LIKE :motif{i}"]
+        params[f"motif{i}"] = regle.motif
+        if regle.issue is not None:
+            conditions.append(f"issue = :issue{i}")
+            params[f"issue{i}"] = regle.issue
+        if regle.source is not None:
+            conditions.append(f"source_key = :source{i}")
+            params[f"source{i}"] = regle.source
+        if regle.statut is not None:
+            conditions.append(f"status_code = :statut{i}")
+            params[f"statut{i}"] = regle.statut
+        clauses.append("(" + " AND ".join(conditions) + ")")
+    return "(" + (" OR ".join(clauses) or "0") + ")", params

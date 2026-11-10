@@ -181,6 +181,65 @@ def test_une_a_cappella_rend_la_production(data_manager):
     assert _credits(data_manager, v.id) == {("Flynt", "Writer", "heritage")}
 
 
+class TestACappellaEnregistrement:
+    """Décision utilisateur du 2026-11-10 : l'a cappella est la prise de voix
+    de l'original, elle hérite de ceux qui l'ont ENREGISTRÉE — ni du beat
+    (producteurs, programmeurs), ni du mixage ou du mastering."""
+
+    def _original(self):
+        o = Track(title="Where They At", artist=Artist(name="Kanye West"))
+        o.credits = [
+            Credit("Kanye West", CreditRole.WRITER, source="genius"),
+            Credit("BoogzDaBeast", CreditRole.PRODUCER, source="genius"),
+            Credit("GETOUT!", CreditRole.RECORDING_ENGINEER, source="genius"),
+            Credit("DBurns", CreditRole.ENGINEER, source="genius"),
+            Credit("MIKE DEAN", CreditRole.MIXING_ENGINEER, source="genius"),
+            Credit("Sean Solymar", CreditRole.MASTERING_ENGINEER, source="genius"),
+            Credit("Dem Jointz", CreditRole.DRUM_PROGRAMMER, source="genius"),
+        ]
+        return o
+
+    def test_l_enregistrement_passe_le_reste_non(self):
+        from src.utils.version_heritage import heriter
+
+        v = Track(title="Where They At (Acapella)", artist=Artist(name="Kanye West"))
+        heriter(v, self._original())
+        assert {c.name for c in v.credits} == {"Kanye West", "GETOUT!", "DBurns"}
+
+    def test_le_recalcul_garde_l_enregistrement(self):
+        o = self._original()
+        v = Track(title="Where They At (Acapella)", artist=o.artist)
+        v.credits = [
+            Credit(c.name, c.role, source="heritage") for c in o.credits if c.name != "Kanye West"
+        ]
+        perimes = {nom for nom, _, _ in credits_herites_perimes(v, o)}
+        assert perimes == {"BoogzDaBeast", "MIKE DEAN", "Sean Solymar", "Dem Jointz"}
+
+
+def test_une_reprise_sans_original_unique_rend_la_production(data_manager):
+    """Kid Cudi, huit « Heartless » : sans original unique, rien ne dit d'où
+    viennent les crédits — sauf la production d'une REPRISE (`cover_of`), que
+    sa famille ne transmet jamais."""
+    a = _artiste(data_manager, "Kid Cudi")
+    _original(data_manager, a, [], genius_id=100)
+    _original(data_manager, a, [], genius_id=101)
+    v = _version(data_manager, a, "Dreams (Studio Version)")
+    data_manager.record_relationships(
+        v.id, [{"type": "cover_of", "title": "Dreams", "artist": "X", "url": "x"}]
+    )
+    with data_manager.engine.begin() as conn:
+        for nom, role in (("Kanye West", "Producer"), ("The Game", "Writer")):
+            conn.execute(
+                text(
+                    "INSERT INTO credits (track_id, name, role, source) "
+                    "VALUES (:t, :n, :r, 'heritage')"
+                ),
+                {"t": v.id, "n": nom, "r": role},
+            )
+    assert _repasser(data_manager, a) == 1
+    assert _credits(data_manager, v.id) == {("The Game", "Writer", "heritage")}
+
+
 def test_le_script_a_blanc_n_ecrit_pas_puis_applique(data_manager, monkeypatch, capsys):
     import src.utils.data_manager as module_dm
     import src.utils.logger as module_logger

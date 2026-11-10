@@ -44,15 +44,16 @@ def heriter_versions(dm, tracks) -> int:
     (une union, rien n'est remplacé), puis les crédits hérités que l'héritage
     d'aujourd'hui ne poserait plus partent, sœurs comprises
     (`credits_herites_perimes` : l'original a perdu le crédit, la famille ne
-    transmet plus le rôle). Sans original unique, rien ne part. Une fiche qui
-    n'a rien à recevoir ni à rendre n'est pas réécrite."""
+    transmet plus le rôle). Sans original unique, seul un rôle que la famille
+    ne transmet pas part (la production d'une reprise). Une fiche qui n'a rien
+    à recevoir ni à rendre n'est pas réécrite."""
     n = 0
     index = IndexSocles(tracks)  # une fois : sinon chaque version relit tout
     for version in tracks:
         if famille_de(version.title) is None:
             continue
         socle = socle_parmi(version.title, tracks, index)
-        if socle is None or socle is version:
+        if socle is version:
             continue
         perimes = {(nom, role) for nom, role, _ in credits_herites_perimes(version, socle)}
         if perimes:

@@ -13,11 +13,17 @@ de `version_descriptors` :
     chopped / vitesse            oui      oui       oui    (effets sur le master)
     performance (live, acoust.)  oui      oui       NON    (autre prise)
     instrumental                 NON      oui       oui    (constat instrumental)
-    a cappella                   oui      oui       NON    (la voix seule)
+    a cappella                   oui      oui       NON*   (la voix seule)
     remix tiers / collab         NON      oui       NON    (le remixeur produit)
     démo / alternate / snippet   NON      NON       NON    (autre prise, autre équipe)
     reference                    NON      NON       NON    (chantée par un autre)
     reprise (relation cover_of)  oui      oui       NON    (autre artiste, autre prise)
+
+* L'a cappella hérite de l'ENREGISTREMENT (ingénieurs d'enregistrement et
+« Engineer », assistants et additionnels compris) : c'est la prise de voix même
+de l'original. Ni producteurs, ni programmeurs, ni mixage ou mastering
+(décision utilisateur du 2026-11-10, « Where They At (Acapella) » : GETOUT! et
+IBØ ont enregistré la voix ; BoogzDaBeast et Dem Jointz ont fait le beat).
 
 Démo, prise alternative et snippet : décision utilisateur du 2026-09-28 — une
 démo n'était dans aucune ligne et retombait sur « edition » (paroles ET
@@ -66,12 +72,36 @@ _STUDIO_ROLES = frozenset(
 )
 _PRODUCTION = _PRODUCER_ROLES | _STUDIO_ROLES
 
+#: Ceux qui ont ENREGISTRÉ la prise (une partie du studio) : ce qu'hérite une
+#: a cappella, qui est la prise de voix de l'original (`Regle.enregistrement`).
+_ENREGISTREMENT = frozenset(
+    {
+        CreditRole.RECORDING_ENGINEER,
+        CreditRole.ASSISTANT_RECORDING_ENGINEER,
+        CreditRole.ADDITIONAL_RECORDING,
+        CreditRole.ENGINEER,
+        CreditRole.ASSISTANT_ENGINEER,
+        CreditRole.ADDITIONAL_ENGINEERING,
+    }
+)
+
 
 @dataclass(frozen=True)
 class Regle:
     paroles: bool
     ecriture: bool
     production: bool
+    #: L'enregistrement seul, quand la production ne passe pas (a cappella).
+    enregistrement: bool = False
+
+    def transmet(self, role) -> bool:
+        """Le rôle passe-t-il de l'original à la version ? Le seul juge, pour
+        la pose (`heriter`) comme pour le recalcul (`heritage_sans_source`)."""
+        return (
+            (self.ecriture and role in _WRITER_ROLES)
+            or (self.production and role in _PRODUCTION)
+            or (self.enregistrement and role in _ENREGISTREMENT)
+        )
 
 
 #: Familles de rendition (`version_descriptors._FAMILLES_RENDITION`) et remix.
@@ -85,7 +115,7 @@ REGLES: dict[str, Regle] = {
     "vitesse": Regle(paroles=True, ecriture=True, production=True),
     "performance": Regle(paroles=True, ecriture=True, production=False),
     "instrumental": Regle(paroles=False, ecriture=True, production=True),
-    "a_cappella": Regle(paroles=True, ecriture=True, production=False),
+    "a_cappella": Regle(paroles=True, ecriture=True, production=False, enregistrement=True),
     "remix_named": Regle(paroles=False, ecriture=True, production=False),
     "remix_bare": Regle(paroles=False, ecriture=True, production=False),
     "demo": Regle(paroles=False, ecriture=False, production=False),
@@ -375,10 +405,7 @@ def heriter(version, socle, *, famille: str | None = None) -> Heritage:
     for c in socle.credits:
         if c.source == SOURCE:
             continue  # on n'hérite pas d'un héritage : la source reste le socle
-        transmis = (regle.ecriture and c.role in _WRITER_ROLES) or (
-            regle.production and c.role in _PRODUCTION
-        )
-        if transmis and (c.name, c.role) not in deja:
+        if regle.transmet(c.role) and (c.name, c.role) not in deja:
             herite = Credit(name=c.name, role=c.role, role_detail=c.role_detail, source=SOURCE)
             version.credits.append(herite)
             bilan.credits.append(herite)
@@ -495,7 +522,7 @@ def heritage_sans_source(
             r = CreditRole(role)
         except ValueError:
             continue
-        if not ((regle.ecriture and r in _WRITER_ROLES) or (regle.production and r in _PRODUCTION)):
+        if not regle.transmet(r):
             rendus.append((nom, role, ROLE_NON_TRANSMIS))
         elif (nom, role) not in directs:
             rendus.append((nom, role, ABSENT_DE_L_ORIGINAL))
@@ -507,12 +534,20 @@ def credits_herites_perimes(version, socle) -> list[tuple]:
     d'aujourd'hui depuis `socle` ne poserait plus, `(nom, rôle, motif)` — le
     même juge que l'audit (`heritage_sans_source`). L'héritage n'étant qu'une
     UNION, ces crédits restaient (2026-11-10) : le passage suivant les retire.
-    `socle` None (original absent ou ambigu) : rien — rien ne dit d'où ils
-    viennent, on ne retire que ce qu'on peut montrer."""
-    if socle is None:
-        return []
+    `socle` None (original absent ou ambigu) : seul un rôle que la famille
+    de la fiche ne transmet pas (la production d'une REPRISE) — le reste,
+    rien ne dit d'où il vient, on ne retire que ce qu'on peut montrer. Même
+    règle que l'audit (`audit.heritages_perimes`)."""
     herites = [(c.name, c.role.value) for c in version.credits if est_herite(c.source)]
     if not herites:
         return []
+    if socle is None:
+        return [
+            p
+            for p in heritage_sans_source(
+                version.title, herites, [], relations=version.relationships
+            )
+            if p[2] == ROLE_NON_TRANSMIS
+        ]
     du_socle = [(c.name, c.role.value, c.source) for c in socle.credits]
-    return heritage_sans_source(version.title, herites, du_socle)
+    return heritage_sans_source(version.title, herites, du_socle, relations=version.relationships)

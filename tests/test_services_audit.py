@@ -1487,8 +1487,11 @@ class TestPochettePhoto:
         brut.consigner("genius_api", f"https://api.genius.com/songs/{page}", 200, corps)
         brut.fermer()
 
-    def test_photo_de_l_artiste_en_png(self, data_manager, isha):
+    def _fichiers(self, data_manager, isha, date):
+        import os
+
         from src.utils.image_downloader import cover_image_path
+        from src.utils.pochettes_photo import CORRECTIF_EXTRACTEUR
 
         a, t = isha
         autre = Track(title="Ailleurs", artist=a)
@@ -1501,7 +1504,12 @@ class TestPochettePhoto:
             fichier = fichier.with_suffix(".png")
             fichier.parent.mkdir(parents=True, exist_ok=True)
             fichier.write_bytes(titre.encode())
+            quand = CORRECTIF_EXTRACTEUR + date
+            os.utime(fichier, (quand, quand))
+        return t
 
+    def test_photo_de_l_artiste_en_png(self, data_manager, isha):
+        t = self._fichiers(data_manager, isha, -86400)
         base = au.auditer(data_manager, revue=False)
         (cas,) = [c for c in base.cas if c.famille == "pochette_photo"]
         assert cas.pistes == [t.id] and cas.nature == au.INFORMATION
@@ -1510,6 +1518,13 @@ class TestPochettePhoto:
 
         par_artiste = au.auditer(data_manager, ["Isha"], revue=False)
         assert not [c for c in par_artiste.cas if c.famille == "pochette_photo"]
+
+    def test_un_fichier_ecrit_apres_le_correctif_n_est_pas_la_photo(self, data_manager, isha):
+        """Les 5 cas du 2026-11-10 (Mac Miller, Swift Guad), écrits les 6 et
+        8/11 : l'extracteur refusait déjà la photo, ce sont de vraies pochettes."""
+        self._fichiers(data_manager, isha, 86400)
+        base = au.auditer(data_manager, revue=False)
+        assert not [c for c in base.cas if c.famille == "pochette_photo"]
 
 
 class TestHorsDuDisque:

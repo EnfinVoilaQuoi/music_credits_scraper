@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     pages = pages_a_photo(brut.CHEMIN)
     prouves, laisses = candidats(dm, pages)
     print(f"{len(pages)} pages Genius servent la photo d'un artiste en guise de pochette")
-    print(f"{len(prouves)} pochettes prouvées à retirer, {len(laisses)} JPEG uniques laissés")
+    print(f"{len(prouves)} pochettes prouvées à retirer, {len(laisses)} laissées (JPEG uniques, ou écrites après le correctif)")
     for fichier in prouves[:10]:
         print(f"   {fichier.name}")
     if len(prouves) > 10:

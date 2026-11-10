@@ -10,9 +10,14 @@ Sans pochette, Genius sert la photo d'un artiste crédité comme
 
 Le juge : un morceau sans album dont la page Genius (lue dans le brut) sert la
 photo d'un artiste crédité, ET dont le fichier est un PNG / WebP (Deezer ne
-sert que du JPEG) ou identique à celui d'un AUTRE morceau. Il n'est pas sûr :
-la photo d'un artiste est parfois la pochette d'un de ses disques (« Drunk »
-de Thundercat, *Artefact* de Swift Guad ; 2026-11-10).
+sert que du JPEG) ou identique à celui d'un AUTRE morceau, et ÉCRIT AVANT le
+correctif de l'extracteur. Sans cette date il n'était pas sûr : l'URL vient du
+brut (ce que Genius servait à la lecture), pas du fichier, réécrit depuis par
+une autre source ; une vraie pochette peut être un PNG (« Drunk » de
+Thundercat) ou partagée par deux morceaux d'un disque (*Artefact* de Swift
+Guad) — 2026-11-10. L'égalité d'image avec la photo enregistrée de l'artiste
+n'est pas praticable : nos photos d'artistes viennent de Deezer, la photo
+Genius n'est jamais gardée.
 """
 
 from __future__ import annotations
@@ -23,7 +28,15 @@ import sqlite3
 import zlib
 from collections import defaultdict
 from contextlib import closing
+from datetime import datetime
 from pathlib import Path
+
+#: Le correctif de `GeniusAPI._extract_song_art` (`a169745`, 2026-11-03 20:22) :
+#: depuis, la photo d'un artiste crédité n'est plus téléchargée comme pochette.
+#: Un fichier écrit APRÈS ne vient pas d'elle (les 5 cas de l'audit du
+#: 2026-11-10, Mac Miller et Swift Guad, écrits les 6 et 8/11 : de vraies
+#: pochettes, aucune égale à une photo d'artiste enregistrée).
+CORRECTIF_EXTRACTEUR = datetime.fromisoformat("2026-11-03T20:22:43+01:00").timestamp()
 
 
 def pages_a_photo(chemin_brut: Path) -> set[int]:
@@ -59,7 +72,8 @@ def pochettes_a_photo(lignes, dossier: Path | None = None) -> tuple[dict, dict]:
     (`(artiste, titre, page, …)`, pages déjà jugées par `pages_a_photo`).
     Prouvé : PNG / WebP, ou fichier au contenu partagé par une autre page ;
     laissé : un JPEG unique, qui peut être la pochette Deezer (repli quand
-    l'artwork Genius manquait). `dossier` : celui des pochettes, à la place de
+    l'artwork Genius manquait), ou un fichier écrit après
+    `CORRECTIF_EXTRACTEUR`. `dossier` : celui des pochettes, à la place de
     `config.COVER_IMAGES_DIR`."""
     from src.utils.image_downloader import cover_image_path, existing_image
 
@@ -79,6 +93,7 @@ def pochettes_a_photo(lignes, dossier: Path | None = None) -> tuple[dict, dict]:
     prouves, laisses = {}, {}
     for fichier in sorted(par_fichier):
         partage = len(pages_par_contenu[empreintes[fichier]]) > 1
-        cible = prouves if partage or fichier.suffix.lower() != ".jpg" else laisses
+        avant = fichier.stat().st_mtime < CORRECTIF_EXTRACTEUR
+        cible = prouves if avant and (partage or fichier.suffix.lower() != ".jpg") else laisses
         cible[fichier] = par_fichier[fichier]
     return prouves, laisses

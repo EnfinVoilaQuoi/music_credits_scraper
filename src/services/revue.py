@@ -222,6 +222,10 @@ class Contexte:
     #: (`meme_enregistrement.fusions_a_decider`), lues par `charger_contexte` :
     #: le détecteur reste pur.
     fusions: dict = field(default_factory=dict)
+    #: Pages « Non-Music » sans identifiant que la liste Deezer de leur album
+    #: contient (`sortie_officielle.sorties_par_leur_disque`), lues par
+    #: `charger_contexte` : le détecteur `annotee` reste pur.
+    non_music_sortis: set = field(default_factory=set)
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -1419,21 +1423,27 @@ def page_sans_info(track, _ctx=None):
     return None
 
 
-def page_annotee_sans_trace(track, _ctx=None):
-    """URL Genius `-annotated` (le tag « Non-Music ») sans aucune trace de
-    plateforme : c'est ainsi qu'on a trouvé les pages poubelles du 2026-09-26
-    (29 supprimées sur 47). Le tag seul couvre aussi de vrais skits. Une page
-    qui ne dit rien (`sans_info`) est déjà montrée pour information (🕳️,
-    décision utilisateur 2026-10-26) : elle n'est pas une décision de plus
-    (« NICE THAT », « Real shit », 2026-10-29)."""
+def page_annotee_sans_trace(track, ctx=None):
+    """URL Genius `-annotated` (le tag « Non-Music ») SANS SORTIE OFFICIELLE :
+    ni identifiant Spotify, Deezer ou Apple, ni place dans la liste Deezer de
+    son album (`sortie_officielle`, décision utilisateur 2026-11-10 : on ne
+    garde que ce qui est sorti — skit d'album, vrai morceau mal tagué, piste
+    parlée). Une vidéo ne protège plus la page : les skits des « Snippet
+    Tape » d'Eminem en ont une. C'est ainsi qu'on a trouvé les pages poubelles
+    du 2026-09-26 (29 supprimées sur 47). Une page qui ne dit rien
+    (`sans_info`) est déjà montrée pour information (🕳️, décision utilisateur
+    2026-10-26) : elle n'est pas une décision de plus (« NICE THAT », « Real
+    shit », 2026-10-29)."""
+    from src.utils.sortie_officielle import a_un_identifiant, page_non_music
+
+    sortis = ctx.non_music_sortis if ctx is not None else set()
     if (
-        (track.genius_url or "").endswith("-annotated")
-        and not track.spotify_id
-        and not track.deezer_id
-        and not track.videos
+        page_non_music(track)
+        and not a_un_identifiant(track)
+        and track.id not in sortis
         and not sans_info(track)
     ):
-        return ("page Genius « Non-Music » sans trace de plateforme ni vidéo", {})
+        return ("page Genius « Non-Music » sans sortie officielle", {})
     return None
 
 
@@ -3658,7 +3668,9 @@ DETECTEURS: tuple[Detecteur, ...] = (
         credits_api_seuls,
         nature_du_cas=nature_credits_api,
     ),
-    Detecteur("annotee", "Page « Non-Music » sans trace", "🏷️", page_annotee_sans_trace),
+    Detecteur(
+        "annotee", "Page « Non-Music » sans sortie officielle", "🏷️", page_annotee_sans_trace
+    ),
     Detecteur(
         "video_autre_chaine",
         "Vidéo d'un autre artiste (chaîne et durée)",
@@ -4041,6 +4053,7 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.positions = data_manager.get_artist_positions(artiste.id)
     ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
     ctx.fusions = data_manager.fusions_a_decider([t.id for t in tracks if t.id])
+    ctx.non_music_sortis = data_manager.non_music_sortis(tracks)
     if VIDEOS_MORTES_BRANCHEES:
         ctx.videos_mortes = data_manager.videos_mortes_constatees()
     return ctx

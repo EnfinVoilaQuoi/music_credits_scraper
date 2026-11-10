@@ -220,6 +220,14 @@ class RevueRepository:
 
         return fusions_a_decider(self.db_path, ids_fiches)
 
+    def non_music_sortis(self, fiches) -> set[int]:
+        """Les pages « Non-Music » sans identifiant que la liste Deezer de leur
+        album contient (lecture seule, `sortie_officielle`)."""
+        from src.utils.sortie_officielle import sorties_par_leur_disque
+
+        with self.engine.connect() as conn:
+            return sorties_par_leur_disque(conn, fiches)
+
     def corrections_revue(self, artist_id: int, *, retablies: bool = False) -> list[dict]:
         """Le journal de l'artiste, le plus récent d'abord (sans les corrections
         déjà défaites, sauf `retablies=True`)."""

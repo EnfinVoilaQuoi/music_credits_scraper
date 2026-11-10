@@ -133,7 +133,7 @@ def _page_artiste(nom="ISHA", auditeurs=387860, playcounts=None, albums=None):
     }
 
 
-def _run(dm, scraper, artist=None, stop=None):
+def _run(dm, scraper, artist=None, stop=None, fiches=None):
     result = {
         "recorded": 0,
         "harvested_foreign": 0,
@@ -147,7 +147,9 @@ def _run(dm, scraper, artist=None, stop=None):
         "spotify_artist_id": None,
         "aborted": None,
     }
-    return asyncio.run(_crawl(artist or _Artist(), dm, scraper, "artistid", stop, result))
+    return asyncio.run(
+        _crawl(artist or _Artist(), dm, scraper, "artistid", stop, result, fiches=fiches)
+    )
 
 
 # ── Gate d'identité ───────────────────────────────────────────────────────────
@@ -234,6 +236,52 @@ def test_les_morceaux_non_recoltes_sont_visites():
     _run(dm, scraper)
     assert scraper.visited == [_ID_B]
     assert {c["track_id"] for c in dm.streams_calls} == {10, 11}
+
+
+class TestFichesNommees:
+    """`--fiches` : la page titre de ces seules fiches (2026-11-10 — un run
+    d'une fiche de Kery James ouvrait 120 pages, 20 min)."""
+
+    def _album(self):
+        return _Scraper(
+            _page_artiste(albums={"album1": "Mon Album"}),
+            track_pages={
+                _ID_A: {"playcounts": {_ID_A: 5}, "durations": {_ID_A: 200}},
+                _ID_B: {"playcounts": {_ID_B: 7}},
+            },
+            album_pages={"album1": {"tracks": [(_ID_A, "T"), (_ID_B, "U")]}},
+        )
+
+    def test_seule_la_fiche_nommee_est_visitee(self):
+        dm, scraper = _DataManager(), self._album()
+        result = _run(dm, scraper, fiches=frozenset({10}))
+        assert scraper.visited == [_ID_A]
+        assert result["pages"] == 2  # la page artiste, la page titre
+        assert dm.duration_calls == [(10, 200, "spotify_web")]
+
+    def test_la_passe_des_albums_est_sautee(self):
+        dm, scraper = _DataManager(), self._album()
+        result = _run(dm, scraper, fiches=frozenset({10, 11}))
+        assert dm.album_calls == []
+        assert result["albums_totalises"] == 0
+
+    def test_une_fiche_fraiche_ou_deja_recoltee_est_relue(self):
+        dm, scraper = _DataManager(), self._album()
+        dm.get_stream_observation_dates = lambda source: {10: datetime.now()}
+        scraper.artist_page["playcounts"] = {_ID_A: 5}
+        _run(dm, scraper, fiches=frozenset({10}))
+        assert scraper.visited == [_ID_A]
+
+    def test_aucune_fiche_nommee_n_ouvre_que_la_page_artiste(self):
+        dm, scraper = _DataManager(), self._album()
+        result = _run(dm, scraper, fiches=frozenset())
+        assert scraper.visited == []
+        assert result["pages"] == 1
+
+    def test_sans_fiches_la_file_entiere_est_visitee(self):
+        dm, scraper = _DataManager(), self._album()
+        _run(dm, scraper)
+        assert set(scraper.visited) == {_ID_A, _ID_B}
 
 
 def test_le_plafond_de_pages_est_respecte(monkeypatch):
@@ -499,6 +547,51 @@ def test_le_budget_epuise_n_ecrit_pas_de_total_partiel(monkeypatch):
     assert dm.album_calls == []
 
 
+class TestRefusDeBudgetDeSuite:
+    """En fin de budget, chaque album refusé coûte sa page pour rien : la passe
+    s'arrête après trois refus de suite (2026-11-10, Kery James : dix pages)."""
+
+    def _monter(self, monkeypatch, plafond, tailles):
+        from src.config import settings
+
+        monkeypatch.setattr(settings, "spotify_web_max_pages_per_run", plafond)
+        titres = [f"Disque {chr(65 + i)}" for i in range(len(tailles))]
+        pages = {
+            f"album{i}": _page_album([(f"piste{i}x{j}", f"T{i}x{j}") for j in range(n)])
+            for i, n in enumerate(tailles)
+        }
+        dm = _DataManager(tracks=[], albums=[{"title": t} for t in titres])
+        scraper = _Scraper(
+            _page_artiste(
+                playcounts={"piste2x0": 50},
+                albums={f"album{i}": t for i, t in enumerate(titres)},
+            ),
+            album_pages=pages,
+        )
+        ouverts = []
+        lire = scraper.afetch_album
+
+        async def afetch_album(sess, album_id):
+            ouverts.append(album_id)
+            return await lire(sess, album_id)
+
+        scraper.afetch_album = afetch_album
+        return dm, scraper, ouverts
+
+    def test_trois_refus_de_suite_arretent_la_passe(self, monkeypatch):
+        dm, scraper, ouverts = self._monter(monkeypatch, 7, [10, 10, 10, 10, 10])
+        _run(dm, scraper)
+        assert ouverts == ["album0", "album1", "album2"]
+        assert dm.album_calls == []
+
+    def test_un_album_totalise_remet_le_compte_a_zero(self, monkeypatch):
+        # Le troisième disque (une piste, déjà récoltée) passe après deux refus.
+        dm, scraper, ouverts = self._monter(monkeypatch, 9, [10, 10, 1, 10, 10, 10, 10])
+        _run(dm, scraper)
+        assert [c["title"] for c in dm.album_calls] == ["Disque C"]
+        assert len(ouverts) == 6
+
+
 def test_le_titre_de_la_base_prime_sur_celui_de_spotify():
     """L'upsert se fait sur le titre EN BASE : une graphie Spotify légèrement
     différente ne doit pas créer un album en double."""
@@ -541,7 +634,31 @@ def test_une_tracklist_complete_ecrit_le_total():
     assert dm.album_calls[0]["streams"] == 150
 
 
-# ── Mode léger ────────────────────────────────────────────────────────────────
+class TestPisteIndisponible:
+    """Une ligne rendue sans lien (piste indisponible sur Spotify) n'est pas une
+    ligne manquante : le total est celui des pistes lisibles (décision
+    utilisateur 2026-11-10 — « Nique le casino », 12 liens pour 13 lignes)."""
+
+    def _lancer(self, indisponibles, annonce):
+        dm = _DataManager(albums=[{"title": "Mon Album"}])
+        page = _page_album([(_ID_A, "A"), (_ID_B, "B")])
+        page["announced"] = annonce
+        page["indisponibles"] = indisponibles
+        scraper = _Scraper(
+            _page_artiste(playcounts={_ID_A: 100, _ID_B: 50}, albums={_ID_ALBUM: "Mon Album"}),
+            album_pages={_ID_ALBUM: page},
+        )
+        _run(dm, scraper)
+        return dm.album_calls
+
+    def test_le_total_des_pistes_lisibles_est_ecrit(self):
+        assert self._lancer(1, 3)[0]["streams"] == 150
+
+    def test_une_ligne_non_rendue_en_plus_reste_tronquee(self):
+        assert self._lancer(1, 4) == []
+
+
+# ── Mode léger────────────────────────────────────────────────────────────────
 def test_mode_leger_n_ouvre_que_la_page_artiste():
     """Une page pour les auditeurs mensuels et le top 10 : ce qu'on peut se
     permettre à chaque run. Les pages titre et les albums, eux, coûtent une page
@@ -637,7 +754,7 @@ class TestEntreePublique:
 
         monkeypatch.setattr(uss, "SpotifyWebScraper", lambda headless=True: _ScraperMuet())
 
-        async def faux_crawl(artist, dm, scraper, sid, stop, result, full):
+        async def faux_crawl(artist, dm, scraper, sid, stop, result, full, fiches):
             result["spotify_artist_id_vu"] = sid
             return result
 
@@ -657,7 +774,7 @@ class TestEntreePublique:
             def close(self):
                 ferme.append(True)
 
-        async def faux_crawl(artist, dm, scraper, sid, stop, result, full):
+        async def faux_crawl(artist, dm, scraper, sid, stop, result, full, fiches):
             return result
 
         monkeypatch.setattr(uss, "_crawl", faux_crawl)

@@ -1150,17 +1150,60 @@ class TestIdsPartagesEntreArtistes:
     def test_ce_qui_n_est_pas_un_cas(self, pistes):
         assert au.ids_partages_entre_artistes(pistes) == []
 
-    def test_spotify_entre_pages_d_une_formation_laisse_au_panneau(self):
-        """Le panneau lit membre et groupe ensemble (`id_catalogue_partage`) ;
-        un ISRC n'y est pas jugé, il reste à l'audit."""
+    def test_spotify_entre_pages_lues_ensemble_laisse_au_panneau(self):
+        """Deux fiches qu'une même fenêtre du panneau lit (`lus_ensemble`) : il
+        juge l'ID Spotify (`id_catalogue_partage`) ; un ISRC n'y est pas jugé,
+        il reste à l'audit."""
         pistes = [
             _fiche_id(1, 1, 10, spotify_id="SP", isrc="X"),
             _fiche_id(2, 2, 11, spotify_id="SP", isrc="X"),
         ]
-        liees = {frozenset((1, 2))}
-        cas = au.ids_partages_entre_artistes(pistes, liees)
+        cas = au.ids_partages_entre_artistes(pistes, [{1, 2}])
         assert [c.libelle.split(" ")[0] for c in cas] == ["isrc"]
-        assert len(au.ids_partages_entre_artistes(pistes)) == 2
+        # Lues chacune dans sa fenêtre : aucune ne voit l'autre.
+        assert len(au.ids_partages_entre_artistes(pistes, [{1}, {2}])) == 2
+
+    def test_la_regle_exacte_du_panneau_groupe_et_collectif(self, data_manager):
+        """2026-11-10 : un lien de formation ne suffit pas. Un groupe apporte
+        tous ses morceaux au membre ; un collectif, seulement ceux où le membre
+        est présent — sans lui, le panneau ne voit pas la paire, l'audit la
+        compte."""
+        from src.models import ArtistRelation, Credit, CreditRole
+
+        def artiste(nom):
+            a = Artist(name=nom)
+            a.id = data_manager.save_artist(a)
+            return a
+
+        def fiche(a, titre, gid, sid, credits=()):
+            t = Track(title=titre, artist=a)
+            t.genius_id = gid
+            t.credits = [Credit(name=n, role=r) for n, r in credits]
+            data_manager.save_track(t)
+            _sql(data_manager, "UPDATE tracks SET spotify_id = :s WHERE id = :t", s=sid, t=t.id)
+            return t
+
+        membre = artiste("Lucio Bukowski")
+        collectif = artiste("L'Animalerie")
+        groupe = artiste("Groupe")
+        fiche(membre, "Solo A", 1, "SP_A")
+        fiche(collectif, "Sans lui", 2, "SP_A")
+        fiche(membre, "Solo B", 3, "SP_B")
+        fiche(collectif, "Avec lui", 4, "SP_B", [("Lucio Bukowski", CreditRole.WRITER)])
+        fiche(membre, "Solo C", 5, "SP_C")
+        fiche(groupe, "Du groupe", 6, "SP_C")
+        data_manager.record_artist_relations(
+            membre.id,
+            [
+                ArtistRelation(
+                    related_name="L'Animalerie", kind="member_of", formation="collectif"
+                ),
+                ArtistRelation(related_name="Groupe", kind="member_of", formation="groupe"),
+            ],
+        )
+        audit = au.auditer(data_manager, revue=False, persistance=False)
+        vus = [c.libelle.split(" ")[1] for c in audit.cas if c.famille == "id_partage_artistes"]
+        assert vus == ["SP_A"]
 
     def test_base_entiere_seulement(self, data_manager, isha):
         _, t = isha

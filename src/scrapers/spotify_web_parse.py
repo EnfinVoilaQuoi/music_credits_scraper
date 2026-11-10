@@ -190,6 +190,19 @@ def parse_album_tracks(html: str) -> list[tuple[str, str]]:
     return list(found.items())
 
 
+def parse_album_rows_sans_lien(html: str) -> list[str]:
+    """Le texte des lignes RENDUES sans lien de piste : des pistes indisponibles
+    sur Spotify (grisées, sans page ni compteur). À compter à part des lignes
+    non rendues — la page est complète, c'est la piste qui manque (2026-11-10 :
+    « Nique le casino », 13 lignes pour 13 annoncées, dont une sans lien, était
+    tenu pour tronqué et rouvert à chaque run sans jamais avoir de total)."""
+    return [
+        row.get_text(" ", strip=True)
+        for row in _soup(html).select('[data-testid="tracklist-row"]')
+        if not row.find("a", href=_TRACK_ID_RE)
+    ]
+
+
 def parse_track_ids(html: str) -> list[str]:
     """IDs seuls des pistes listées (cf. `parse_album_tracks`)."""
     return [track_id for track_id, _ in parse_album_tracks(html)]

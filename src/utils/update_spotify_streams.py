@@ -49,6 +49,13 @@ logger = get_logger(__name__)
 #: `(track_id, field, source)`, les deux coexistent et deviennent comparables.
 _SOURCE = "spotify_web"
 
+#: La passe des albums s'arrête après autant d'albums refusés DE SUITE faute de
+#: budget (2026-11-10). Chaque refus coûte la page de l'album, relue au run
+#: suivant : en fin de budget, dix albums de suite étaient ouverts pour rien
+#: (Kery James, ~90 s). Trois et non un : un single ou un album déjà récolté
+#: passe encore après un gros album refusé (« La sans pitax », même journal).
+_REFUS_DE_BUDGET_DE_SUITE = 3
+
 
 def _parse_seen_at(raw) -> datetime | None:
     """`seen_at` d'une observation — rendu BRUT par le repository (string ou
@@ -89,6 +96,7 @@ def update_spotify_streams(
     scraper=None,
     stop_requested=None,
     full_crawl: bool = True,
+    fiches=None,
 ) -> dict:
     """Scrape open.spotify.com et met à jour streams et auditeurs mensuels.
 
@@ -102,6 +110,9 @@ def update_spotify_streams(
             mensuels et top 10, pour UNE page. Les passes par morceau et par
             album, qui coûtent une page chacune, sont sautées. C'est le mode
             qu'on peut se permettre à chaque run.
+        fiches: ID de base NOMMÉS par l'appelant (`--fiches`). La page artiste,
+            puis la page titre de ces seules fiches, fraîches ou non ; ni file
+            par péremption, ni passe des albums.
 
     Returns:
         dict résumé {recorded, harvested_foreign, unknown_ids, pages,
@@ -144,6 +155,7 @@ def update_spotify_streams(
                 stop_requested,
                 result,
                 full_crawl,
+                fiches,
             )
         )
     finally:
@@ -173,6 +185,7 @@ async def _crawl(
     stop_requested,
     result: dict,
     full_crawl: bool = True,
+    fiches=None,
 ) -> dict:
     """Les deux passes, sous UNE session navigateur.
 
@@ -212,6 +225,15 @@ async def _crawl(
             result["monthly_listeners"] = page["monthly_listeners"]
 
         _record(page["playcounts"], artist, data_manager, id_map, releves, result)
+
+        if fiches is not None:
+            # Des fiches NOMMÉES (2026-11-10) : leurs pages, rien d'autre. Sans
+            # cela, un run d'UNE fiche ouvrait 120 pages (file par péremption,
+            # puis les albums) : 20 min au lieu d'une vingtaine de secondes.
+            await _visiter_fiches(
+                sess, scraper, artist, data_manager, id_map, fiches, releves, stop_requested, result
+            )
+            return result
 
         if not full_crawl:
             # 6C : sauf les morceaux à ID Spotify SANS AUCUN stream — sous le
@@ -311,6 +333,39 @@ async def _visiter_sans_stream(
         data = await scraper.afetch_track(sess, spotify_id)
         result["pages"] += 1
         result["sans_stream"] += 1
+        if not data:
+            continue
+        _record(data["playcounts"], artist, data_manager, id_map, releves, result)
+        _declarer_durees(data.get("durations"), data_manager, id_map, result)
+
+
+async def _visiter_fiches(
+    sess, scraper, artist, data_manager, id_map, fiches, releves, stop_requested, result
+) -> None:
+    """La page titre de chaque fiche nommée, par son ID PRINCIPAL. Pas de
+    filtre de fraîcheur : qui nomme une fiche veut la relire. La page est
+    ouverte même si la page artiste a déjà rendu son compteur — elle seule
+    donne la durée. Le plafond de pages vaut ici aussi."""
+    file = [
+        t.spotify_id
+        for t in data_manager.get_artist_tracks(artist.id)
+        if t.id in fiches and t.spotify_id
+    ]
+    budget = settings.spotify_web_max_pages_per_run - result["pages"]
+    logger.info(
+        f"Spotify web '{artist.name}' : {len(file)} fiche(s) nommée(s) à visiter "
+        f"(sur {len(fiches)}), sans file ni passe des albums"
+    )
+    for spotify_id in dict.fromkeys(file):
+        if budget <= 0:
+            logger.warning("Plafond de pages atteint — des fiches nommées n'ont pas été lues")
+            break
+        if stop_requested and stop_requested():
+            logger.info("Arrêt demandé — interruption entre deux morceaux")
+            break
+        data = await scraper.afetch_track(sess, spotify_id)
+        budget -= 1
+        result["pages"] += 1
         if not data:
             continue
         _record(data["playcounts"], artist, data_manager, id_map, releves, result)
@@ -571,10 +626,17 @@ async def _totaliser_albums(
             if t.album and not t.spotify_id and not t.secondary_role:
                 sans_id.setdefault(normalize_title(t.album), []).append(t)
     resolus: list[str] = []
+    refus_de_suite = 0
 
     for cle in albums_a_totaliser(groupes, totaux, datetime.now()):
         editions = groupes[cle]
         if budget <= 0 or (stop_requested and stop_requested()):
+            break
+        if refus_de_suite >= _REFUS_DE_BUDGET_DE_SUITE:
+            logger.info(
+                f"{refus_de_suite} albums de suite hors budget ({budget} page(s) restantes) — "
+                "la passe des albums reprendra au prochain run"
+            )
             break
 
         compositions = {}
@@ -606,8 +668,14 @@ async def _totaliser_albums(
                 # ce qu'on voit donnerait un total plausible et FAUX — le pire
                 # des résultats, puisqu'il ne se signale pas. Mesuré le
                 # 2026-09-05 : la même page a rendu 15 pistes puis 7.
+                # Une ligne rendue SANS lien (piste indisponible sur Spotify,
+                # sans compteur nulle part) n'est pas une ligne manquante : le
+                # total est celui des pistes lisibles (décision utilisateur
+                # 2026-11-10), sinon l'album était rouvert à chaque run sans
+                # jamais être totalisé.
                 annonce = album.get("announced")
-                if annonce is not None and len(album["tracks"]) < annonce:
+                rendues = len(album["tracks"]) + (album.get("indisponibles") or 0)
+                if annonce is not None and rendues < annonce:
                     tronquee = True
         if len(compositions) != len(editions) or tronquee:
             logger.warning(f"Album '{connus[cle]}' : composition incomplète — total NON écrit")
@@ -626,7 +694,9 @@ async def _totaliser_albums(
                 f"Album '{connus[cle]}' : {len(manquants)} piste(s) manquante(s) pour "
                 f"{budget} page(s) de budget — total NON écrit (le prochain run reprendra)"
             )
+            refus_de_suite += 1
             continue
+        refus_de_suite = 0
 
         for track_id in manquants:
             data = await scraper.afetch_track(sess, track_id)
@@ -665,6 +735,9 @@ async def _totaliser_albums(
             if len(compositions) > 1
             else ""
         )
+        indisponibles = sum(a.get("indisponibles") or 0 for a in compositions.values())
+        if indisponibles:
+            detail_txt += f" — {indisponibles} ligne(s) indisponible(s) sur Spotify, hors total"
         logger.info(
             f"Album '{connus[cle]}' : {total:,} streams sur "
             f"{len(par_enregistrement)} enregistrements{detail_txt}".replace(",", " ")

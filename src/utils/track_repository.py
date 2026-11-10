@@ -2916,6 +2916,38 @@ class TrackRepository:
             logger.error(f"Erreur retirer_heritage({track_id}): {e}")
             return 0, False
 
+    def retirer_credits_herites(self, track_id: int, cles) -> int:
+        """Retire des crédits HÉRITÉS précis `(nom, rôle)` (`source='heritage'`)
+        d'une fiche de version, sœurs comprises — l'héritage d'aujourd'hui ne
+        les poserait plus (`version_heritage.credits_herites_perimes`). Le même
+        crédit venu d'une autre source reste (une ligne par source). Sans le
+        retrait chez les sœurs, l'union de `synchroniser_soeurs` le rendrait.
+        Rend le nombre de lignes retirées."""
+        cles = [(nom, role) for nom, role in cles]
+        total = [0]
+        if not cles:
+            return 0
+        try:
+            with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
+                self._toucher(conn, track_id)
+
+                def retirer(tid: int) -> None:
+                    for nom, role in cles:
+                        total[0] += conn.execute(
+                            text(
+                                "DELETE FROM credits WHERE track_id = :t AND source = 'heritage' "
+                                "AND name = :n AND role = :r"
+                            ),
+                            {"t": tid, "n": nom, "r": role},
+                        ).rowcount
+
+                retirer(track_id)
+                effacer_chez_les_soeurs(conn, track_id, retirer)
+            return total[0]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_credits_herites({track_id}): {e}")
+            return 0
+
     def forget_credit(self, track_id: int, name: str, role: str) -> int:
         """Retire un crédit (nom normalisé + rôle), toutes sources. Rend le nombre
         de lignes retirées. Sa MÉMOIRE est `corrections_fiches.credits_refuses` :

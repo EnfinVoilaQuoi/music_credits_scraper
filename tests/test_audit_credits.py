@@ -113,12 +113,20 @@ def test_familles_de_credits_dans_l_audit(data_manager):
     _credit(data_manager, fiches["Heartless (Studio Version)"], "No I.D.", "Producer", "heritage")
     audit = au.auditer(data_manager, ["Shurik’n"], revue=False, persistance=False)
     heritage = sorted(
-        (c for c in audit.cas if c.famille == "heritage_sans_source"), key=lambda c: c.nature
+        (c for c in audit.cas if c.famille.startswith("heritage_sans")), key=lambda c: c.nature
     )
-    assert [(c.nature, c.pistes) for c in heritage] == [
-        (au.ERREUR, [fiches["Fugitif (Instrumental)"], fiches["Fugitif"]]),
-        (au.INFORMATION, [fiches["Heartless (Studio Version)"]]),
+    assert [(c.famille, c.nature, c.pistes) for c in heritage] == [
+        (
+            "heritage_sans_source",
+            au.ERREUR,
+            [fiches["Fugitif (Instrumental)"], fiches["Fugitif"]],
+        ),
+        ("heritage_sans_original", au.INFORMATION, [fiches["Heartless (Studio Version)"]]),
     ]
+    # L'erreur est un INVARIANT (l'héritage se recalcule, 2026-11-10) ;
+    # l'original introuvable reste une information, hors critère.
+    assert "heritage_sans_source" in au.INVARIANTS
+    assert "heritage_sans_original" in au.FAMILLES_HORS_CRITERE
     assert "IAM Producer" in heritage[0].libelle and "Shurik" not in heritage[0].libelle
     (graphie,) = [c for c in audit.cas if c.famille == "credit_graphie"]
     assert graphie.nature == au.INFORMATION and graphie.pistes == [fiches["Fugitif"]]

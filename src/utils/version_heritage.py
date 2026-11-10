@@ -433,3 +433,35 @@ def sans_heritage_couvert(credits: list) -> list:
             )
         )
     ]
+
+
+#: Pourquoi un crédit hérité n'a plus de source (`heritage_sans_source`).
+ROLE_NON_TRANSMIS = "rôle que sa famille n'hérite plus"
+ABSENT_DE_L_ORIGINAL = "absent de l'original"
+
+
+def heritage_sans_source(titre: str | None, herites, credits_du_socle) -> list[tuple]:
+    """PUR. Les crédits HÉRITÉS `(nom, rôle)` d'une version de titre `titre`
+    que l'héritage d'aujourd'hui ne poserait plus, avec leur motif : rôle que
+    la règle de sa famille ne transmet plus (`REGLES`, une a cappella n'hérite
+    plus de la production), ou crédit que l'original ne porte plus en source
+    directe (`credits_du_socle`, `(nom, rôle, source)` : Genius a retiré ou
+    scindé le crédit — « Gamble & Huff » devenu Kenneth Gamble et Leon Huff).
+    L'héritage est une UNION qui ne retire rien : ces crédits restaient, sans
+    source (2026-11-10, 37 crédits). Un rôle inconnu n'est pas jugé."""
+    famille = famille_de(titre)
+    if famille is None:
+        return []
+    regle = REGLES.get(famille) or REGLES["edition"]
+    directs = {(n, r) for n, r, s in credits_du_socle if not est_herite(s)}
+    rendus = []
+    for nom, role in herites:
+        try:
+            r = CreditRole(role)
+        except ValueError:
+            continue
+        if not ((regle.ecriture and r in _WRITER_ROLES) or (regle.production and r in _PRODUCTION)):
+            rendus.append((nom, role, ROLE_NON_TRANSMIS))
+        elif (nom, role) not in directs:
+            rendus.append((nom, role, ABSENT_DE_L_ORIGINAL))
+    return rendus

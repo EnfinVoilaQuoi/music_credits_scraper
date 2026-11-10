@@ -186,6 +186,8 @@ FAMILLES = {
     "streams_double": "même compteur Spotify sur deux pages Genius",
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
+    "heritage_sans_source": "crédit hérité que l'héritage d'aujourd'hui ne poserait plus "
+    "(rôle non transmis, absent de l'original)",
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
     "disque_homonyme": "disque d'au moins 3 fiches, ni page Genius ni ID Spotify d'un profil connu (homonyme ?)",
     "hors_du_disque": "DÉCISION — fiche absente de la liste Deezer de sa parution, sa piste sur un autre disque",
@@ -197,6 +199,7 @@ FAMILLES = {
     "lien_jamais_mesure": "lien YouTube sans ligne `track_videos` : vues jamais relevées",
     "date_ancienne": "date de sortie avant 1950 (juste pour une œuvre ancienne, sinon douteuse)",
     "pochette_photo": "pochette d'un morceau isolé qui serait la photo d'un artiste crédité (Genius)",
+    "credit_graphie": "même crédit sous deux graphies sur une fiche (Discogs / Genius…)",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
     "soeurs_divergentes": "INVARIANT — lignes sœurs aux valeurs d'enregistrement différentes",
@@ -232,6 +235,7 @@ FAMILLES_HORS_CRITERE = (
     "lien_jamais_mesure",
     "date_ancienne",
     "pochette_photo",
+    "credit_graphie",
 )
 
 #: Les familles dont la cible est zéro (une seule ligne = un défaut de code).
@@ -1088,6 +1092,112 @@ def echecs(c, pistes) -> list[Cas]:
                     t["artiste"],
                     [t["id"]],
                     f"{_lib(t)} {r['source_key']} crash : {msg[:60] or '(vide)'}",
+                )
+            )
+    return cas
+
+
+def _credits_par_fiche(c, ids, where: str = "") -> dict[int, list]:
+    par = collections.defaultdict(list)
+    for r in c.execute(f"SELECT track_id, name, role, role_detail, source FROM credits {where}"):
+        if r["track_id"] in ids:
+            par[r["track_id"]].append(r)
+    return par
+
+
+def heritage_sans_source(c, pistes) -> list[Cas]:
+    """Des crédits HÉRITÉS (`source = 'heritage'`) que l'héritage d'aujourd'hui
+    ne poserait plus (`version_heritage.heritage_sans_source`) : ERREUR, le
+    juge de la pose les refuse (« Stand United (Acapella) » et sa production,
+    « Fugitif (Instrumental) » et le « IAM » producteur que l'original ne
+    porte plus). Une version dont l'original n'est plus UNIQUE (huit
+    « Heartless » chez Kid Cudi) ou plus retrouvé : rien ne dit d'où viennent
+    ses crédits, pour information (2026-11-10 : 2 345 crédits hérités, 37 sans
+    source, 35 sans original unique)."""
+    from src.utils.version_heritage import IndexSocles, socle_parmi
+    from src.utils.version_heritage import heritage_sans_source as juger
+
+    ids = {t["id"]: t for t in pistes}
+    herites = _credits_par_fiche(c, ids, "WHERE source = 'heritage'")
+    if not herites:
+        return []
+    fiches = collections.defaultdict(list)
+    for t in pistes:
+        fiches[t["artist_id"]].append(
+            SimpleNamespace(id=t["id"], title=t["title"], secondary_role=t["secondary_role"])
+        )
+    index = {a: IndexSocles(f) for a, f in fiches.items()}
+    socles = {}
+    for tid in herites:
+        t = ids[tid]
+        socles[tid] = socle_parmi(t["title"], fiches[t["artist_id"]], index[t["artist_id"]])
+    du_socle = _credits_par_fiche(c, {s.id for s in socles.values() if s is not None})
+    cas = []
+    for tid, credits in herites.items():
+        t, socle = ids[tid], socles[tid]
+        if socle is None:
+            cas.append(
+                Cas(
+                    "heritage_sans_source",
+                    t["artiste"],
+                    [tid],
+                    f"{_lib(t)} : {len(credits)} crédit(s) hérité(s), original introuvable "
+                    "ou ambigu",
+                    INFORMATION,
+                )
+            )
+            continue
+        perimes = juger(
+            t["title"],
+            [(x["name"], x["role"]) for x in credits],
+            [(x["name"], x["role"], x["source"]) for x in du_socle.get(socle.id, [])],
+        )
+        if perimes:
+            detail = ", ".join(f"{n} {r} ({m})" for n, r, m in perimes[:4])
+            cas.append(
+                Cas(
+                    "heritage_sans_source",
+                    t["artiste"],
+                    [tid, socle.id],
+                    f"{_lib(t)} hérité de #{socle.id} : {len(perimes)} crédit(s) sans "
+                    f"source — {detail}",
+                )
+            )
+    return cas
+
+
+def credit_graphie(c, pistes) -> list[Cas]:
+    """Le même crédit sous deux graphies sur une fiche, toutes sources hors
+    YouTube (`credit_normalize.credits_sous_deux_graphies` ; YouTube :
+    l'invariant `credit_doublon`). Pour INFORMATION : aucun écrivain ne
+    promet de fondre deux sources, et le studio en fond déjà les trois quarts
+    par `identity_key` (2026-11-10 : 735 fiches, 10 exemples justes sur 10,
+    « M.A.T (FRA) » / « M.A.T. (USA) » écartés)."""
+    from src.utils.credit_normalize import credits_sous_deux_graphies
+
+    ids = {t["id"]: t for t in pistes}
+    cas = []
+    for tid, credits in _credits_par_fiche(c, ids).items():
+        groupes = credits_sous_deux_graphies(
+            [
+                SimpleNamespace(
+                    name=x["name"], role=x["role"], role_detail=x["role_detail"], source=x["source"]
+                )
+                for x in credits
+            ]
+        )
+        if groupes:
+            detail = " ; ".join(
+                " = ".join(f"{x.name} ({x.source})" for x in g) + f" [{g[0].role}]"
+                for g in groupes[:3]
+            )
+            cas.append(
+                Cas(
+                    "credit_graphie",
+                    ids[tid]["artiste"],
+                    [tid],
+                    f"{_lib(ids[tid])} {detail}",
+                    INFORMATION,
                 )
             )
     return cas
@@ -2170,6 +2280,8 @@ def auditer(
         audit.cas += certifs(pistes)
         audit.cas += streams(c, par)
         audit.cas += echecs(c, pistes)
+        audit.cas += heritage_sans_source(c, pistes)
+        audit.cas += credit_graphie(c, pistes)
         audit.cas += studio_sur_live(c, pistes)
         audit.cas += disques_homonymes(pistes, juge_des_ids_spotify(c))
         audit.cas += colonnes_sans_provenance(c, pistes)

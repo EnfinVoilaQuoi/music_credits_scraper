@@ -118,3 +118,33 @@ def credits_youtube_en_double(credits) -> list:
 def _role(credit) -> str:
     role = credit.role
     return role if isinstance(role, str) else role.value
+
+
+def _region(name: str | None) -> str | None:
+    """Le suffixe régional de Genius (« FRA », « USA ») d'un nom, ou None."""
+    trouve = _REGION_SUFFIX_RE.search((name or "").strip())
+    return trouve.group(0).strip(" ()").upper() if trouve else None
+
+
+def credits_sous_deux_graphies(credits) -> list[list]:
+    """Le même crédit sur UN morceau sous plusieurs graphies, TOUTES sources
+    (« Eric Chevet » de Discogs / « Éric Chevet » de Genius, « JeanJass » /
+    « Jean Jass ») : groupes de crédits au même rôle, même détail de rôle et
+    même `cle_de_doublon`, aux noms bruts différents. Généralise le juge des
+    crédits YouTube (`credits_youtube_en_double`, dont les lignes restent à
+    l'invariant `credit_doublon`). Deux suffixes régionaux différents sont
+    deux personnes (« M.A.T (FRA) » / « M.A.T. (USA) »). Mesuré le
+    2026-11-10 : 735 groupes, discogs + genius pour 619."""
+    groupes: dict[tuple, list] = {}
+    for c in credits:
+        cle = cle_de_doublon(c.name)
+        if cle and c.source not in SOURCES_YOUTUBE:
+            groupes.setdefault((cle, _role(c), c.role_detail or ""), []).append(c)
+    rendus = []
+    for groupe in groupes.values():
+        if len({c.name for c in groupe}) < 2:
+            continue
+        if len({r for r in (_region(c.name) for c in groupe) if r}) > 1:
+            continue
+        rendus.append(groupe)
+    return rendus

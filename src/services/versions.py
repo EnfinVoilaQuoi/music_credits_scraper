@@ -18,6 +18,8 @@ from src.utils.logger import get_logger
 from src.utils.title_matching import names_match_as_words
 from src.utils.version_heritage import (
     IndexSocles,
+    credits_herites_perimes,
+    est_herite,
     est_instrumental,
     famille_de,
     heriter,
@@ -36,8 +38,12 @@ logger = get_logger(__name__)
 def heriter_versions(dm, tracks) -> int:
     """Applique l'héritage à chaque fiche de version dont l'original est UNIQUE
     parmi `tracks` (les morceaux d'UN artiste). Rend le nombre de fiches
-    enrichies. UNION seulement (`heriter`) : rien n'est remplacé, et une fiche
-    qui n'a rien à recevoir n'est pas réécrite."""
+    touchées. L'héritage se RECALCULE (2026-11-10) : ce que `heriter` ajoute
+    (une union, rien n'est remplacé), puis les crédits hérités que l'héritage
+    d'aujourd'hui ne poserait plus partent, sœurs comprises
+    (`credits_herites_perimes` : l'original a perdu le crédit, la famille ne
+    transmet plus le rôle). Sans original unique, rien ne part. Une fiche qui
+    n'a rien à recevoir ni à rendre n'est pas réécrite."""
     n = 0
     index = IndexSocles(tracks)  # une fois : sinon chaque version relit tout
     for version in tracks:
@@ -46,10 +52,25 @@ def heriter_versions(dm, tracks) -> int:
         socle = socle_parmi(version.title, tracks, index)
         if socle is None or socle is version:
             continue
-        if heriter(version, socle).vide:
-            continue
-        dm.save_track(version)
-        n += 1
+        perimes = {(nom, role) for nom, role, _ in credits_herites_perimes(version, socle)}
+        if perimes:
+            version.credits = [
+                c
+                for c in version.credits
+                if not (est_herite(c.source) and (c.name, c.role.value) in perimes)
+            ]
+        recu = not heriter(version, socle).vide
+        if recu:
+            dm.save_track(version)
+        if perimes and version.id is not None:
+            # Après l'écriture : `save_track` unit les crédits des sœurs, qui
+            # portent encore l'héritage périmé ; le retrait passe chez elles.
+            retires = dm.retirer_credits_herites(version.id, sorted(perimes))
+            logger.info(
+                f"↩ « {version.title} » : {retires} crédit(s) hérité(s) sans source retiré(s)"
+            )
+        if recu or perimes:
+            n += 1
     if n:
         logger.info(f"↩ Héritage appliqué à {n} fiche(s) de version")
     return n

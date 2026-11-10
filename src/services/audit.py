@@ -186,8 +186,6 @@ FAMILLES = {
     "streams_double": "même compteur Spotify sur deux pages Genius",
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
-    "heritage_sans_source": "crédit hérité que l'héritage d'aujourd'hui ne poserait plus "
-    "(rôle non transmis, absent de l'original)",
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
     "disque_homonyme": "disque d'au moins 3 fiches, ni page Genius ni ID Spotify d'un profil connu (homonyme ?)",
     "hors_du_disque": "fiche absente de la liste Deezer de sa parution, sa piste sur un autre disque",
@@ -200,6 +198,8 @@ FAMILLES = {
     "date_ancienne": "date de sortie avant 1950 (juste pour une œuvre ancienne, sinon douteuse)",
     "pochette_photo": "pochette d'un morceau isolé qui serait la photo d'un artiste crédité (Genius)",
     "credit_graphie": "même crédit sous deux graphies sur une fiche (Discogs / Genius…)",
+    "heritage_sans_original": "crédits hérités d'une version dont l'original n'est plus unique "
+    "ou plus retrouvé",
     # ── Invariants : cible ZÉRO ──
     "colonne_verdict": "INVARIANT — colonne dérivée ≠ verdict de ses observations",
     "soeurs_divergentes": "INVARIANT — lignes sœurs aux valeurs d'enregistrement différentes",
@@ -211,6 +211,8 @@ FAMILLES = {
     "credit_doublon": "INVARIANT — crédit YouTube qui redit un crédit déjà porté, ou nom composé",
     "tete_fabriquee": "INVARIANT — tête de section des paroles nommée à tort (« [Couplet 1 : <ligne>] »)",
     "photo_par_defaut": "INVARIANT — silhouette Deezer gardée comme photo d'artiste ou de personne",
+    "heritage_sans_source": "INVARIANT — crédit hérité que l'héritage d'aujourd'hui ne poserait "
+    "plus (rôle non transmis, absent de l'original)",
 }
 
 #: Les familles de l'audit dont les cas sont des DÉCISIONS (pas des erreurs).
@@ -236,6 +238,7 @@ FAMILLES_HORS_CRITERE = (
     "date_ancienne",
     "pochette_photo",
     "credit_graphie",
+    "heritage_sans_original",
 )
 
 #: Les familles dont la cible est zéro (une seule ligne = un défaut de code).
@@ -250,6 +253,7 @@ INVARIANTS = (
     "credit_doublon",
     "tete_fabriquee",
     "photo_par_defaut",
+    "heritage_sans_source",
 )
 
 _FEAT = re.compile(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", re.IGNORECASE)
@@ -1118,15 +1122,13 @@ def _credits_par_fiche(c, ids, where: str = "") -> dict[int, list]:
     return par
 
 
-def heritage_sans_source(c, pistes) -> list[Cas]:
-    """Des crédits HÉRITÉS (`source = 'heritage'`) que l'héritage d'aujourd'hui
-    ne poserait plus (`version_heritage.heritage_sans_source`) : ERREUR, le
-    juge de la pose les refuse (« Stand United (Acapella) » et sa production,
-    « Fugitif (Instrumental) » et le « IAM » producteur que l'original ne
-    porte plus). Une version dont l'original n'est plus UNIQUE (huit
-    « Heartless » chez Kid Cudi) ou plus retrouvé : rien ne dit d'où viennent
-    ses crédits, pour information (2026-11-10 : 2 345 crédits hérités, 37 sans
-    source, 35 sans original unique)."""
+def heritages_perimes(c, pistes) -> list[tuple]:
+    """Les fiches de `pistes` à crédits HÉRITÉS (`source = 'heritage'`), avec
+    l'original que l'héritage d'aujourd'hui leur trouve et ce qu'il ne
+    poserait plus : `(fiche, socle | None, crédits hérités, périmés)`, où
+    `périmés` = `(nom, rôle, motif)` (`version_heritage.heritage_sans_source`).
+    `socle` None : original absent ou ambigu, rien n'est jugé. Partagé par
+    l'audit et le rattrapage (`scripts/recalculer_heritage.py`)."""
     from src.utils.version_heritage import IndexSocles, socle_parmi
     from src.utils.version_heritage import heritage_sans_source as juger
 
@@ -1145,13 +1147,40 @@ def heritage_sans_source(c, pistes) -> list[Cas]:
         t = ids[tid]
         socles[tid] = socle_parmi(t["title"], fiches[t["artist_id"]], index[t["artist_id"]])
     du_socle = _credits_par_fiche(c, {s.id for s in socles.values() if s is not None})
-    cas = []
+    rendus = []
     for tid, credits in herites.items():
-        t, socle = ids[tid], socles[tid]
+        socle = socles[tid]
+        perimes = (
+            juger(
+                ids[tid]["title"],
+                [(x["name"], x["role"]) for x in credits],
+                [(x["name"], x["role"], x["source"]) for x in du_socle.get(socle.id, [])],
+            )
+            if socle is not None
+            else []
+        )
+        rendus.append((ids[tid], socle, credits, perimes))
+    return rendus
+
+
+def heritage_sans_source(c, pistes) -> list[Cas]:
+    """Des crédits HÉRITÉS (`source = 'heritage'`) que l'héritage d'aujourd'hui
+    ne poserait plus (`version_heritage.heritage_sans_source`) : INVARIANT
+    depuis le 2026-11-10 — l'héritage se recalcule à chaque passage
+    (`versions.heriter_versions`), ce qui reste est un défaut d'écriture
+    (« Stand United (Acapella) » et sa production, « Fugitif (Instrumental) »
+    et le « IAM » producteur que l'original ne porte plus ; 37 crédits avant
+    le recalcul). Une version dont l'original n'est plus UNIQUE (huit
+    « Heartless » chez Kid Cudi) ou plus retrouvé : rien ne dit d'où viennent
+    ses crédits, rien ne part — famille `heritage_sans_original`, pour
+    information (35 crédits le 2026-11-10)."""
+    cas = []
+    for t, socle, credits, perimes in heritages_perimes(c, pistes):
+        tid = t["id"]
         if socle is None:
             cas.append(
                 Cas(
-                    "heritage_sans_source",
+                    "heritage_sans_original",
                     t["artiste"],
                     [tid],
                     f"{_lib(t)} : {len(credits)} crédit(s) hérité(s), original introuvable "
@@ -1160,11 +1189,6 @@ def heritage_sans_source(c, pistes) -> list[Cas]:
                 )
             )
             continue
-        perimes = juger(
-            t["title"],
-            [(x["name"], x["role"]) for x in credits],
-            [(x["name"], x["role"], x["source"]) for x in du_socle.get(socle.id, [])],
-        )
         if perimes:
             detail = ", ".join(f"{n} {r} ({m})" for n, r, m in perimes[:4])
             cas.append(

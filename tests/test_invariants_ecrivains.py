@@ -295,6 +295,35 @@ class TestApresChaqueEcrivain:
         data_manager.combler_isrc_vides(appliquer=True)
         assert _invariants(data_manager) == {}
 
+    def test_heritage_recalcule_quand_l_original_perd_un_credit(self, data_manager, base):
+        """Invariant `heritage_sans_source` (2026-11-10) : le passage de
+        l'héritage retire le crédit que l'original ne porte plus, chez les
+        lignes sœurs de la version aussi."""
+        from src.models.track import Credit, CreditRole
+        from src.services.versions import heriter_versions
+
+        isha = base["durag"].artist
+        original = base["durag"]
+        original.credits = [
+            Credit("Isha", CreditRole.PRODUCER, source="genius"),
+            Credit("Le Chroniqueur Sale", CreditRole.PRODUCER, source="genius"),
+        ]
+        data_manager.save_track(original)
+        version = Track(title="Durag (Instrumental)", artist=isha)
+        version.genius_id = 9002
+        data_manager.save_track(version)
+        soeur = Track(title="Durag (Instrumental)", artist=base["swing"].artist)
+        soeur.genius_id = 9002
+        data_manager.save_track(soeur)
+        heriter_versions(data_manager, data_manager.get_artist_tracks(isha.id))
+        assert _invariants(data_manager) == {}
+
+        original.credits = [Credit("Isha", CreditRole.PRODUCER, source="genius")]
+        data_manager.save_track(original)
+        assert "heritage_sans_source" in _invariants(data_manager)
+        heriter_versions(data_manager, data_manager.get_artist_tracks(isha.id))
+        assert _invariants(data_manager) == {}
+
     def test_rematerialiser_ne_change_rien_sur_une_base_saine(self, data_manager, base):
         assert data_manager.rematerialiser() == {}
 

@@ -465,3 +465,19 @@ def heritage_sans_source(titre: str | None, herites, credits_du_socle) -> list[t
         elif (nom, role) not in directs:
             rendus.append((nom, role, ABSENT_DE_L_ORIGINAL))
     return rendus
+
+
+def credits_herites_perimes(version, socle) -> list[tuple]:
+    """PUR. Les crédits HÉRITÉS de `version` (objets `Track`) que l'héritage
+    d'aujourd'hui depuis `socle` ne poserait plus, `(nom, rôle, motif)` — le
+    même juge que l'audit (`heritage_sans_source`). L'héritage n'étant qu'une
+    UNION, ces crédits restaient (2026-11-10) : le passage suivant les retire.
+    `socle` None (original absent ou ambigu) : rien — rien ne dit d'où ils
+    viennent, on ne retire que ce qu'on peut montrer."""
+    if socle is None:
+        return []
+    herites = [(c.name, c.role.value) for c in version.credits if est_herite(c.source)]
+    if not herites:
+        return []
+    du_socle = [(c.name, c.role.value, c.source) for c in socle.credits]
+    return heritage_sans_source(version.title, herites, du_socle)

@@ -5,7 +5,9 @@ Deezer, remix Kworb). Les pages de version importées de Genius (« Boulbi
 (Instrumental) », « Heartless (Studio Version) ») n'en recevaient jamais rien :
 mesuré, 20 instrumentaux et 171 éditions sans aucun crédit de production alors
 que leur original en a. Décision utilisateur : appliquer la table à l'existant,
-et à chaque run discographie pour les suivantes.
+et à chaque run discographie pour les suivantes. (« Heartless (Studio Version) »
+s'est révélée être la REPRISE de Kris Allen : une reprise n'hérite pas de la
+production, `version_heritage.famille_de_fiche`, 2026-11-10.)
 """
 
 from __future__ import annotations

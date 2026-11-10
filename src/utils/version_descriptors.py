@@ -1294,6 +1294,14 @@ def meme_version_mesuree(a: str | None, b: str | None) -> bool:
     return memes_parties(a, b) and meme_version(a, b)
 
 
+def autre_partie(a: str | None, b: str | None) -> bool:
+    """Question du juge : les deux titres nomment-ils des PARTIES différentes
+    (« Keep My Spirit Alive » / « Keep My Spirit Alive pt 2 ») ? Une suite
+    nommée n'est pas un doublon, même aux paroles proches — l'audit
+    `meme_enregistrement` ne la propose pas à la fusion (2026-11-10)."""
+    return not memes_parties(a, b)
+
+
 # ── Questions des GATES (chantier D, délégation, 2026-10-29) ───────────────────
 #
 # Les gates (Spotify, Deezer, Apple, Kworb, SongBPM, YouTube, LRC…) ne lisent

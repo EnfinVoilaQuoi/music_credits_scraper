@@ -656,8 +656,9 @@ def meme_enregistrement(
     Juge : `utils.meme_enregistrement` (simulé le 2026-11-09 : 12 paires, 10
     justes ; branche identifiant non branchée, `id_partage` la couvre). Une
     paire déjà jugée — par une famille de paires (`FAMILLES_DE_PAIRES`), un
-    verdict du panneau qui nomme l'autre fiche ou une correction humaine — ne
-    ressort pas (« Keep My Spirit Alive » / « pt 2 », `compteur_partage`)."""
+    verdict du panneau posé à la main qui nomme l'autre fiche ou une correction
+    humaine — ne ressort pas ; le verdict d'une règle ne la tranche pas, et deux
+    parties nommées (« Keep My Spirit Alive » / « pt 2 ») ne sont pas un doublon."""
     from src.utils import meme_enregistrement as me
 
     deja = me.paires_deja_tranchees(c, pistes)

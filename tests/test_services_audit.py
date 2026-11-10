@@ -1640,6 +1640,32 @@ class TestMemeEnregistrement:
         )
         assert not self._cas(au.auditer(data_manager, revue=False))
 
+    def test_le_verdict_d_une_regle_ne_tranche_pas_la_fusion(self, data_manager, isha):
+        # `compteur_partage` dit où compter les streams, pas s'il faut fusionner
+        # (« FLORIDA FLOW » / « (Physical Edition) », décision utilisateur 2026-11-10).
+        a, _ = isha
+        _, autre = self._paire(data_manager, isha)
+        _sql(
+            data_manager,
+            "INSERT INTO revue_verdicts (artist_id, detecteur, cle, verdict, note) "
+            "VALUES (:a, 'compteur_partage', :c, 'normal', 'regle:compteur_partage')",
+            a=a.id,
+            c="g4242|" + json.dumps({"autre": autre.id, "paroles": 0.98}),
+        )
+        (cas,) = self._cas(au.auditer(data_manager, revue=False))
+        assert cas.nature == au.DECISION
+
+    def test_deux_parties_nommees_ne_sont_pas_un_doublon(self, data_manager, isha):
+        # « Keep My Spirit Alive » / « Keep My Spirit Alive pt 2 ».
+        t, autre = self._paire(data_manager, isha)
+        _sql(
+            data_manager,
+            "UPDATE tracks SET title = :titre WHERE id = :t",
+            titre=f"{t.title} pt 2",
+            t=autre.id,
+        )
+        assert not self._cas(au.auditer(data_manager, revue=False))
+
     def test_une_paire_corrigee_a_la_main_ne_ressort_pas(self, data_manager, isha):
         self._paire(data_manager, isha)
         _sql(

@@ -218,6 +218,10 @@ class Contexte:
     #: ISRC des éditions par fiche (`get_artist_edition_isrcs`), lus par
     #: `analyser` : `identite_derivee` rend celles d'une autre page.
     isrc_editions: dict = field(default_factory=dict)
+    #: Paires que les données disent le même enregistrement sous deux pages
+    #: (`meme_enregistrement.fusions_a_decider`), lues par `charger_contexte` :
+    #: le détecteur reste pur.
+    fusions: dict = field(default_factory=dict)
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -1720,6 +1724,35 @@ def page_et_fiche_plateforme(track, ctx):
             {"autres": [page.id], "empreinte": f"g{page.genius_id}"},
         )
     return None
+
+
+def meme_enregistrement(track, ctx):
+    """Deux fiches de l'artiste aux titres que le juge ne rapproche pas, aux
+    paroles Genius à ≥ 90 % et aux durées à ± 2 s, lues par des identifiants
+    qu'elles ne partagent pas (`utils.meme_enregistrement`, `ctx.fusions`) : le
+    même enregistrement sous deux pages (« Promise Land » / « Promised Land »),
+    ou une réédition que le titre nomme mal (« INTERLUDE RELOADED » de Vald).
+    Versé de l'audit le 2026-11-10 : une suspicion d'audit n'avait ni action ni
+    mémoire, le « non » de l'utilisateur ne se retenait nulle part. À l'humain :
+    la fusion n'est pas réversible ; « ✓ Normal » retient que ce sont deux
+    fiches. UN cas par paire, porté par la fiche d'identifiant le plus bas."""
+    paire = ctx.fusions.get(track.id)
+    if paire is None:
+        return None
+    autre = ctx.memo("par_id", lambda: {t.id: t for t in ctx.disco}).get(paire["autre"])
+    if autre is None:
+        return None
+    return (
+        f"mêmes paroles Genius que « {autre.title} »"
+        + (f" ({autre.album})" if autre.album else "")
+        + f" à {paire['paroles']:.0%}, durées par identifiant à {paire['ecart']} s : "
+        "le même enregistrement sous deux pages — fusionner ?",
+        {
+            "autres": [autre.id],
+            "paroles": paire["paroles"],
+            "empreinte": f"g{autre.genius_id}" if autre.genius_id else f"t{autre.id}",
+        },
+    )
 
 
 # ── Vidéos, streams, dates ──────────────────────────────────────────────────
@@ -3613,6 +3646,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         page_et_fiche_plateforme,
     ),
     Detecteur(
+        "meme_enregistrement",
+        "Mêmes paroles, même durée : une seule fiche ?",
+        "♊",
+        meme_enregistrement,
+    ),
+    Detecteur(
         "credits_api",
         "Crédits 🎫 non confirmés",
         "🎫",
@@ -4001,6 +4040,7 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.soeurs = data_manager.divergences_identite_soeurs(artiste.id)
     ctx.positions = data_manager.get_artist_positions(artiste.id)
     ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
+    ctx.fusions = data_manager.fusions_a_decider([t.id for t in tracks if t.id])
     if VIDEOS_MORTES_BRANCHEES:
         ctx.videos_mortes = data_manager.videos_mortes_constatees()
     return ctx

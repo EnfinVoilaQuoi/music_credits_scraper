@@ -36,6 +36,7 @@ _CODES_DOUBLON = (
     "id_spotify_partage",
     "meme_place",
     "page_et_plateforme",
+    "meme_enregistrement",
 )
 
 

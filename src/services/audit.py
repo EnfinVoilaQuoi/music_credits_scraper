@@ -69,7 +69,8 @@ from src.utils.duree_youtube import (
     segment_de_dj_mix,
     trop_courte_pour_les_paroles,
 )
-from src.utils.lrc_garde import ACCORD_CATALOGUES_S, CATALOGUES_PAR_ID
+from src.utils.lrc_garde import ACCORD_CATALOGUES_S
+from src.utils.meme_enregistrement import durees_par_identifiant
 from src.utils.participation import SQL_SIGNATURES_DE_DISQUES, sans_participation, signe_son_disque
 from src.utils.title_matching import contains_as_words, meme_album, normalize_name, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
@@ -193,8 +194,8 @@ FAMILLES = {
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
     "disque_homonyme": "disque d'au moins 3 fiches, ni page Genius ni ID Spotify d'un profil connu (homonyme ?)",
     "hors_du_disque": "DÉCISION — fiche absente de la liste Deezer de sa parution, sa piste sur un autre disque",
-    "meme_enregistrement": "DÉCISION — titres non équivalents, paroles à ≥ 90 % et durées à ± 2 s (fusionner ?)",
     # ── Hors critère (natures `RUN` et `INFORMATION`) ──
+    "meme_enregistrement": "titres non équivalents, paroles à ≥ 90 %, autre durée (version non nommée)",
     "colonne_sans_provenance": "durée, date, ISRC ou LRC en colonne sans aucune observation",
     "id_spotify_sans_compteur": "ID Spotify posé, aucun compteur (plafond de pages du run)",
     "fiche_sans_participation": "morceau d'un autre sur le disque de l'artiste, hors de ses totaux",
@@ -221,13 +222,15 @@ FAMILLES = {
 #: décision humaine (la fusion n'est pas réversible).
 #: `hors_du_disque` (2026-11-10) : sortir une fiche de son disque est une
 #: décision (une édition physique peut la contenir).
-#: `meme_enregistrement` (2026-11-10) : fusionner deux pages, une décision.
-FAMILLES_DECISION: tuple[str, ...] = ("soeur_non_reliee", "hors_du_disque", "meme_enregistrement")
+#: `meme_enregistrement` n'en est plus : sa décision de fusion est un détecteur
+#: du panneau (`revue:meme_enregistrement`), la famille ne garde que l'information.
+FAMILLES_DECISION: tuple[str, ...] = ("soeur_non_reliee", "hors_du_disque")
 
 #: Les familles de l'audit dont AUCUN cas n'est une erreur (« à faire par un
 #: run », « pour information ») : hors du bloc des erreurs du tableau, où elles
 #: s'affichaient à 0 sans paraître ailleurs (1 319 cas cachés le 2026-11-09).
 FAMILLES_HORS_CRITERE = (
+    "meme_enregistrement",
     "colonne_sans_provenance",
     "id_spotify_sans_compteur",
     "fiche_sans_participation",
@@ -306,26 +309,6 @@ def doublons_equivalents(par) -> list[Cas]:
                         )
                     )
     return cas
-
-
-def durees_par_identifiant(c, ids=None) -> dict[int, dict[str, int]]:
-    """`{fiche: {source: secondes}}` des durées lues par l'IDENTIFIANT de la
-    fiche (`lrc_garde.CATALOGUES_PAR_ID`), jamais par une recherche de titre :
-    le témoin indépendant des règles d'audit qui jugent deux fiches."""
-    out: dict[int, dict[str, int]] = collections.defaultdict(dict)
-    sources = ",".join("?" * len(CATALOGUES_PAR_ID))
-    for r in c.execute(
-        "SELECT track_id, source, value FROM observations "
-        f"WHERE field = 'duration' AND source IN ({sources})",
-        CATALOGUES_PAR_ID,
-    ):
-        if ids is not None and r["track_id"] not in ids:
-            continue
-        try:
-            out[r["track_id"]][r["source"]] = int(float(r["value"]))
-        except (TypeError, ValueError):
-            continue
-    return out
 
 
 def accord_des_durees(da: dict | None, db: dict | None) -> bool | None:
@@ -647,11 +630,12 @@ def meme_enregistrement(
     desactivees: set[int] = frozenset(),
 ) -> list[Cas]:
     """Deux fiches d'un artiste aux titres que le juge ne rapproche pas, aux
-    paroles Genius à ≥ 90 % et aux durées à ± 2 s, lues par des identifiants
-    qu'elles ne partagent pas : le même enregistrement sous deux pages, une
-    DÉCISION de fusion (humaine, la fusion n'est pas réversible). Mêmes paroles
-    mais durées différentes : une version que le titre ne nomme pas, pour
-    INFORMATION. Sans durée d'un côté : indécidable, pas de cas.
+    paroles Genius à ≥ 90 % et aux durées par identifiant DIFFÉRENTES : une
+    version que le titre ne nomme pas, pour INFORMATION. Aux durées à ± 2 s,
+    c'est le même enregistrement sous deux pages, une DÉCISION de fusion : elle
+    est au panneau « À trancher » (`revue:meme_enregistrement`, 2026-11-10), qui
+    retient le « non » — l'audit la compte par là, plus ici. Sans durée d'un
+    côté : indécidable, pas de cas.
 
     Juge : `utils.meme_enregistrement` (simulé le 2026-11-09 : 12 paires, 10
     justes ; branche identifiant non branchée, `id_partage` la couvre). Une
@@ -670,12 +654,9 @@ def meme_enregistrement(
     for x in me.juger_paires(_par_artiste(jugees), me.Identifiants(c, jugees), durees):
         if x["communs"] or x["paire"] in deja:
             continue  # branche identifiant : `id_partage`
-        if x["verdict"] == me.MEME:
-            nature, quoi = DECISION, "même enregistrement : fusionner ?"
-        elif x["verdict"] == me.VERSION:
-            nature, quoi = INFORMATION, "durées différentes : version non nommée"
-        else:
-            continue
+        if x["verdict"] != me.VERSION:
+            continue  # `me.MEME` : la décision de fusion est au panneau
+        nature, quoi = INFORMATION, "durées différentes : version non nommée"
         a, b = x["fiches"]
         cas.append(
             Cas(

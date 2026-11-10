@@ -18,11 +18,13 @@ rapprochées par le juge ou vues par `id_partage`.
 
 import collections
 import json
+import re
 import sqlite3
 from contextlib import closing
 from pathlib import Path
 
 from src.utils.catalogue_designe import ECART_MEME_ENREGISTREMENT_S, PAROLES_MEME_ENREGISTREMENT
+from src.utils.compteurs_partages import titres_parents
 from src.utils.concordance_paroles import (
     bigrammes,
     jugeable,
@@ -32,9 +34,11 @@ from src.utils.concordance_paroles import (
 from src.utils.contenants import parties_du_titre
 from src.utils.duree_youtube import segment_de_dj_mix
 from src.utils.lrc_garde import ACCORD_CATALOGUES_S, CATALOGUES_PAR_ID
+from src.utils.title_matching import meme_album, normalize_title
 from src.utils.version_descriptors import (
     autre_partie,
     meme_socle,
+    porte_une_version,
     sous_titres,
     titres_equivalents,
 )
@@ -348,7 +352,10 @@ def fusions_a_decider(db_path, ids_fiches) -> dict[int, dict]:
     `fusion_par_isrc`) — ce que montre le détecteur `meme_enregistrement` du panneau
     « À trancher » (2026-11-10 : la décision y a sa mémoire, « ✓ Normal » retient
     le NON). Une paire qu'un humain a déjà jugée (`paires_deja_tranchees`) ou
-    qui partage un identifiant (`id_partage`) n'en est pas. Lecture seule."""
+    qui partage un identifiant (`id_partage`) n'en est pas. Depuis le
+    2026-11-11 aussi : deux pages Genius au même texte (`juger_textes_identiques`,
+    clé `texte`) et deux fiches d'un disque au même compteur Spotify
+    (`juger_meme_compteur`, clé `compteur`), versées de l'audit. Lecture seule."""
     ids = sorted(set(ids_fiches))
     if not ids:
         return {}
@@ -369,6 +376,8 @@ def fusions_a_decider(db_path, ids_fiches) -> dict[int, dict]:
         deja = paires_deja_tranchees(c, pistes)
         durees = durees_par_identifiant(c, set(ids))
         jugees = juger_paires(par, Identifiants(c, pistes), durees)
+        au_meme_compteur = [p for ts in par.values() for p in paires_au_meme_compteur(c, ts)]
+        places = places_par_fiche(c, [t["id"] for p in au_meme_compteur for t in p])
     out: dict[int, dict] = {}
     for x in sorted(jugees, key=lambda x: sorted(x["paire"])):
         if x["communs"] or x["verdict"] != MEME or x["paire"] in deja:
@@ -381,6 +390,18 @@ def fusions_a_decider(db_path, ids_fiches) -> dict[int, dict]:
         for a, b in paires_au_meme_isrc(ts):
             if frozenset((a["id"], b["id"])) not in deja and fusion_par_isrc(a, b, durees):
                 out.setdefault(a["id"], {"autre": b["id"], "isrc": a["isrc"]})
+        # Versés de l'audit le 2026-11-11 (`paroles_identiques`, `streams_double`).
+        for a, b in paires_au_meme_texte(ts):
+            a, b = sorted((a, b), key=lambda t: t["id"])
+            if frozenset((a["id"], b["id"])) in deja:
+                continue
+            if juger_textes_identiques(a, b, durees) == TEXTE_PAGES:
+                out.setdefault(a["id"], {"autre": b["id"], "texte": True})
+    for a, b in au_meme_compteur:
+        if frozenset((a["id"], b["id"])) in deja:
+            continue
+        if juger_meme_compteur(a, b, places, durees) == COMPTEUR_FUSION:
+            out.setdefault(a["id"], {"autre": b["id"], "compteur": a["spotify_streams"]})
     return out
 
 
@@ -447,3 +468,210 @@ def juger_paires(par, ids: Identifiants, durees: dict[int, dict]) -> list[dict]:
                 }
             )
     return out
+
+
+# ── Versés de l'audit le 2026-11-11 : `paroles_identiques`, `streams_double` ─
+#
+# Les deux familles laissaient des DÉCISIONS sans action ni mémoire : deux
+# pages Genius au même texte (5 paires sur la base, dont une au moins sans
+# durée par identifiant, que la branche « paroles + durée » ne voit pas), et
+# deux fiches d'un même disque au même compteur Spotify (2 paires). Le juge vit
+# ici ; l'audit (pour information) et le panneau ♊ (la décision) le lisent.
+
+#: Verdicts de `juger_textes_identiques` (None : pas un cas).
+TEXTE_VERSIONS = "versions"  # deux versions d'un même morceau : expliqué
+TEXTE_DUREES = "durees"  # durées par identifiant différentes : version non nommée
+TEXTE_GENIUS = "genius"  # une relation Genius relie les deux pages
+TEXTE_PAGES = "pages"  # le texte de leurs propres pages : décision (panneau ♊)
+TEXTE_ERREUR = "erreur"  # un texte qu'un héritage a posé sur une fiche
+
+_INDICATION = re.compile(
+    r"^(?:couplet|refrain|verse|chorus|intro|outro|hook|pont|bridge|pre-chorus)\b"
+)
+
+
+def texte_compare(texte: str) -> str:
+    """PUR. Les lignes de paroles, ponctuation et indications de structure retirées."""
+    lignes = (re.sub(r"\W+", " ", ligne).strip().lower() for ligne in texte.splitlines())
+    return "\n".join(ligne for ligne in lignes if ligne and not _INDICATION.match(ligne))
+
+
+def sans_groupes(titre: str | None) -> str:
+    """PUR. Le titre sans ses parenthèses ni crochets : « Cudi the Kid (Kissy
+    Sell Out's Style From the Dark Side) » et « (TAI remix) » sont deux versions
+    d'un même morceau, même quand le descripteur n'est pas reconnu."""
+    return normalize_title(re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", titre or ""))
+
+
+def champ(t, cle):
+    """La colonne `cle` d'une ligne (`sqlite3.Row` ou dict), None si absente."""
+    try:
+        return t[cle]
+    except (KeyError, IndexError):
+        return None
+
+
+def _adresse(url: str | None) -> str:
+    return (url or "").strip().rstrip("/").lower()
+
+
+def relies_par_genius(a, b) -> bool:
+    """Une relation Genius (`remix_of`, `samples`…) de l'une nomme la PAGE de
+    l'autre : Genius sait que ce sont deux pages liées (« ’Til I Collapse
+    Freestyle » remix de « Green Lantern (Collapse G-Unit Freestyle) »,
+    « For What Demo » qui échantillonne « for what? »)."""
+    for x, y in ((a, b), (b, a)):
+        cible = _adresse(champ(y, "genius_url"))
+        if not cible:
+            continue
+        try:
+            relations = json.loads(champ(x, "relationships") or "[]")
+        except ValueError:
+            continue
+        if any(
+            isinstance(r, dict) and _adresse(r.get("url")) == cible
+            for r in (relations if isinstance(relations, list) else [])
+        ):
+            return True
+    return False
+
+
+def textes_de_leurs_pages(a, b) -> bool:
+    """Les deux textes sont ceux que leurs PROPRES pages Genius servent (source
+    `genius`, pas un héritage `heritage:<id>` posé par notre code) : Genius
+    tient deux pages au même texte — doublon de pages (« It must be » / « Must
+    be me »), version non nommée ou erreur de Genius ; rien dans nos données ne
+    départage, c'est une DÉCISION (2026-11-10, les 7 erreurs de la vague 3)."""
+    return all(
+        (champ(t, "lyrics_source") or "").lower().startswith("genius") and champ(t, "genius_url")
+        for t in (a, b)
+    )
+
+
+def paires_au_meme_texte(ts) -> list[tuple]:
+    """Les paires de fiches d'un artiste au MÊME texte (`texte_compare` des
+    paroles de référence), hors lignes sœurs et titres d'un même morceau
+    (équivalents, même socle, mêmes sans leurs groupes)."""
+    groupes = collections.defaultdict(list)
+    for t in ts:
+        ref = paroles_de_reference(t["lyrics"], t["lyrics_source"])
+        if ref and len(ref) > PAROLES_MIN and jugeable(ref):
+            groupes[texte_compare(ref)].append(t)
+    paires = []
+    for g in groupes.values():
+        for i, a in enumerate(g):
+            for b in g[i + 1 :]:
+                if a["genius_id"] and a["genius_id"] == b["genius_id"]:
+                    continue
+                if (
+                    titres_equivalents(a["title"], b["title"])
+                    or meme_socle(a["title"], b["title"])
+                    or sans_groupes(a["title"]) == sans_groupes(b["title"])
+                ):
+                    continue
+                paires.append((a, b))
+    return paires
+
+
+def juger_textes_identiques(a, b, durees: dict[int, dict]) -> str:
+    """Le verdict d'une paire de `paires_au_meme_texte` (règles du 2026-11-02,
+    2026-11-09 et 2026-11-10 de la famille d'audit `paroles_identiques`).
+
+    Deux VERSIONS (acapella, démo, `[V1]`) d'un même morceau ont ses paroles :
+    expliqué. Une seule version : rien ne dit que c'est la sienne (« Tous Les
+    Jours (Remix) » aux paroles de « Fais le vide »). Des durées lues par
+    identifiant qui DIFFÈRENT : deux enregistrements, version non nommée. Une
+    relation Genius entre les pages explique le texte commun. Deux textes de
+    leurs propres pages : décision, au panneau ♊ depuis le 2026-11-11. Reste
+    une erreur le texte qu'un héritage a posé."""
+    if porte_une_version(a["title"]) and porte_une_version(b["title"]):
+        return TEXTE_VERSIONS
+    if accord_des_durees(durees.get(a["id"]), durees.get(b["id"])) is False:
+        return TEXTE_DUREES
+    if relies_par_genius(a, b):
+        return TEXTE_GENIUS
+    if textes_de_leurs_pages(a, b):
+        return TEXTE_PAGES
+    return TEXTE_ERREUR
+
+
+#: Verdicts de `juger_meme_compteur` (None : pas un cas de cette règle).
+COMPTEUR_DEUX_PLACES = "deux_places"  # deux places d'un même disque : deux morceaux
+COMPTEUR_DUREES = "durees"  # durées par identifiant différentes : deux enregistrements
+COMPTEUR_FUSION = "fusion"  # même disque, durées d'accord ou inconnues : panneau ♊
+
+
+def places_par_fiche(c, ids) -> dict[int, set[tuple]]:
+    """`{fiche: {(parution, disque, piste)}}` des places NUMÉROTÉES."""
+    out: dict[int, set[tuple]] = collections.defaultdict(set)
+    ids = sorted(set(ids))
+    for i in range(0, len(ids), 500):
+        lot = ids[i : i + 500]
+        for r in c.execute(
+            "SELECT track_id, release_id, disc_number, track_number FROM release_tracks "
+            f"WHERE track_number IS NOT NULL AND track_id IN ({','.join('?' * len(lot))})",
+            lot,
+        ):
+            out[r[0]].add((r[1], r[2] or 1, r[3]))
+    return out
+
+
+def deux_places_d_un_disque(pa: set[tuple], pb: set[tuple]) -> bool:
+    """PUR. Les deux fiches sont sur une même parution à deux places
+    DIFFÉRENTES : deux morceaux du disque (« Calypso I » n° 6 et « Calypso II »
+    n° 15 de *Caravelle*, ISRC et paroles différents — Spotify leur montre le
+    même compteur ; règle 3 du 2026-11-11)."""
+    return any(ra == r and (da, na) != (d, n) for r, d, n in pb for ra, da, na in pa)
+
+
+def juger_meme_compteur(a, b, places: dict[int, set], durees: dict[int, dict]) -> str:
+    """Deux fiches d'un même disque au même compteur Spotify, sans ID Spotify
+    partagé (le cas « même disque » de la famille d'audit `streams_double`) :
+    deux places du disque → deux morceaux ; des durées par identifiant qui
+    diffèrent → deux enregistrements ; sinon le même enregistrement sous deux
+    fiches, décision de fusion au panneau ♊ (« À la vibe et mektoub » / « A la
+    vibe & mektoub » de Keny Arkana ; « T’inquiète Pas » / « T'inquiètes pas »
+    d'Ol' Kainry, piste 8 de deux éditions d'*Au delà des apparences*)."""
+    if deux_places_d_un_disque(places.get(a["id"], set()), places.get(b["id"], set())):
+        return COMPTEUR_DEUX_PLACES
+    if accord_des_durees(durees.get(a["id"]), durees.get(b["id"])) is False:
+        return COMPTEUR_DUREES
+    return COMPTEUR_FUSION
+
+
+def paires_au_meme_compteur(c, ts) -> list[tuple]:
+    """Les paires d'un artiste SEULES à porter un compteur Spotify (> 1 000),
+    de deux pages (ou une fiche sans page), sur le même disque, aux titres qui
+    ne sont pas parents (`compteur_partage` du panneau) et sans ID Spotify
+    commun (une donnée fausse, `streams_double` en erreur)."""
+    groupes = collections.defaultdict(list)
+    for t in ts:
+        if (t["spotify_streams"] or 0) > 1000:
+            groupes[t["spotify_streams"]].append(t)
+    candidates = [
+        g
+        for g in groupes.values()
+        if len(g) == 2
+        and g[0]["genius_id"] != g[1]["genius_id"]
+        and meme_album(g[0]["album"], g[1]["album"])
+        and not titres_parents(g[0]["title"], g[1]["title"])
+    ]
+    if not candidates:
+        return []
+    ids = [t["id"] for g in candidates for t in g]
+    spotify = collections.defaultdict(set)
+    for i in range(0, len(ids), 500):
+        lot = ids[i : i + 500]
+        for r in c.execute(
+            "SELECT track_id, spotify_id FROM track_spotify_ids "
+            f"WHERE track_id IN ({','.join('?' * len(lot))})",
+            lot,
+        ):
+            spotify[r[0]].add(r[1])
+    paires = []
+    for a, b in (sorted(g, key=lambda t: t["id"]) for g in candidates):
+        sa = spotify[a["id"]] | ({a["spotify_id"]} if a["spotify_id"] else set())
+        sb = spotify[b["id"]] | ({b["spotify_id"]} if b["spotify_id"] else set())
+        if not sa & sb:
+            paires.append((a, b))
+    return paires

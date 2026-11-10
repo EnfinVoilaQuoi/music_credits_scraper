@@ -569,8 +569,9 @@ def test_paroles_identiques_aux_durees_differentes_version_non_nommee(durees, na
     "source_b, relations_b, nature, mention",
     [
         # « It must be » / « Must be me » de The Game : deux pages Genius au même
-        # texte, rien ne départage doublon et version → l'humain.
-        ("genius", None, au.DECISION, "doublon de pages ou version"),
+        # texte, rien ne départage doublon et version → l'humain, au panneau ♊
+        # depuis le 2026-11-11 (l'audit n'en garde que l'information).
+        ("genius", None, au.INFORMATION, "décision au panneau (♊"),
         # « ’Til I Collapse Freestyle » : remix (Genius) de « Green Lantern ».
         (
             "genius",
@@ -614,6 +615,43 @@ def test_paroles_identiques_texte_de_leurs_pages(source_b, relations_b, nature, 
     (cas,) = au.paroles_identiques({1: fiches}, {1: {"deezer": 239}})
     assert cas.nature == nature
     assert mention is None or mention in cas.libelle
+
+
+def test_deux_pages_au_meme_texte_au_panneau(data_manager, isha):
+    """2026-11-11 : « It must be » / « Must be me » de The Game, une page sans
+    durée par identifiant — la décision de fusion est au ♊, que la branche
+    « paroles + durée » ne voyait pas."""
+    from src.services import revue
+
+    a, t = isha
+    autre = Track(title="Bavardage", artist=a)
+    autre.genius_id = 4243
+    data_manager.save_track(autre)
+    texte = "\n".join(
+        f"[Couplet {i}]\nligne numéro {i} du texte qui parle de la ville et du temps qui passe"
+        for i in range(12)
+    )
+    for tid, page in ((t.id, "a"), (autre.id, "b")):
+        _sql(
+            data_manager,
+            "UPDATE tracks SET lyrics = :l, lyrics_source = 'genius', genius_url = :u "
+            "WHERE id = :t",
+            l=texte,
+            u=f"https://genius.com/Isha-{page}-lyrics",
+            t=tid,
+        )
+    audit = au.auditer(data_manager)
+    (cas,) = [c for c in audit.cas if c.famille == "revue:meme_enregistrement"]
+    assert cas.pistes == [t.id] and "même texte Genius" in cas.libelle
+    (info,) = [c for c in audit.cas if c.famille == "paroles_identiques"]
+    assert info.nature == au.INFORMATION
+    a.tracks = data_manager.discographie_reunie(a)
+    (du_panneau,) = [
+        c for c in revue.analyser(data_manager, a).actifs if c.detecteur == "meme_enregistrement"
+    ]
+    data_manager.trancher_cas(a.id, du_panneau.detecteur, du_panneau.cle)
+    audit = au.auditer(data_manager)
+    assert not [c for c in audit.cas if c.famille == "revue:meme_enregistrement"]
 
 
 def test_lrc_minute_au_dela_de_la_duree(data_manager, isha):
@@ -1279,9 +1317,14 @@ class TestFamillesNues:
     @pytest.mark.parametrize(
         "albums, ids, nature, fin",
         [
-            # Même disque seul : « Calypso I / II » (Spotify affiche lui-même le
-            # compteur commun) ou un doublon à fusionner — une décision.
-            (("Caravelle", "Caravelle"), ("A" * 22, "B" * 22), au.DECISION, "même disque"),
+            # Même disque seul : un doublon à fusionner — une décision, au
+            # panneau ♊ depuis le 2026-11-11 (l'audit n'en garde que l'information).
+            (
+                ("Caravelle", "Caravelle"),
+                ("A" * 22, "B" * 22),
+                au.INFORMATION,
+                "décision au panneau (♊",
+            ),
             # Le même ID Spotify sur les deux fiches : une donnée fausse.
             (("X", "Y"), ("A" * 22, "A" * 22), au.ERREUR, "ID Spotify partagé"),
             # Aucun autre signal (« Vrai » / « Demolition man ») : le hasard.
@@ -1310,6 +1353,88 @@ class TestFamillesNues:
             par = au._par_artiste(au._pistes(c, [a.id]))
             (cas,) = [x for x in au.streams(c, par) if x.famille == "streams_double"]
         assert cas.nature == nature and fin in cas.libelle
+
+    def _meme_compteur_meme_disque(self, data_manager, isha, places=None, durees=(201, 201)):
+        a, t = isha
+        autre = Track(title="Bavardage", artist=a)
+        autre.genius_id = 4243
+        data_manager.save_track(autre)
+        for tid, sid, duree in ((t.id, "A" * 22, durees[0]), (autre.id, "B" * 22, durees[1])):
+            _sql(
+                data_manager,
+                "UPDATE tracks SET spotify_streams = 823933, album = 'Caravelle', "
+                "spotify_id = :s WHERE id = :t",
+                s=sid,
+                t=tid,
+            )
+            _sql(
+                data_manager,
+                "INSERT INTO observations (track_id, field, value, source) "
+                "VALUES (:t, 'duration', :v, 'deezer')",
+                t=tid,
+                v=str(duree),
+            )
+        if places:
+            _sql(
+                data_manager,
+                "INSERT INTO releases (id, artist_id, title, identity_key) "
+                "VALUES (77, :a, 'Caravelle', 'caravelle')",
+                a=a.id,
+            )
+            for tid, n in zip((t.id, autre.id), places, strict=True):
+                _sql(
+                    data_manager,
+                    "INSERT INTO release_tracks (release_id, track_id, track_number) "
+                    "VALUES (77, :t, :n)",
+                    t=tid,
+                    n=n,
+                )
+        return a, t, autre
+
+    @pytest.mark.parametrize(
+        "places, durees, fin",
+        [
+            # Règle 3 (2026-11-11) : « Calypso I » n° 6 et « Calypso II » n° 15
+            # de *Caravelle* — deux morceaux, Spotify leur montre le même compteur.
+            ((6, 15), (164, 164), "deux places du disque"),
+            # Des durées par identifiant à plus de 2 s : deux enregistrements.
+            (None, (201, 230), "deux enregistrements"),
+        ],
+    )
+    def test_meme_compteur_deux_morceaux_pour_information(
+        self, data_manager, isha, places, durees, fin
+    ):
+        from contextlib import closing
+
+        a, _, _ = self._meme_compteur_meme_disque(data_manager, isha, places, durees)
+        with closing(au._connexion(data_manager.db_path)) as c:
+            par = au._par_artiste(au._pistes(c, [a.id]))
+            (cas,) = [x for x in au.streams(c, par) if x.famille == "streams_double"]
+        assert cas.nature == au.INFORMATION and fin in cas.libelle
+        assert not data_manager.fusions_a_decider([t["id"] for t in par[a.id]])
+
+    def test_meme_compteur_meme_disque_est_au_panneau(self, data_manager, isha):
+        """« À la vibe et mektoub » / « A la vibe & mektoub » de Keny Arkana
+        (2026-11-11) : la décision de fusion est au ♊, « ✓ Normal » retient le non."""
+        from src.services import revue
+
+        a, t, autre = self._meme_compteur_meme_disque(data_manager, isha)
+        audit = au.auditer(data_manager)
+        (cas,) = [c for c in audit.cas if c.famille == "revue:meme_enregistrement"]
+        assert cas.pistes == [t.id] and "compteur Spotify" in cas.libelle
+        assert cas.nature == au.DECISION
+        (info,) = [c for c in audit.cas if c.famille == "streams_double"]
+        assert info.nature == au.INFORMATION
+        a.tracks = data_manager.discographie_reunie(a)
+        (du_panneau,) = [
+            c
+            for c in revue.analyser(data_manager, a).actifs
+            if c.detecteur == "meme_enregistrement"
+        ]
+        assert du_panneau.preuves["autres"] == [autre.id]
+        data_manager.trancher_cas(a.id, du_panneau.detecteur, du_panneau.cle)
+        audit = au.auditer(data_manager)
+        assert not [c for c in audit.cas if c.famille == "revue:meme_enregistrement"]
 
     @pytest.mark.parametrize(
         "piste, famille",

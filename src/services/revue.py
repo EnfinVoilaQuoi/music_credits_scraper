@@ -1747,7 +1747,10 @@ def meme_enregistrement(track, ctx):
     même enregistrement sous deux pages (« Promise Land » / « Promised Land »),
     ou une réédition que le titre nomme mal (« INTERLUDE RELOADED » de Vald) ;
     ou deux fiches au même ISRC dont un titre est joint à l'autre (« 93 Empire »
-    de Kery James, `fusion_par_isrc`, versé de `id_partage` le 2026-11-10).
+    de Kery James, `fusion_par_isrc`, versé de `id_partage` le 2026-11-10) ;
+    ou deux pages au même texte Genius, ou deux fiches d'un disque au même
+    compteur Spotify (versés de `paroles_identiques` et `streams_double` le
+    2026-11-11).
     Versé de l'audit le 2026-11-10 : une suspicion d'audit n'avait ni action ni
     mémoire, le « non » de l'utilisateur ne se retenait nulle part. À l'humain :
     la fusion n'est pas réversible ; « ✓ Normal » retient que ce sont deux
@@ -1766,6 +1769,23 @@ def meme_enregistrement(track, ctx):
             "celui-ci, durées par identifiant à ± 2 s : le même enregistrement sous deux "
             "pages — fusionner ?",
             {"autres": [autre.id], "isrc": paire["isrc"], "empreinte": empreinte},
+        )
+    if paire.get("texte"):
+        # Versé de `paroles_identiques` (audit) le 2026-11-11.
+        return (
+            f"même texte Genius que « {autre.title} »"
+            + (f" ({autre.album})" if autre.album else "")
+            + ", servi par les deux pages, sans durée par identifiant pour les départager : "
+            "doublon de pages Genius ou version que le titre ne nomme pas — fusionner ?",
+            {"autres": [autre.id], "texte": True, "empreinte": empreinte},
+        )
+    if paire.get("compteur"):
+        # Versé de `streams_double` (audit) le 2026-11-11.
+        return (
+            f"même compteur Spotify ({paire['compteur']:,}) que « {autre.title} », sur le même "
+            "disque, sans ID Spotify commun ni durées contraires : le même enregistrement "
+            "sous deux fiches — fusionner ?",
+            {"autres": [autre.id], "compteur": paire["compteur"], "empreinte": empreinte},
         )
     return (
         f"mêmes paroles Genius que « {autre.title} »"

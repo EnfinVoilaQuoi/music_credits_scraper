@@ -565,6 +565,57 @@ def test_paroles_identiques_aux_durees_differentes_version_non_nommee(durees, na
     assert ("version non nommée" in cas.libelle) is (nature == au.INFORMATION)
 
 
+@pytest.mark.parametrize(
+    "source_b, relations_b, nature, mention",
+    [
+        # « It must be » / « Must be me » de The Game : deux pages Genius au même
+        # texte, rien ne départage doublon et version → l'humain.
+        ("genius", None, au.DECISION, "doublon de pages ou version"),
+        # « ’Til I Collapse Freestyle » : remix (Genius) de « Green Lantern ».
+        (
+            "genius",
+            '[{"type": "remix_of", "title": "A", "url": "https://genius.com/X-a-lyrics/"}]',
+            au.INFORMATION,
+            "liées par Genius",
+        ),
+        # Un texte HÉRITÉ par notre code d'une autre fiche : il peut être faux.
+        ("heritage:1", None, au.ERREUR, None),
+    ],
+)
+def test_paroles_identiques_texte_de_leurs_pages(source_b, relations_b, nature, mention):
+    """2026-11-10 : les 7 erreurs de la vague 3 avaient toutes le texte de LEURS
+    pages Genius — aucun posé par notre code."""
+    texte = "\n".join(
+        f"[Couplet {i}]\nligne numéro {i} du texte qui parle de la ville et du temps qui passe"
+        for i in range(12)
+    )
+    fiches = [
+        {
+            "id": 1,
+            "title": "Must be me",
+            "genius_id": 1,
+            "genius_url": "https://genius.com/X-a-lyrics",
+            "relationships": None,
+            "lyrics": texte,
+            "lyrics_source": "genius",
+            "artiste": "The Game",
+        },
+        {
+            "id": 2,
+            "title": "It must be",
+            "genius_id": 2,
+            "genius_url": "https://genius.com/X-b-lyrics",
+            "relationships": relations_b,
+            "lyrics": texte,
+            "lyrics_source": source_b,
+            "artiste": "The Game",
+        },
+    ]
+    (cas,) = au.paroles_identiques({1: fiches}, {1: {"deezer": 239}})
+    assert cas.nature == nature
+    assert mention is None or mention in cas.libelle
+
+
 def test_lrc_minute_au_dela_de_la_duree(data_manager, isha):
     """Un LRC qui court après la fin du morceau : l'un des deux est faux, et
     l'audit dit si la durée était confirmée (2026-10-13)."""

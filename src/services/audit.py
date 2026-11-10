@@ -566,7 +566,13 @@ def paroles_identiques(par, durees: dict[int, dict] | None = None) -> list[Cas]:
     sont deux enregistrements : une version que le titre ne nomme pas (« Best
     Day Ever » / « BDE Bonus », 159 / 243 s), pour information (règle du
     2026-11-09, simulée : 3 cas sur 11, conformes à CORRECTIFS). Les mêmes
-    durées ne prouvent pas un doublon : aucun cas ne l'a validé, l'erreur reste."""
+    durées ne prouvent pas un doublon.
+
+    Règle du 2026-11-10 (les 7 erreurs restantes, étudiées une à une) : une
+    relation Genius entre les deux pages explique le texte commun (information) ;
+    deux textes servis par leurs propres pages Genius ne sont pas posés par
+    notre code — doublon de pages ou version, à l'humain (décision). Reste une
+    ERREUR le texte qu'un héritage (`heritage:<id>`) a posé sur une fiche."""
     durees = durees or {}
     cas = []
     for ts in par.values():
@@ -594,22 +600,68 @@ def paroles_identiques(par, durees: dict[int, dict] | None = None) -> list[Cas]:
                     # vide ») — une erreur, comme deux pages sans version.
                     version = porte_une_version(a["title"]) and porte_une_version(b["title"])
                     libelle = f"{_lib(a)} et {_lib(b)} : mêmes paroles"
+                    nature = INFORMATION if version else ERREUR
                     if (
                         not version
                         and accord_des_durees(durees.get(a["id"]), durees.get(b["id"])) is False
                     ):
-                        version = True
+                        nature = INFORMATION
                         libelle += " — durées différentes : version non nommée"
+                    elif nature == ERREUR and _relies_par_genius(a, b):
+                        nature = INFORMATION
+                        libelle += " — liées par Genius : version que la page nomme"
+                    elif nature == ERREUR and _textes_de_leurs_pages(a, b):
+                        nature = DECISION
+                        libelle += " — texte de leurs pages Genius : doublon de pages ou version ?"
                     cas.append(
-                        Cas(
-                            "paroles_identiques",
-                            a["artiste"],
-                            [a["id"], b["id"]],
-                            libelle,
-                            INFORMATION if version else ERREUR,
-                        )
+                        Cas("paroles_identiques", a["artiste"], [a["id"], b["id"]], libelle, nature)
                     )
     return cas
+
+
+def _champ(t, cle):
+    """La colonne `cle` d'une ligne (`sqlite3.Row` ou dict), None si absente."""
+    try:
+        return t[cle]
+    except (KeyError, IndexError):
+        return None
+
+
+def _adresse(url: str | None) -> str:
+    return (url or "").strip().rstrip("/").lower()
+
+
+def _relies_par_genius(a, b) -> bool:
+    """Une relation Genius (`remix_of`, `samples`…) de l'une nomme la PAGE de
+    l'autre : Genius sait que ce sont deux pages liées (« ’Til I Collapse
+    Freestyle » remix de « Green Lantern (Collapse G-Unit Freestyle) »,
+    « For What Demo » qui échantillonne « for what? »)."""
+    for x, y in ((a, b), (b, a)):
+        cible = _adresse(_champ(y, "genius_url"))
+        if not cible:
+            continue
+        try:
+            relations = json.loads(_champ(x, "relationships") or "[]")
+        except ValueError:
+            continue
+        if any(
+            isinstance(r, dict) and _adresse(r.get("url")) == cible
+            for r in (relations if isinstance(relations, list) else [])
+        ):
+            return True
+    return False
+
+
+def _textes_de_leurs_pages(a, b) -> bool:
+    """Les deux textes sont ceux que leurs PROPRES pages Genius servent (source
+    `genius`, pas un héritage `heritage:<id>` posé par notre code) : Genius
+    tient deux pages au même texte — doublon de pages (« It must be » / « Must
+    be me »), version non nommée ou erreur de Genius ; rien dans nos données ne
+    départage, c'est une DÉCISION (2026-11-10, les 7 erreurs de la vague 3)."""
+    return all(
+        (_champ(t, "lyrics_source") or "").lower().startswith("genius") and _champ(t, "genius_url")
+        for t in (a, b)
+    )
 
 
 #: Les familles qui jugent déjà une PAIRE de fiches d'un artiste : une paire

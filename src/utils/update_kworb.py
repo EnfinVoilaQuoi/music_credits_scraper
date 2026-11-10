@@ -20,6 +20,7 @@ v2 — refonte après session d'exploration du site (JOURNAL 2026-07-02) :
 """
 
 import difflib
+import json
 import re
 import sys
 from collections import defaultdict
@@ -375,7 +376,17 @@ def _a_trancher(result, detecteur, track, motif, preuves, impact=0, *, morceau=N
     )
 
 
-def _ligne_ecartee(result, track, titre, streams) -> None:
+def preuves_de_ligne(titre: str, spotify_id: str | None) -> dict:
+    """Les preuves d'un cas sur une LIGNE Kworb : son titre et l'ID Spotify
+    qu'elle affiche — sans lui, impossible de rejuger le cas plus tard par la
+    durée de l'ID (2026-11-10 : les 8 `kworb_flou` de la base ne l'avaient pas).
+    L'empreinte reste celle du seul titre : la clé du cas, donc les verdicts
+    déjà posés, ne changent pas."""
+    empreinte = json.dumps({"titre_kworb": titre}, sort_keys=True, ensure_ascii=False)
+    return {"titre_kworb": titre, "spotify_id": spotify_id, "empreinte": empreinte}
+
+
+def _ligne_ecartee(result, track, titre, streams, spotify_id=None) -> None:
     _a_trancher(
         result,
         "kworb_ecartee",
@@ -383,7 +394,7 @@ def _ligne_ecartee(result, track, titre, streams) -> None:
         f"ligne Kworb « {titre} » ({streams:,} streams) écartée — autre enregistrement ?".replace(
             ",", " "
         ),
-        {"titre_kworb": titre},
+        preuves_de_ligne(titre, spotify_id),
         streams,
     )
 
@@ -884,7 +895,7 @@ def signalement_resolu(detecteur: str, preuves: dict, track, decisions: dict) ->
         titre = preuves.get("titre_kworb")
         if not titre:
             return False
-        entree = {"title": titre, "spotify_id": None}
+        entree = {"title": titre, "spotify_id": preuves.get("spotify_id")}
         return lien_tranche(entree, track, decisions) or _normalize_title(titre) in (
             decisions.get("rejected") or []
         )
@@ -1602,7 +1613,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         ):
             refusees_titre.add(track.id)
             result["lignes_ecartees"].append((entry["title"], entry["streams"], track.title))
-            _ligne_ecartee(result, track, entry["title"], entry["streams"])
+            _ligne_ecartee(result, track, entry["title"], entry["streams"], entry.get("spotify_id"))
             result["unmatched"] += 1
             result["unmatched_titles"].append(entry["title"])
             result["unmatched_details"].append((entry["title"], entry["streams"]))
@@ -1645,7 +1656,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 "kworb_flou",
                 track,
                 f"ligne Kworb « {entry['title']} » rapprochée à {r.score:.0%} — même morceau ?",
-                {"titre_kworb": entry["title"]},
+                preuves_de_ligne(entry["title"], entry.get("spotify_id")),
                 entry["streams"],
             )
             logger.info(
@@ -1727,7 +1738,7 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         ecartees = [ligne for ligne in ecartees if not lien_tranche(ligne, track, _decisions)]
         for ligne in ecartees:
             result["lignes_ecartees"].append((ligne["title"], ligne["streams"], track.title))
-            _ligne_ecartee(result, track, ligne["title"], ligne["streams"])
+            _ligne_ecartee(result, track, ligne["title"], ligne["streams"], ligne.get("spotify_id"))
             result["unmatched"] += 1
             result["unmatched_titles"].append(ligne["title"])
             result["unmatched_details"].append((ligne["title"], ligne["streams"]))

@@ -2190,3 +2190,19 @@ class TestArtisteAbsentDeKworb:
         res = update_kworb_streams(_Artist(), dm, scraper=_Scraper(songs=None))
         assert "absent_de_kworb" not in res
         assert "Impossible d'obtenir une page Kworb validée" in caplog.text
+
+
+def test_le_signalement_d_une_ligne_garde_son_id_sans_changer_de_cle():
+    """2026-11-10 : les 8 `kworb_flou` de la base n'avaient pas l'ID Spotify de
+    leur ligne — impossible de les rejuger par la durée. L'ID entre aux
+    preuves ; la clé du cas (et donc un verdict déjà posé) ne change pas."""
+    from types import SimpleNamespace
+
+    from src.services.revue import cle_du_cas
+    from src.utils.update_kworb import preuves_de_ligne
+
+    fiche = SimpleNamespace(id=1, genius_id=42)
+    avant = cle_du_cas(fiche, {"titre_kworb": "Just Don't Give a F**"})
+    preuves = preuves_de_ligne("Just Don't Give a F**", "5ldt0nAAAAAAAAAAAAAAAA")
+    assert preuves["spotify_id"] == "5ldt0nAAAAAAAAAAAAAAAA"
+    assert cle_du_cas(fiche, preuves) == avant

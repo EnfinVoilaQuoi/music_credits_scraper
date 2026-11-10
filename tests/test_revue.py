@@ -1084,6 +1084,7 @@ def test_fenetre_se_construit(racine_tk):
         divergences_identite_soeurs=lambda _id: [],
         get_artist_positions=lambda _id: {},
         fusions_a_decider=lambda _ids: {},
+        hors_du_disque_a_decider=lambda _ids: {},
         non_music_sortis=lambda _fiches: set(),
         videos_mortes_constatees=dict,
         signalements_revue=lambda _id: [],

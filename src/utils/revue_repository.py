@@ -220,6 +220,15 @@ class RevueRepository:
 
         return fusions_a_decider(self.db_path, ids_fiches)
 
+    def hors_du_disque_a_decider(self, ids_fiches) -> dict[int, dict]:
+        """`{fiche: {"release_id", "parution", "album_deezer", …}}` : les fiches
+        rangées sur un disque dont la liste Deezer ne les contient pas, leur
+        piste Deezer sur un autre disque (lecture seule,
+        `appartenance_disque.a_decider`)."""
+        from src.utils.appartenance_disque import a_decider
+
+        return a_decider(self.db_path, ids_fiches)
+
     def non_music_sortis(self, fiches) -> set[int]:
         """Les pages « Non-Music » sans identifiant que la liste Deezer de leur
         album contient (lecture seule, `sortie_officielle`)."""

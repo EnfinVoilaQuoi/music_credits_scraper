@@ -1573,7 +1573,9 @@ class TestPochettePhoto:
 class TestHorsDuDisque:
     """Vague 3 (2026-11-10) : une fiche rangée sur un disque dont la liste
     Deezer ne la contient pas, sa piste Deezer sur un autre disque (« Tulum,
-    México » sur M.A.N, 2026-11-03) — une DÉCISION, base entière et artiste."""
+    México » sur M.A.N, 2026-11-03) — une DÉCISION, que montre le panneau
+    « À trancher » (`revue:hors_du_disque`, 2026-11-11) : l'audit la compte par
+    lui, sa famille ne garde que l'autre édition du disque (information)."""
 
     @staticmethod
     def _brut(requete, corps):
@@ -1614,26 +1616,115 @@ class TestHorsDuDisque:
 
     @staticmethod
     def _cas(audit):
+        """Les décisions, comptées par le panneau."""
+        return [c for c in audit.cas if c.famille == "revue:hors_du_disque"]
+
+    @staticmethod
+    def _informations(audit):
         return [c for c in audit.cas if c.famille == "hors_du_disque"]
+
+    @staticmethod
+    def _du_panneau(dm, a):
+        from src.services import revue
+
+        a.tracks = dm.discographie_reunie(a)
+        return [c for c in revue.analyser(dm, a).actifs if c.detecteur == "hors_du_disque"]
 
     def test_piste_sur_un_autre_disque_est_une_decision(self, data_manager, isha):
         _, t = isha
         self._disque(data_manager, t)
-        for audit in (
-            au.auditer(data_manager, revue=False),
-            au.auditer(data_manager, ["Isha"], revue=False),
-        ):
+        for audit in (au.auditer(data_manager), au.auditer(data_manager, ["Isha"])):
             (cas,) = self._cas(audit)
             assert cas.pistes == [t.id] and cas.nature == au.DECISION
             assert "M.A.N" in cas.libelle and "Tulum, México" in cas.libelle
-            assert audit.compte_critere()["hors_du_disque"] == 1
-        assert "hors_du_disque" in au.FAMILLES_DECISION
+            assert audit.compte_critere()["revue:hors_du_disque"] == 1
+            assert not self._informations(audit)  # compté une seule fois
+        assert "hors_du_disque" not in au.FAMILLES_DECISION
+
+    def test_sans_le_panneau_l_audit_ne_compte_plus_la_decision(self, data_manager, isha):
+        _, t = isha
+        self._disque(data_manager, t)
+        audit = au.auditer(data_manager, revue=False)
+        assert not self._cas(audit) and not self._informations(audit)
 
     def test_autre_edition_du_disque_pour_information(self, data_manager, isha):
         _, t = isha
         self._disque(data_manager, t, album_de_la_piste="M.A.N (Deluxe)")
-        (cas,) = self._cas(au.auditer(data_manager, revue=False))
-        assert cas.nature == au.INFORMATION
+        audit = au.auditer(data_manager)
+        (cas,) = self._informations(audit)
+        assert cas.nature == au.INFORMATION and not self._cas(audit)
+        assert "hors_du_disque" in au.FAMILLES_HORS_CRITERE
+
+    def test_le_non_de_l_utilisateur_est_retenu(self, data_manager, isha):
+        from src.services import revue
+
+        a, t = isha
+        self._disque(data_manager, t)
+        (cas,) = self._du_panneau(data_manager, a)
+        assert cas.track_id == t.id and cas.preuves["release_id"] == 1
+        data_manager.trancher_cas(a.id, cas.detecteur, cas.cle)
+        assert not self._cas(au.auditer(data_manager))
+        masques = revue.analyser(data_manager, a).masques
+        assert [c.cle for c in masques if c.detecteur == "hors_du_disque"] == [cas.cle]
+
+    def test_sortir_du_disque_delie_et_le_lien_ne_se_repose_pas(self, data_manager, isha):
+        # « Tulum, México » : la page Genius range toujours la fiche dans M.A.N.
+        from src.models import ReleaseObservation
+        from src.services import revue_actions
+        from src.utils.corrections_fiches import cle_parution, parutions_refusees
+
+        a, t = isha
+        self._disque(data_manager, t)
+        _sql(data_manager, "UPDATE tracks SET album = 'M.A.N' WHERE id = :t", t=t.id)
+        _sql(
+            data_manager,
+            "INSERT INTO releases (id, artist_id, title, identity_key) "
+            "VALUES (2, :a, 'Tulum, México', 'tulum')",
+            a=a.id,
+        )
+        _sql(
+            data_manager,
+            "INSERT INTO release_tracks (release_id, track_id, source) VALUES (2, :t, 'deezer')",
+            t=t.id,
+        )
+        (cas,) = self._du_panneau(data_manager, a)
+        assert cas.preuves["remplacement"] == 2
+        (action,) = revue_actions.actions_pour(cas)
+        ctx = revue_actions.ContexteAction(data_manager, a, {x.id: x for x in a.tracks})
+        revue_actions.executer(action, ctx, cas)
+
+        def liens():
+            with data_manager.engine.connect() as conn:
+                return sorted(
+                    r[0]
+                    for r in conn.exec_driver_sql(
+                        "SELECT release_id FROM release_tracks WHERE track_id = ?", (t.id,)
+                    )
+                )
+
+        assert liens() == [2]
+        assert data_manager.album_de_la_fiche(t.id) == ("Tulum, México", 1)
+        assert parutions_refusees(ctx.tracks[t.id]) == {cle_parution("M.A.N")}
+        data_manager.record_release_observations(
+            t.id, [ReleaseObservation(title="M.A.N", source="genius", scope="own")]
+        )
+        assert liens() == [2]  # refusé : la page Genius ne le repose pas
+        assert not self._du_panneau(data_manager, a)
+        audit = au.auditer(data_manager)
+        assert not self._cas(audit)
+        assert not [c for c in audit.cas if c.famille == "refus_vivant"]
+
+    def test_un_disque_refuse_encore_lie_est_un_refus_vivant(self, data_manager, isha):
+        from src.utils.corrections_fiches import memoriser_parution_refusee
+
+        a, t = isha
+        self._disque(data_manager, t)
+        a.tracks = data_manager.discographie_reunie(a)
+        memoriser_parution_refusee(next(x for x in a.tracks if x.id == t.id), "M.A.N")
+        (cas,) = [
+            c for c in au.auditer(data_manager, revue=False).cas if c.famille == "refus_vivant"
+        ]
+        assert cas.pistes == [t.id]
 
     @pytest.mark.parametrize(
         "variante",
@@ -1646,7 +1737,8 @@ class TestHorsDuDisque:
     def test_pas_de_cas(self, data_manager, isha, variante):
         _, t = isha
         self._disque(data_manager, t, **variante)
-        assert not self._cas(au.auditer(data_manager, revue=False))
+        audit = au.auditer(data_manager)
+        assert not self._cas(audit) and not self._informations(audit)
 
     def test_dans_la_liste_par_le_titre(self, data_manager, isha):
         _, t = isha
@@ -1655,7 +1747,7 @@ class TestHorsDuDisque:
             "https://api.deezer.com/album/10/tracks?limit=100",
             {"data": [{"id": 9, "title": "Durag", "isrc": None}]},
         )
-        assert not self._cas(au.auditer(data_manager, revue=False))
+        assert not self._cas(au.auditer(data_manager))
 
     def test_une_page_desactivee_n_est_pas_jugee(self, data_manager, isha):
         from src.utils.disabled_tracks_manager import DisabledTracksManager
@@ -1663,7 +1755,7 @@ class TestHorsDuDisque:
         _, t = isha
         self._disque(data_manager, t)
         DisabledTracksManager().desactiver("Isha", [t.id], "manuel", "manuel")
-        assert not self._cas(au.auditer(data_manager, revue=False))
+        assert not self._cas(au.auditer(data_manager))
 
 
 #: Le détecteur du panneau qui porte la décision de fusion.

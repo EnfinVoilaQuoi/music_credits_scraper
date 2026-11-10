@@ -222,6 +222,10 @@ class Contexte:
     #: (`meme_enregistrement.fusions_a_decider`), lues par `charger_contexte` :
     #: le détecteur reste pur.
     fusions: dict = field(default_factory=dict)
+    #: Fiches rangées sur un disque dont la liste Deezer ne les contient pas,
+    #: leur piste Deezer sur un autre disque (`appartenance_disque.a_decider`),
+    #: lues par `charger_contexte` : le détecteur reste pur.
+    hors_disque: dict = field(default_factory=dict)
     #: Pages « Non-Music » sans identifiant que la liste Deezer de leur album
     #: contient (`sortie_officielle.sorties_par_leur_disque`), lues par
     #: `charger_contexte` : le détecteur `annotee` reste pur.
@@ -1772,6 +1776,36 @@ def meme_enregistrement(track, ctx):
             "autres": [autre.id],
             "paroles": paire["paroles"],
             "empreinte": empreinte,
+        },
+    )
+
+
+def hors_du_disque(track, ctx):
+    """Une fiche rangée sur un disque dont la liste Deezer ne la contient ni
+    par identifiant, ni par ISRC, ni par titre, et dont la piste Deezer, lue par
+    son ID, est sur un AUTRE disque (`utils.appartenance_disque`,
+    `ctx.hors_disque`) : « Tulum, México » rangé par sa page Genius dans M.A.N
+    (2026-11-03). Versé de l'audit le 2026-11-11 : la suspicion n'avait ni
+    action ni mémoire. À l'humain — une édition physique peut la contenir, ce
+    que dit souvent la page Genius : « 💿 Sortir du disque » délie et retient le
+    retrait (refus `parution`), « ✓ Normal » retient qu'elle y est. Le témoin
+    Apple (liste iTunes du code-barres) est indépendant de Deezer."""
+    x = ctx.hors_disque.get(track.id)
+    if x is None:
+        return None
+    from src.utils.corrections_fiches import cle_parution
+
+    return (
+        f"rangée sur « {x['parution']} », absente de sa liste Deezer "
+        f"({x['pistes_deezer']} pistes) ; sa piste Deezer est sur « {x['album_deezer']} » "
+        f"— {x['apple']} : la sortir du disque ?",
+        {
+            "release_id": x["release_id"],
+            "parution": x["parution"],
+            "album_deezer": x["album_deezer"],
+            "remplacement": x["remplacement"],
+            "apple": x["apple"],
+            "empreinte": f"r{cle_parution(x['parution'])}",
         },
     )
 
@@ -3673,6 +3707,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         meme_enregistrement,
     ),
     Detecteur(
+        "hors_du_disque",
+        "Fiche absente de la liste Deezer de son disque",
+        "💿",
+        hors_du_disque,
+    ),
+    Detecteur(
         "credits_api",
         "Crédits 🎫 non confirmés",
         "🎫",
@@ -4064,6 +4104,7 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.positions = data_manager.get_artist_positions(artiste.id)
     ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
     ctx.fusions = data_manager.fusions_a_decider([t.id for t in tracks if t.id])
+    ctx.hors_disque = data_manager.hors_du_disque_a_decider([t.id for t in tracks if t.id])
     ctx.non_music_sortis = data_manager.non_music_sortis(tracks)
     if VIDEOS_MORTES_BRANCHEES:
         ctx.videos_mortes = data_manager.videos_mortes_constatees()

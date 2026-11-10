@@ -191,7 +191,7 @@ FAMILLES = {
     "(rôle non transmis, absent de l'original)",
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
     "disque_homonyme": "disque d'au moins 3 fiches, ni page Genius ni ID Spotify d'un profil connu (homonyme ?)",
-    "hors_du_disque": "fiche absente de la liste Deezer de sa parution, sa piste sur un autre disque",
+    "hors_du_disque": "fiche absente de la liste Deezer de sa parution, sa piste sur une autre édition du disque",
     # ── Hors critère (natures `RUN` et `INFORMATION`) ──
     "meme_enregistrement": "titres non équivalents, paroles à ≥ 90 %, autre durée (version non nommée)",
     "colonne_sans_provenance": "durée, date, ISRC ou LRC en colonne sans aucune observation",
@@ -219,17 +219,18 @@ FAMILLES = {
 #: détecteur du panneau (`revue:recherche_perimee`), qu'une règle tranche.
 #: `soeur_non_reliee` (2026-11-09) : relier une ligne sœur ou fusionner est une
 #: décision humaine (la fusion n'est pas réversible).
-#: `hors_du_disque` (2026-11-10) : sortir une fiche de son disque est une
-#: décision (une édition physique peut la contenir).
 #: `meme_enregistrement` n'en est plus : sa décision de fusion est un détecteur
 #: du panneau (`revue:meme_enregistrement`), la famille ne garde que l'information.
-FAMILLES_DECISION: tuple[str, ...] = ("soeur_non_reliee", "hors_du_disque")
+#: `hors_du_disque` non plus (2026-11-11) : sortir une fiche de son disque se
+#: décide au panneau (`revue:hors_du_disque`), qui a l'action et la mémoire.
+FAMILLES_DECISION: tuple[str, ...] = ("soeur_non_reliee",)
 
 #: Les familles de l'audit dont AUCUN cas n'est une erreur (« à faire par un
 #: run », « pour information ») : hors du bloc des erreurs du tableau, où elles
 #: s'affichaient à 0 sans paraître ailleurs (1 319 cas cachés le 2026-11-09).
 FAMILLES_HORS_CRITERE = (
     "meme_enregistrement",
+    "hors_du_disque",
     "colonne_sans_provenance",
     "id_spotify_sans_compteur",
     "fiche_sans_participation",
@@ -1421,6 +1422,7 @@ def refus_vivants(c, pistes) -> list[Cas]:
         CHAMP_PAGE_GETSONGBPM,
         CHAMP_PAGE_SONGBPM,
         champs_songbpm_refuses,
+        cle_parution,
         designe,
         empreinte_lrc,
         mesure_de_cle,
@@ -1459,6 +1461,13 @@ def refus_vivants(c, pistes) -> list[Cas]:
         (CHAMP_PAGE_GETSONGBPM,),
     ):
         pages_getsongbpm[r["track_id"]].add(str(r["value"]))
+    disques = collections.defaultdict(set)
+    if c.execute("SELECT 1 FROM refus WHERE nature = 'parution' LIMIT 1").fetchone():
+        for r in c.execute(
+            "SELECT rt.track_id, r.title FROM release_tracks rt "
+            "JOIN releases r ON r.id = rt.release_id"
+        ):
+            disques[r["track_id"]].add(cle_parution(r["title"]))
 
     def porte(t, nature, valeur) -> bool:
         if nature == "id_spotify":
@@ -1483,6 +1492,8 @@ def refus_vivants(c, pistes) -> list[Cas]:
             return valeur in pages_getsongbpm[t["id"]]
         if nature == "mesure_songbpm":
             return bool(champs_songbpm_refuses([mesure_de_cle(valeur)], mesures_songbpm[t["id"]]))
+        if nature == "parution":
+            return valeur in disques[t["id"]]
         return False
 
     cas = []
@@ -1490,7 +1501,7 @@ def refus_vivants(c, pistes) -> list[Cas]:
         "SELECT genius_id, artiste, titre, album, nature, valeur FROM refus "
         "WHERE nature IN ('id_spotify', 'id_deezer', 'id_apple', 'id_discogs','isrc', 'video', 'lrc', 'paroles', "
         "'page_songbpm', "
-        "'page_getsongbpm', 'mesure_songbpm')"
+        "'page_getsongbpm', 'mesure_songbpm', 'parution')"
     ):
         if r["genius_id"] is not None:
             visees = par_genius.get(int(r["genius_id"]), [])
@@ -2110,10 +2121,12 @@ def hors_du_disque(
 ) -> list[Cas]:
     """Une fiche liée à une parution dont la liste Deezer (brut) ne la contient
     ni par ID, ni par ISRC, ni par titre, et dont la piste Deezer, lue par son
-    ID, est sur un AUTRE disque : DÉCISION (la sortir du disque ?), jamais une
-    erreur — une édition physique peut la contenir. La même piste sur une autre
-    édition du disque : INFORMATION. Une fiche sans piste Deezer lue, ou une
-    liste plus courte que la parution : indécidable, pas de cas.
+    ID, est sur une autre ÉDITION du disque : INFORMATION. Sur un AUTRE disque,
+    c'est une DÉCISION (la sortir du disque ? une édition physique peut la
+    contenir) : elle est au panneau « À trancher » (`revue:hors_du_disque`,
+    2026-11-11), qui a l'action et retient le « non » — l'audit la compte par
+    là, plus ici. Une fiche sans piste Deezer lue, ou une liste plus courte que
+    la parution : indécidable, pas de cas.
 
     Juge : `utils.appartenance_disque` (simulé le 2026-11-09 : 29 décisions,
     19 / 19 confirmées par la liste iTunes de la parution ; cas d'origine
@@ -2126,12 +2139,9 @@ def hors_du_disque(
     jugees = [t for t in pistes if t["id"] not in desactivees]
     cas = []
     for x in ad.liens_hors_liste(c, cat, jugees):
-        if x["verdict"] == ad.HORS_DU_DISQUE:
-            nature, quoi = DECISION, f"sa piste Deezer est sur « {x['album_deezer']} »"
-        elif x["verdict"] == ad.AUTRE_EDITION:
-            nature, quoi = INFORMATION, "elle est sur une autre édition du disque"
-        else:
-            continue
+        if x["verdict"] != ad.AUTRE_EDITION:
+            continue  # `ad.HORS_DU_DISQUE` : la décision est au panneau
+        nature, quoi = INFORMATION, "elle est sur une autre édition du disque"
         f = x["fiche"]
         cas.append(
             Cas(

@@ -2724,8 +2724,11 @@ def nature_non_musique(titre: str | None, paroles: str | None) -> str | None:
     la main) : « chant » (couplets, refrain ; un freestyle) → gardée ;
     « sketch » (skit, interlude, intro, outro, au titre ou en section) et
     « sans_texte » → désactivées ; « texte » (un sample, une prose : entretien,
-    article, liste, notes de pochette) → supprimée ; None → l'humain (des
-    lignes courtes sans section : peut-être des paroles)."""
+    article, liste, notes de pochette) → supprimée. Des lignes courtes sans
+    section allaient à l'humain jusqu'au 2026-11-10 ; décision utilisateur ce
+    jour-là (« à supprimer si bien Non-Music ») : un texte qui n'est ni chant ni
+    sketch est un « texte », supprimé (« Bostellan », un poème de Dooz Kawa ;
+    « Imitation Kery James », un sketch de Thomas N'Gijol)."""
     from src.utils.paroles_genius import texte_utile
     from src.utils.title_matching import contains_as_words
 
@@ -2746,11 +2749,10 @@ def nature_non_musique(titre: str | None, paroles: str | None) -> str | None:
     lignes = [ligne for ligne in texte.splitlines() if ligne.strip()]
     if not lignes:
         return "sans_texte"
-    if "sample" in mots_de_section:
-        return "texte"
-    if sum(len(ligne.split()) for ligne in lignes) / len(lignes) >= _MOTS_PAR_LIGNE_PROSE:
-        return "texte"
-    return None
+    # Un sample, une prose (≥ `_MOTS_PAR_LIGNE_PROSE` mots par ligne : entretien,
+    # article, notes de pochette), et depuis le 2026-11-10 tout autre texte qui
+    # n'est ni chant ni sketch.
+    return "texte"
 
 
 def politique_non_musique(cas, track, _ctx):

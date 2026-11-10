@@ -214,8 +214,14 @@ class TestNonMusique:
                 "Um, that's a tough question, man. For the most part, yeah. But I don't know.",
                 "texte",
             ),
-            # Des lignes courtes sans section : peut-être des paroles — l'humain.
-            ("Untitled", "Yeah, I'm up three\nDouble cup and Rémy\nWe've been outside", None),
+            # Des lignes courtes sans section, ni chant ni sketch : supprimée
+            # (décision utilisateur 2026-11-10 : « Bostellan », « Imitation Kery James »).
+            ("Untitled", "Yeah, I'm up three\nDouble cup and Rémy\nWe've been outside", "texte"),
+            (
+                "Imitation Kery James",
+                "9.4\nThuuug Life\nJ'rappe des hématomes\nTu sens qu'ça sent la tempête !",
+                "texte",
+            ),
         ],
     )
     def test_nature(self, titre, paroles, nature):

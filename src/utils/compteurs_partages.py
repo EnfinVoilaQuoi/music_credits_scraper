@@ -101,11 +101,26 @@ def _instrumental(page) -> bool:
     return bool(page.lyrics.instrumental) or rendition_instrumentale(page.title)
 
 
-def _sortie(page) -> date | None:
+def _sortie(page) -> str | None:
+    """La date de sortie sous sa forme canonique (« 2011 », « 2011-09 »,
+    « 2011-09-01 », `dates.normaliser_observation`). La fiche la porte en
+    CHAÎNE (« 2011-09-01 ») : n'accepter qu'un `date` rendait le critère
+    « première parution » mort (« Come On Baby » 2011 / 2021, 2026-11-10)."""
+    from src.utils.dates import normaliser_observation
+
     d = page.release_date
-    if isinstance(d, datetime):
-        return d.date()
-    return d if isinstance(d, date) else None
+    if isinstance(d, date) and not isinstance(d, datetime):
+        d = datetime(d.year, d.month, d.day)
+    return normaliser_observation(d)
+
+
+def _avant(a: str, b: str) -> bool:
+    """`a` est STRICTEMENT antérieure à `b` : une date moins précise qui
+    contient l'autre (« 2018 » / « 2018-05-14 ») n'est pas antérieure
+    (`dates.la_plus_ancienne`)."""
+    from src.utils.dates import completer
+
+    return not (a.startswith(b) or b.startswith(a)) and completer(a) < completer(b)
 
 
 #: Paroles Genius au moins aussi proches : une version proche (« Keep My
@@ -155,8 +170,7 @@ def page_du_compteur(pages: Sequence, rattachees_par_kworb: set) -> tuple[str, o
         return "première partie", pages[i]
     sorties = [(s, p) for p in pages if (s := _sortie(p))]
     if len(sorties) == len(pages):
-        premiere = min(s for s, _ in sorties)
-        retenues = [p for s, p in sorties if s == premiere]
+        retenues = [p for s, p in sorties if all(_avant(s, t) for t, q in sorties if q is not p)]
         if len(retenues) == 1:
             return "première parution", retenues[0]
     return None

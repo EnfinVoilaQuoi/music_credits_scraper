@@ -142,6 +142,20 @@ class TestPageDuCompteur:
         b.release_date = a.release_date
         assert page_du_compteur([a, b], set()) is None
 
+    def test_premiere_parution_d_une_date_en_chaine(self):
+        """La fiche porte sa date en CHAÎNE : « Come On Baby » de Mac Miller,
+        2011 (Killa Kyleon) contre 2021 (Cookin' Soul), 2026-11-10."""
+        a = _f("Come On Baby", 1, release_date="2021-09-30")
+        b = _f("Come on Baby", 2, release_date="2011-09-01")
+        assert page_du_compteur([a, b], set()) == ("première parution", b)
+
+    def test_une_date_moins_precise_n_est_pas_anterieure(self):
+        a = _f("Clubber Lang", 1, release_date="2015")
+        b = _f("Clubber Lang", 2, release_date="2015-07-10")
+        assert page_du_compteur([a, b], set()) is None
+        b.release_date = "2016-04-01"
+        assert page_du_compteur([a, b], set()) == ("première parution", a)
+
 
 class TestPolitique:
     def _paire(self, ta, tb, sid_a="SA", sid_b="SB", **preuves):

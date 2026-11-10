@@ -46,21 +46,16 @@ from pathlib import Path
 from src.config import DATA_DIR
 from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
 from src.services import audit
-from src.utils import appartenance_disque
-from src.utils.catalogue_designe import ECART_MEME_ENREGISTREMENT_S, PAROLES_MEME_ENREGISTREMENT
+from src.utils import appartenance_disque, meme_enregistrement
 from src.utils.compteurs_partages import titres_parents
 from src.utils.concordance_paroles import (
-    bigrammes,
-    jugeable,
     paroles_de_reference,
     recouvrement_bigrammes,
 )
 from src.utils.contenants import parties_du_titre
-from src.utils.duree_youtube import segment_de_dj_mix
 from src.utils.lrc_garde import CATALOGUES_PAR_ID
 from src.utils.title_matching import normalize_title
 from src.utils.version_descriptors import (
-    meme_socle,
     titres_equivalents,
 )
 
@@ -376,138 +371,24 @@ def regle_e(tm: Temoins, cat: CatalogueDuBrut, pistes) -> list[dict]:
 
 # ── f. titres non équivalents, même enregistrement ───────────────────────────
 #
-# Cas d'origine : Booba « DCR (Dolce Camara Remix) » #9099 et « Dolce Camara
-# (Snight B Remix) » #9710, que le juge des titres ne rapproche pas. La règle
-# cherche les paires d'un artiste que les DONNÉES disent identiques : un
-# identifiant commun (ISRC, Spotify, Deezer, Apple — colonnes, ID secondaires,
-# éditions, observations) ou des paroles Genius à ≥ 90 %, corroborés par une
-# durée lue par un identifiant QUI N'EST PAS le partagé (une durée lue par un
-# ID ne corrobore jamais cet ID).
+# Le juge vit dans `src/utils/meme_enregistrement.py` (famille d'audit
+# `meme_enregistrement`, 2026-11-10, branche paroles seule) : un verdict, un
+# seul endroit. Le script montre aussi la branche identifiant.
 
-#: Au-delà, deux durées par identifiant disent deux enregistrements.
-ECART_DEMENTI_S = 10
-#: Source de durée (`CATALOGUES_PAR_ID`) → l'identifiant par lequel elle est lue.
-IDENTIFIANT_DE_LA_SOURCE = {
-    "deezer": "deezer",
-    "spotify_web": "spotify",
-    "apple_music": "apple",
-    "youtube": "video",
-}
-
-
-def identifiants_communs(ia: dict[str, set], ib: dict[str, set]) -> dict[str, set]:
-    """PUR. Par nature d'identifiant, les valeurs que les deux fiches portent."""
-    return {k: v for k in ia if (v := ia[k] & ib.get(k, set()))}
-
-
-def durees_hors_identifiants(
-    da: dict[str, int], db: dict[str, int], communs: dict[str, set]
-) -> tuple[bool | None, int | None]:
-    """PUR. (même durée à ± 2 s ?, écart min) sur les seules sources lues par un
-    identifiant que les deux fiches ne PARTAGENT pas ; (None, None) sans paire."""
-    garder = {s for s in set(da) | set(db) if IDENTIFIANT_DE_LA_SOURCE.get(s) not in communs}
-    va = {v for s, v in da.items() if s in garder}
-    vb = {v for s, v in db.items() if s in garder}
-    if not va or not vb:
-        return None, None
-    ecart = min(abs(x - y) for x in va for y in vb)
-    return ecart <= ECART_MEME_ENREGISTREMENT_S, ecart
-
-
-def verdict_f(
-    communs: dict[str, set], paroles: float | None, meme_duree: bool | None, ecart: int | None
-) -> str | None:
-    """PUR. Règle candidate f : None = pas de cas."""
-    paroles_memes = paroles is not None and paroles >= PAROLES_MEME_ENREGISTREMENT
-    if communs:
-        if meme_duree is False and ecart is not None and ecart > ECART_DEMENTI_S:
-            return "identifiant démenti (durées indépendantes > 10 s)"
-        if meme_duree or paroles_memes:
-            return "meme_enregistrement"
-        return "indécidable (identifiant seul)"
-    if not paroles_memes:
-        return None
-    if meme_duree:
-        return "meme_enregistrement (paroles + durée)"
-    if meme_duree is False:
-        return "information (mêmes paroles, autre durée : version non nommée)"
-    return "indécidable (paroles seules)"
-
-
-class Identifiants:
-    """Tous les identifiants d'une fiche, lus une fois (colonnes, ID Spotify
-    secondaires, éditions, ISRC observés, vidéos)."""
-
-    def __init__(self, c: sqlite3.Connection):
-        self.par = collections.defaultdict(lambda: collections.defaultdict(set))
-        for r in c.execute("SELECT id, isrc, spotify_id, deezer_id, apple_music_id FROM tracks"):
-            for k, col in (
-                ("isrc", "isrc"),
-                ("spotify", "spotify_id"),
-                ("deezer", "deezer_id"),
-                ("apple", "apple_music_id"),
-            ):
-                if r[col]:
-                    self.par[r["id"]][k].add(self._norme(k, r[col]))
-        requetes = (
-            ("spotify", "SELECT track_id, spotify_id FROM track_spotify_ids"),
-            ("deezer", "SELECT track_id, deezer_id FROM track_editions WHERE deezer_id"),
-            ("isrc", "SELECT track_id, isrc FROM track_editions WHERE isrc"),
-            ("isrc", "SELECT track_id, value FROM observations WHERE field = 'isrc'"),
-            ("video", "SELECT track_id, video_id FROM track_videos"),
-        )
-        for k, sql in requetes:
-            for tid, v in c.execute(sql):
-                if v:
-                    self.par[tid][k].add(self._norme(k, v))
-
-    @staticmethod
-    def _norme(k: str, v) -> str:
-        return str(v).strip().upper() if k == "isrc" else str(v).strip()
-
-    def de(self, tid: int) -> dict[str, set]:
-        return self.par.get(tid, {})
-
-
-def _rapproches_par_le_juge(a: str | None, b: str | None) -> bool:
-    """Le juge des titres les rapproche déjà (les familles actuelles les voient),
-    ou l'un est un titre JOINT dont une partie est l'autre (medley, contenant)."""
-    if titres_equivalents(a, b) or meme_socle(a, b):
-        return True
-    for long, court in ((a, b), (b, a)):
-        if any(titres_equivalents(p, court) for p in parties_du_titre(long) or ()):
-            return True
-    return False
-
-
-def _paires_par_paroles(fiches: list, paroles: dict[int, str]) -> set[frozenset]:
-    """Paires d'un artiste aux paroles Genius proches : index inversé des
-    bigrammes (les très fréquents ignorés), confirmé par `recouvrement_bigrammes`."""
-    bgs = {t["id"]: bigrammes(paroles[t["id"]]) for t in fiches if t["id"] in paroles}
-    index = collections.defaultdict(list)
-    for tid, bg in bgs.items():
-        for x in bg:
-            index[x].append(tid)
-    communs = collections.Counter()
-    for porteurs in index.values():
-        if 1 < len(porteurs) <= 30:
-            for i, a in enumerate(porteurs):
-                for b in porteurs[i + 1 :]:
-                    communs[a, b] += 1
-    out = set()
-    for (a, b), n in communs.items():
-        if n >= 0.5 * min(len(bgs[a]), len(bgs[b])):
-            score = recouvrement_bigrammes(paroles[a], paroles[b])
-            if score is not None and score >= PAROLES_MEME_ENREGISTREMENT:
-                out.add(frozenset((a, b)))
-    return out
+ECART_DEMENTI_S = meme_enregistrement.ECART_DEMENTI_S
+identifiants_communs = meme_enregistrement.identifiants_communs
+durees_hors_identifiants = meme_enregistrement.durees_hors_identifiants
+verdict_f = meme_enregistrement.verdict
+Identifiants = meme_enregistrement.Identifiants
+_rapproches_par_le_juge = meme_enregistrement.rapproches_par_le_juge
+_paires_par_paroles = meme_enregistrement.paires_par_paroles
 
 
 def regle_f(tm: Temoins, pistes, par, actives: set[int]) -> list[dict]:
     c = tm.c
-    ids = Identifiants(c)
+    jugees = [t for t in pistes if t["id"] in actives]
     durees = audit.durees_par_identifiant(c)
-    deja = set()
+    deja = meme_enregistrement.paires_deja_tranchees(c, pistes)
     for x in (
         audit.ids_partages(par, durees)
         + audit.paroles_identiques(par, durees)
@@ -515,69 +396,26 @@ def regle_f(tm: Temoins, pistes, par, actives: set[int]) -> list[dict]:
     ):
         deja |= {frozenset((a, b)) for a in x.pistes for b in x.pistes if a != b}
     out = []
-    for ts in par.values():
-        ts = [t for t in ts if t["id"] in actives]
-        fiche = {t["id"]: t for t in ts}
-        paroles = {}
-        for t in ts:
-            ref = tm.paroles(t)
-            if ref and len(ref) > 200 and jugeable(ref):
-                paroles[t["id"]] = ref
-        paires = _paires_par_paroles(ts, paroles)
-        index = collections.defaultdict(set)
-        for t in ts:
-            for k, vs in ids.de(t["id"]).items():
-                if k != "video":
-                    for v in vs:
-                        index[k, v].add(t["id"])
-        for porteurs in index.values():
-            if 1 < len(porteurs) <= 6:
-                p = sorted(porteurs)
-                paires |= {frozenset((a, b)) for i, a in enumerate(p) for b in p[i + 1 :]}
-        for paire in paires:
-            a, b = (fiche[i] for i in sorted(paire))
-            if a["genius_id"] and a["genius_id"] == b["genius_id"]:
-                continue
-            if _rapproches_par_le_juge(a["title"], b["title"]):
-                continue
-            # Le segment d'un DJ mix reprend le texte d'un autre enregistrement
-            # (Eminem « Nuthin' But A "G" Thang [Remix] [Mixed] », 44 s, sur
-            # l'a cappella de « Hazardous Youth ») : jamais le même.
-            if any(segment_de_dj_mix(t["title"], t["album"]) for t in (a, b)):
-                continue
-            communs = identifiants_communs(ids.de(a["id"]), ids.de(b["id"]))
-            communs.pop("video", None)
-            score = (
-                recouvrement_bigrammes(paroles[a["id"]], paroles[b["id"]])
-                if a["id"] in paroles and b["id"] in paroles
-                else None
-            )
-            # Une vidéo commune lie aussi les durées `youtube` des deux fiches.
-            videos = ids.de(a["id"]).get("video", set()) & ids.de(b["id"]).get("video", set())
-            meme, ecart = durees_hors_identifiants(
-                durees.get(a["id"], {}),
-                durees.get(b["id"], {}),
-                {**communs, "video": videos} if videos else communs,
-            )
-            verdict = verdict_f(communs, score, meme, ecart)
-            if verdict is None:
-                continue
-            out.append(
-                {
-                    "artiste": a["artiste"],
-                    "fiches": [_lib(a), _lib(b)],
-                    "albums": [a["album"], b["album"]],
-                    "communs": {k: sorted(v) for k, v in communs.items()},
-                    "paroles": score,
-                    "durees": [durees.get(a["id"], {}), durees.get(b["id"], {})],
-                    "ecart_hors_ids": ecart,
-                    "regle": verdict,
-                    "deja_vu_par_l_audit": paire in deja,
-                    "relations": [
-                        r for r in (a["relationships"], b["relationships"]) if r and r != "[]"
-                    ],
-                }
-            )
+    for x in meme_enregistrement.juger_paires(
+        audit._par_artiste(jugees), Identifiants(c, jugees), durees
+    ):
+        a, b = x["fiches"]
+        out.append(
+            {
+                "artiste": a["artiste"],
+                "fiches": [_lib(a), _lib(b)],
+                "albums": [a["album"], b["album"]],
+                "communs": {k: sorted(v) for k, v in x["communs"].items()},
+                "paroles": x["paroles"],
+                "durees": [durees.get(a["id"], {}), durees.get(b["id"], {})],
+                "ecart_hors_ids": x["ecart"],
+                "regle": x["verdict"],
+                "deja_vu_par_l_audit": x["paire"] in deja,
+                "relations": [
+                    r for r in (a["relationships"], b["relationships"]) if r and r != "[]"
+                ],
+            }
+        )
     return sorted(out, key=lambda x: (x["regle"], x["artiste"]))
 
 

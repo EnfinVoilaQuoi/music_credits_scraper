@@ -193,6 +193,7 @@ FAMILLES = {
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
     "disque_homonyme": "disque d'au moins 3 fiches, ni page Genius ni ID Spotify d'un profil connu (homonyme ?)",
     "hors_du_disque": "DÉCISION — fiche absente de la liste Deezer de sa parution, sa piste sur un autre disque",
+    "meme_enregistrement": "DÉCISION — titres non équivalents, paroles à ≥ 90 % et durées à ± 2 s (fusionner ?)",
     # ── Hors critère (natures `RUN` et `INFORMATION`) ──
     "colonne_sans_provenance": "durée, date, ISRC ou LRC en colonne sans aucune observation",
     "id_spotify_sans_compteur": "ID Spotify posé, aucun compteur (plafond de pages du run)",
@@ -220,7 +221,8 @@ FAMILLES = {
 #: décision humaine (la fusion n'est pas réversible).
 #: `hors_du_disque` (2026-11-10) : sortir une fiche de son disque est une
 #: décision (une édition physique peut la contenir).
-FAMILLES_DECISION: tuple[str, ...] = ("soeur_non_reliee", "hors_du_disque")
+#: `meme_enregistrement` (2026-11-10) : fusionner deux pages, une décision.
+FAMILLES_DECISION: tuple[str, ...] = ("soeur_non_reliee", "hors_du_disque", "meme_enregistrement")
 
 #: Les familles de l'audit dont AUCUN cas n'est une erreur (« à faire par un
 #: run », « pour information ») : hors du bloc des erreurs du tableau, où elles
@@ -629,6 +631,61 @@ def paroles_identiques(par, durees: dict[int, dict] | None = None) -> list[Cas]:
                             INFORMATION if version else ERREUR,
                         )
                     )
+    return cas
+
+
+#: Les familles qui jugent déjà une PAIRE de fiches d'un artiste : une paire
+#: qu'elles montrent n'est pas reprise par `meme_enregistrement`.
+FAMILLES_DE_PAIRES = ("doublon_equivalent", "id_partage", "paroles_identiques")
+
+
+def meme_enregistrement(
+    c,
+    pistes,
+    durees: dict[int, dict],
+    cas_existants: list[Cas] = (),
+    desactivees: set[int] = frozenset(),
+) -> list[Cas]:
+    """Deux fiches d'un artiste aux titres que le juge ne rapproche pas, aux
+    paroles Genius à ≥ 90 % et aux durées à ± 2 s, lues par des identifiants
+    qu'elles ne partagent pas : le même enregistrement sous deux pages, une
+    DÉCISION de fusion (humaine, la fusion n'est pas réversible). Mêmes paroles
+    mais durées différentes : une version que le titre ne nomme pas, pour
+    INFORMATION. Sans durée d'un côté : indécidable, pas de cas.
+
+    Juge : `utils.meme_enregistrement` (simulé le 2026-11-09 : 12 paires, 10
+    justes ; branche identifiant non branchée, `id_partage` la couvre). Une
+    paire déjà jugée — par une famille de paires (`FAMILLES_DE_PAIRES`), un
+    verdict du panneau qui nomme l'autre fiche ou une correction humaine — ne
+    ressort pas (« Keep My Spirit Alive » / « pt 2 », `compteur_partage`)."""
+    from src.utils import meme_enregistrement as me
+
+    deja = me.paires_deja_tranchees(c, pistes)
+    for x in cas_existants:
+        if x.famille in FAMILLES_DE_PAIRES:
+            deja |= {frozenset((a, b)) for a in x.pistes for b in x.pistes if a != b}
+    jugees = [t for t in pistes if t["id"] not in desactivees]
+    cas = []
+    for x in me.juger_paires(_par_artiste(jugees), me.Identifiants(c, jugees), durees):
+        if x["communs"] or x["paire"] in deja:
+            continue  # branche identifiant : `id_partage`
+        if x["verdict"] == me.MEME:
+            nature, quoi = DECISION, "même enregistrement : fusionner ?"
+        elif x["verdict"] == me.VERSION:
+            nature, quoi = INFORMATION, "durées différentes : version non nommée"
+        else:
+            continue
+        a, b = x["fiches"]
+        cas.append(
+            Cas(
+                "meme_enregistrement",
+                a["artiste"],
+                [a["id"], b["id"]],
+                f"{_lib(a)} et {_lib(b)} : paroles à {x['paroles']:.0%}, durées par "
+                f"identifiant à {x['ecart']} s — {quoi}",
+                nature,
+            )
+        )
     return cas
 
 
@@ -2074,6 +2131,7 @@ def auditer(
         audit.cas += ids_partages(par, durees_id)
         audit.cas += lrc(par)
         audit.cas += paroles_identiques(par, durees_id)
+        audit.cas += meme_enregistrement(c, pistes, durees_id, audit.cas, pages_desactivees(pistes))
         audit.cas += instrumentaux(pistes)
         audit.cas += durees(c, pistes)
         audit.cas += certifs(pistes)

@@ -1554,3 +1554,98 @@ class TestHorsDuDisque:
         self._disque(data_manager, t)
         DisabledTracksManager().desactiver("Isha", [t.id], "manuel", "manuel")
         assert not self._cas(au.auditer(data_manager, revue=False))
+
+
+class TestMemeEnregistrement:
+    """Vague 3 (2026-11-10) : deux pages aux titres non équivalents, aux mêmes
+    paroles Genius et à la même durée lue par des identifiants différents
+    (« Promise Land » / « Promised Land ») — une DÉCISION de fusion."""
+
+    PAROLES = "\n".join(
+        f"[Couplet {i}]\nligne {i} du texte qui raconte la rue numéro {i} sans fin"
+        for i in range(1, 12)
+    )
+
+    def _paire(self, dm, isha, *, durees=(200, 201), paroles_b=None, deezer=(1, 2)):
+        a, t = isha
+        autre = Track(title="Do Rag", artist=a)
+        autre.genius_id = 4343
+        dm.save_track(autre)
+        for tid, duree, did, texte in (
+            (t.id, durees[0], deezer[0], self.PAROLES),
+            # Pas tout à fait le même texte : des paroles IDENTIQUES sont
+            # déjà une paire de `paroles_identiques`, que la famille ne reprend pas.
+            (autre.id, durees[1], deezer[1], paroles_b or self.PAROLES + "\n[Outro]\nfin"),
+        ):
+            _sql(
+                dm,
+                "UPDATE tracks SET lyrics = :l, lyrics_source = 'genius', deezer_id = :d "
+                "WHERE id = :t",
+                l=texte,
+                d=did,
+                t=tid,
+            )
+            if duree is not None:
+                _sql(
+                    dm,
+                    "INSERT INTO observations (track_id, field, value, source) "
+                    "VALUES (:t, 'duration', :v, 'deezer')",
+                    t=tid,
+                    v=str(duree),
+                )
+        return t, autre
+
+    @staticmethod
+    def _cas(audit):
+        return [c for c in audit.cas if c.famille == "meme_enregistrement"]
+
+    def test_memes_paroles_meme_duree_decision_de_fusion(self, data_manager, isha):
+        t, autre = self._paire(data_manager, isha)
+        for audit in (
+            au.auditer(data_manager, revue=False),
+            au.auditer(data_manager, ["Isha"], revue=False),
+        ):
+            (cas,) = self._cas(audit)
+            assert sorted(cas.pistes) == sorted([t.id, autre.id])
+            assert cas.nature == au.DECISION and "fusionner" in cas.libelle
+            assert audit.compte_critere()["meme_enregistrement"] == 1
+        assert "meme_enregistrement" in au.FAMILLES_DECISION
+
+    def test_autre_duree_version_non_nommee_pour_information(self, data_manager, isha):
+        self._paire(data_manager, isha, durees=(200, 260))
+        (cas,) = self._cas(au.auditer(data_manager, revue=False))
+        assert cas.nature == au.INFORMATION
+
+    @pytest.mark.parametrize(
+        "variante",
+        [
+            {"durees": (200, None)},  # sans durée d'un côté : indécidable
+            {"paroles_b": "\n".join(f"autre texte {i} sans rapport aucun ici" for i in range(30))},
+            {"deezer": (1, 1)},  # ID commun : branche identifiant, `id_partage`
+        ],
+    )
+    def test_pas_de_cas(self, data_manager, isha, variante):
+        self._paire(data_manager, isha, **variante)
+        assert not self._cas(au.auditer(data_manager, revue=False))
+
+    def test_une_paire_deja_tranchee_par_le_panneau_ne_ressort_pas(self, data_manager, isha):
+        a, _ = isha
+        _, autre = self._paire(data_manager, isha)
+        _sql(
+            data_manager,
+            "INSERT INTO revue_verdicts (artist_id, detecteur, cle, verdict) "
+            "VALUES (:a, 'compteur_partage', :c, 'normal')",
+            a=a.id,
+            c="g4242|" + json.dumps({"autre": autre.id, "paroles": 0.98}),
+        )
+        assert not self._cas(au.auditer(data_manager, revue=False))
+
+    def test_une_paire_corrigee_a_la_main_ne_ressort_pas(self, data_manager, isha):
+        self._paire(data_manager, isha)
+        _sql(
+            data_manager,
+            "INSERT INTO corrections (cle_fiche, artiste, fiche, action, valeur) "
+            "VALUES ('g4343', 'Isha', '{\"genius_id\": 4343}', 'version_de', "
+            "'{\"genius_id\": 4242}')",
+        )
+        assert not self._cas(au.auditer(data_manager, revue=False))

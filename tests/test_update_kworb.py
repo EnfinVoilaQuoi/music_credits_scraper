@@ -1234,6 +1234,60 @@ class TestDesambiguisationParEmbed:
         assert dm.streams_writes == []
 
 
+class TestHomonymeParLaDuree:
+    """Deux morceaux de l'artiste au même titre, que les artistes crédités ne
+    départagent pas : la durée de l'ID de la ligne désigne celui dont la durée
+    indépendante est à ± 2 s, si tous les autres en ont une hors de ± 2 s
+    (Travis Scott « OUTSIDE » de JACKBOYS 2, 183 s, contre « outside » de
+    *Birds in the Trap*, 176 s ; 2026-11-10)."""
+
+    def _fiche(self, id_, titre, duree, album=None):
+        t = _track(id_, titre, spotify_id=f"SP{id_}", album=album)
+        t.duration = duree
+        return t
+
+    def _run(self, tracks, entree, duree):
+        dm = _DataManager(tracks)
+        identite = {"name": entree["title"], "artists": ["Jul"], "duration": duree}
+        res = update_kworb_streams(
+            _Artist(),
+            dm,
+            scraper=_Scraper(songs=_page([entree])),
+            lire_identite=lambda sid: identite,
+        )
+        return res, dm
+
+    def test_la_duree_designe_la_fiche(self):
+        tracks = [
+            self._fiche(1, "OUTSIDE", 183, "JACKBOYS 2"),
+            self._fiche(2, "outside", 176, "Birds in the Trap"),
+        ]
+        res, dm = self._run(tracks, _entry("OUTSIDE", 22_117_110, 9, "AUTRE"), 183)
+        assert dm.streams_writes[0][:2] == (1, 22_117_110)
+        assert res["unmatched"] == 0
+
+    def test_un_candidat_sans_duree_abstient(self):
+        tracks = [self._fiche(1, "OUTSIDE", 183), self._fiche(2, "outside", None)]
+        res, dm = self._run(tracks, _entry("OUTSIDE", spotify_id="AUTRE"), 183)
+        assert dm.streams_writes == [] and res["unmatched"] == 1
+
+    def test_deux_candidats_a_la_duree_abstient(self):
+        tracks = [self._fiche(1, "OUTSIDE", 183), self._fiche(2, "outside", 184)]
+        res, dm = self._run(tracks, _entry("OUTSIDE", spotify_id="AUTRE"), 183)
+        assert dm.streams_writes == [] and res["unmatched"] == 1
+
+    def test_aucun_candidat_a_la_duree_abstient(self):
+        tracks = [self._fiche(1, "OUTSIDE", 183), self._fiche(2, "outside", 176)]
+        res, dm = self._run(tracks, _entry("OUTSIDE", spotify_id="AUTRE"), 200)
+        assert dm.streams_writes == [] and res["unmatched"] == 1
+
+    def test_un_titre_generique_abstient(self):
+        """Chaque projet a son interlude : l'« Interlude » de Jazzy Bazz reste ambigu."""
+        tracks = [self._fiche(1, "Interlude", 66), self._fiche(2, "Interlude", 79)]
+        res, dm = self._run(tracks, _entry("Interlude", spotify_id="AUTRE"), 66)
+        assert dm.streams_writes == [] and res["unmatched"] == 1
+
+
 class TestKworbDeclareSansArbitrer:
     """Kworb ne decide pas de ce qui atterrit en colonne.
 

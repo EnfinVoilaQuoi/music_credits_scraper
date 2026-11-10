@@ -212,6 +212,14 @@ class RevueRepository:
 
         return constats_frais(self.engine)
 
+    def fusions_a_decider(self, ids_fiches) -> dict[int, dict]:
+        """`{fiche: {"autre", "paroles", "ecart"}}` : les paires de ces fiches que
+        les données disent le même enregistrement sous deux pages (lecture seule,
+        `meme_enregistrement.fusions_a_decider`)."""
+        from src.utils.meme_enregistrement import fusions_a_decider
+
+        return fusions_a_decider(self.db_path, ids_fiches)
+
     def corrections_revue(self, artist_id: int, *, retablies: bool = False) -> list[dict]:
         """Le journal de l'artiste, le plus récent d'abord (sans les corrections
         déjà défaites, sauf `retablies=True`)."""

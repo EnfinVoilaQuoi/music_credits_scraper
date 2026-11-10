@@ -1556,10 +1556,16 @@ class TestHorsDuDisque:
         assert not self._cas(au.auditer(data_manager, revue=False))
 
 
+#: Le détecteur du panneau qui porte la décision de fusion.
+CODE_FUSION = "meme_enregistrement"
+
+
 class TestMemeEnregistrement:
     """Vague 3 (2026-11-10) : deux pages aux titres non équivalents, aux mêmes
     paroles Genius et à la même durée lue par des identifiants différents
-    (« Promise Land » / « Promised Land ») — une DÉCISION de fusion."""
+    (« Promise Land » / « Promised Land ») — une DÉCISION de fusion, que montre
+    le panneau « À trancher » (`revue:meme_enregistrement`) : l'audit la compte
+    par lui, sa famille ne garde que la version non nommée (information)."""
 
     PAROLES = "\n".join(
         f"[Couplet {i}]\nligne {i} du texte qui raconte la rue numéro {i} sans fin"
@@ -1597,24 +1603,48 @@ class TestMemeEnregistrement:
 
     @staticmethod
     def _cas(audit):
+        """Les décisions de fusion, comptées par le panneau."""
+        return [c for c in audit.cas if c.famille == "revue:meme_enregistrement"]
+
+    @staticmethod
+    def _informations(audit):
         return [c for c in audit.cas if c.famille == "meme_enregistrement"]
 
     def test_memes_paroles_meme_duree_decision_de_fusion(self, data_manager, isha):
-        t, autre = self._paire(data_manager, isha)
-        for audit in (
-            au.auditer(data_manager, revue=False),
-            au.auditer(data_manager, ["Isha"], revue=False),
-        ):
+        t, _autre = self._paire(data_manager, isha)
+        for audit in (au.auditer(data_manager), au.auditer(data_manager, ["Isha"])):
             (cas,) = self._cas(audit)
-            assert sorted(cas.pistes) == sorted([t.id, autre.id])
+            assert cas.pistes == [t.id]  # porté par la fiche d'identifiant le plus bas
             assert cas.nature == au.DECISION and "fusionner" in cas.libelle
-            assert audit.compte_critere()["meme_enregistrement"] == 1
-        assert "meme_enregistrement" in au.FAMILLES_DECISION
+            assert audit.compte_critere()["revue:meme_enregistrement"] == 1
+            assert not self._informations(audit)  # compté une seule fois
+
+    def test_sans_le_panneau_l_audit_ne_compte_plus_la_fusion(self, data_manager, isha):
+        self._paire(data_manager, isha)
+        audit = au.auditer(data_manager, revue=False)
+        assert not self._cas(audit) and not self._informations(audit)
+
+    def test_le_non_de_l_utilisateur_est_retenu(self, data_manager, isha):
+        # « INTERLUDE RELOADED » / « interlude » de Vald (2026-11-10) : « ✓ Normal »
+        # au panneau, et la paire ne revient ni au panneau ni au critère.
+        from src.services import revue
+
+        a, t = isha
+        self._paire(data_manager, isha)
+        a.tracks = data_manager.discographie_reunie(a)
+        (cas,) = [c for c in revue.analyser(data_manager, a).actifs if c.detecteur == CODE_FUSION]
+        assert cas.track_id == t.id
+        data_manager.trancher_cas(a.id, cas.detecteur, cas.cle)
+        assert not self._cas(au.auditer(data_manager))
+        masques = revue.analyser(data_manager, a).masques
+        assert [c.cle for c in masques if c.detecteur == CODE_FUSION] == [cas.cle]
 
     def test_autre_duree_version_non_nommee_pour_information(self, data_manager, isha):
         self._paire(data_manager, isha, durees=(200, 260))
-        (cas,) = self._cas(au.auditer(data_manager, revue=False))
-        assert cas.nature == au.INFORMATION
+        audit = au.auditer(data_manager)
+        (cas,) = self._informations(audit)
+        assert cas.nature == au.INFORMATION and not self._cas(audit)
+        assert "meme_enregistrement" in au.FAMILLES_HORS_CRITERE
 
     @pytest.mark.parametrize(
         "variante",
@@ -1626,7 +1656,7 @@ class TestMemeEnregistrement:
     )
     def test_pas_de_cas(self, data_manager, isha, variante):
         self._paire(data_manager, isha, **variante)
-        assert not self._cas(au.auditer(data_manager, revue=False))
+        assert not self._cas(au.auditer(data_manager))
 
     def test_une_paire_deja_tranchee_par_le_panneau_ne_ressort_pas(self, data_manager, isha):
         a, _ = isha
@@ -1638,7 +1668,7 @@ class TestMemeEnregistrement:
             a=a.id,
             c="g4242|" + json.dumps({"autre": autre.id, "paroles": 0.98}),
         )
-        assert not self._cas(au.auditer(data_manager, revue=False))
+        assert not self._cas(au.auditer(data_manager))
 
     def test_le_verdict_d_une_regle_ne_tranche_pas_la_fusion(self, data_manager, isha):
         # `compteur_partage` dit où compter les streams, pas s'il faut fusionner
@@ -1652,7 +1682,7 @@ class TestMemeEnregistrement:
             a=a.id,
             c="g4242|" + json.dumps({"autre": autre.id, "paroles": 0.98}),
         )
-        (cas,) = self._cas(au.auditer(data_manager, revue=False))
+        (cas,) = self._cas(au.auditer(data_manager))
         assert cas.nature == au.DECISION
 
     def test_deux_parties_nommees_ne_sont_pas_un_doublon(self, data_manager, isha):
@@ -1664,7 +1694,7 @@ class TestMemeEnregistrement:
             titre=f"{t.title} pt 2",
             t=autre.id,
         )
-        assert not self._cas(au.auditer(data_manager, revue=False))
+        assert not self._cas(au.auditer(data_manager))
 
     def test_une_paire_corrigee_a_la_main_ne_ressort_pas(self, data_manager, isha):
         self._paire(data_manager, isha)
@@ -1674,4 +1704,4 @@ class TestMemeEnregistrement:
             "VALUES ('g4343', 'Isha', '{\"genius_id\": 4343}', 'version_de', "
             "'{\"genius_id\": 4242}')",
         )
-        assert not self._cas(au.auditer(data_manager, revue=False))
+        assert not self._cas(au.auditer(data_manager))

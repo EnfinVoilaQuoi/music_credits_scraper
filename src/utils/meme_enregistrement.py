@@ -18,6 +18,9 @@ rapprochées par le juge ou vues par `id_partage`.
 
 import collections
 import json
+import sqlite3
+from contextlib import closing
+from pathlib import Path
 
 from src.utils.catalogue_designe import ECART_MEME_ENREGISTREMENT_S, PAROLES_MEME_ENREGISTREMENT
 from src.utils.concordance_paroles import (
@@ -28,6 +31,7 @@ from src.utils.concordance_paroles import (
 )
 from src.utils.contenants import parties_du_titre
 from src.utils.duree_youtube import segment_de_dj_mix
+from src.utils.lrc_garde import CATALOGUES_PAR_ID
 from src.utils.version_descriptors import autre_partie, meme_socle, titres_equivalents
 
 #: Au-delà, deux durées par identifiant disent deux enregistrements.
@@ -234,6 +238,64 @@ def paires_deja_tranchees(c, pistes) -> set[frozenset]:
                     if a != b:
                         paires.add(frozenset((a, b)))
     return paires
+
+
+def durees_par_identifiant(c, ids=None) -> dict[int, dict[str, int]]:
+    """`{fiche: {source: secondes}}` des durées lues par l'IDENTIFIANT de la
+    fiche (`lrc_garde.CATALOGUES_PAR_ID`), jamais par une recherche de titre :
+    le témoin indépendant des règles qui jugent deux fiches."""
+    out: dict[int, dict[str, int]] = collections.defaultdict(dict)
+    sources = ",".join("?" * len(CATALOGUES_PAR_ID))
+    for r in c.execute(
+        "SELECT track_id, source, value FROM observations "
+        f"WHERE field = 'duration' AND source IN ({sources})",
+        CATALOGUES_PAR_ID,
+    ):
+        if ids is not None and r["track_id"] not in ids:
+            continue
+        try:
+            out[r["track_id"]][r["source"]] = int(float(r["value"]))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def fusions_a_decider(db_path, ids_fiches) -> dict[int, dict]:
+    """`{fiche: {"autre", "paroles", "ecart"}}` : les paires de `ids_fiches`
+    (les fiches ACTIVES d'un panneau) que les données disent le même
+    enregistrement sous deux pages (`MEME`), portées par la fiche d'identifiant
+    le plus bas — ce que montre le détecteur `meme_enregistrement` du panneau
+    « À trancher » (2026-11-10 : la décision y a sa mémoire, « ✓ Normal » retient
+    le NON). Une paire qu'un humain a déjà jugée (`paires_deja_tranchees`) ou
+    qui partage un identifiant (`id_partage`) n'en est pas. Lecture seule."""
+    ids = sorted(set(ids_fiches))
+    if not ids:
+        return {}
+    with closing(sqlite3.connect(f"file:{Path(db_path).as_posix()}?mode=ro", uri=True)) as c:
+        c.row_factory = sqlite3.Row
+        pistes = []
+        for i in range(0, len(ids), 500):
+            lot = ids[i : i + 500]
+            pistes += c.execute(
+                "SELECT t.*, a.name AS artiste FROM tracks t "
+                "JOIN artists a ON a.id = t.artist_id "
+                f"WHERE t.id IN ({','.join('?' * len(lot))})",
+                lot,
+            ).fetchall()
+        par = collections.defaultdict(list)
+        for t in pistes:
+            par[t["artist_id"]].append(t)
+        deja = paires_deja_tranchees(c, pistes)
+        jugees = juger_paires(par, Identifiants(c, pistes), durees_par_identifiant(c, set(ids)))
+    out: dict[int, dict] = {}
+    for x in sorted(jugees, key=lambda x: sorted(x["paire"])):
+        if x["communs"] or x["verdict"] != MEME or x["paire"] in deja:
+            continue
+        a, b = x["fiches"]
+        out.setdefault(
+            a["id"], {"autre": b["id"], "paroles": round(x["paroles"], 2), "ecart": x["ecart"]}
+        )
+    return out
 
 
 def juger_paires(par, ids: Identifiants, durees: dict[int, dict]) -> list[dict]:

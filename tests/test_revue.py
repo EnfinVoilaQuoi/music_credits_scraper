@@ -1083,6 +1083,7 @@ def test_fenetre_se_construit(racine_tk):
         get_artist_relations=lambda _id, status: [],
         divergences_identite_soeurs=lambda _id: [],
         get_artist_positions=lambda _id: {},
+        fusions_a_decider=lambda _ids: {},
         videos_mortes_constatees=dict,
         signalements_revue=lambda _id: [],
         verdicts_revue=lambda _id: {},

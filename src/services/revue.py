@@ -1741,7 +1741,9 @@ def meme_enregistrement(track, ctx):
     paroles Genius à ≥ 90 % et aux durées à ± 2 s, lues par des identifiants
     qu'elles ne partagent pas (`utils.meme_enregistrement`, `ctx.fusions`) : le
     même enregistrement sous deux pages (« Promise Land » / « Promised Land »),
-    ou une réédition que le titre nomme mal (« INTERLUDE RELOADED » de Vald).
+    ou une réédition que le titre nomme mal (« INTERLUDE RELOADED » de Vald) ;
+    ou deux fiches au même ISRC dont un titre est joint à l'autre (« 93 Empire »
+    de Kery James, `fusion_par_isrc`, versé de `id_partage` le 2026-11-10).
     Versé de l'audit le 2026-11-10 : une suspicion d'audit n'avait ni action ni
     mémoire, le « non » de l'utilisateur ne se retenait nulle part. À l'humain :
     la fusion n'est pas réversible ; « ✓ Normal » retient que ce sont deux
@@ -1752,6 +1754,15 @@ def meme_enregistrement(track, ctx):
     autre = ctx.memo("par_id", lambda: {t.id: t for t in ctx.disco}).get(paire["autre"])
     if autre is None:
         return None
+    empreinte = f"g{autre.genius_id}" if autre.genius_id else f"t{autre.id}"
+    if paire.get("isrc"):
+        # Versé de `id_partage` (audit) : même ISRC, titre joint à l'autre.
+        return (
+            f"même ISRC {paire['isrc']} que « {autre.title} », dont le titre est joint à "
+            "celui-ci, durées par identifiant à ± 2 s : le même enregistrement sous deux "
+            "pages — fusionner ?",
+            {"autres": [autre.id], "isrc": paire["isrc"], "empreinte": empreinte},
+        )
     return (
         f"mêmes paroles Genius que « {autre.title} »"
         + (f" ({autre.album})" if autre.album else "")
@@ -1760,7 +1771,7 @@ def meme_enregistrement(track, ctx):
         {
             "autres": [autre.id],
             "paroles": paire["paroles"],
-            "empreinte": f"g{autre.genius_id}" if autre.genius_id else f"t{autre.id}",
+            "empreinte": empreinte,
         },
     )
 

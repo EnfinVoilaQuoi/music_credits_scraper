@@ -726,6 +726,37 @@ def duree_de_la_ligne(entry, track, lire_identite) -> str | None:
     return "autre"
 
 
+def homonyme_par_la_duree(entry, candidates, lire_identite):
+    """Le candidat UNIQUE que la durée de l'ID de la ligne désigne, quand les
+    artistes crédités n'ont pas départagé des homonymes du même artiste, ou None.
+
+    Il faut que la durée lue à l'embed soit à ± 2 s de la durée INDÉPENDANTE
+    d'un seul candidat, même version (`duree_de_la_ligne` == « meme »), et que
+    chacun des autres ait une durée indépendante HORS de ± 2 s : un candidat
+    sans durée pourrait être la ligne. Jamais un titre générique (chaque projet
+    a son intro). Cas d'origine (2026-11-10) : Travis Scott « OUTSIDE », second
+    upload de JACKBOYS 2 (183 s) contre « outside » de *Birds in the Trap*
+    (176 s) ; Kanye « KING » de VULTURES 1 (157 s) contre celui de BULLY
+    (126 s). Simulé sur toute la base avec l'embed : 3 lignes ambiguës, 2
+    tranchées, chacune confirmée par le compteur Spotify de la fiche élue
+    (0,5 % et 0,2 % d'écart) ; l'« Interlude » de Jazzy Bazz reste ambigu."""
+    sid = entry.get("spotify_id")
+    if not sid or titre_generique(entry["title"]):
+        return None
+    duree = (_identite_embed(sid, lire_identite) or {}).get("duration")
+    if not duree:
+        return None
+    memes = []
+    for c in candidates:
+        if duree_de_la_ligne(entry, c, lire_identite) == "meme":
+            memes.append(c)
+            continue
+        temoin = duree_temoin(c)
+        if not temoin or abs(temoin - duree) <= TOLERANCE_MEME_FICHIER:
+            return None
+    return memes[0] if len(memes) == 1 else None
+
+
 def equivalence_confirmee(entry, track, lire_identite) -> bool:
     """La ligne porte le titre de la fiche sous une autre GRAPHIE (titres
     ÉQUIVALENTS, même version : « Airplanes, Pt. II » / « Airplanes, Pt. 2 »,
@@ -968,6 +999,9 @@ def rapprocher(
         track = _resolve_homonym(candidates, artist.name, credited_norm, premier)
         if track:
             return Rapprochement(track=track, via="title+artistes")
+        track = homonyme_par_la_duree(entry, candidates, lire_identite)
+        if track:
+            return Rapprochement(track=track, via="title+duree")
         return Rapprochement(motif="ambigu")
 
     # Un rapprochement REJETÉ par l'utilisateur ne revient jamais par une règle.
@@ -1274,6 +1308,7 @@ def relier_ids_kworb(artist, data_manager, scraper=None, lire_identite=None) -> 
         if via in (
             "title",
             "title+artistes",
+            "title+duree",
             "fuzzy",
             "duree",
             "equivalent",
@@ -1551,7 +1586,16 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         track, via = r.track, r.via
         sid = entry.get("spotify_id")
         if (
-            via in ("title", "title+artistes", "fuzzy", "duree", "equivalent", "sous_titre")
+            via
+            in (
+                "title",
+                "title+artistes",
+                "title+duree",
+                "fuzzy",
+                "duree",
+                "equivalent",
+                "sous_titre",
+            )
             and sid
             and autre_upload_que_la_fiche(track, sid, entry["streams"], ids_page, lus_web)
             and not lien_tranche(entry, track, _decisions)
@@ -1611,6 +1655,11 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             logger.info(
                 f"🔎 Homonyme résolu par artistes crédités: '{entry['title']}' "
                 f"→ track #{track.id} ({getattr(track, 'primary_artist_name', None) or artist.name})"
+            )
+        elif via == "title+duree":
+            logger.info(
+                f"⏱️ Homonyme résolu par la durée de l'ID : '{entry['title']}' "
+                f"→ track #{track.id} « {track.title} »"
             )
         elif via in ("confirmed", "decision"):
             logger.info(f"🔗 Kworb (décision mémorisée): '{entry['title']}' → '{track.title}'")

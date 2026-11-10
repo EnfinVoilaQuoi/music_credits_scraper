@@ -28,7 +28,7 @@ from src.utils.concordance_paroles import (
 )
 from src.utils.contenants import parties_du_titre
 from src.utils.duree_youtube import segment_de_dj_mix
-from src.utils.version_descriptors import meme_socle, titres_equivalents
+from src.utils.version_descriptors import autre_partie, meme_socle, titres_equivalents
 
 #: Au-delà, deux durées par identifiant disent deux enregistrements.
 ECART_DEMENTI_S = 10
@@ -138,9 +138,11 @@ class Identifiants:
 
 
 def rapproches_par_le_juge(a: str | None, b: str | None) -> bool:
-    """Le juge des titres les rapproche déjà (les familles actuelles les voient),
-    ou l'un est un titre JOINT dont une partie est l'autre (medley, contenant)."""
-    if titres_equivalents(a, b) or meme_socle(a, b):
+    """Le juge des titres a déjà son mot sur la paire : il les rapproche (les
+    familles actuelles les voient), il y lit deux PARTIES différentes (« Keep My
+    Spirit Alive » / « pt 2 » : une suite nommée, pas un doublon), ou l'un est un
+    titre JOINT dont une partie est l'autre (medley, contenant)."""
+    if titres_equivalents(a, b) or meme_socle(a, b) or autre_partie(a, b):
         return True
     for long, court in ((a, b), (b, a)):
         if any(titres_equivalents(p, court) for p in parties_du_titre(long) or ()):
@@ -178,11 +180,13 @@ def paires_par_paroles(fiches: list, paroles: dict[int, str]) -> set[frozenset]:
 
 
 def paires_deja_tranchees(c, pistes) -> set[frozenset]:
-    """Les paires de fiches qu'une décision a déjà jugées l'une POUR l'autre :
-    un verdict du panneau qui nomme l'autre fiche (`revue_verdicts`, clé
-    `g<page>|{…, "autre": <fiche>}` — « Keep My Spirit Alive » / « pt 2 »,
-    `compteur_partage`, 2026-10-27), ou une correction humaine entre deux
-    fiches (`CORRECTIONS_DE_PAIRE` : version de, départage, fusion…)."""
+    """Les paires de fiches qu'un HUMAIN a déjà jugées l'une POUR l'autre : un
+    verdict du panneau posé à la main qui nomme l'autre fiche (`revue_verdicts`,
+    clé `g<page>|{…, "autre": <fiche>}`), ou une correction entre deux fiches
+    (`CORRECTIONS_DE_PAIRE` : version de, départage, fusion…). Le verdict d'une
+    RÈGLE (`note` « regle:… ») ne tranche pas : `compteur_partage` dit où compter
+    les streams de « FLORIDA FLOW » et de sa « (Physical Edition) », pas s'il
+    faut les fusionner (décision utilisateur 2026-11-10)."""
     par_page = collections.defaultdict(set)  # (artiste, page) → fiches
     par_titre = collections.defaultdict(set)  # (artiste, titre, album) → fiches
     artiste_de = {}
@@ -200,7 +204,9 @@ def paires_deja_tranchees(c, pistes) -> set[frozenset]:
         return par_titre.get((artiste, d.get("titre"), d.get("album")), set())
 
     paires = set()
-    for artist_id, cle in c.execute("SELECT artist_id, cle FROM revue_verdicts"):
+    for artist_id, cle, note in c.execute("SELECT artist_id, cle, note FROM revue_verdicts"):
+        if (note or "").startswith("regle:"):
+            continue
         page, _, reste = (cle or "").partition("|")
         if not page.startswith("g") or not page[1:].isdigit():
             continue

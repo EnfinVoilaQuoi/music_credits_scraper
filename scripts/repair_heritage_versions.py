@@ -28,7 +28,7 @@ from sqlalchemy import text
 from src.models.track import _WRITER_ROLES
 from src.utils.data_manager import DataManager
 from src.utils.database_backup import get_backup_manager
-from src.utils.version_heritage import REGLES, famille_de
+from src.utils.version_heritage import REGLES, famille_de_fiche
 
 
 def candidates(dm: DataManager) -> list[dict]:
@@ -37,19 +37,21 @@ def candidates(dm: DataManager) -> list[dict]:
     with dm.engine.connect() as conn:
         heritages = conn.execute(
             text(
-                "SELECT t.id, t.title, a.name, t.lyrics_source, "
+                "SELECT t.id, t.title, a.name, t.lyrics_source, t.relationships, "
                 "(SELECT group_concat(c.role, '|') FROM credits c "
                 " WHERE c.track_id = t.id AND c.source = 'heritage') "
                 "FROM tracks t JOIN artists a ON a.id = t.artist_id"
             )
         ).all()
     sortie = []
-    for tid, titre, nom, source_paroles, roles in heritages:
-        famille = famille_de(titre or "")
+    for tid, titre, nom, source_paroles, relations, roles in heritages:
+        famille = famille_de_fiche(titre, relations)
         regle = REGLES.get(famille)
-        if regle is None or regle.paroles or regle.production:
+        # Une famille qui garde les paroles mais pas la production (une prise
+        # autre, une reprise) ne perd que sa production.
+        if regle is None or regle.production:
             continue
-        paroles = (source_paroles or "").startswith("heritage")
+        paroles = not regle.paroles and (source_paroles or "").startswith("heritage")
         ecriture = {r.value for r in _WRITER_ROLES} if regle.ecriture else set()
         roles = [r for r in (roles or "").split("|") if r and r not in ecriture]
         if not paroles and not roles:
@@ -61,6 +63,7 @@ def candidates(dm: DataManager) -> list[dict]:
                 "artiste": nom,
                 "famille": famille,
                 "garder_ecriture": regle.ecriture,
+                "garder_paroles": regle.paroles,
                 "paroles": paroles,
                 "roles": roles,
             }
@@ -96,7 +99,9 @@ def main() -> int:
     print(f"💾 Backup : {sauvegarde}")
     credits = paroles = 0
     for f in fiches:
-        n, p = dm.retirer_heritage(f["id"], garder_ecriture=f["garder_ecriture"])
+        n, p = dm.retirer_heritage(
+            f["id"], garder_ecriture=f["garder_ecriture"], garder_paroles=f["garder_paroles"]
+        )
         credits += n
         paroles += int(p)
     print(f"✅ {credits} crédit(s) hérité(s) retiré(s), {paroles} paroles héritées retirées.")

@@ -58,7 +58,6 @@ from src.utils.concordance_paroles import (
     paroles_de_reference,
     recouvrement_bigrammes,
 )
-from src.utils.contenants import parties_du_titre
 from src.utils.duree_youtube import (
     DUREE_MAX_MORCEAU,
     DUREE_MIN_MORCEAU,
@@ -70,8 +69,11 @@ from src.utils.duree_youtube import (
     segment_de_dj_mix,
     trop_courte_pour_les_paroles,
 )
-from src.utils.lrc_garde import ACCORD_CATALOGUES_S
-from src.utils.meme_enregistrement import durees_par_identifiant
+from src.utils.meme_enregistrement import (
+    accord_des_durees,
+    durees_par_identifiant,
+    fusion_par_isrc,
+)
 from src.utils.participation import SQL_SIGNATURES_DE_DISQUES, sans_participation, signe_son_disque
 from src.utils.title_matching import contains_as_words, meme_album, normalize_name, normalize_title
 from src.utils.track_mapper import recherche_de_ligne
@@ -79,7 +81,6 @@ from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, 
 from src.utils.version_descriptors import (
     meme_socle,
     porte_une_version,
-    sous_titres,
     studio_sur_disque_live,
     titre_generique,
     titres_equivalents,
@@ -314,40 +315,16 @@ def doublons_equivalents(par) -> list[Cas]:
     return cas
 
 
-def accord_des_durees(da: dict | None, db: dict | None) -> bool | None:
-    """PUR. Deux fiches ont-elles une durée lue par identifiant commune à
-    ± `ACCORD_CATALOGUES_S` ? None si l'une n'en a aucune (rien à comparer)."""
-    va, vb = set((da or {}).values()), set((db or {}).values())
-    if not va or not vb:
-        return None
-    return min(abs(x - y) for x in va for y in vb) <= ACCORD_CATALOGUES_S
-
-
-def titre_joint_a_l_autre(a: str | None, b: str | None) -> bool:
-    """PUR. L'un des titres JOINT des parties (`contenants.parties_du_titre`,
-    jamais « 24/7 ») dont la dernière est l'autre titre, ou l'un de ses
-    sous-titres : « #Jesuispasséchezso : Épisode 6 / 93 Empire » et « 93
-    Empire », « Episode 5 / Police Nationale » et « C'est nous les condés
-    (Police Nationale) »."""
-    for long, court in ((a, b), (b, a)):
-        parties = parties_du_titre(long)
-        if parties and court:
-            dernier = parties[-1]
-            if any(titres_equivalents(dernier, f) for f in (court, *sous_titres(court))):
-                return True
-    return False
-
-
 def ids_partages(par, durees: dict[int, dict] | None = None) -> list[Cas]:
     """Le même ID sur deux fiches d'un artiste qui ne sont pas lignes sœurs.
 
     Branche ISRC (règle du 2026-11-09, simulée : 5 cas sur 6) : deux fiches
-    dont l'une JOINT au bout de son titre celui de l'autre (`titre_joint_a_l_autre`)
-    et dont les durées lues par identifiant (`durees`) concordent à ± 2 s sont
-    le MÊME enregistrement sous deux pages (« 93 Empire » de Kery James) : une
-    DÉCISION de fusion, pas une erreur — la fusion reste humaine (elle n'est pas
-    réversible). « Tigini (Remix) » (même ISRC, deux remix différents) reste
-    une erreur."""
+    dont l'une JOINT au bout de son titre celui de l'autre et dont les durées
+    lues par identifiant (`durees`) concordent à ± 2 s sont le MÊME
+    enregistrement sous deux pages (« 93 Empire » de Kery James,
+    `meme_enregistrement.fusion_par_isrc`) : une décision de fusion, que montre
+    le panneau (`revue:meme_enregistrement`, 2026-11-10) — plus de cas ici.
+    « Tigini (Remix) » (même ISRC, deux remix différents) reste une erreur."""
     durees = durees or {}
     cas = []
     for ts in par.values():
@@ -362,20 +339,13 @@ def ids_partages(par, durees: dict[int, dict] | None = None) -> list[Cas]:
                     # Entre pages Genius : le panneau le juge (`revue:id_catalogue_partage`).
                     continue
                 if len(g) > 1 and (len(pages) > 1 or None in pages):
+                    if col == "isrc" and len(g) == 2 and fusion_par_isrc(g[0], g[1], durees):
+                        # Le même enregistrement sous deux pages : la décision de
+                        # fusion est au panneau (`revue:meme_enregistrement`).
+                        continue
                     libelle = f"{col} {valeur} : " + " | ".join(_lib(t) for t in g)
-                    nature = ERREUR
-                    if (
-                        col == "isrc"
-                        and len(g) == 2
-                        and titre_joint_a_l_autre(g[0]["title"], g[1]["title"])
-                        and accord_des_durees(durees.get(g[0]["id"]), durees.get(g[1]["id"]))
-                    ):
-                        nature = DECISION
-                        libelle += (
-                            " — même enregistrement (titre joint, durées à ± 2 s) : fusionner ?"
-                        )
                     cas.append(
-                        Cas("id_partage", g[0]["artiste"], [t["id"] for t in g], libelle, nature)
+                        Cas("id_partage", g[0]["artiste"], [t["id"] for t in g], libelle, ERREUR)
                     )
     return cas
 
@@ -1127,9 +1097,11 @@ def heritages_perimes(c, pistes) -> list[tuple]:
     l'original que l'héritage d'aujourd'hui leur trouve et ce qu'il ne
     poserait plus : `(fiche, socle | None, crédits hérités, périmés)`, où
     `périmés` = `(nom, rôle, motif)` (`version_heritage.heritage_sans_source`).
-    `socle` None : original absent ou ambigu, rien n'est jugé. Partagé par
-    l'audit et le rattrapage (`scripts/recalculer_heritage.py`)."""
-    from src.utils.version_heritage import IndexSocles, socle_parmi
+    `socle` None (original absent ou ambigu) : seul un rôle que la famille de
+    la fiche ne transmet pas est jugé — la production héritée d'une REPRISE
+    (Kid Cudi, huit « Heartless », 2026-11-10) ; le reste, rien ne dit d'où il
+    vient. Partagé par l'audit et le rattrapage (`scripts/recalculer_heritage.py`)."""
+    from src.utils.version_heritage import ROLE_NON_TRANSMIS, IndexSocles, socle_parmi
     from src.utils.version_heritage import heritage_sans_source as juger
 
     ids = {t["id"]: t for t in pistes}
@@ -1149,17 +1121,23 @@ def heritages_perimes(c, pistes) -> list[tuple]:
     du_socle = _credits_par_fiche(c, {s.id for s in socles.values() if s is not None})
     rendus = []
     for tid, credits in herites.items():
-        socle = socles[tid]
-        perimes = (
-            juger(
-                ids[tid]["title"],
-                [(x["name"], x["role"]) for x in credits],
+        t, socle = ids[tid], socles[tid]
+        relations = _champ(t, "relationships")
+        herites_de = [(x["name"], x["role"]) for x in credits]
+        if socle is None:
+            perimes = [
+                p
+                for p in juger(t["title"], herites_de, [], relations=relations)
+                if p[2] == ROLE_NON_TRANSMIS
+            ]
+        else:
+            perimes = juger(
+                t["title"],
+                herites_de,
                 [(x["name"], x["role"], x["source"]) for x in du_socle.get(socle.id, [])],
+                relations=relations,
             )
-            if socle is not None
-            else []
-        )
-        rendus.append((ids[tid], socle, credits, perimes))
+        rendus.append((t, socle, credits, perimes))
     return rendus
 
 
@@ -1170,24 +1148,37 @@ def heritage_sans_source(c, pistes) -> list[Cas]:
     (`versions.heriter_versions`), ce qui reste est un défaut d'écriture
     (« Stand United (Acapella) » et sa production, « Fugitif (Instrumental) »
     et le « IAM » producteur que l'original ne porte plus ; 37 crédits avant
-    le recalcul). Une version dont l'original n'est plus UNIQUE (huit
-    « Heartless » chez Kid Cudi) ou plus retrouvé : rien ne dit d'où viennent
-    ses crédits, rien ne part — famille `heritage_sans_original`, pour
-    information (35 crédits le 2026-11-10)."""
+    le recalcul). Une REPRISE (relation `cover_of`) n'hérite jamais de la
+    production : jugée même sans original unique. Le reste d'une version dont
+    l'original n'est plus UNIQUE (huit « Heartless » chez Kid Cudi) ou plus
+    retrouvé : rien ne dit d'où viennent ses crédits, rien ne part — famille
+    `heritage_sans_original`, pour information (35 crédits le 2026-11-10)."""
     cas = []
     for t, socle, credits, perimes in heritages_perimes(c, pistes):
         tid = t["id"]
         if socle is None:
-            cas.append(
-                Cas(
-                    "heritage_sans_original",
-                    t["artiste"],
-                    [tid],
-                    f"{_lib(t)} : {len(credits)} crédit(s) hérité(s), original introuvable "
-                    "ou ambigu",
-                    INFORMATION,
+            if perimes:
+                detail = ", ".join(f"{n} {r}" for n, r, _m in perimes[:4])
+                cas.append(
+                    Cas(
+                        "heritage_sans_source",
+                        t["artiste"],
+                        [tid],
+                        f"{_lib(t)} : {len(perimes)} crédit(s) hérité(s) que sa "
+                        f"famille ne transmet pas — {detail}",
+                    )
                 )
-            )
+            else:
+                cas.append(
+                    Cas(
+                        "heritage_sans_original",
+                        t["artiste"],
+                        [tid],
+                        f"{_lib(t)} : {len(credits)} crédit(s) hérité(s), original "
+                        "introuvable ou ambigu",
+                        INFORMATION,
+                    )
+                )
             continue
         if perimes:
             detail = ", ".join(f"{n} {r} ({m})" for n, r, m in perimes[:4])

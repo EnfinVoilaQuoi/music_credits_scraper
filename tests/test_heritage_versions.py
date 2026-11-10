@@ -247,3 +247,49 @@ def test_retirer_heritage_garde_l_ecriture_si_demande(data_manager):
     assert data_manager.retirer_heritage(tid, garder_ecriture=False) == (1, False)
     (relue,) = data_manager.get_artist_tracks(a.id)
     assert [c.name for c in relue.credits] == ["Hype Williams"]
+
+
+class TestReprise:
+    """« Heartless (Studio Version) » de Kris Allen, sur *Season 8 Favorite
+    Performances* : rangée « edition » par son titre, la reprise héritait des
+    19 crédits de production de Kanye West (2026-11-10)."""
+
+    _REPRISE = [{"type": "cover_of", "title": "Boulbi", "artist": "Booba", "url": "x"}]
+
+    def test_une_reprise_n_herite_pas_de_la_production(self):
+        r = _t("Boulbi (Studio Version)", relationships=self._REPRISE)
+        bilan = heriter(r, _original())
+        assert bilan.famille == "reprise"
+        assert {(c.name, c.role) for c in r.credits} == {("Booba", CreditRole.WRITER)}
+
+    def test_le_meme_titre_sans_relation_reste_une_edition(self):
+        e = _t("Boulbi (Studio Version)")
+        heriter(e, _original())
+        assert ("Animalsons", CreditRole.PRODUCER) in {(c.name, c.role) for c in e.credits}
+
+    def test_l_audit_et_la_reparation_jugent_la_production_heritee(self, data_manager):
+        from src.utils.version_heritage import ROLE_NON_TRANSMIS, heritage_sans_source
+
+        assert heritage_sans_source(
+            "Heartless (Studio Version)",
+            [("No I.D.", "Co-Producer"), ("Kanye West", "Writer")],
+            [("No I.D.", "Co-Producer", "genius"), ("Kanye West", "Writer", "genius")],
+            relations=self._REPRISE,
+        ) == [("No I.D.", "Co-Producer", ROLE_NON_TRANSMIS)]
+
+        a = Artist(name="Kanye West")
+        a.id = data_manager.save_artist(a)
+        r = Track(title="Heartless (Studio Version)", artist=a)
+        r.credits = [
+            Credit("Kanye West", CreditRole.WRITER, source="genius"),
+            Credit("No I.D.", CreditRole.CO_PRODUCER, source="heritage"),
+        ]
+        r.lyrics.text, r.lyrics.present, r.lyrics.source = "Paroles", True, "heritage:1"
+        tid = data_manager.save_track(r)
+        assert data_manager.retirer_heritage(tid, garder_ecriture=True, garder_paroles=True) == (
+            1,
+            False,
+        )
+        (relue,) = data_manager.get_artist_tracks(a.id)
+        assert [c.name for c in relue.credits] == ["Kanye West"]
+        assert relue.lyrics.text == "Paroles"

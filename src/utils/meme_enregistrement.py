@@ -31,8 +31,13 @@ from src.utils.concordance_paroles import (
 )
 from src.utils.contenants import parties_du_titre
 from src.utils.duree_youtube import segment_de_dj_mix
-from src.utils.lrc_garde import CATALOGUES_PAR_ID
-from src.utils.version_descriptors import autre_partie, meme_socle, titres_equivalents
+from src.utils.lrc_garde import ACCORD_CATALOGUES_S, CATALOGUES_PAR_ID
+from src.utils.version_descriptors import (
+    autre_partie,
+    meme_socle,
+    sous_titres,
+    titres_equivalents,
+)
 
 #: Au-delà, deux durées par identifiant disent deux enregistrements.
 ECART_DEMENTI_S = 10
@@ -264,6 +269,57 @@ def paires_deja_tranchees(c, pistes) -> set[frozenset]:
     return paires
 
 
+def accord_des_durees(da: dict | None, db: dict | None) -> bool | None:
+    """PUR. Deux fiches ont-elles une durée lue par identifiant commune à
+    ± `ACCORD_CATALOGUES_S` ? None si l'une n'en a aucune (rien à comparer)."""
+    va, vb = set((da or {}).values()), set((db or {}).values())
+    if not va or not vb:
+        return None
+    return min(abs(x - y) for x in va for y in vb) <= ACCORD_CATALOGUES_S
+
+
+def titre_joint_a_l_autre(a: str | None, b: str | None) -> bool:
+    """PUR. L'un des titres JOINT des parties (`contenants.parties_du_titre`,
+    jamais « 24/7 ») dont la dernière est l'autre titre, ou l'un de ses
+    sous-titres : « #Jesuispasséchezso : Épisode 6 / 93 Empire » et « 93
+    Empire », « Episode 5 / Police Nationale » et « C'est nous les condés
+    (Police Nationale) »."""
+    for long, court in ((a, b), (b, a)):
+        parties = parties_du_titre(long)
+        if parties and court:
+            dernier = parties[-1]
+            if any(titres_equivalents(dernier, f) for f in (court, *sous_titres(court))):
+                return True
+    return False
+
+
+def fusion_par_isrc(a, b, durees: dict[int, dict]) -> bool:
+    """Deux fiches au même ISRC dont l'une JOINT au bout de son titre celui de
+    l'autre et dont les durées lues par identifiant concordent à ± 2 s : le même
+    enregistrement sous deux pages (« 93 Empire » de Kery James, règle du
+    2026-11-09, simulée : 5 cas sur 6) — une décision de fusion."""
+    return bool(
+        titre_joint_a_l_autre(a["title"], b["title"])
+        and accord_des_durees(durees.get(a["id"]), durees.get(b["id"]))
+    )
+
+
+def paires_au_meme_isrc(ts) -> list[tuple]:
+    """PUR. Les paires de fiches d'un artiste SEULES à porter un ISRC, qui ne
+    sont pas lignes sœurs (deux pages, ou une fiche sans page) — la branche ISRC
+    de `audit.ids_partages`, fiche d'identifiant le plus bas d'abord."""
+    groupes = collections.defaultdict(list)
+    for t in ts:
+        if t["isrc"]:
+            groupes[t["isrc"]].append(t)
+    paires = []
+    for g in groupes.values():
+        pages = {t["genius_id"] for t in g}
+        if len(g) == 2 and (len(pages) > 1 or None in pages):
+            paires.append(tuple(sorted(g, key=lambda t: t["id"])))
+    return paires
+
+
 def durees_par_identifiant(c, ids=None) -> dict[int, dict[str, int]]:
     """`{fiche: {source: secondes}}` des durées lues par l'IDENTIFIANT de la
     fiche (`lrc_garde.CATALOGUES_PAR_ID`), jamais par une recherche de titre :
@@ -288,7 +344,8 @@ def fusions_a_decider(db_path, ids_fiches) -> dict[int, dict]:
     """`{fiche: {"autre", "paroles", "ecart"}}` : les paires de `ids_fiches`
     (les fiches ACTIVES d'un panneau) que les données disent le même
     enregistrement sous deux pages (`MEME`), portées par la fiche d'identifiant
-    le plus bas — ce que montre le détecteur `meme_enregistrement` du panneau
+    le plus bas (par les paroles et la durée, ou par l'ISRC d'un titre joint :
+    `fusion_par_isrc`) — ce que montre le détecteur `meme_enregistrement` du panneau
     « À trancher » (2026-11-10 : la décision y a sa mémoire, « ✓ Normal » retient
     le NON). Une paire qu'un humain a déjà jugée (`paires_deja_tranchees`) ou
     qui partage un identifiant (`id_partage`) n'en est pas. Lecture seule."""
@@ -310,7 +367,8 @@ def fusions_a_decider(db_path, ids_fiches) -> dict[int, dict]:
         for t in pistes:
             par[t["artist_id"]].append(t)
         deja = paires_deja_tranchees(c, pistes)
-        jugees = juger_paires(par, Identifiants(c, pistes), durees_par_identifiant(c, set(ids)))
+        durees = durees_par_identifiant(c, set(ids))
+        jugees = juger_paires(par, Identifiants(c, pistes), durees)
     out: dict[int, dict] = {}
     for x in sorted(jugees, key=lambda x: sorted(x["paire"])):
         if x["communs"] or x["verdict"] != MEME or x["paire"] in deja:
@@ -319,6 +377,10 @@ def fusions_a_decider(db_path, ids_fiches) -> dict[int, dict]:
         out.setdefault(
             a["id"], {"autre": b["id"], "paroles": round(x["paroles"], 2), "ecart": x["ecart"]}
         )
+    for ts in par.values():
+        for a, b in paires_au_meme_isrc(ts):
+            if frozenset((a["id"], b["id"])) not in deja and fusion_par_isrc(a, b, durees):
+                out.setdefault(a["id"], {"autre": b["id"], "isrc": a["isrc"]})
     return out
 
 

@@ -17,6 +17,7 @@ de `version_descriptors` :
     remix tiers / collab         NON      oui       NON    (le remixeur produit)
     démo / alternate / snippet   NON      NON       NON    (autre prise, autre équipe)
     reference                    NON      NON       NON    (chantée par un autre)
+    reprise (relation cover_of)  oui      oui       NON    (autre artiste, autre prise)
 
 Démo, prise alternative et snippet : décision utilisateur du 2026-09-28 — une
 démo n'était dans aucune ligne et retombait sur « edition » (paroles ET
@@ -91,7 +92,37 @@ REGLES: dict[str, Regle] = {
     "alternate": Regle(paroles=False, ecriture=False, production=False),
     "snippet": Regle(paroles=False, ecriture=False, production=False),
     "reference": Regle(paroles=False, ecriture=False, production=False),
+    # La page d'une REPRISE (relation Genius `cover_of`) : le même texte, les
+    # mêmes auteurs, un autre enregistrement — jamais la production de
+    # l'original, quel que soit son titre (« Heartless (Studio Version) » de
+    # Kris Allen, rangée « edition » par son titre, héritait des 19 crédits de
+    # production de Kanye ; 2026-11-10).
+    "reprise": Regle(paroles=True, ecriture=True, production=False),
 }
+
+
+def est_reprise(relations) -> bool:
+    """PUR. La page se dit REPRISE d'un autre morceau (relation Genius
+    `cover_of`). `relations` : la liste `Track.relationships`, ou la colonne
+    JSON telle quelle."""
+    if isinstance(relations, str):
+        import json
+
+        try:
+            relations = json.loads(relations or "[]")
+        except ValueError:
+            return False
+    return any(isinstance(r, dict) and r.get("type") == "cover_of" for r in relations or ())
+
+
+def famille_de_fiche(titre: str | None, relations) -> str | None:
+    """La famille d'héritage d'une FICHE : celle de son titre, sauf une reprise
+    (`est_reprise`), qui est toujours « reprise » quand son titre est une
+    version. Le seul point qui décide pour `heriter` et pour l'audit."""
+    famille = famille_de(titre or "")
+    if famille is not None and est_reprise(relations):
+        return "reprise"
+    return famille
 
 
 #: Un GROUPE du titre (parenthèses, crochets, ou segment après « - ») qui dit
@@ -334,7 +365,7 @@ def heriter(version, socle, *, famille: str | None = None) -> Heritage:
     (`instrumental`) reçoit le CONSTAT `lyrics.instrumental = True` (e27), jamais
     les paroles.
     """
-    famille = famille or famille_de(version.title)
+    famille = famille or famille_de_fiche(version.title, version.relationships)
     bilan = Heritage(famille=famille, credits=[])
     if famille is None or socle is None:
         return bilan
@@ -440,7 +471,9 @@ ROLE_NON_TRANSMIS = "rôle que sa famille n'hérite plus"
 ABSENT_DE_L_ORIGINAL = "absent de l'original"
 
 
-def heritage_sans_source(titre: str | None, herites, credits_du_socle) -> list[tuple]:
+def heritage_sans_source(
+    titre: str | None, herites, credits_du_socle, *, relations=None
+) -> list[tuple]:
     """PUR. Les crédits HÉRITÉS `(nom, rôle)` d'une version de titre `titre`
     que l'héritage d'aujourd'hui ne poserait plus, avec leur motif : rôle que
     la règle de sa famille ne transmet plus (`REGLES`, une a cappella n'hérite
@@ -448,8 +481,10 @@ def heritage_sans_source(titre: str | None, herites, credits_du_socle) -> list[t
     directe (`credits_du_socle`, `(nom, rôle, source)` : Genius a retiré ou
     scindé le crédit — « Gamble & Huff » devenu Kenneth Gamble et Leon Huff).
     L'héritage est une UNION qui ne retire rien : ces crédits restaient, sans
-    source (2026-11-10, 37 crédits). Un rôle inconnu n'est pas jugé."""
-    famille = famille_de(titre)
+    source (2026-11-10, 37 crédits). Un rôle inconnu n'est pas jugé.
+    `relations` : celles de la fiche (une reprise n'hérite pas de la
+    production, `famille_de_fiche`)."""
+    famille = famille_de_fiche(titre, relations)
     if famille is None:
         return []
     regle = REGLES.get(famille) or REGLES["edition"]

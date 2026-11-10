@@ -252,19 +252,26 @@ class SpotifyWebScraper(CrawlAIScraperBase):
                 obs.parse_error("0 piste listée (structure changée ?)")
                 return None
             annonce = parse.parse_album_track_count(html)
-            if annonce is not None and len(tracks) < annonce:
+            sans_lien = parse.parse_album_rows_sans_lien(html)
+            if annonce is not None and len(tracks) + len(sans_lien) < annonce:
                 # Pas une erreur de source : la page a répondu, c'est le rendu qui
                 # n'a pas tout déroulé. On le DIT au lieu de rendre une liste
                 # tronquée dont personne ne verrait qu'elle l'est.
                 logger.warning(
-                    f"Album {album_id} : {len(tracks)} piste(s) rendues sur {annonce} annoncées"
+                    f"Album {album_id} : {len(tracks) + len(sans_lien)} piste(s) rendues "
+                    f"sur {annonce} annoncées"
                 )
+            for ligne in sans_lien:
+                logger.info(f"Album {album_id} : piste indisponible sur Spotify — {ligne[:90]}")
             obs.ok()
             return {
                 "title": parse.parse_album_title(html),
                 "tracks": tracks,
                 "track_ids": [tid for tid, _ in tracks],
                 "announced": annonce,
+                # Lignes rendues SANS lien : la page est complète, la piste n'a
+                # ni page ni compteur. Elles ne font pas une page tronquée.
+                "indisponibles": len(sans_lien),
                 "durations": parse.parse_row_durations(html),
             }
 

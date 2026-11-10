@@ -201,7 +201,9 @@ def _fiches_arg(p: argparse.ArgumentParser) -> None:
         "--fiches",
         help="seulement ces fiches (ID de base séparés par des virgules) ; avec le "
         "--force… de l'étape pour les relire même complètes. Les passes d'ARTISTE "
-        "(page Kworb, catalogue Deezer, MusicBrainz) tournent quand même",
+        "(page Kworb, page artiste Spotify, catalogue Deezer, MusicBrainz) tournent "
+        "quand même ; en streams, Spotify n'ouvre que la page titre de ces fiches "
+        "(ni file par péremption, ni passe des albums)",
     )
 
 
@@ -435,6 +437,7 @@ def options_streams(a: argparse.Namespace) -> streams.OptionsStreams:
         ytm=a.ytm_streams,
         ytm_channel=a.ytm_channel,
         track_ids=_ids_de_fiches(getattr(a, "fiches", None)),
+        fiches=_ids_de_fiches(getattr(a, "fiches", None)),
     )
 
 

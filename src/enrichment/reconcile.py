@@ -648,9 +648,13 @@ def _reconcile_lyrics_synced(
     (décision utilisateur 2026-10-31) — un LRC LRCLIB dont l'audio est contredit
     de plus de 10 s par deux catalogues concordants lus par ID n'est pas
     recevable (`lrc_garde.audio_dementi_par_les_catalogues` ; « On My Vibe »).
+    Étendu au LRC YouTube Music le 2026-11-11 (décision utilisateur, simulée :
+    13 colonnes sur 5 165 ; « Le fil » de Lord Esperanza portait le LRC de sa
+    « Version originale », 172 s contre 185 s chez quatre catalogues).
     """
     from src.utils.concordance_paroles import lrc_dementi
     from src.utils.lrc_garde import (
+        SOURCES_LRC_AUDIO_JUGE,
         audio_dementi_par_les_catalogues,
         cale_sur_un_autre_audio,
         deborde_son_audio,
@@ -662,8 +666,8 @@ def _reconcile_lyrics_synced(
     audios = audios or {}
 
     def trop_long(o) -> bool:
-        if o.source == "lrclib" and audio_dementi_par_les_catalogues(
-            audios.get("lrclib"), catalogues
+        if o.source in SOURCES_LRC_AUDIO_JUGE and audio_dementi_par_les_catalogues(
+            audios.get(o.source), catalogues, o.source
         ):
             return True
         if cale_sur_un_autre_audio(o.source, audios, track_duration):

@@ -4,13 +4,18 @@ la règle « Lots de runs en fond » de PROJET.md exige (2026-10-21 : un run fig
 fin de tâche, personne ne le voit).
 
     python scripts/lot_runs.py lot.txt
-    python scripts/lot_runs.py lot.txt --code <worktree figé> --delai 120 --gel 20
+    python scripts/lot_runs.py lot.txt --delai 120 --gel 20
 
 `lot.txt` : un run par ligne, les arguments de `python -m src.cli`
 (« credits "Kanye West" », « streams Booba --no-kworb ») ; lignes vides et
 « # … » ignorées.
 
 Protections, d'office :
+- **code figé** : le lot tourne sur un worktree détaché au commit courant, fabriqué
+  au départ (`.claude/worktrees/lot-<date>`, `data/` en jonction, `.env` copié) et
+  retiré à la fin, jonction d'abord. Une fusion pendant le lot ne le touche plus
+  (2026-11-11, Aketo). Ce qui n'est pas commité n'y est pas : le lot le dit.
+  `--code .` lance le code vivant du dépôt, `--code <dossier>` un autre code ;
 - **délai** par run (`--delai`, minutes) : au-delà, l'arbre du run est tué ;
 - **gel** (`--gel`, minutes) : si ni le journal du run, ni la base
   (`data/music_credits.db*`), ni le brut (`data/brut/*.db*`) n'ont bougé depuis
@@ -33,7 +38,7 @@ se rattrape, un run de trop non.
 
 Journal du lot : `data/logs/lots/<date>/lot.log` (DÉBUT / FIN / FIGÉ / DÉLAI),
 la sortie de chaque run à côté. Codes : 0 tout est passé, 1 au moins un run en
-échec, figé ou hors délai, 2 `--code` refusé, 3 un autre écrivain occupe la base.
+échec, figé ou hors délai, 2 code refusé ou impossible à figer, 3 un autre écrivain occupe la base.
 """
 
 from __future__ import annotations
@@ -41,6 +46,7 @@ from __future__ import annotations
 import argparse
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -117,6 +123,72 @@ def refus_du_code(code: Path, racine: Path) -> str | None:
     if (racine / ".env").exists() and not (code / ".env").exists():
         return f"{code / '.env'} manque : copier celui du dépôt."
     return None
+
+
+#: Où le lot fabrique son worktree figé (sous `.claude/`, ignoré par git).
+DOSSIER_FIGES = Path(".claude") / "worktrees"
+
+
+def _git(depot: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", *args], cwd=depot, check=True, capture_output=True, text=True, encoding="utf-8"
+    ).stdout.strip()
+
+
+def _creer_jonction(cible: Path, lien: Path) -> None:
+    if sys.platform == "win32":
+        import _winapi
+
+        _winapi.CreateJunction(str(cible), str(lien))
+    else:
+        lien.symlink_to(cible, target_is_directory=True)
+
+
+def est_un_lien(chemin: Path) -> bool:
+    """Jonction Windows ou lien symbolique : le retirer ne touche pas sa cible."""
+    return chemin.is_symlink() or os.path.isjunction(chemin)
+
+
+def figer_le_code(racine: Path, nom: str) -> tuple[Path, str]:
+    """Un worktree DÉTACHÉ au commit courant de `racine` : le code du lot ne bouge
+    plus, quoi qu'on fusionne pendant qu'il tourne (2026-11-11 : la fusion de
+    `hors-du-disque` en plein run d'Aketo, import paresseux du nouveau code,
+    correcteur et audit tombés). Son `data/` devient une jonction vers celui du
+    dépôt, son `.env` est celui du dépôt. Rend (dossier, commit)."""
+    dossier = racine / DOSSIER_FIGES / nom
+    _git(racine, "worktree", "add", "--detach", str(dossier), "HEAD")
+    data = dossier / "data"
+    if data.exists() and not est_un_lien(data):
+        shutil.rmtree(data)  # la copie des fichiers suivis : un vrai dossier, neuf
+    _creer_jonction(racine / "data", data)
+    if (racine / ".env").exists():
+        shutil.copy2(racine / ".env", dossier / ".env")
+    return dossier, _git(dossier, "rev-parse", "HEAD")
+
+
+def retirer_le_code_fige(racine: Path, dossier: Path) -> str | None:
+    """La jonction D'ABORD, puis le worktree : un retrait récursif qui suivrait la
+    jonction viderait le vrai `data/`. Rend None, ou pourquoi le worktree reste."""
+    data = dossier / "data"
+    if est_un_lien(data):
+        if data.is_symlink():
+            data.unlink()
+        else:
+            os.rmdir(data)  # sur une jonction : retire le lien, jamais la cible
+    if os.path.lexists(data) and data.resolve() == (racine / "data").resolve():
+        return f"{data} mène encore au data du dépôt : worktree gardé, à retirer à la main"
+    try:
+        _git(racine, "worktree", "remove", "--force", str(dossier))
+    except (subprocess.CalledProcessError, OSError) as exc:
+        return f"worktree {dossier} non retiré ({exc})"
+    return None
+
+
+def modifications_hors_du_fige(racine: Path) -> list[str]:
+    """Les fichiers suivis modifiés et non commités : ils ne seront pas dans le code figé."""
+    sortie = _git(racine, "status", "--porcelain", "--untracked-files=no")
+    # `_git` retire l'espace de tête du statut (« ␣M chemin ») : découper au premier blanc.
+    return [ligne.split(maxsplit=1)[1] for ligne in sortie.splitlines() if ligne.strip()]
 
 
 def verdict(
@@ -247,6 +319,7 @@ def executer_lot(
     processus: Callable[[], list[tuple[int, str]]] = _processus,
     ecrire: Callable[[str], None] = print,
     tuer: Callable[[subprocess.Popen], set[int]] = tuer_arbre,
+    code_libelle: str | None = None,
 ) -> Lot:
     """Les runs un par un, chacun surveillé (délai, gel). Un autre écrivain
     arrête le lot avant le run suivant ; un run figé ou hors délai est tué,
@@ -262,6 +335,8 @@ def executer_lot(
             f.write(ligne + "\n")
         ecrire(ligne)
 
+    if code_libelle:
+        noter(f"CODE : {code_libelle}")
     if anti_veille:
         _anti_veille(True)
     try:
@@ -326,7 +401,10 @@ def main() -> int:
     )
     parser.add_argument("lot", type=Path, help="fichier de lot (un run par ligne)")
     parser.add_argument(
-        "--code", type=Path, default=RACINE, help="dossier du code à lancer (worktree figé)"
+        "--code",
+        type=Path,
+        help="dossier du code à lancer (défaut : un worktree figé au commit courant, "
+        "fabriqué puis retiré par le lot ; « --code . » = le code vivant du dépôt)",
     )
     parser.add_argument("--delai", type=float, default=DELAI_MIN, help="minutes max par run")
     parser.add_argument("--gel", type=float, default=GEL_MIN, help="minutes sans activité = figé")
@@ -344,23 +422,46 @@ def main() -> int:
     if not runs:
         print(f"Aucun run dans {args.lot}")
         return 1
-    refus = refus_du_code(args.code, RACINE)
-    if refus:
-        print(f"Lot refusé : {refus}")
-        return 2
-    sortie = args.sortie or RACINE / "data" / "logs" / "lots" / f"{datetime.now():%Y%m%d_%H%M%S}"
-    print(f"Pour arrêter ce lot : {sortie / FICHIER_ARRET}", flush=True)
-    lot = executer_lot(
-        runs,
-        sortie=sortie,
-        data=args.code / "data",
-        code=args.code,
-        commande=lambda a: [sys.executable, "-m", "src.cli", *a],
-        delai_s=args.delai * 60,
-        gel_s=args.gel * 60,
-        arreter_si_fige=args.arreter_si_fige,
-    )
-    return lot.code
+    horodatage = f"{datetime.now():%Y%m%d_%H%M%S}"
+    fige = None
+    if args.code is None:
+        try:
+            hors = modifications_hors_du_fige(RACINE)
+            fige, commit = figer_le_code(RACINE, f"lot-{horodatage}")
+        except (subprocess.CalledProcessError, OSError) as exc:
+            print(f"Lot refusé : impossible de figer le code ({exc})")
+            return 2
+        if hors:
+            print(f"⚠ Non commité, absent du code figé : {', '.join(hors)}")
+        code, libelle = fige, f"figé au commit {commit[:10]} ({fige})"
+    else:
+        code = args.code.resolve()
+        libelle = "le code vivant du dépôt" if code == RACINE else str(code)
+    try:
+        refus = refus_du_code(code, RACINE)
+        if refus:
+            print(f"Lot refusé : {refus}")
+            return 2
+        sortie = args.sortie or RACINE / "data" / "logs" / "lots" / horodatage
+        print(f"Code : {libelle}", flush=True)
+        print(f"Pour arrêter ce lot : {sortie / FICHIER_ARRET}", flush=True)
+        lot = executer_lot(
+            runs,
+            sortie=sortie,
+            data=code / "data",
+            code=code,
+            commande=lambda a: [sys.executable, "-m", "src.cli", *a],
+            delai_s=args.delai * 60,
+            gel_s=args.gel * 60,
+            arreter_si_fige=args.arreter_si_fige,
+            code_libelle=libelle,
+        )
+        return lot.code
+    finally:
+        if fige is not None:
+            reste = retirer_le_code_fige(RACINE, fige)
+            if reste:
+                print(f"⚠ {reste}")
 
 
 if __name__ == "__main__":

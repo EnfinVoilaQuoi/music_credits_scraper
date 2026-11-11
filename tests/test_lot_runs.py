@@ -244,6 +244,126 @@ class TestCodeRefuse:
         assert "Lot refusé" in capsys.readouterr().out
 
 
+def _depot_git(tmp_path):
+    """Un petit dépôt : un module, un fichier suivi sous `data/`, la « base » et
+    un `.env` non suivis."""
+    import subprocess
+
+    depot = tmp_path / "depot"
+    (depot / "src").mkdir(parents=True)
+    (depot / "data").mkdir()
+    (depot / "src" / "module.py").write_text("VERSION = 1\n", encoding="utf-8")
+    (depot / "data" / "suivi.json").write_text("{}", encoding="utf-8")
+    (depot / ".gitignore").write_text(".env\n.claude/\ndata/*.db\n", encoding="utf-8")
+    (depot / ".env").write_text("CLE=x\n", encoding="utf-8")
+    (depot / "data" / "music_credits.db").write_bytes(b"base")
+
+    def git(*args):
+        subprocess.run(
+            ["git", "-c", "user.name=t", "-c", "user.email=t@t.invalid", *args],
+            cwd=depot,
+            check=True,
+            capture_output=True,
+        )
+
+    git("init", "-q")
+    git("add", "src/module.py", "data/suivi.json", ".gitignore")
+    git("commit", "-q", "-m", "init")
+    return depot, git
+
+
+class TestCodeFige:
+    """2026-11-11 : `hors-du-disque` fusionné dans `main` en plein run d'Aketo ; le
+    correcteur et l'audit, importés paresseusement, ont lu un code à moitié neuf.
+    Le lot fige désormais son code d'office."""
+
+    def test_le_code_fige_ne_suit_pas_une_fusion(self, tmp_path):
+        depot, git = _depot_git(tmp_path)
+        fige, commit = lot_runs.figer_le_code(depot, "lot-essai")
+        try:
+            (depot / "src" / "module.py").write_text("VERSION = 2\n", encoding="utf-8")
+            git("commit", "-q", "-am", "fusion")
+            assert (fige / "src" / "module.py").read_text(encoding="utf-8") == "VERSION = 1\n"
+            assert len(commit) == 40
+            assert lot_runs.refus_du_code(fige, depot) is None  # data en jonction, .env copié
+            assert (fige / "data" / "music_credits.db").read_bytes() == b"base"
+        finally:
+            assert lot_runs.retirer_le_code_fige(depot, fige) is None
+
+    def test_le_retrait_garde_le_vrai_data(self, tmp_path):
+        depot, _ = _depot_git(tmp_path)
+        fige, _ = lot_runs.figer_le_code(depot, "lot-essai")
+        assert lot_runs.retirer_le_code_fige(depot, fige) is None
+        assert not fige.exists()
+        assert (depot / "data" / "music_credits.db").read_bytes() == b"base"
+        assert (depot / "data" / "suivi.json").exists()
+
+    def test_le_non_commite_est_signale(self, tmp_path):
+        depot, _ = _depot_git(tmp_path)
+        assert lot_runs.modifications_hors_du_fige(depot) == []
+        (depot / "src" / "module.py").write_text("VERSION = 3\n", encoding="utf-8")
+        assert lot_runs.modifications_hors_du_fige(depot) == ["src/module.py"]
+
+    def test_le_lot_tourne_sur_le_fige_et_le_retire(self, tmp_path, monkeypatch, capsys):
+        depot, _ = _depot_git(tmp_path)
+        lot = tmp_path / "lot.txt"
+        lot.write_text("credits Booba\n", encoding="utf-8")
+        monkeypatch.setattr(lot_runs, "RACINE", depot)
+        monkeypatch.setattr(sys, "argv", ["lot_runs", str(lot), "--sortie", str(tmp_path / "s")])
+        monkeypatch.setattr(sys.stdout, "reconfigure", lambda **_: None, raising=False)
+        vus = {}
+
+        def executer(runs, **kw):
+            vus.update(kw, existait=kw["code"].exists())
+            return lot_runs.Lot()
+
+        monkeypatch.setattr(lot_runs, "executer_lot", executer)
+        assert lot_runs.main() == 0
+        assert vus["existait"] and vus["code"].parent == depot / lot_runs.DOSSIER_FIGES
+        assert "figé au commit" in vus["code_libelle"]
+        assert not vus["code"].exists()  # retiré à la fin
+        assert (depot / "data" / "music_credits.db").exists()
+
+    def test_le_fige_est_retire_meme_si_le_lot_tombe(self, tmp_path, monkeypatch):
+        depot, _ = _depot_git(tmp_path)
+        lot = tmp_path / "lot.txt"
+        lot.write_text("credits Booba\n", encoding="utf-8")
+        monkeypatch.setattr(lot_runs, "RACINE", depot)
+        monkeypatch.setattr(sys, "argv", ["lot_runs", str(lot), "--sortie", str(tmp_path / "s")])
+        monkeypatch.setattr(sys.stdout, "reconfigure", lambda **_: None, raising=False)
+        vus = {}
+
+        def executer(runs, **kw):
+            vus["code"] = kw["code"]
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(lot_runs, "executer_lot", executer)
+        try:
+            lot_runs.main()
+        except KeyboardInterrupt:
+            pass
+        assert not vus["code"].exists()
+        assert (depot / "data" / "music_credits.db").exists()
+
+    def test_code_point_lance_le_code_vivant(self, tmp_path, monkeypatch):
+        depot, _ = _depot_git(tmp_path)
+        lot = tmp_path / "lot.txt"
+        lot.write_text("credits Booba\n", encoding="utf-8")
+        monkeypatch.setattr(lot_runs, "RACINE", depot)
+        monkeypatch.chdir(depot)
+        monkeypatch.setattr(
+            sys, "argv", ["lot_runs", str(lot), "--code", ".", "--sortie", str(tmp_path / "s")]
+        )
+        monkeypatch.setattr(sys.stdout, "reconfigure", lambda **_: None, raising=False)
+        vus = {}
+        monkeypatch.setattr(
+            lot_runs, "executer_lot", lambda runs, **kw: vus.update(kw) or lot_runs.Lot()
+        )
+        assert lot_runs.main() == 0
+        assert vus["code"] == depot.resolve() and vus["code_libelle"] == "le code vivant du dépôt"
+        assert not (depot / lot_runs.DOSSIER_FIGES).exists()
+
+
 def test_un_run_tue_qui_traine_n_est_pas_un_autre_ecrivain(tmp_path):
     """« streams Django » (2026-10-30) : tué pendant une copie calée vers le
     disque externe, le processus traînait encore et le lot s'arrêtait (code 3)."""

@@ -434,7 +434,8 @@ class TestAudioDementiParLesCatalogues:
     """LD2 (décision utilisateur 2026-10-31) : un LRC LRCLIB dont l'audio est
     contredit de plus de 10 s par deux catalogues concordants lus par ID n'est
     pas recevable — règle de VERDICT de la colonne (« On My Vibe » : audio
-    234 s, Deezer 252, Spotify 251, YouTube 252 ; 6 colonnes sur la base)."""
+    234 s, Deezer 252, Spotify 251, YouTube 252 ; 6 colonnes sur la base).
+    Étendu au LRC YouTube Music le 2026-11-11 (13 colonnes sur la base)."""
 
     _LRC = "[00:00.00] ♪\n[03:40.00] fin"
 
@@ -472,19 +473,46 @@ class TestAudioDementiParLesCatalogues:
         res = reconcile(self._obs(250, deezer=252, spotify_web=251), track_duration=252)
         assert res["lyrics_synced"].value == self._LRC
 
-    def test_le_lrc_youtube_music_n_est_pas_juge(self):
-        from datetime import datetime
+    _LRC_FIL = "[00:00.00] ♪\n[02:36.00] fin"
 
-        from src.enrichment.reconcile import reconcile
+    def _obs_ytm(self, audio, lrclib_audio=None):
+        from datetime import datetime
 
         vu = datetime(2026, 10, 31, 1, 0)
         obs = [
-            Observation("lyrics_synced", self._LRC, "ytmusic", seen_at=vu),
-            Observation("lrc_duree_audio", 234, "ytmusic", seen_at=vu),
-            Observation("duration", 252, "deezer", seen_at=vu),
-            Observation("duration", 251, "spotify_web", seen_at=vu),
+            Observation("lyrics_synced", self._LRC_FIL, "ytmusic", seen_at=vu),
+            Observation("lrc_duree_audio", audio, "ytmusic", seen_at=vu),
+            Observation("duration", 185, "deezer", seen_at=vu),
+            Observation("duration", 184, "spotify_web", seen_at=vu),
         ]
-        assert reconcile(obs, track_duration=252)["lyrics_synced"].value == self._LRC
+        if lrclib_audio is not None:
+            obs += [
+                Observation("lyrics_synced", "[00:00.00] a\n[02:50.00] b", "lrclib", seen_at=vu),
+                Observation("lrc_duree_audio", lrclib_audio, "lrclib", seen_at=vu),
+            ]
+        return obs
+
+    def test_le_lrc_youtube_music_est_juge(self):
+        """Étendu au LRC YouTube Music le 2026-11-11 (décision utilisateur) :
+        « Le fil » de Lord Esperanza, 185 s chez les catalogues, portait le LRC
+        de sa « Version originale », calé sur 172 s."""
+        from src.enrichment.reconcile import reconcile
+        from src.utils.lrc_garde import audio_dementi_par_les_catalogues as dementi
+
+        assert reconcile(self._obs_ytm(172), track_duration=185)["lyrics_synced"].value is None
+        assert (
+            reconcile(self._obs_ytm(184), track_duration=185)["lyrics_synced"].value
+            == self._LRC_FIL
+        )
+        assert dementi(172, {"deezer": 185, "spotify_web": 184}, "ytmusic").startswith(
+            "audio YouTube Music 172 s"
+        )
+
+    def test_le_lrc_lrclib_juste_reste_quand_celui_de_youtube_music_part(self):
+        from src.enrichment.reconcile import reconcile
+
+        res = reconcile(self._obs_ytm(172, lrclib_audio=185), track_duration=185)
+        assert res["lyrics_synced"].source == "LRCLIB"
 
     def test_en_colonne(self, data_manager):
         a = Artist(name="Kanye West")

@@ -50,6 +50,7 @@ from src.services.revue import (
     session_live,
     video_nomme,
 )
+from src.utils import meme_enregistrement as me
 from src.utils.artist_repository import ALIAS_LETTRES_MIN
 from src.utils.cert_titres import certif_du_morceau
 from src.utils.compteurs_partages import titres_parents
@@ -70,7 +71,6 @@ from src.utils.duree_youtube import (
     trop_courte_pour_les_paroles,
 )
 from src.utils.meme_enregistrement import (
-    accord_des_durees,
     durees_par_identifiant,
     fusion_par_isrc,
 )
@@ -524,24 +524,6 @@ def lrc(par) -> list[Cas]:
     return cas
 
 
-_INDICATION = re.compile(
-    r"^(?:couplet|refrain|verse|chorus|intro|outro|hook|pont|bridge|pre-chorus)\b"
-)
-
-
-def _texte_compare(texte: str) -> str:
-    """Les lignes de paroles, ponctuation et indications de structure retirées."""
-    lignes = (re.sub(r"\W+", " ", ligne).strip().lower() for ligne in texte.splitlines())
-    return "\n".join(ligne for ligne in lignes if ligne and not _INDICATION.match(ligne))
-
-
-def _sans_groupes(titre: str | None) -> str:
-    """Le titre sans ses parenthèses ni crochets : « Cudi the Kid (Kissy Sell
-    Out's Style From the Dark Side) » et « (TAI remix) » sont deux versions
-    d'un même morceau, même quand le descripteur n'est pas reconnu."""
-    return normalize_title(re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", "", titre or ""))
-
-
 def paroles_identiques(par, durees: dict[int, dict] | None = None) -> list[Cas]:
     """Le même texte sur deux fiches d'un artiste aux titres NON équivalents
     (chantier D, 2026-10-13) : le pendant de `lrc_emprunte` pour les paroles
@@ -559,96 +541,33 @@ def paroles_identiques(par, durees: dict[int, dict] | None = None) -> list[Cas]:
     relation Genius entre les deux pages explique le texte commun (information) ;
     deux textes servis par leurs propres pages Genius ne sont pas posés par
     notre code — doublon de pages ou version, à l'humain (décision). Reste une
-    ERREUR le texte qu'un héritage (`heritage:<id>`) a posé sur une fiche."""
+    ERREUR le texte qu'un héritage (`heritage:<id>`) a posé sur une fiche.
+
+    Versé au panneau le 2026-11-11 : deux textes de leurs propres pages sont une
+    décision de fusion du ♊ `revue:meme_enregistrement` (action et mémoire) ;
+    la famille ne la garde qu'en information. Le juge est commun
+    (`meme_enregistrement.juger_textes_identiques`)."""
     durees = durees or {}
+    libelles = {
+        me.TEXTE_VERSIONS: (INFORMATION, ""),
+        me.TEXTE_DUREES: (INFORMATION, " — durées différentes : version non nommée"),
+        me.TEXTE_GENIUS: (INFORMATION, " — liées par Genius : version que la page nomme"),
+        me.TEXTE_PAGES: (
+            INFORMATION,
+            " — texte de leurs pages Genius : décision au panneau (♊ meme_enregistrement)",
+        ),
+        me.TEXTE_ERREUR: (ERREUR, ""),
+    }
     cas = []
     for ts in par.values():
-        groupes = collections.defaultdict(list)
-        for t in ts:
-            ref = paroles_de_reference(t["lyrics"], t["lyrics_source"])
-            if ref and len(ref) > 200 and jugeable(ref):
-                groupes[_texte_compare(ref)].append(t)
-        for g in groupes.values():
-            for i, a in enumerate(g):
-                for b in g[i + 1 :]:
-                    if a["genius_id"] and a["genius_id"] == b["genius_id"]:
-                        continue
-                    if (
-                        titres_equivalents(a["title"], b["title"])
-                        or meme_socle(a["title"], b["title"])
-                        or _sans_groupes(a["title"]) == _sans_groupes(b["title"])
-                    ):
-                        continue
-                    # Deux VERSIONS (acapella, démo, `[V1]`) d'un même morceau
-                    # ont ses paroles : expliqué, pour information (« Any Man
-                    # (Acapella) » / « Fucking Crazy (Any Man Demo Version) »,
-                    # 2026-11-02). Une seule version : rien ne dit que c'est la
-                    # sienne (« Tous Les Jours (Remix) » aux paroles de « Fais le
-                    # vide ») — une erreur, comme deux pages sans version.
-                    version = porte_une_version(a["title"]) and porte_une_version(b["title"])
-                    libelle = f"{_lib(a)} et {_lib(b)} : mêmes paroles"
-                    nature = INFORMATION if version else ERREUR
-                    if (
-                        not version
-                        and accord_des_durees(durees.get(a["id"]), durees.get(b["id"])) is False
-                    ):
-                        nature = INFORMATION
-                        libelle += " — durées différentes : version non nommée"
-                    elif nature == ERREUR and _relies_par_genius(a, b):
-                        nature = INFORMATION
-                        libelle += " — liées par Genius : version que la page nomme"
-                    elif nature == ERREUR and _textes_de_leurs_pages(a, b):
-                        nature = DECISION
-                        libelle += " — texte de leurs pages Genius : doublon de pages ou version ?"
-                    cas.append(
-                        Cas("paroles_identiques", a["artiste"], [a["id"], b["id"]], libelle, nature)
-                    )
+        for a, b in me.paires_au_meme_texte(ts):
+            nature, suite = libelles[me.juger_textes_identiques(a, b, durees)]
+            libelle = f"{_lib(a)} et {_lib(b)} : mêmes paroles{suite}"
+            cas.append(Cas("paroles_identiques", a["artiste"], [a["id"], b["id"]], libelle, nature))
     return cas
 
 
-def _champ(t, cle):
-    """La colonne `cle` d'une ligne (`sqlite3.Row` ou dict), None si absente."""
-    try:
-        return t[cle]
-    except (KeyError, IndexError):
-        return None
-
-
-def _adresse(url: str | None) -> str:
-    return (url or "").strip().rstrip("/").lower()
-
-
-def _relies_par_genius(a, b) -> bool:
-    """Une relation Genius (`remix_of`, `samples`…) de l'une nomme la PAGE de
-    l'autre : Genius sait que ce sont deux pages liées (« ’Til I Collapse
-    Freestyle » remix de « Green Lantern (Collapse G-Unit Freestyle) »,
-    « For What Demo » qui échantillonne « for what? »)."""
-    for x, y in ((a, b), (b, a)):
-        cible = _adresse(_champ(y, "genius_url"))
-        if not cible:
-            continue
-        try:
-            relations = json.loads(_champ(x, "relationships") or "[]")
-        except ValueError:
-            continue
-        if any(
-            isinstance(r, dict) and _adresse(r.get("url")) == cible
-            for r in (relations if isinstance(relations, list) else [])
-        ):
-            return True
-    return False
-
-
-def _textes_de_leurs_pages(a, b) -> bool:
-    """Les deux textes sont ceux que leurs PROPRES pages Genius servent (source
-    `genius`, pas un héritage `heritage:<id>` posé par notre code) : Genius
-    tient deux pages au même texte — doublon de pages (« It must be » / « Must
-    be me »), version non nommée ou erreur de Genius ; rien dans nos données ne
-    départage, c'est une DÉCISION (2026-11-10, les 7 erreurs de la vague 3)."""
-    return all(
-        (_champ(t, "lyrics_source") or "").lower().startswith("genius") and _champ(t, "genius_url")
-        for t in (a, b)
-    )
+_champ = me.champ
 
 
 #: Les familles qui jugent déjà une PAIRE de fiches d'un artiste : une paire
@@ -677,8 +596,6 @@ def meme_enregistrement(
     verdict du panneau posé à la main qui nomme l'autre fiche ou une correction
     humaine — ne ressort pas ; le verdict d'une règle ne la tranche pas, et deux
     parties nommées (« Keep My Spirit Alive » / « pt 2 ») ne sont pas un doublon."""
-    from src.utils import meme_enregistrement as me
-
     deja = me.paires_deja_tranchees(c, pistes)
     for x in cas_existants:
         if x.famille in FAMILLES_DE_PAIRES:
@@ -946,6 +863,21 @@ def _seconds_signaux(c, g) -> list[str]:
     return signaux
 
 
+def _verdict_du_compteur(c, g) -> tuple[str, str]:
+    """Deux fiches d'un disque au même compteur, sans ID Spotify commun
+    (`meme_enregistrement.juger_meme_compteur`, 2026-11-11) : deux places du
+    disque (« Calypso I / II ») ou deux durées → deux morceaux, information ;
+    sinon la décision de fusion est au panneau (♊ `meme_enregistrement`)."""
+    a, b = sorted(g, key=lambda t: t["id"])
+    ids = {a["id"], b["id"]}
+    v = me.juger_meme_compteur(a, b, me.places_par_fiche(c, ids), durees_par_identifiant(c, ids))
+    if v == me.COMPTEUR_DEUX_PLACES:
+        return INFORMATION, " — deux places du disque : deux morceaux"
+    if v == me.COMPTEUR_DUREES:
+        return INFORMATION, " — durées par identifiant différentes : deux enregistrements"
+    return INFORMATION, " : décision au panneau (♊ meme_enregistrement)"
+
+
 def streams(c, par) -> list[Cas]:
     """`streams_double` (règle du 2026-11-09, simulée sur 4 cas) : un compteur
     Spotify égal sur deux pages n'est une erreur qu'avec un ID Spotify PARTAGÉ ;
@@ -982,7 +914,12 @@ def streams(c, par) -> list[Cas]:
                         # fusionner (« À la vibe et mektoub ») — à l'humain
                         # (2026-11-10). Seul l'ID partagé est une donnée fausse.
                         nature = DECISION
-                        libelle += " : doublon ou compteur que Spotify partage ?"
+                        suite = " : doublon ou compteur que Spotify partage ?"
+                        if len(g) == 2 and "même disque" in signaux:
+                            # Versé au panneau le 2026-11-11 : le juge commun
+                            # (`meme_enregistrement.juger_meme_compteur`).
+                            nature, suite = _verdict_du_compteur(c, g)
+                        libelle += suite
                 else:
                     nature = INFORMATION
                     libelle += " — aucun autre signal : égalité de hasard"

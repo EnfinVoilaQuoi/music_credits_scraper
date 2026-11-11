@@ -166,10 +166,17 @@ CATALOGUES_PAR_ID = ("deezer", "spotify_web", "apple_music", "youtube")
 ECART_AUDIO_DEMENTI_S = 10
 ACCORD_CATALOGUES_S = 2
 
+#: Sources dont LD2 juge l'audio du LRC : LRCLIB (2026-10-31), YouTube Music
+#: (décision utilisateur 2026-11-11, simulée sur la base : 13 colonnes).
+SOURCES_LRC_AUDIO_JUGE = ("lrclib", "ytmusic")
+_LIBELLES_SOURCE = {"lrclib": "LRCLIB", "ytmusic": "YouTube Music"}
 
-def audio_dementi_par_les_catalogues(duree_audio: int | None, durees: dict) -> str | None:
-    """PUR. LD2 (décision utilisateur 2026-10-31) : l'audio sur lequel LRCLIB a
-    calé son LRC est contredit de plus de `ECART_AUDIO_DEMENTI_S` par au moins
+
+def audio_dementi_par_les_catalogues(
+    duree_audio: int | None, durees: dict, source: str = "lrclib"
+) -> str | None:
+    """PUR. LD2 (décision utilisateur 2026-10-31) : l'audio sur lequel `source`
+    (LRCLIB, ou YouTube Music depuis le 2026-11-11) a calé son LRC est contredit de plus de `ECART_AUDIO_DEMENTI_S` par au moins
     deux catalogues INDÉPENDANTS (`vote_durees.famille`) lus par ID et
     concordants entre eux à `ACCORD_CATALOGUES_S` près : ce LRC minute un autre
     audio (« On My Vibe » : audio 234 s, Deezer 252, Spotify 251, YouTube 252).
@@ -188,7 +195,8 @@ def audio_dementi_par_les_catalogues(duree_audio: int | None, durees: dict) -> s
         if len({famille(s) for s in accord}) < 2:
             continue
         if all(abs(d - int(duree_audio)) > ECART_AUDIO_DEMENTI_S for d in accord.values()):
-            return f"audio LRCLIB {duree_audio} s ≠ " + ", ".join(
+            libelle = _LIBELLES_SOURCE.get(source, source)
+            return f"audio {libelle} {duree_audio} s ≠ " + ", ".join(
                 f"{s} {d} s" for s, d in sorted(accord.items())
             )
     return None

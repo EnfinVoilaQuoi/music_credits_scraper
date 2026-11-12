@@ -15,6 +15,7 @@ from src.models.track import SOURCE_NON_TRANSCRITES
 from src.observability import source_usage
 from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
 from src.utils import credits_genius_api
+from src.utils.corrections_fiches import constat_instrumental_refuse
 from src.utils.credit_roles import LIBELLES_HORS_CREDITS, map_role, valeur_vide
 from src.utils.encodage import reparer_c1
 from src.utils.inedits import titre_sans_marqueur
@@ -397,6 +398,11 @@ class GeniusScraperV3(CrawlAIScraperBase):
         # (Instrumental) », 3 320 caractères) — décision utilisateur 2026-10-09.
         if titre_instrumental:
             instrumental_ecrit = True
+        # La PAGE se dit instrumentale (« This song is an instrumental »), un
+        # humain l'a démentie : le constat ne se pose pas, les paroles d'ailleurs
+        # (héritage) restent (Diam's « Confessions nocturnes - Live 2006 »,
+        # 2026-11-12). Un TITRE instrumental ne se dément pas ainsi.
+        page_dementie = not est_instrumental(track.title) and constat_instrumental_refuse(track)
         if instrumental_ecrit:
             lyrics = ""
         if lyrics:
@@ -419,6 +425,12 @@ class GeniusScraperV3(CrawlAIScraperBase):
             if track.lyrics.source == SOURCE_NON_TRANSCRITES:
                 track.lyrics.source = "genius"  # les paroles sont arrivées
             logger.info(f"✅ Paroles récupérées pour '{track.title}' ({len(lyrics.split())} mots)")
+        elif page_dementie and (instrumental_ecrit or self._is_instrumental_bs4(soup)):
+            track.lyrics.instrumental = False
+            track.lyrics.scraped_at = datetime.now()
+            logger.info(
+                f"🎙️ Page Genius instrumentale démentie à la main, pas de constat : '{track.title}'"
+            )
         elif instrumental_ecrit or self._is_instrumental_bs4(soup):
             # Pas de paroles PAR NATURE : le scrape a ABOUTI, il se date et se
             # source comme un succès — c'est ce constat qui évite de re-crawler

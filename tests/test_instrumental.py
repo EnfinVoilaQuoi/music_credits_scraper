@@ -101,6 +101,31 @@ class TestDetectionPage:
         assert t.lyrics.scraped_at is not None, "le scrape a ABOUTI, il se date"
         assert t.lyrics.source == "genius"
 
+    def test_page_instrumentale_dementie_garde_les_paroles(
+        self, scraper, page_instrumentale, monkeypatch
+    ):
+        """Diam's « Confessions nocturnes - Live 2006 » : Genius la dit
+        instrumentale, elle est chantée (décision utilisateur 2026-11-12). Le
+        refus `constat_instrumental` empêche le constat ; les paroles héritées
+        restent."""
+        from src.scrapers import genius_scraper_v3
+
+        monkeypatch.setattr(genius_scraper_v3, "constat_instrumental_refuse", lambda t: True)
+        t = Track(title="Confessions nocturnes - Live 2006", artist=Artist(name="Diam's"))
+        t.lyrics.text, t.lyrics.source = "Ouais", "heritage:8223"
+        scraper._apply_lyrics_from_html(page_instrumentale, t)
+        assert t.lyrics.instrumental is False
+        assert t.lyrics.text == "Ouais" and t.lyrics.source == "heritage:8223"
+        assert t.lyrics.scraped_at is not None
+
+    def test_un_titre_instrumental_ne_se_dement_pas(self, scraper, page_instrumentale, monkeypatch):
+        from src.scrapers import genius_scraper_v3
+
+        monkeypatch.setattr(genius_scraper_v3, "constat_instrumental_refuse", lambda t: True)
+        t = Track(title="Suzy (Instrumental)", artist=Artist(name="Diam's"))
+        scraper._apply_lyrics_from_html(page_instrumentale, t)
+        assert t.lyrics.instrumental is True
+
     def test_apply_avec_paroles_pose_faux(self, scraper, page_a_paroles):
         t = Track(title="Dans le vide", artist=Artist(name="Josman"))
         assert scraper._apply_lyrics_from_html(page_a_paroles, t)

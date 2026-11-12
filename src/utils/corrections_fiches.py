@@ -149,6 +149,7 @@ PAR_ENREGISTREMENT = frozenset(
         "id_discogs",
         "id_apple",
         "isrc",
+        "constat_instrumental",
     }
 )
 
@@ -627,6 +628,26 @@ def memoriser_isrc_refuse(track, isrc: str, origine: str | None = None) -> None:
 
 def oublier_isrc_refuse(track, isrc: str) -> bool:
     return _oublier(track, "isrc", str(isrc).strip().upper())
+
+
+#: Valeur unique du refus `constat_instrumental` : c'est la PAGE Genius qui se
+#: dit instrumentale (« This song is an instrumental »), pas le titre.
+CONSTAT_GENIUS = "genius"
+
+
+def constat_instrumental_refuse(track) -> bool:
+    """La page Genius se dit instrumentale à tort : un humain l'a démentie.
+    Diam's « Confessions nocturnes - Live 2006 » (avec Vitaa), chantée, que
+    Genius marque instrumentale (décision utilisateur 2026-11-12)."""
+    return any(r["valeur"] == CONSTAT_GENIUS for r in _lignes(track, "constat_instrumental"))
+
+
+def memoriser_constat_instrumental_refuse(track, origine: str | None = None) -> None:
+    _memoriser(track, "constat_instrumental", CONSTAT_GENIUS, origine=origine)
+
+
+def oublier_constat_instrumental_refuse(track) -> bool:
+    return _oublier(track, "constat_instrumental", CONSTAT_GENIUS)
 
 
 def memoriser_disque_refuse(

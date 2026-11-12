@@ -115,6 +115,18 @@ class TestHeriter:
             CreditRole.MIXING_ENGINEER,
         }
 
+    def test_un_constat_d_instrumental_ne_recoit_pas_les_paroles(self):
+        """« Jesus Walks (Orchestral) » : la page Genius dit « instrumental », la
+        famille (performance) transmet les paroles ; le constat l'emporte
+        (2026-11-12, 9 fiches dont les paroles de l'original revenaient)."""
+        v = _version("Suzy (Orchestral)")
+        v.lyrics.instrumental = True
+        h = vh.heriter(v, _socle())
+        assert h.famille == "performance"
+        assert not h.paroles and v.lyrics.text is None and v.lyrics.instrumental is True
+        # les crédits d'écriture passent toujours
+        assert ("Diam's", CreditRole.WRITER) in {(c.name, c.role) for c in v.credits}
+
     def test_instrumental_sans_paroles_avec_constat(self):
         v = _version("Suzy (Instrumental)")
         h = vh.heriter(v, _socle())

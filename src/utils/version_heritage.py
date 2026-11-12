@@ -393,7 +393,7 @@ def heriter(version, socle, *, famille: str | None = None) -> Heritage:
     UNION : un crédit déjà porté par la version (même nom, même rôle) n'est pas
     doublé ; des paroles déjà présentes ne sont pas remplacées. Un instrumental
     (`instrumental`) reçoit le CONSTAT `lyrics.instrumental = True` (e27), jamais
-    les paroles.
+    les paroles ; une version de toute famille qui porte déjà ce constat non plus.
     """
     famille = famille or famille_de_fiche(version.title, version.relationships)
     bilan = Heritage(famille=famille, credits=[])
@@ -424,7 +424,18 @@ def heriter(version, socle, *, famille: str | None = None) -> Heritage:
         # version l'emporte toujours. La durée ne passe pas (un instrumental
         # peut être raccourci ou rallongé). Décision utilisateur 2026-09-26.
         bilan.mesures = _heriter_mesures(version, socle)
-    elif regle.paroles and socle.lyrics.text and not version.lyrics.text:
+    elif (
+        regle.paroles
+        and socle.lyrics.text
+        and not version.lyrics.text
+        # Un CONSTAT d'instrumental (page Genius « This song is an
+        # instrumental », titre, ou décision) vaut pour la version : elle n'a
+        # pas de paroles, celles de l'original n'y reviennent pas. Sans cette
+        # garde, la page vidait les paroles et l'héritage de fin d'étape les
+        # reposait (9 fiches le 2026-11-12, « Jesus Walks (Orchestral) »,
+        # « Every Hour (Piano Solo) » ; déjà 14 retirées à la main le 2026-10-13).
+        and version.lyrics.instrumental is not True
+    ):
         version.lyrics.text = socle.lyrics.text
         version.lyrics.present = True
         version.lyrics.source = f"{SOURCE}:{socle.id}" if socle.id else SOURCE

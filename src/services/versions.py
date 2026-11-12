@@ -185,10 +185,17 @@ def constater_instrumentaux(dm, tracks) -> int:
     Passe par l'écrivain dédié `constater_instrumental` (`save_track` ne sait
     pas vider des paroles) et met les objets en phase, sans quoi le prochain
     `save_track` du run regarnirait la colonne. Rend le nombre de fiches touchées.
+
+    Une fiche déjà CONSTATÉE instrumentale (page Genius) qui porte les paroles
+    de son original par l'héritage les perd aussi : l'héritage de fin d'étape
+    les reposait sur la page qui venait de les vider (2026-11-12, 9 fiches).
     """
     n = 0
     for t in tracks:
-        if t.id is None or not est_instrumental(t.title):
+        if t.id is None:
+            continue
+        constat_herite = t.lyrics.instrumental is True and est_herite(t.lyrics.source)
+        if not (est_instrumental(t.title) or constat_herite):
             continue
         if t.lyrics.instrumental is True and not t.lyrics.text and not t.lyrics.synced:
             continue

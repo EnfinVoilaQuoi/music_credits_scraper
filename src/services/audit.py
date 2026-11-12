@@ -1459,6 +1459,8 @@ def refus_vivants(c, pistes) -> list[Cas]:
             return bool(champs_songbpm_refuses([mesure_de_cle(valeur)], mesures_songbpm[t["id"]]))
         if nature == "parution":
             return valeur in disques[t["id"]]
+        if nature == "constat_instrumental":
+            return t["instrumental"] == 1
         return False
 
     cas = []
@@ -1466,7 +1468,7 @@ def refus_vivants(c, pistes) -> list[Cas]:
         "SELECT genius_id, artiste, titre, album, nature, valeur FROM refus "
         "WHERE nature IN ('id_spotify', 'id_deezer', 'id_apple', 'id_discogs','isrc', 'video', 'lrc', 'paroles', "
         "'page_songbpm', "
-        "'page_getsongbpm', 'mesure_songbpm', 'parution')"
+        "'page_getsongbpm', 'mesure_songbpm', 'parution', 'constat_instrumental')"
     ):
         if r["genius_id"] is not None:
             visees = par_genius.get(int(r["genius_id"]), [])

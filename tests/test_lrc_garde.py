@@ -102,6 +102,29 @@ class TestInstrumental:
         assert a_vider.lyrics.text is None and a_vider.lyrics.synced is None
         assert chante.lyrics.synced == _LRC
 
+    def test_constat_de_la_page_perd_les_paroles_heritees(self):
+        """« Jesus Walks (Orchestral) » : page Genius instrumentale, paroles de
+        l'original reposées par l'héritage (2026-11-12). Des paroles d'une
+        source DIRECTE sur une fiche constatée ne sont pas touchées ici."""
+
+        class _DM:
+            constates: list = []
+
+            def constater_instrumental(self, tid):
+                self.constates.append(tid)
+                return True
+
+        herite = _t("Jesus Walks (Orchestral)", tid=1, paroles=_PAROLES, instrumental=True)
+        herite.lyrics.source = "heritage:6795"
+        directes = _t("Suzy - Live", tid=2, paroles=_PAROLES, instrumental=True)
+        sans_constat = _t("Hey Mama (Live)", tid=3, paroles=_PAROLES)
+        sans_constat.lyrics.source = "heritage:6694"
+        dm = _DM()
+        assert constater_instrumentaux(dm, [herite, directes, sans_constat]) == 1
+        assert dm.constates == [1]
+        assert herite.lyrics.text is None and herite.lyrics.instrumental is True
+        assert sans_constat.lyrics.text == _PAROLES
+
 
 class TestAutreMorceau:
     def test_le_lrc_confirme_par_une_autre_fiche_est_refuse(self):

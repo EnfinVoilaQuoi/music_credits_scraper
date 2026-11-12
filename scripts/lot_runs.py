@@ -38,13 +38,22 @@ se rattrape, un run de trop non.
 
 Journal du lot : `data/logs/lots/<date>/lot.log` (DÉBUT / FIN / FIGÉ / DÉLAI),
 la sortie de chaque run à côté. Codes : 0 tout est passé, 1 au moins un run en
-échec, figé ou hors délai, 2 code refusé ou impossible à figer, 3 un autre écrivain occupe la base.
+échec, figé ou hors délai, 2 code refusé ou impossible à figer, 3 un autre écrivain occupe la base,
+4 des colonnes dérivées ne suivent plus le code.
+
+Verdicts à jour (2026-11-12) : avant le premier run, `scripts/rematerialiser.py` À
+BLANC sur toute la base, avec le code du lot. Si des fiches changeraient, une
+règle de verdict a été fusionnée sans être rematérialisée : le lot est REFUSÉ
+(code 4), sinon chaque run qui relit une de ces fiches ferait monter
+`colonne_verdict` (LD2, 2026-11-11 : +16 sur 8 artistes, découverts au fil du
+lot). Rematérialiser d'abord (`--apply`), ou `--sans-verdicts` pour passer outre.
 """
 
 from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -293,6 +302,43 @@ class Lot:
         return 0 if all(r.statut == "ok" for r in self.resultats) else 1
 
 
+_CHANGEMENTS = re.compile(r"^(\d+) fiche\(s\) changent", re.M)
+
+
+def fiches_a_rematerialiser(sortie: str) -> int | None:
+    """Le nombre de fiches que `rematerialiser.py` à blanc changerait, lu dans
+    sa sortie ; None si la sortie ne le dit pas (script en erreur)."""
+    m = _CHANGEMENTS.search(sortie or "")
+    return int(m.group(1)) if m else None
+
+
+def controler_verdicts(
+    code: Path, lancer: Callable[..., subprocess.CompletedProcess] = subprocess.run
+) -> str | None:
+    """Raison de refuser le lot, ou None : `rematerialiser.py` à blanc, lancé
+    avec le code du lot, ne doit rien changer. Un script illisible refuse aussi :
+    un contrôle qui n'a pas eu lieu ne vaut pas un contrôle passé."""
+    fini = lancer(
+        [sys.executable, "scripts/rematerialiser.py"],
+        cwd=code,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    n = fiches_a_rematerialiser(fini.stdout)
+    if n is None:
+        return f"contrôle des verdicts impossible (code {fini.returncode}) : {fini.stdout[-300:]}"
+    if n:
+        ligne = _CHANGEMENTS.search(fini.stdout)
+        detail = fini.stdout[ligne.start() :].splitlines()[0]
+        return (
+            f"{detail} — une règle de verdict n'a pas été rematérialisée : "
+            "python scripts/rematerialiser.py --apply, ou --sans-verdicts"
+        )
+    return None
+
+
 def _anti_veille(actif: bool) -> None:
     """Windows : interdit la mise en veille (pas l'écran) tant que `actif`."""
     if sys.platform != "win32":
@@ -414,6 +460,11 @@ def main() -> int:
     parser.add_argument(
         "--arreter-si-fige", action="store_true", help="arrêter le lot au premier run figé"
     )
+    parser.add_argument(
+        "--sans-verdicts",
+        action="store_true",
+        help="ne pas vérifier que les colonnes dérivées suivent le code (rematerialiser à blanc)",
+    )
     args = parser.parse_args()
     if sys.platform == "win32":
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -442,6 +493,14 @@ def main() -> int:
         if refus:
             print(f"Lot refusé : {refus}")
             return 2
+        # Un autre écrivain : le lot s'arrêtera avant son premier run (code 3) ;
+        # le contrôle, qui écrit puis annule fiche par fiche, attendrait sa base.
+        if not args.sans_verdicts and not autres_ecrivains(_processus(), {psutil.Process().pid}):
+            print("Contrôle des verdicts (rematerialiser à blanc)…", flush=True)
+            raison = controler_verdicts(code)
+            if raison:
+                print(f"Lot refusé : {raison}")
+                return 4
         sortie = args.sortie or RACINE / "data" / "logs" / "lots" / horodatage
         print(f"Code : {libelle}", flush=True)
         print(f"Pour arrêter ce lot : {sortie / FICHIER_ARRET}", flush=True)

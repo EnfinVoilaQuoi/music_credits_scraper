@@ -6,6 +6,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
+import pytest
+
 RACINE = Path(__file__).resolve().parents[1]
 _spec = importlib.util.spec_from_file_location("lot_runs", RACINE / "scripts" / "lot_runs.py")
 lot_runs = importlib.util.module_from_spec(_spec)
@@ -277,6 +279,11 @@ class TestCodeFige:
     correcteur et l'audit, importés paresseusement, ont lu un code à moitié neuf.
     Le lot fige désormais son code d'office."""
 
+    @pytest.fixture(autouse=True)
+    def _verdicts_a_jour(self, monkeypatch):
+        # Le contrôle des verdicts (`TestVerdictsAJour`) lancerait le vrai script.
+        monkeypatch.setattr(lot_runs, "controler_verdicts", lambda code: None)
+
     def test_le_code_fige_ne_suit_pas_une_fusion(self, tmp_path):
         depot, git = _depot_git(tmp_path)
         fige, commit = lot_runs.figer_le_code(depot, "lot-essai")
@@ -406,3 +413,34 @@ def test_qui_reste_devant_leve_la_limite(tmp_path, monkeypatch):
     code = f"import os,pathlib;pathlib.Path({str(vu)!r}).write_text(os.environ['FENETRE_VISIBLE_MAX_S'])"
     _executer(tmp_path, [code])
     assert vu.read_text() == "0"
+
+
+class TestVerdictsAJour:
+    """Avant le lot, `rematerialiser.py` à blanc ne doit rien changer : sinon une
+    règle de verdict fusionnée sans recalcul fait monter `colonne_verdict` à
+    chaque run (LD2, 2026-11-11 : +16 sur 8 artistes)."""
+
+    @staticmethod
+    def _lancer(sortie, code=0):
+        def lancer(cmd, **kw):
+            assert cmd[-1] == "scripts/rematerialiser.py" and "--apply" not in cmd
+            return lot_runs.subprocess.CompletedProcess(cmd, code, stdout=sortie)
+
+        return lancer
+
+    def test_rien_a_rematerialiser_le_lot_part(self, tmp_path):
+        sortie = "0 fiche(s) changent : {}\n(à blanc — relancer avec --apply pour écrire)\n"
+        assert lot_runs.controler_verdicts(tmp_path, self._lancer(sortie)) is None
+
+    def test_des_fiches_a_rematerialiser_refusent_le_lot(self, tmp_path):
+        sortie = "8 fiche(s) changent : {'lyrics_synced': 8, 'lyrics_synced_source': 8}\n"
+        raison = lot_runs.controler_verdicts(tmp_path, self._lancer(sortie))
+        assert raison.startswith("8 fiche(s) changent") and "--apply" in raison
+
+    def test_un_controle_qui_n_a_pas_eu_lieu_refuse(self, tmp_path):
+        raison = lot_runs.controler_verdicts(tmp_path, self._lancer("Traceback…", code=1))
+        assert raison and "impossible" in raison
+
+    def test_lecture_de_la_sortie(self):
+        assert lot_runs.fiches_a_rematerialiser("[log]\n12 fiche(s) changent : {}") == 12
+        assert lot_runs.fiches_a_rematerialiser("") is None

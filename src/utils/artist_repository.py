@@ -713,6 +713,7 @@ class ArtistRepository:
                         "debut": rel.begin_date,
                         "fin": rel.end_date,
                         "detail": rel.detail,
+                        "origine": rel.formation_origine,
                         "quand": maintenant,
                     }
                     if deja:
@@ -723,6 +724,7 @@ class ArtistRepository:
                                 "UPDATE artist_relations SET related_artist_id = :lie, "
                                 "source = :source, formation = :formation, "
                                 "begin_date = :debut, end_date = :fin, detail = :detail, "
+                                "formation_origine = :origine, "
                                 "status = 'confirmed', confirmed_at = :quand "
                                 "WHERE id = :rid"
                             ),
@@ -733,9 +735,10 @@ class ArtistRepository:
                             text(
                                 "INSERT INTO artist_relations (artist_id, related_artist_id, "
                                 "related_name, kind, source, formation, begin_date, "
-                                "end_date, detail, status, confirmed_at, created_at) "
+                                "end_date, detail, formation_origine, status, confirmed_at, "
+                                "created_at) "
                                 "VALUES (:aid, :lie, :nom, :kind, :source, :formation, :debut, "
-                                ":fin, :detail, 'confirmed', :quand, :quand)"
+                                ":fin, :detail, :origine, 'confirmed', :quand, :quand)"
                             ),
                             params,
                         )
@@ -818,12 +821,17 @@ class ArtistRepository:
         formation: str | None = None,
         *,
         effacer_nature: bool = False,
+        origine: str | None = None,
     ) -> bool:
         """Arbitre UN lien existant : `proposed` → `confirmed` / `refused`, ou l'inverse.
 
         `confirmed_at` est posé quand on confirme, effacé sinon. `formation` n'est
         écrite que si fournie (la nature d'un alias reste NULL). `effacer_nature` la
         retire : rétablir une confirmation par règle défait aussi sa nature.
+        `origine` (e65) : qui choisit la nature écrite — None = à la main,
+        « regle:<code> » = une règle ; inchangée quand aucune nature n'est écrite.
+        Une écriture de règle ne change ni n'efface une nature choisie à la main
+        (verrou, 2026-11-13) : seule la main défait la main.
         """
         if status not in self.STATUTS_RELATION:
             raise ValueError(f"Statut de lien inconnu : {status!r}")
@@ -845,8 +853,19 @@ class ArtistRepository:
                     text(
                         "UPDATE artist_relations SET status = :status, "
                         "confirmed_at = :quand, "
-                        "formation = CASE WHEN :effacer THEN NULL "
-                        "ELSE COALESCE(:formation, formation) END "
+                        # Verrou (décision utilisateur 2026-11-13) : une
+                        # règle (`origine` posée) ne touche JAMAIS une nature
+                        # choisie à la main (posée, sans origine), ni pour la
+                        # changer, ni pour l'effacer.
+                        "formation = CASE WHEN :regle AND formation IS NOT NULL "
+                        "AND formation_origine IS NULL THEN formation "
+                        "WHEN :effacer THEN NULL "
+                        "ELSE COALESCE(:formation, formation) END, "
+                        "formation_origine = CASE WHEN :regle AND formation IS NOT NULL "
+                        "AND formation_origine IS NULL THEN NULL "
+                        "WHEN :effacer THEN NULL "
+                        "WHEN :formation IS NOT NULL THEN :origine "
+                        "ELSE formation_origine END "
                         "WHERE id = :rid"
                     ),
                     {
@@ -854,6 +873,8 @@ class ArtistRepository:
                         "quand": datetime.now() if status == "confirmed" else None,
                         "formation": formation,
                         "effacer": effacer_nature,
+                        "origine": origine,
+                        "regle": origine is not None,
                         "rid": rid,
                     },
                 )
@@ -902,6 +923,27 @@ class ArtistRepository:
                 return ligne["id"]
         return None
 
+    def poser_genius_id_formation(
+        self, artist_id: int, related_name: str, kind: str, genius_id: int | None
+    ) -> bool:
+        """Pose (ou retire, `None`) l'ID Genius de l'autre bout d'UN lien — une
+        formation, prouvée par les morceaux du membre (`formations_genius`).
+        Aucun portier n'en dépend : l'ID sert à lancer la discographie de la
+        formation et à mesurer sa nature, il ne juge aucun morceau."""
+        try:
+            with self.engine.begin() as conn:
+                rid = self._id_relation(conn, artist_id, related_name, kind)
+                if rid is None:
+                    return False
+                conn.execute(
+                    text("UPDATE artist_relations SET genius_id = :gid WHERE id = :rid"),
+                    {"gid": genius_id, "rid": rid},
+                )
+            return True
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur poser_genius_id_formation({artist_id}, {related_name!r}): {e}")
+            return False
+
     def forget_artist_relation(self, artist_id: int, related_name: str, kind: str) -> bool:
         """Retire UN lien (l'utilisateur le décoche). Pendant de l'additivité."""
         try:
@@ -947,7 +989,8 @@ class ArtistRepository:
                 lignes = conn.execute(
                     text(
                         "SELECT related_artist_id, related_name, kind, source, "
-                        "formation, begin_date, end_date, status, detail "
+                        "formation, begin_date, end_date, status, detail, "
+                        "genius_id, formation_origine "
                         f"FROM artist_relations WHERE artist_id = :aid{filtre} "
                         "ORDER BY kind, related_name"
                     ),
@@ -964,6 +1007,8 @@ class ArtistRepository:
                         end_date=r["end_date"],
                         status=r["status"],
                         detail=r["detail"],
+                        genius_id=r["genius_id"],
+                        formation_origine=r["formation_origine"],
                     )
                     for r in lignes
                 ]
@@ -1072,7 +1117,48 @@ class ArtistRepository:
                 ).scalars()
             )
 
-    def nature_connue_pour(self, related_name: str) -> str | None:
+    def membres_de_formation(self, related_name: str) -> tuple[int | None, list[tuple[str, int]]]:
+        """`(ID Genius de la formation, [(nom, ID Genius) de nos membres])` :
+        les artistes de la base liés à CETTE formation (nom normalisé égal ;
+        lien confirmé ou proposé), avec leur ID Genius. La règle de nature
+        mesure leur part dans les morceaux de la formation (`formations_genius`)."""
+        cible = normalize_name(related_name)
+        formation_id, membres = None, {}
+        if not cible:
+            return None, []
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text(
+                    "SELECT r.related_name, r.genius_id, a.name, a.genius_id AS membre_id "
+                    "FROM artist_relations r JOIN artists a ON a.id = r.artist_id "
+                    "WHERE r.kind = 'member_of' AND r.status IN ('confirmed', 'proposed')"
+                )
+            ).mappings()
+            for ligne in lignes:
+                if normalize_name(ligne["related_name"]) != cible:
+                    continue
+                formation_id = formation_id or ligne["genius_id"]
+                if ligne["membre_id"]:
+                    membres[ligne["name"]] = int(ligne["membre_id"])
+        return formation_id, sorted(membres.items())
+
+    def liens_de_formation(self, related_name: str) -> list[dict]:
+        """Les liens `member_of` confirmés de TOUS nos membres vers cette
+        formation (nom normalisé égal) : `{artist_id, related_name, formation,
+        formation_origine}`. Une nature est une propriété de la formation."""
+        cible = normalize_name(related_name)
+        if not cible:
+            return []
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text(
+                    "SELECT artist_id, related_name, formation, formation_origine "
+                    "FROM artist_relations WHERE kind = 'member_of' AND status = 'confirmed'"
+                )
+            ).mappings()
+            return [dict(x) for x in lignes if normalize_name(x["related_name"]) == cible]
+
+    def nature_connue_pour(self, related_name: str, *, humaine: bool = False) -> str | None:
         """Nature déjà choisie pour CETTE formation, quel qu'en soit le membre.
 
         La nature est une propriété de la FORMATION : L'Animalerie est un
@@ -1082,7 +1168,9 @@ class ArtistRepository:
         autre « collectif ». La fenêtre pré-remplit avec ce que renvoie cette
         méthode : la divergence devient un geste délibéré au lieu d'un oubli.
 
-        Comparaison par nom NORMALISÉ, comme le rattachement.
+        Comparaison par nom NORMALISÉ, comme le rattachement. `humaine` : les
+        seules natures choisies à la main (e65) — une nature posée par règle se
+        recalcule, elle ne fait pas foi pour un nouveau membre.
         """
         cible = normalize_name(related_name)
         if not cible:
@@ -1093,6 +1181,7 @@ class ArtistRepository:
                     text(
                         "SELECT related_name, formation FROM artist_relations "
                         "WHERE formation IS NOT NULL AND status = 'confirmed'"
+                        + (" AND formation_origine IS NULL" if humaine else "")
                     )
                 ).mappings()
                 for ligne in lignes:

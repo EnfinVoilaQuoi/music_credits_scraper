@@ -230,6 +230,10 @@ class Contexte:
     #: contient (`sortie_officielle.sorties_par_leur_disque`), lues par
     #: `charger_contexte` : le détecteur `annotee` reste pur.
     non_music_sortis: set = field(default_factory=set)
+    #: `{nom de formation proposée: formations_genius.Nature}` — la règle de
+    #: nature mesurée dans le brut (`formations_genius.mesurer_nature`), lue par
+    #: `charger_contexte` : les politiques restent pures.
+    natures_formations: dict = field(default_factory=dict)
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -4105,6 +4109,31 @@ def fiches_actives(artiste) -> list:
     return [t for t in tracks if t.id not in desactives] if desactives else list(tracks)
 
 
+def natures_des_formations(data_manager, relations) -> dict:
+    """La nature de chaque formation proposée sans nature : celle déjà choisie
+    chez un autre membre, sinon la règle mesurée hors ligne
+    (`formations_genius.mesurer_nature`) ; absente si rien à mesurer."""
+    from src.services.formations_genius import mesurer_nature
+    from src.utils.formations_genius import Nature
+
+    natures, index = {}, None
+    for rel in relations:
+        if rel.kind != "member_of" or rel.formation:
+            continue
+        connue = data_manager.nature_connue_pour(rel.related_name, humaine=True)
+        if connue:
+            verdict = Nature(connue, "nature déjà choisie chez un autre membre")
+        else:
+            if index is None:
+                from src.utils.formations_membres import index_du_brut
+
+                index = index_du_brut()
+            verdict = mesurer_nature(data_manager, rel.related_name, index_membres=index)
+        if verdict is not None:
+            natures[rel.related_name] = verdict
+    return natures
+
+
 def charger_contexte(data_manager, artiste) -> Contexte:
     """Le contexte des détecteurs, lu UNE fois (lectures seules) — celui
     qu'`analyser` juge, et que les politiques d'arbitrage relisent. Sans les
@@ -4126,6 +4155,7 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.fusions = data_manager.fusions_a_decider([t.id for t in tracks if t.id])
     ctx.hors_disque = data_manager.hors_du_disque_a_decider([t.id for t in tracks if t.id])
     ctx.non_music_sortis = data_manager.non_music_sortis(tracks)
+    ctx.natures_formations = natures_des_formations(data_manager, ctx.relations_proposees)
     if VIDEOS_MORTES_BRANCHEES:
         ctx.videos_mortes = data_manager.videos_mortes_constatees()
     return ctx

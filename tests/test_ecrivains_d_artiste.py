@@ -39,6 +39,10 @@ EXCEPTIONS: dict[str, str] = {
         "un RETRAIT : ses fiches partent avec lui, et les liens des autres vers "
         "lui restent (par nom) — rien ne devient trouvable"
     ),
+    "poser_genius_id_formation": (
+        "ID Genius d'une formation : sert à lancer sa discographie et à mesurer "
+        "sa nature, aucun morceau n'est jugé par lui"
+    ),
     "propose_artist_relations": (
         "lien PROPOSÉ ou `info` : seuls les liens confirmés jugent "
         "(`get_artist_relations`) — c'est leur confirmation qui invalide"

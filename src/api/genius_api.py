@@ -271,6 +271,32 @@ class GeniusAPI:
             log_api("Genius", "artist/songs", False)
             return tracks
 
+    def chansons_brutes(self, genius_id: int) -> list[dict] | None:
+        """La liste `/artists/{id}/songs` COMPLÈTE d'un artiste, telle que Genius
+        la sert (dicts de l'API, gardés dans le brut par la session) ; None si
+        une page n'a pas répondu. Sert aux formations (`formations_genius`) :
+        prouver leur ID et mesurer la part de chaque membre. Mêmes paramètres
+        que la discographie, pour que le brut ne garde qu'une forme de requête.
+        Seul `next_page` fait foi pour la pagination."""
+        chansons: list[dict] = []
+        page = 1
+        while page:
+            try:
+                with source_usage.attempt(_SOURCE):
+                    reponse = self.genius.artist_songs(
+                        genius_id, sort="release_date", per_page=50, page=page
+                    )
+            except (requests.RequestException, ValueError, KeyError, TypeError) as e:
+                logger.warning(
+                    f"Liste Genius de l'artiste {genius_id} illisible (page {page}): {e}"
+                )
+                return None
+            if not reponse or "songs" not in reponse:
+                return None
+            chansons.extend(s for s in reponse["songs"] or [] if isinstance(s, dict))
+            page = reponse.get("next_page")
+        return chansons
+
     def _extract_additional_metadata_from_raw(self, raw_data: dict) -> dict:
         """Extrait des métadonnées supplémentaires depuis les données brutes - VERSION CORRIGÉE"""
         metadata = {}

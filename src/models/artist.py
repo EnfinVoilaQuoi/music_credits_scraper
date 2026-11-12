@@ -92,3 +92,7 @@ class ArtistRelation:
     end_date: str | None = None
     status: str = "confirmed"
     detail: str | None = None
+    #: e65 : ID Genius de la formation (prouvé par les morceaux du membre).
+    genius_id: int | None = None
+    #: e65 : None = nature choisie à la main ; « regle:<code> » = par une règle.
+    formation_origine: str | None = None

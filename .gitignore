@@ -223,6 +223,7 @@ scripts/*
 # Titre de la page Spotify relu dans le brut (2026-10-31).
 !scripts/rafraichir_titres_spotify.py
 !scripts/marquer_parutions_live.py
+!scripts/poser_ids_genius_formations.py
 !scripts/completer_parutions_musicbrainz.py
 !scripts/mesurer_photos_personnes.py
 !scripts/remplacer_photos_homonymes.py

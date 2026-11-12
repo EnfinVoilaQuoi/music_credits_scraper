@@ -9,6 +9,7 @@ import pytest
 from src.models import Artist, Track
 from src.services import politiques_revue as pol
 from src.services import revue
+from src.utils import formations_genius as fg
 
 _A = Artist(name="A2H")
 
@@ -1047,13 +1048,24 @@ class TestFormationMbEtDiscogs:
     formation est confirmée, « collectif » par défaut."""
 
     @staticmethod
-    def _juger(kind="member_of", source="discogs+musicbrainz", formation=None):
+    def _juger(kind="member_of", source="discogs+musicbrainz", formation=None, nature=None):
         rel = SimpleNamespace(
             kind=kind, related_name="Sniper", source=source, formation=formation, detail=None
         )
-        ctx = SimpleNamespace(relations_proposees=[rel], disco=[])
+        natures = {"Sniper": nature} if nature else {}
+        ctx = SimpleNamespace(relations_proposees=[rel], disco=[], natures_formations=natures)
         cas = _cas("liens_proposes", None, {"nom": "Sniper", "kind": kind})
         return pol.politique_alias(cas, None, ctx)
+
+    def test_la_nature_mesuree_par_genius_est_confirmee(self):
+        """Règle validée le 2026-11-12 (`formations_genius.nature_par_les_parts`)."""
+        nature = fg.Nature(fg.GROUPE, "tous à 75 % ou plus")
+        arbitrage = self._juger(nature=nature)
+        assert arbitrage.action == "confirmer_formation" and "(groupe)" in arbitrage.sens
+
+    @pytest.mark.parametrize("signale", [False, True])
+    def test_une_nature_indecise_ou_signalee_reste_a_l_humain(self, signale):
+        assert self._juger(nature=fg.Nature(None, "entre les deux", signale)) is None
 
     @pytest.mark.parametrize("kind", ["member_of", "has_member"])
     def test_les_deux_sources_confirment(self, kind):

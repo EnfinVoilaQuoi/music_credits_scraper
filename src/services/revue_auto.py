@@ -471,13 +471,24 @@ def _confirmer_lien(_dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
 
 def _confirmer_formation(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
     """Confirme une formation que MusicBrainz et Discogs donnent : la nature déjà
-    choisie pour elle chez un autre membre, sinon « collectif ». Un lien
+    choisie pour elle chez un autre membre, sinon celle que mesure la règle
+    (`formations_genius.mesurer_nature`, 2026-11-12), sinon « collectif ». La
+    nature est notée posée par règle (`formation_origine`). Un lien
     `has_member` n'a pas de nature (il ne réunit rien). Rétablir rend le lien
     « proposé », sans la nature posée ici."""
+    from src.services.formations_genius import mesurer_nature
+
     nom, kind = cas.preuves["nom"], cas.preuves["kind"]
-    nature = None
+    nature, origine = None, None
     if kind == "member_of":
-        nature = dm.nature_connue_pour(nom) or "collectif"
+        mesure = mesurer_nature(dm, nom)
+        nature, origine = dm.nature_connue_pour(nom, humaine=True), f"{PREFIXE_REGLE}nature_connue"
+        if nature is None and mesure is not None:
+            if mesure.nature is None:
+                raise LookupError(f"nature de « {nom} » indécise : {mesure.motif}")
+            nature, origine = mesure.nature, f"{PREFIXE_REGLE}nature_genius"
+        if nature is None:
+            nature, origine = "collectif", f"{PREFIXE_REGLE}formation_mb_et_discogs"
     relation = next(
         (
             r
@@ -488,8 +499,12 @@ def _confirmer_formation(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
     )
     if relation is None:
         raise LookupError(f"lien « {nom} » introuvable")
-    posee = bool(nature and not relation.formation)
-    if not dm.set_relation_status(artiste.id, nom, kind, "confirmed", formation=nature):
+    if relation.formation:  # nature déjà choisie sur le lien : elle reste
+        nature = origine = None
+    posee = bool(nature)
+    if not dm.set_relation_status(
+        artiste.id, nom, kind, "confirmed", formation=nature, origine=origine
+    ):
         raise LookupError(f"lien « {nom} » introuvable")
     return (
         f"« {nom} » confirmé" + (f" ({nature})" if nature else ""),
@@ -1207,6 +1222,8 @@ def retablir(dm, artiste, correction: dict) -> str:
             annulation["kind"],
             "proposed",
             effacer_nature=bool(annulation.get("nature_posee")),
+            # Écriture de règle : une nature choisie à la main entre-temps reste.
+            origine=f"{PREFIXE_REGLE}retablir",
         ):
             raise LookupError(f"lien « {annulation['nom']} » introuvable")
         compte_rendu = f"« {annulation['nom']} » rendu « proposé »"

@@ -72,6 +72,9 @@ class BilanDisco(Bilan):
     fusions_editions: list = field(default_factory=list)
     #: Medleys liés à leurs fiches par la règle des titres joints.
     medleys: list = field(default_factory=list)
+    #: ID Genius de formations posés, et formations signalées sans ID.
+    formations_ids: list = field(default_factory=list)
+    formations_signalees: list = field(default_factory=list)
     albums_api: int = 0
     dates_api: int = 0
     images: int = 0
@@ -532,6 +535,13 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
     from src.services.lignes_tiers import rattraper
 
     rattraper(dm, artist, artist.tracks)
+    # L'ID Genius des formations de l'artiste, prouvé par ses morceaux, et la
+    # liste de celles dont la nature reste à décider (`formations_genius`).
+    from src.services.formations_genius import poser_ids_genius
+
+    formations = poser_ids_genius(dm, artist, runtime.genius_api)
+    bilan.formations_ids = formations.poses
+    bilan.formations_signalees = formations.signales
     # Une page désactivée car VIDE que Genius a remplie revient (`pages_vides`).
     from src.services.pages_vides import reactiver_pages_remplies
 
@@ -626,6 +636,10 @@ def resume(bilan: BilanDisco, artist: Artist) -> str:
     if bilan.medleys:
         msg += f"\n🧩 {len(bilan.medleys)} medley(s) lié(s) à leurs fiches : "
         msg += ", ".join(bilan.medleys[:5])
+    if bilan.formations_ids:
+        msg += f"\n🎤 ID Genius de formation(s) : {', '.join(bilan.formations_ids[:5])}"
+    if bilan.formations_signalees:
+        msg += f"\n⚠️ Formation(s) sans ID Genius : {', '.join(bilan.formations_signalees[:5])}"
     if bilan.titres_album:
         msg += f"\n🎼 {bilan.titres_album} titre(s) d'album ajouté(s) par la tracklist Genius"
     if bilan.doublons_evites:

@@ -248,7 +248,37 @@ def proposer_formations(runtime: Runtime, artist: Artist) -> PropositionsIdentit
     res.discogs_a_revoir = idd is None or idd.origine not in ("forcee", "memorisee", "disques")
     if idd is not None and idd.origine != "inconnu":
         _signaler_contradiction(dm, artist, idd)
+    lire_les_membres_des_formations(dm, artist)
     return res
+
+
+def lire_les_membres_des_formations(dm, artist: Artist, mb=None, discogs=None) -> list[str]:
+    """Lit (réseau) la fiche MusicBrainz et la page Discogs des formations de
+    l'artiste qui ne sont pas encore dans le brut : leur nombre de membres
+    sert la règle « 2 membres ⇒ groupe » (`formations_membres`, 2026-11-13).
+    Les sources se trouvent par la fiche du membre, que `chercher_formations`
+    vient de lire. Rien n'est écrit en base."""
+    from src.utils import formations_membres as fm
+
+    noms = [
+        r.related_name
+        for r in dm.get_artist_relations(artist.id, status=None)
+        if r.kind == "member_of" and r.status in ("confirmed", "proposed")
+    ]
+    if not noms:
+        return []
+    if mb is None:
+        from src.api.musicbrainz_api import MusicBrainzAPI
+
+        mb = MusicBrainzAPI()
+    if discogs is None:
+        from src.api.discogs_api import DiscogsClient, token_discogs
+
+        discogs = DiscogsClient(token_discogs())
+    lues = fm.lire_les_fiches(noms, fm.index_du_brut(), mb, discogs)
+    if lues:
+        logger.info(f"👥 Membres lus pour {len(lues)} formation(s) : {', '.join(lues)}")
+    return lues
 
 
 def _signaler_contradiction(dm, artist: Artist, idd) -> None:

@@ -203,6 +203,9 @@ class _DM:
     def noms_des_formations(self, artist_id):
         return set()
 
+    def get_artist_relations(self, artist_id, status="confirmed"):
+        return []
+
     def save_track(self, t):
         if t.id is None:
             t.id = self.next_id

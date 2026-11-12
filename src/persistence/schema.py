@@ -408,6 +408,12 @@ artist_relations = Table(
     # Type d'alias tel que la source le nomme (« Artist name », « Legal name »,
     # « Search hint », « name_variation ») ; NULL pour une formation.
     Column("detail", Text),
+    # e65 : ID Genius de l'autre bout (une formation), prouvé par les morceaux
+    # du membre (`utils.formations_genius`), jamais par le seul nom.
+    Column("genius_id", Integer),
+    # e65 : qui a choisi `formation` — NULL = à la main (toute nature d'avant
+    # e65), « regle:<code> » = une règle, qui peut la recalculer.
+    Column("formation_origine", Text),
     UniqueConstraint("artist_id", "related_name", "kind"),
     sqlite_autoincrement=True,
 )

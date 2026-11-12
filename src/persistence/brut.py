@@ -262,6 +262,26 @@ def corps_gardes(source: str, requete: str, chemin: str | Path | None = None) ->
         ]
 
 
+def dernieres_lectures(
+    source: str, prefixe: str, chemin: str | Path | None = None
+) -> dict[str, bytes]:
+    """`{requête: corps}` de la lecture LA PLUS RÉCENTE de chaque requête de
+    `source` qui commence par `prefixe`, EN LECTURE SEULE (les pages d'une
+    liste paginée, lues d'un coup)."""
+    chemin = Path(chemin or CHEMIN)
+    if not chemin.exists():
+        return {}
+    motif = prefixe.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    with closing(sqlite3.connect(f"file:{chemin.as_posix()}?mode=ro", uri=True)) as conn:
+        lignes = conn.execute(
+            "SELECT requete, corps FROM brut WHERE source = ? AND requete LIKE ? ESCAPE '\\' "
+            "ORDER BY derniere_lecture, id",
+            (source, motif),
+        ).fetchall()
+    # La plus récente écrase les autres (ordre croissant).
+    return {requete: zlib.decompress(corps) for requete, corps in lignes}
+
+
 def bilan() -> dict:
     """Ce que garde le magasin : requêtes et octets (compressés / bruts) par source."""
     with _verrou:

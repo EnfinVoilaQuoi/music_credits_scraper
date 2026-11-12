@@ -958,9 +958,9 @@ def politique_alias(cas, _track, ctx):
         return None
     sources = set((rel.source or "").split("+"))
     if kind == "member_of":
-        return _formation_par_ses_morceaux(rel, ctx) or _formation_mb_et_discogs(rel, sources)
+        return _formation_par_ses_morceaux(rel, ctx) or _formation_mb_et_discogs(rel, sources, ctx)
     if kind == "has_member":
-        return _formation_mb_et_discogs(rel, sources)
+        return _formation_mb_et_discogs(rel, sources, ctx)
     if kind != "alias":
         return None
     if {"discogs", "musicbrainz"} <= sources:
@@ -1010,19 +1010,39 @@ def _fiches_ou_il_ecrit(nom: str, ctx) -> list[str]:
 FORMATIONS_MB_ET_DISCOGS = True
 
 
-def _formation_mb_et_discogs(rel, sources: set) -> Arbitrage | None:
-    """Une formation que MusicBrainz ET Discogs donnent se confirme, « collectif »
-    par défaut : prendre un groupe pour un collectif ne coûte presque rien,
-    l'inverse apporte des morceaux en trop (décision utilisateur du 2026-11-06, le
-    lien de membre n'a pas de nature : `has_member`, navigation seulement). Une
-    nature déjà proposée autre que « collectif » reste à l'humain (N.H. : groupe)."""
+def _formation_mb_et_discogs(rel, sources: set, ctx=None) -> Arbitrage | None:
+    """Une formation que MusicBrainz ET Discogs donnent se confirme. Sa nature
+    suit la règle validée le 2026-11-12 (`formations_genius.nature_par_les_parts`,
+    mesurée hors ligne dans le brut, `ctx.natures_formations`) : la part de nos
+    membres dans les morceaux Genius de la formation ; mesure indécise ou part
+    nulle (homonyme, faux lien) ⇒ l'humain. Sans mesure (pas d'ID Genius, liste
+    jamais lue) : « collectif » par défaut — prendre un groupe pour un collectif
+    ne coûte presque rien, l'inverse apporte des morceaux en trop (décision
+    utilisateur du 2026-11-06). Le lien de membre n'a pas de nature
+    (`has_member`, navigation seulement). Une nature déjà proposée autre que
+    « collectif » reste à l'humain (N.H. : groupe)."""
     if not FORMATIONS_MB_ET_DISCOGS or not {"discogs", "musicbrainz"} <= sources:
         return None
     if rel.formation and rel.formation != "collectif":
         return None
-    nature = "collectif" if rel.kind == "member_of" else "lien de membre"
+    if rel.kind != "member_of":
+        return Arbitrage(
+            "confirmer la formation (lien de membre)",
+            "confirmer_formation",
+            "MusicBrainz ET Discogs",
+        )
+    natures = ctx.natures_formations if ctx is not None else {}
+    verdict = None if rel.formation else natures.get(rel.related_name)
+    if verdict is None:
+        return Arbitrage(
+            "confirmer la formation (collectif)", "confirmer_formation", "MusicBrainz ET Discogs"
+        )
+    if verdict.nature is None:
+        return None
     return Arbitrage(
-        f"confirmer la formation ({nature})", "confirmer_formation", "MusicBrainz ET Discogs"
+        f"confirmer la formation ({verdict.nature})",
+        "confirmer_formation",
+        f"MusicBrainz ET Discogs ; Genius : {verdict.motif}",
     )
 
 

@@ -766,6 +766,67 @@ def oublier_disque_accepte(artiste: str, album_deezer: int) -> bool:
         )
 
 
+def memoriser_profil_deezer_refuse(
+    artiste: str, profil_deezer: int, nom: str, origine: str | None = None
+) -> bool:
+    """Consigne un PROFIL Deezer qui n'est pas celui de l'artiste : un homonyme
+    (The Graduates 392414, La Confrérie 1706806) ou un profil vide (Delusional
+    Thomas 166097197). L'oracle `deezer_identite` l'écarte ; sans autre
+    candidat, l'artiste est « pas sur Deezer » et l'étape identité continue sans
+    Deezer. Un AUTRE profil apparu plus tard reste candidat (2026-11-14)."""
+    from datetime import datetime
+
+    if moteur is None or not artiste:
+        return False
+    return _inserer(
+        {"titre": nom, "album": None},
+        artiste,
+        nom,
+        None,
+        "profil_deezer",
+        int(profil_deezer),
+        datetime.now().isoformat(timespec="seconds"),
+        origine=origine,
+    )
+
+
+def profils_deezer_refuses(artiste: str | None) -> set[int]:
+    """Les profils Deezer refusés pour cet artiste."""
+    if moteur is None or not artiste:
+        return set()
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        with moteur.connect() as conn:
+            lignes = conn.execute(
+                text("SELECT valeur FROM refus WHERE nature = 'profil_deezer' AND artiste = :a"),
+                {"a": artiste},
+            ).all()
+    except SQLAlchemyError as e:
+        logger.warning(f"Refus de profils Deezer illisibles : {e} — rien d'appliqué")
+        return set()
+    return {int(v) for (v,) in lignes}
+
+
+def oublier_profil_deezer_refuse(artiste: str, profil_deezer: int) -> bool:
+    """Pendant : le profil redevient candidat au prochain run identité."""
+    if moteur is None:
+        return False
+    from sqlalchemy import text
+
+    with moteur.begin() as conn:
+        return bool(
+            conn.execute(
+                text(
+                    "DELETE FROM refus WHERE nature = 'profil_deezer' AND artiste = :a "
+                    "AND valeur = :v"
+                ),
+                {"a": artiste, "v": str(int(profil_deezer))},
+            ).rowcount
+        )
+
+
 def cle_parution(titre: str | None) -> str:
     """La valeur d'un refus `parution` : le titre normalisé du disque (une
     autre édition — « M.A.N (Deluxe) » — est un autre disque)."""

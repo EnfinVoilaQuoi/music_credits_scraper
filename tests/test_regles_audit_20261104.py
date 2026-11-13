@@ -163,6 +163,17 @@ class TestDisqueEtranger:
         assert ed.ecart_depuis(d, {}).disque_etranger
 
 
+class TestRefusDeProfilDeezer:
+    def test_refuser_puis_oublier(self, data_manager):
+        assert cf.profils_deezer_refuses("The Graduates") == set()
+        assert cf.memoriser_profil_deezer_refuse("The Graduates", 392414, "The Graduates")
+        assert not cf.memoriser_profil_deezer_refuse("The Graduates", 392414, "The Graduates")
+        assert cf.profils_deezer_refuses("The Graduates") == {392414}
+        assert cf.profils_deezer_refuses("Booba") == set()
+        assert cf.oublier_profil_deezer_refuse("The Graduates", 392414)
+        assert cf.profils_deezer_refuses("The Graduates") == set()
+
+
 class TestRefusDeDisque:
     def test_refuser_puis_oublier(self, data_manager):
         assert cf.disques_refuses("Anton Serra") == set()

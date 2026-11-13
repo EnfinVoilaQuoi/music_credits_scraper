@@ -95,6 +95,8 @@ class CatalogueDeezer:
     motif: str = ""
     #: Panne (Deezer injoignable, détection interrompue) — pas une ambiguïté.
     panne: bool = False
+    #: Constat « pas sur Deezer » : tous les profils au nom exact refusés.
+    absent: bool = False
 
 
 @dataclass
@@ -167,6 +169,14 @@ def catalogue_deezer(
                 force_id=force_id,
             )
         )
+    except deezer_identite.ArtistePasSurDeezer as e:
+        # Tous les profils au nom exact refusés à la main : un CONSTAT, ni
+        # ambiguïté ni panne — l'étape continue sans Deezer (2026-11-14).
+        res.absent = True
+        res.motif = "pas sur Deezer (profils refusés : " + ", ".join(
+            str(i) for i in sorted(e.refuses)
+        ) + ")"
+        return res
     except deezer_identite.ArtisteDeezerAmbigu as e:
         res.motif = "artiste Deezer ambigu — à choisir dans la fenêtre « Écarts Deezer »"
         res.ecarts = ecarts_deezer.BilanEcarts(complete=False, motif=res.motif)
@@ -368,6 +378,8 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
         if c.panne:
             bilan.artistes["deezer"] = f"panne — {c.motif}"
             panne("Deezer", c.motif)
+        elif c.absent:
+            bilan.artistes["deezer"] = c.motif
         elif c.deezer_id is None:
             bilan.artistes["deezer"] = f"ambiguë — {c.motif}"
         else:

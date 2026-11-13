@@ -173,3 +173,52 @@ class TestCandidatSeulSansPreuve:
         dm = _DM([], [Track(title="X")])
         artist = _artist(name="Lucio Bukowski")
         assert asyncio.run(di.resoudre_async(client, None, dm, artist)) == 9
+
+
+class TestProfilRefuse:
+    """« Pas sur Deezer » (2026-11-14) : The Graduates (392414, groupe pop-rock),
+    La Confrérie, les profils VIDES de Delusional Thomas, Cool Connexion et Larry
+    Fisherman finissaient « ambigus » à chaque run identité."""
+
+    @pytest.fixture
+    def refuses(self, monkeypatch):
+        import src.utils.corrections_fiches as cf
+
+        table: dict[str, set[int]] = {}
+        monkeypatch.setattr(cf, "profils_deezer_refuses", lambda nom: table.get(nom, set()))
+        return table
+
+    def test_tous_refuses_pas_sur_deezer(self, refuses):
+        refuses["The Graduates"] = {392414}
+        client = _Client([_hit(392414, "The Graduates")], {392414: []})
+        dm = _DM([], [])
+        with pytest.raises(di.ArtistePasSurDeezer) as exc:
+            asyncio.run(di.resoudre_async(client, None, dm, _artist(name="The Graduates")))
+        assert exc.value.refuses == {392414} and dm.ecrit is None
+
+    def test_un_nouveau_profil_reste_candidat(self, refuses):
+        refuses["The Graduates"] = {392414}
+        client = _Client(
+            [_hit(392414, "The Graduates"), _hit(777, "The Graduates")],
+            {392414: [], 777: [{"id": 5, "title": "The Graduates EP"}]},
+        )
+        t = Track(title="Day ‘n’ Nite")
+        t.album = "The Graduates EP"
+        dm = _DM([], [t])
+        artist = _artist(name="The Graduates")
+        assert asyncio.run(di.resoudre_async(client, None, dm, artist)) == 777
+
+    def test_profil_memorise_puis_refuse_s_efface(self, refuses):
+        refuses["Delusional Thomas"] = {166097197}
+        client = _Client([_hit(166097197, "Delusional Thomas")], {166097197: []})
+        dm = _DM([], [])
+        artist = _artist(166097197, name="Delusional Thomas")
+        with pytest.raises(di.ArtistePasSurDeezer):
+            asyncio.run(di.resoudre_async(client, None, dm, artist))
+        assert dm.ecrit is None and artist.deezer_id is None
+
+    def test_sans_refus_aucun_candidat_reste_ambigu(self, refuses):
+        client = _Client([], {})
+        with pytest.raises(di.ArtisteDeezerAmbigu) as exc:
+            asyncio.run(di.resoudre_async(client, None, _DM([], []), _artist()))
+        assert not isinstance(exc.value, di.ArtistePasSurDeezer)

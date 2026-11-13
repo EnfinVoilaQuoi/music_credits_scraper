@@ -59,6 +59,29 @@ class ArtisteDeezerAmbigu(Exception):
         self.candidats = candidats
 
 
+class ArtistePasSurDeezer(ArtisteDeezerAmbigu):
+    """Tous les profils au nom exact ont été refusés à la main (refus
+    `profil_deezer`) : l'artiste n'est pas sur Deezer, ce n'est plus une
+    ambiguïté à trancher. Sous-classe d'`ArtisteDeezerAmbigu` (sans candidat)
+    pour qui ne connaît que celle-ci (fenêtre des écarts Deezer)."""
+
+    def __init__(self, nom: str, refuses: set[int]):
+        super().__init__(nom, [])
+        self.refuses = set(refuses)
+
+
+def sans_profils_refuses(
+    nom: str, candidats: list[CandidatDeezer], refuses: set[int]
+) -> list[CandidatDeezer]:
+    """PUR. Les candidats moins les profils refusés ; lève `ArtistePasSurDeezer`
+    quand il n'en reste aucun ET qu'un refus en a écarté (sans refus, une liste
+    vide reste une ambiguïté : rien ne dit que l'artiste n'y est pas)."""
+    restants = [c for c in candidats if c.id not in refuses]
+    if not restants and refuses:
+        raise ArtistePasSurDeezer(nom, refuses)
+    return restants
+
+
 def candidats_exacts(nom: str, hits: list[dict]) -> list[CandidatDeezer]:
     """Les hits dont le nom normalisé est EXACTEMENT le nôtre — jamais par mots
     entiers (« Swing » ⊂ « Swing Out Sister »)."""
@@ -119,11 +142,19 @@ async def resoudre_async(client, http, dm, artist, *, force_id: int | None = Non
         dm.update_artist_deezer_id(artist.id, int(force_id))
         artist.deezer_id = int(force_id)
         return int(force_id)
+    from src.utils.corrections_fiches import profils_deezer_refuses
+
+    refuses = profils_deezer_refuses(artist.name)
+    if artist.deezer_id and int(artist.deezer_id) in refuses:
+        # Profil mémorisé puis refusé (profil vide de Delusional Thomas) : il
+        # s'efface, l'oracle rejuge les AUTRES candidats.
+        dm.update_artist_deezer_id(artist.id, None)
+        artist.deezer_id = None
     if artist.deezer_id:
         return int(artist.deezer_id)
 
     hits = await client.search_artists_async(http, artist.name)
-    candidats = candidats_exacts(artist.name, hits)
+    candidats = sans_profils_refuses(artist.name, candidats_exacts(artist.name, hits), refuses)
     if not candidats:
         raise ArtisteDeezerAmbigu(artist.name, [])
 

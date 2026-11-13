@@ -576,6 +576,15 @@ class TestCatalogueDeezer:
         assert not res.panne and res.deezer_id is None and "ambigu" in res.motif
         assert [c.id for c in recus[0].ambigu] == [1, 2] and "detection" not in appels
 
+    def test_pas_sur_deezer_est_un_constat_sans_ambiguite_ni_panne(self, monkeypatch):
+        from src.services.deezer_identite import ArtistePasSurDeezer
+
+        exc = ArtistePasSurDeezer("A", {392414})
+        res, recus, appels = self._run(monkeypatch, identite_rendue=exc)
+        assert res.absent and not res.panne and res.deezer_id is None
+        assert "pas sur Deezer" in res.motif and "392414" in res.motif
+        assert recus == [] and "detection" not in appels
+
     def test_deezer_en_panne_est_dit_jamais_leve(self, monkeypatch):
         res, recus, _ = self._run(monkeypatch, detection=RuntimeError("timeout"))
         assert res.panne and "timeout" in res.motif and recus == []

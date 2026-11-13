@@ -234,6 +234,10 @@ class Contexte:
     #: nature mesurée dans le brut (`formations_genius.mesurer_nature`), lue par
     #: `charger_contexte` : les politiques restent pures.
     natures_formations: dict = field(default_factory=dict)
+    #: `{formation proposée: (ID Genius, morceaux du membre, Nature | None)}` :
+    #: l'ID lu dans la liste Genius du membre, la nature mesurée avec lui
+    #: (`formations_prouvees_par_genius`, R4, 2026-11-13).
+    formations_prouvees: dict = field(default_factory=dict)
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -4134,6 +4138,37 @@ def natures_des_formations(data_manager, relations) -> dict:
     return natures
 
 
+def formations_prouvees_par_genius(data_manager, artiste, relations) -> dict:
+    """R4 (décision utilisateur 2026-11-13) : pour chaque formation PROPOSÉE
+    sans nature, l'ID que la liste Genius du membre (brut) donne en artiste
+    principal — le même que celui déjà posé sur le lien, s'il en a un (sinon
+    rien : deux ID, l'humain) —, et la nature que la règle mesure avec lui
+    (nature déjà choisie chez un autre membre d'abord). Lectures seules."""
+    from src.services.formations_genius import id_prouve_par_le_membre, mesurer_nature
+    from src.utils.formations_genius import Nature
+
+    prouvees, index = {}, None
+    for rel in relations:
+        if rel.kind != "member_of" or rel.formation:
+            continue
+        trouve = id_prouve_par_le_membre(artiste.genius_id, rel.related_name)
+        if trouve is None or (rel.genius_id and int(rel.genius_id) != trouve.genius_id):
+            continue
+        connue = data_manager.nature_connue_pour(rel.related_name, humaine=True)
+        if connue:
+            verdict = Nature(connue, "nature déjà choisie chez un autre membre")
+        else:
+            if index is None:
+                from src.utils.formations_membres import index_du_brut
+
+                index = index_du_brut()
+            verdict = mesurer_nature(
+                data_manager, rel.related_name, index_membres=index, formation_id=trouve.genius_id
+            )
+        prouvees[rel.related_name] = (trouve.genius_id, trouve.pages, verdict)
+    return prouvees
+
+
 def charger_contexte(data_manager, artiste) -> Contexte:
     """Le contexte des détecteurs, lu UNE fois (lectures seules) — celui
     qu'`analyser` juge, et que les politiques d'arbitrage relisent. Sans les
@@ -4156,6 +4191,9 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.hors_disque = data_manager.hors_du_disque_a_decider([t.id for t in tracks if t.id])
     ctx.non_music_sortis = data_manager.non_music_sortis(tracks)
     ctx.natures_formations = natures_des_formations(data_manager, ctx.relations_proposees)
+    ctx.formations_prouvees = formations_prouvees_par_genius(
+        data_manager, artiste, ctx.relations_proposees
+    )
     if VIDEOS_MORTES_BRANCHEES:
         ctx.videos_mortes = data_manager.videos_mortes_constatees()
     return ctx

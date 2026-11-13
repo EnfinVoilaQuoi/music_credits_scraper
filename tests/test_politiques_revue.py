@@ -1053,7 +1053,9 @@ class TestFormationMbEtDiscogs:
             kind=kind, related_name="Sniper", source=source, formation=formation, detail=None
         )
         natures = {"Sniper": nature} if nature else {}
-        ctx = SimpleNamespace(relations_proposees=[rel], disco=[], natures_formations=natures)
+        ctx = SimpleNamespace(
+            relations_proposees=[rel], disco=[], natures_formations=natures, formations_prouvees={}
+        )
         cas = _cas("liens_proposes", None, {"nom": "Sniper", "kind": kind})
         return pol.politique_alias(cas, None, ctx)
 

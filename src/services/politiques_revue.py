@@ -963,7 +963,11 @@ def politique_alias(cas, _track, ctx):
         return None
     sources = set((rel.source or "").split("+"))
     if kind == "member_of":
-        return _formation_par_ses_morceaux(rel, ctx) or _formation_mb_et_discogs(rel, sources, ctx)
+        return (
+            _formation_par_ses_morceaux(rel, ctx)
+            or _formation_prouvee_par_genius(rel, ctx)
+            or _formation_mb_et_discogs(rel, sources, ctx)
+        )
     if kind == "has_member":
         return _formation_mb_et_discogs(rel, sources, ctx)
     if kind != "alias":
@@ -1048,6 +1052,29 @@ def _formation_mb_et_discogs(rel, sources: set, ctx=None) -> Arbitrage | None:
         f"confirmer la formation ({verdict.nature})",
         "confirmer_formation",
         f"MusicBrainz ET Discogs ; Genius : {verdict.motif}",
+    )
+
+
+def _formation_prouvee_par_genius(rel, ctx) -> Arbitrage | None:
+    """R4 (décision utilisateur 2026-11-13) : une formation proposée est
+    confirmée quand la liste Genius du membre la donne pour artiste principal
+    d'au moins `FICHES_MIN_LIEN` morceaux, sous un seul ID, ET que la nature
+    mesurée avec cet ID est tranchée (groupe / collectif). Nature indécise,
+    part nulle : l'humain. Simulé sur la copie du 13/11 : 21 liens prouvés sur
+    40, aucune erreur vue (Bad Meets Evil, D12, Ideal J, Mafia K'1 Fry…)."""
+    # `formations_prouvees` ne retient que les liens sans nature, à l'ID concordant.
+    if rel.formation or ctx is None:
+        return None
+    entree = ctx.formations_prouvees.get(rel.related_name)
+    if entree is None:
+        return None
+    genius_id, pages, verdict = entree
+    if pages < FICHES_MIN_LIEN or verdict is None or verdict.nature is None:
+        return None
+    return Arbitrage(
+        f"confirmer la formation ({verdict.nature}) — prouvée par Genius",
+        "confirmer_formation_genius",
+        f"Genius {genius_id} principal de {pages} morceaux du membre ; {verdict.motif}",
     )
 
 
@@ -2466,6 +2493,8 @@ REGLES_ETENDUES = frozenset(
         ("liens_proposes", "confirmer_lien"),
         # 2026-11-06 : formation MusicBrainz + Discogs, « collectif » par défaut.
         ("liens_proposes", "confirmer_formation"),
+        # 2026-11-13 (R4) : formation prouvée par les morceaux Genius du membre.
+        ("liens_proposes", "confirmer_formation_genius"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
         ("kworb_proposition", "kworb_tiers"),

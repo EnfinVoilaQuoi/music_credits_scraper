@@ -134,6 +134,7 @@ _SANS_FICHE = frozenset(
         "deezer_edition",
         "confirmer_lien",
         "confirmer_formation",
+        "confirmer_formation_genius",
         "kworb_tiers",
         # Cas d'ARTISTE : ses fiches sont dans ses preuves.
         "retirer_video_partagee",
@@ -477,6 +478,22 @@ def _confirmer_lien(_dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
         "nom": cas.preuves["nom"],
         "kind": cas.preuves["kind"],
     }
+
+
+def _confirmer_formation_genius(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """R4 : pose l'ID Genius de la formation que les morceaux du membre
+    prouvent (`id_prouve_par_le_membre`, relu au moment d'écrire), puis la
+    confirme comme `_confirmer_formation` — sa nature mesurée avec cet ID."""
+    from src.services.formations_genius import id_prouve_par_le_membre
+
+    nom = cas.preuves["nom"]
+    trouve = id_prouve_par_le_membre(artiste.genius_id, nom)
+    if trouve is None:
+        raise LookupError(f"« {nom} » : plus aucun morceau du membre ne la prouve")
+    if not dm.poser_genius_id_formation(artiste.id, nom, "member_of", trouve.genius_id):
+        raise LookupError(f"lien « {nom} » introuvable")
+    compte_rendu, annulation = _confirmer_formation(dm, track, cas, artiste=artiste)
+    return f"{compte_rendu} — ID Genius {trouve.genius_id}", annulation
 
 
 def _confirmer_formation(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
@@ -904,6 +921,7 @@ _CORRECTEURS_DE_REGLE = {
     "retirer_lrc": _corriger_lrc,
     "confirmer_lien": _confirmer_lien,
     "confirmer_formation": _confirmer_formation,
+    "confirmer_formation_genius": _confirmer_formation_genius,
     "kworb_tiers": _kworb_tiers,
     "retirer_video_partagee": _retirer_video_partagee,
     # Même geste pour UNE fiche : `track_ids` = [la fiche], refus de règle.

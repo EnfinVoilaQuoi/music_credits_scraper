@@ -1,11 +1,15 @@
 """Passage à BLANC des politiques d'arbitrage automatique du panneau « À trancher ».
 
-Règle projet « simuler avant d'activer » : aucune politique de
-`src/services/politiques_revue.py` n'est branchée. Ce script les applique, sur
-une COPIE de la base (sauvegarde SQLite en ligne ; la vraie base n'est que
-lue), à toutes les DÉCISIONS actives du panneau, et écrit la liste de ce que
-chacune trancherait, et dans quel sens — pour que l'utilisateur valide famille
-par famille. Aucune écriture, aucun réseau : le gate d'identité Spotify relit
+Règle projet « simuler avant d'activer ». Sur une COPIE de la base (sauvegarde
+SQLite en ligne ; la vraie base n'est que lue), le script range d'abord chaque
+DÉCISION active du panneau selon le correcteur RÉEL (`revue_auto.a_corriger`,
+les règles branchées — le point qu'utilisent aussi le correcteur de fin de run
+et l'audit) : ce qu'il tranche déjà est « à faire par un run ». Les politiques
+de `src/services/politiques_revue.py` ne sont ensuite appliquées qu'au RESTE,
+pour dire ce que chacune trancherait EN PLUS, et dans quel sens — pour que
+l'utilisateur valide famille par famille (2026-11-13 : la version d'avant
+annonçait « aucune politique active » et comptait comme tranchés des cas que
+le correcteur laisse, 30 `deezer_absent` par exemple). Aucune écriture, aucun réseau : le gate d'identité Spotify relit
 les pages embed déjà gardées au brut (`data/brut/brut.db`, ouvert en lecture
 seule) ; `--reseau` lit par un GET nu les pages jamais gardées (aucune
 écriture) ; une page illisible laisse le cas non jugé.
@@ -178,7 +182,7 @@ def main(argv=None) -> int:
 
 def simuler(dm, noms=None, *, reseau: bool = False, runtime=None) -> list[str]:
     from src.services import politiques_revue as pol
-    from src.services import revue
+    from src.services import revue, revue_auto
 
     with closing(sqlite3.connect(dm.db_path)) as c:
         isrcs = {
@@ -206,6 +210,7 @@ def simuler(dm, noms=None, *, reseau: bool = False, runtime=None) -> list[str]:
     pourquoi = collections.Counter()
     non_tranches = collections.defaultdict(list)
     decisions = collections.Counter()
+    deja = collections.Counter()  # détecteur -> cas que le correcteur réel tranche
     for nom in noms or dm.get_artist_names():
         art = dm.get_artist_by_name(nom)
         art.tracks = dm.discographie_reunie(art)
@@ -231,10 +236,17 @@ def simuler(dm, noms=None, *, reseau: bool = False, runtime=None) -> list[str]:
                 rejouer_deezer(runtime, art) if runtime else None,
             ),
         )
-        for cas in revue.analyser(dm, art, ctx).actifs:
+        analyse = revue.analyser(dm, art, ctx)
+        faits = {
+            (c.detecteur, c.cle) for c, _ in revue_auto.a_corriger(dm, art, analyse, ctx, par_id)
+        }
+        for cas in analyse.actifs:
             if cas.nature != revue.DECISION:
                 continue
             decisions[cas.detecteur] += 1
+            if (cas.detecteur, cas.cle) in faits:
+                deja[cas.detecteur] += 1
+                continue
             track = par_id.get(cas.track_id)
             if cas.detecteur == "id_spotify_propose":
                 lue = lire(cas.preuves.get("spotify_id_propose")) is not None
@@ -247,7 +259,7 @@ def simuler(dm, noms=None, *, reseau: bool = False, runtime=None) -> list[str]:
                     non_tranches[politique.code].append((art.name, cas))
                 else:
                     tranches[politique.code].append((art.name, cas, arbitrage))
-    return rapport(politiques, tranches, non_tranches, decisions, pourquoi)
+    return rapport(politiques, tranches, non_tranches, decisions, pourquoi, deja)
 
 
 def _generique(sens: str) -> str:
@@ -258,16 +270,20 @@ def _generique(sens: str) -> str:
     return re.sub(r"\d+", "N", sens.split(" : ")[0])[:90]
 
 
-def rapport(politiques, tranches, non_tranches, decisions, pourquoi) -> list[str]:
+def rapport(politiques, tranches, non_tranches, decisions, pourquoi, deja=None) -> list[str]:
     codes = [p.code for p in politiques] + ["ecarts_deezer"]
     libelles = {p.code: p.libelle for p in politiques}
     libelles["ecarts_deezer"] = "Écarts Deezer, par cas typique"
+    deja = deja or collections.Counter()
     total = sum(decisions.values())
+    faits = sum(deja.values())
     lignes = [
         f"# Passage à blanc des politiques « À trancher » — {date.today()}",
         "",
-        "Aucune politique n'est active. Copie de la base, décisions actives "
-        f"seulement : **{total}** cas.",
+        f"Copie de la base, décisions actives : **{total}** cas. Le correcteur réel "
+        f"(`revue_auto.a_corriger`, règles branchées) en tranche déjà **{faits}** "
+        "(à faire par un run, hors critère) ; les politiques ci-dessous ne jugent "
+        f"que les **{total - faits}** autres — ce qu'elles trancheraient EN PLUS.",
         "",
         "| politique | cas visés | tranchés | reste à l'humain |",
         "|---|---:|---:|---:|",
@@ -286,12 +302,16 @@ def rapport(politiques, tranches, non_tranches, decisions, pourquoi) -> list[str
         lignes += [
             "",
             f"Si TOUTES les politiques étaient validées (durées : `{variante}`) : "
-            f"{len(uniques)} tranchées, **{total - len(uniques)}** décisions restent "
-            "à l'humain.",
+            f"{len(uniques)} tranchées en plus, **{total - faits - len(uniques)}** "
+            "décisions restent à l'humain.",
         ]
     reste = collections.Counter(decisions)
+    reste.subtract(deja)
     for _nom, det, _cle in uniques:  # la dernière variante : la plus large
         reste[det] -= 1
+    if faits:
+        lignes += ["", "Déjà tranchés par le correcteur réel, par détecteur :", ""]
+        lignes += [f"- {n} × `{det}`" for det, n in deja.most_common()]
     lignes += ["", "Ce qui resterait, par détecteur :", ""]
     lignes += [f"- {n} × `{det}`" for det, n in reste.most_common() if n > 0]
     lignes += ["", "ID Spotify proposés — pages embed :", ""]

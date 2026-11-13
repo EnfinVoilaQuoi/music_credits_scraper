@@ -1,5 +1,7 @@
 """Parutions e31 : N↔N, garde-fous d'identité et reprise des albums legacy."""
 
+from sqlalchemy import text
+
 from src.models import Artist, ReleaseObservation, Track
 from src.services import ecarts_deezer as ed
 
@@ -871,3 +873,103 @@ def test_fusion_des_parutions_d_avant_e54_au_meme_upc(data_manager):
         ).fetchall()
     assert ids == [("102768632",), ("230952762",)]
     assert data_manager.fusionner_parutions_meme_upc() == []
+
+
+class TestSingleFonduAvecLAlbum:
+    """2026-11-13 : le single Deezer « Vinyl Days » (1 piste) avait adopté la
+    parution de l'album Genius du même titre (28 pistes) — 9 parutions."""
+
+    def _album_genius(self, dm, artist, n=6):
+        pistes = [_track(dm, artist, title=f"Piste {i}", album="Vinyl Days") for i in range(n)]
+        titre = _track(dm, artist, title="Vinyl Days", album="Vinyl Days")
+        for t in [*pistes, titre]:
+            dm.record_release_observations(
+                t.id,
+                [
+                    ReleaseObservation(
+                        title="Vinyl Days", source="genius", external_release_id=864280
+                    )
+                ],
+            )
+        (album,) = {r["id"] for r in dm.get_track_releases(titre.id)}
+        return album, titre
+
+    def test_un_single_n_adopte_pas_l_album_genius_du_meme_titre(self, data_manager):
+        artist = _artist(data_manager, name="Logic", deezer_id=1)
+        album, titre = self._album_genius(data_manager, artist)
+        data_manager.record_release_observations(
+            titre.id,
+            [
+                ReleaseObservation(
+                    title="Vinyl Days",
+                    source="deezer",
+                    external_release_id=318339417,
+                    record_type="single",
+                    nb_pistes=1,
+                    upc="602445958139",
+                    track_number=1,
+                )
+            ],
+        )
+        parutions = {r["id"]: r for r in data_manager.get_track_releases(titre.id)}
+        assert set(parutions) == {album, max(parutions)} and len(parutions) == 2
+        assert parutions[album]["deezer_album_id"] is None
+        with data_manager.engine.connect() as conn:
+            upc = conn.execute(
+                text("SELECT upc FROM releases WHERE id = :i"), {"i": album}
+            ).scalar()
+        assert upc is None
+        assert parutions[album]["record_type"] is None
+        single = parutions[max(parutions)]
+        assert (single["deezer_album_id"], single["record_type"]) == (318339417, "single")
+
+    def test_l_album_deezer_adopte_toujours_la_parution_genius(self, data_manager):
+        artist = _artist(data_manager, name="Logic", deezer_id=1)
+        album, titre = self._album_genius(data_manager, artist)
+        data_manager.record_release_observations(
+            titre.id,
+            [
+                ReleaseObservation(
+                    title="Vinyl Days",
+                    source="deezer",
+                    external_release_id=326303077,
+                    record_type="album",
+                    nb_pistes=30,
+                )
+            ],
+        )
+        assert [r["id"] for r in data_manager.get_track_releases(titre.id)] == [album]
+
+    def test_un_single_adopte_la_parution_heritee_d_une_piste(self, data_manager):
+        artist = _artist(data_manager)
+        track = _track(data_manager, artist, album="Ma chanson")
+        heritee = data_manager.ensure_release(artist.id, "Ma chanson", scope="own")
+        data_manager.link_track_to_release(heritee, track.id, source="legacy", matched_by="legacy")
+        data_manager.record_release_observations(
+            track.id,
+            [
+                ReleaseObservation(
+                    title="Ma chanson",
+                    source="deezer",
+                    external_release_id=7,
+                    record_type="single",
+                    nb_pistes=1,
+                )
+            ],
+        )
+        assert [r["id"] for r in data_manager.get_track_releases(track.id)] == [heritee]
+
+
+class TestJugeDeLaForme:
+    def test_single_contre_album(self):
+        from src.utils.forme_parution import parution_compatible, single_fondu
+
+        assert not parution_compatible(None, 28, "single", 1)
+        assert not parution_compatible("album", 1, "single", 1)
+        assert not parution_compatible("single", 1, "album", 12)
+        assert parution_compatible(None, 3, "single", None)
+        assert parution_compatible(None, 1, "single", 1)
+        assert parution_compatible(None, 28, "album", 20)  # deluxe Genius : admis
+        assert parution_compatible(None, 28, None, None)
+        assert single_fondu("single", 4) and not single_fondu("single", 3)
+        assert not single_fondu("album", 28)

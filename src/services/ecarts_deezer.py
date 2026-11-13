@@ -1023,6 +1023,7 @@ def _ligne(artist, e: Ecart, contributeurs: list[tuple[int, str]]) -> Track:
             track_number=p.position,
             confidence=e.matched_by or "identified",
             upc=a.upc,
+            nb_pistes=a.nb_tracks,
         )
     )
     if est_apparition:
@@ -1218,6 +1219,7 @@ def _lier_parution(dm, artist, e: Ecart, track: Track) -> bool:
                 track_number=e.piste.position,
                 confidence=e.matched_by or "identified",
                 upc=e.album.upc,
+                nb_pistes=e.album.nb_tracks,
             )
         ],
     )

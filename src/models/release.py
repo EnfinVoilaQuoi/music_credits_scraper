@@ -34,3 +34,7 @@ class ReleaseObservation:
     #: source dont chaque pressage est un objet (Discogs : vinyle, CD, cassette)
     #: et qui ouvrirait sinon une parution par pressage.
     rattacher_seulement: bool = False
+    #: Nombre de pistes de l'édition selon la source (Deezer `nb_tracks`) : un
+    #: single d'une piste n'adopte pas la parution d'un album au même titre
+    #: (`TrackRepository._parution_compatible`, 2026-11-13).
+    nb_pistes: int | None = None

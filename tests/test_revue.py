@@ -2019,3 +2019,29 @@ class TestPageEtFichePlateforme:
         }
         assert revue.page_et_fiche_plateforme(fiche, ctx) is None
         assert revue.meme_place(page, ctx)
+
+    def test_skits_recurrents_de_deux_disques(self):
+        """Décision utilisateur 2026-11-13 : « Paul » de *The Marshall Mathers
+        LP* (11 s) n'est pas une édition de « Paul (Skit) » de *The Slim Shady
+        LP* (15 s) ni de *Kamikaze* (36 s) — deux skits au même nom."""
+        sslp = self._f(
+            "Paul (Skit)", 1, 15, genius_id=11, spotify_id="A", album="The Slim Shady LP"
+        )
+        kami = self._f("Paul (Skit)", 2, 36, genius_id=12, spotify_id="B", album="Kamikaze")
+        mmlp = self._f("Paul", 3, 11, spotify_id="C", album="The Marshall Mathers LP")
+        assert revue.page_et_fiche_plateforme(mmlp, _ctx(sslp, kami, mmlp)) is None
+
+    def test_skit_meme_disque_ou_meme_duree_reste_signale(self):
+        page = self._f(
+            "Paul (Skit)", 1, 15, genius_id=11, spotify_id="A", album="The Slim Shady LP"
+        )
+        meme_disque = self._f("Paul", 2, 11, spotify_id="B", album="The Slim Shady LP (Expanded)")
+        meme_duree = self._f("Paul", 3, 16, spotify_id="C", album="Curtain Call")
+        sans_disque = self._f("Paul", 4, 11, spotify_id="D")
+        for fiche in (meme_disque, meme_duree, sans_disque):
+            assert revue.page_et_fiche_plateforme(fiche, _ctx(page, fiche))
+
+    def test_hors_skit_le_disque_et_la_duree_ne_suffisent_pas(self):
+        page = self._f("Mélomanes", 1, 150, genius_id=11, spotify_id="A", album="The Narvalow Tape")
+        fiche = self._f("Melomanes", 2, 159, spotify_id="B", album="Hérésie Tape")
+        assert revue.page_et_fiche_plateforme(fiche, _ctx(page, fiche))

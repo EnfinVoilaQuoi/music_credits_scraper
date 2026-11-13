@@ -1616,7 +1616,30 @@ def juge_des_ids_spotify(c, chemin: Path | None = None):
     return credite_un_profil_connu
 
 
-def disques_homonymes(pistes, credite_un_profil_connu=None) -> list[Cas]:
+def parutions_deezer_des_fiches(c) -> dict[int, list[tuple[str | None, int]]]:
+    """`{fiche: [(artiste crédité de la parution, album Deezer)]}` (lecture seule)."""
+    sortie: dict[int, list[tuple[str | None, int]]] = collections.defaultdict(list)
+    for tid, credite, did in c.execute(
+        "SELECT rt.track_id, r.credited_artist_name, r.deezer_album_id FROM release_tracks rt "
+        "JOIN releases r ON r.id = rt.release_id WHERE r.deezer_album_id IS NOT NULL"
+    ):
+        sortie[tid].append((credite, int(did)))
+    return sortie
+
+
+def disques_acceptes_de(c) -> set[tuple[str, int]]:
+    """`{(artiste, album Deezer)}` acceptés à la main (`memoriser_disque_accepte`)."""
+    return {
+        (a, int(v))
+        for a, v in c.execute(
+            "SELECT artiste, valeur FROM acceptations WHERE nature = 'disque_deezer'"
+        )
+    }
+
+
+def disques_homonymes(
+    pistes, credite_un_profil_connu=None, parutions=None, acceptes=frozenset()
+) -> list[Cas]:
     """Un disque dont aucune fiche n'a de page Genius ni d'ID Spotify qui prouve
     l'artiste : posé par le seul Deezer, dont un profil peut mêler deux
     homonymes. Les données d'un autre artiste, que rien d'autre ne signalait (le
@@ -1625,7 +1648,20 @@ def disques_homonymes(pistes, credite_un_profil_connu=None) -> list[Cas]:
     Un ID Spotify ne prouve l'artiste que si son embed crédite un profil connu
     de l'artiste (`credite_un_profil_connu`, `juge_des_ids_spotify` ; règle du
     2026-11-09 : un profil Spotify mêle aussi des homonymes). Sans ce juge
-    (appel pur), un ID suffit, comme avant."""
+    (appel pur), un ID suffit, comme avant.
+
+    `parutions` (`parutions_deezer_des_fiches`) : un disque dont la parution
+    Deezer est créditée à un AUTRE artiste est le disque de cet autre, où
+    l'artiste n'est qu'invité (Aketo chez L'Homme de L'Ombre, Furax chez Reda La
+    pire des races, 2026-11-14 : la règle R1 ne les crée que si Deezer crédite
+    l'artiste par SON identifiant) : ce n'est pas un homonyme sur son profil,
+    il n'est pas montré, même pour information (décision utilisateur
+    2026-11-14 : pas de fourre-tout de cas justes). `acceptes` : les disques
+    reconnus à la main (`memoriser_disque_accepte`, Médine *Enfants du Destin
+    (Acoustic)*) ne sont plus montrés."""
+    from src.utils.title_matching import contains_as_words
+
+    parutions = parutions or {}
     disques = collections.defaultdict(list)
     for t in pistes:
         if t["album"]:
@@ -1647,14 +1683,20 @@ def disques_homonymes(pistes, credite_un_profil_connu=None) -> list[Cas]:
             continue
         if _disque_de_sessions(album, fiches):
             continue
-        cas.append(
-            Cas(
-                "disque_homonyme",
-                fiches[0]["artiste"],
-                [f["id"] for f in fiches],
-                f"« {album} » : {len(fiches)} fiches, aucune avec page Genius ni ID Spotify d'un profil connu",
-            )
+        artiste = fiches[0]["artiste"]
+        lues = [p for f in fiches for p in parutions.get(f["id"], ())]
+        if lues and all((artiste, did) in acceptes for _, did in lues):
+            continue
+        libelle = (
+            f"« {album} » : {len(fiches)} fiches, aucune avec page Genius ni ID Spotify "
+            "d'un profil connu"
         )
+        autres = {
+            credite for credite, _ in lues if credite and not contains_as_words(artiste, credite)
+        }
+        if lues and len(autres) == len({c for c, _ in lues}):
+            continue  # le disque d'un autre : une participation, rien à montrer
+        cas.append(Cas("disque_homonyme", artiste, [f["id"] for f in fiches], libelle))
     return cas
 
 
@@ -2346,6 +2388,30 @@ MEMES_SUJETS: dict[str, frozenset[str]] = {
 }
 
 
+#: Les cas « pour information » qu'une règle a déjà jugés JUSTES : l'audit ne
+#: les montre plus (décision utilisateur 2026-11-14 : la section information
+#: devenait un fourre-tout illisible, 1 541 cas pour 10 erreurs). Leurs erreurs
+#: et décisions restent ; les fonctions des familles gardent leur verdict
+#: (tests, `--detail`), seul l'assemblage les écarte.
+INFORMATIONS_JUSTES = {
+    "fiche_sans_participation": "morceau d'un autre, déjà hors des totaux",
+    "revue:sans_info": "page vide avec un signe de vie (la fin de cycle désactive les autres)",
+    "meme_enregistrement": "version non nommée ; la fusion est au panneau ♊",
+    "hors_du_disque": "autre édition du même disque ; la sortie est au panneau 💿",
+    "certif_plus_long": "certif admise par le juge de la pose",
+    "certif_autre": "certif admise par le juge de la pose",
+    "lien_jamais_mesure": "vidéo hors catalogue (interview, message)",
+    "paroles_identiques": "version nommée, ou déjà au panneau",
+    "streams_double": "égalité de hasard, deux morceaux, ou déjà au panneau",
+    "id_partage": "déjà montré par le panneau",
+}
+
+
+def sans_informations_justes(cas: list[Cas]) -> list[Cas]:
+    """PUR. Retire les cas `INFORMATION` des familles de `INFORMATIONS_JUSTES`."""
+    return [c for c in cas if not (c.nature == INFORMATION and c.famille in INFORMATIONS_JUSTES)]
+
+
 def montres_par_le_panneau(cas: list[Cas]) -> list[Cas]:
     """Une ERREUR de l'audit dont une fiche porte déjà un cas du panneau (au
     critère) sur le même sujet (`MEMES_SUJETS`) n'est pas comptée deux fois :
@@ -2374,7 +2440,12 @@ def montres_par_le_panneau(cas: list[Cas]) -> list[Cas]:
 
 
 def auditer(
-    dm, noms: list[str] | None = None, *, persistance: bool = True, revue: bool = True
+    dm,
+    noms: list[str] | None = None,
+    *,
+    persistance: bool = True,
+    revue: bool = True,
+    masquer_justes: bool = True,
 ) -> Audit:
     """L'audit de `noms` (toute la base si None). `persistance` ajoute les
     invariants (le passage à blanc de `rematerialiser` coûte ~36 s sur toute
@@ -2412,7 +2483,9 @@ def auditer(
         audit.cas += credit_graphie(c, pistes)
         audit.cas += studio_sur_live(c, pistes)
         audit.cas += singles_fondus(c, pistes)
-        audit.cas += disques_homonymes(pistes, juge_des_ids_spotify(c))
+        audit.cas += disques_homonymes(
+            pistes, juge_des_ids_spotify(c), parutions_deezer_des_fiches(c), disques_acceptes_de(c)
+        )
         audit.cas += colonnes_sans_provenance(c, pistes)
         audit.cas += ids_spotify_sans_compteur(c, pistes)
         audit.cas += fiches_sans_participation(c, pistes)
@@ -2454,6 +2527,8 @@ def auditer(
         )
     if revue:
         audit.cas = montres_par_le_panneau(audit.cas)
+    if masquer_justes:
+        audit.cas = sans_informations_justes(audit.cas)
     return audit
 
 

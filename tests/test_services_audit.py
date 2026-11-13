@@ -640,7 +640,7 @@ def test_deux_pages_au_meme_texte_au_panneau(data_manager, isha):
             u=f"https://genius.com/Isha-{page}-lyrics",
             t=tid,
         )
-    audit = au.auditer(data_manager)
+    audit = au.auditer(data_manager, masquer_justes=False)
     (cas,) = [c for c in audit.cas if c.famille == "revue:meme_enregistrement"]
     assert cas.pistes == [t.id] and "même texte Genius" in cas.libelle
     (info,) = [c for c in audit.cas if c.famille == "paroles_identiques"]
@@ -650,7 +650,7 @@ def test_deux_pages_au_meme_texte_au_panneau(data_manager, isha):
         c for c in revue.analyser(data_manager, a).actifs if c.detecteur == "meme_enregistrement"
     ]
     data_manager.trancher_cas(a.id, du_panneau.detecteur, du_panneau.cle)
-    audit = au.auditer(data_manager)
+    audit = au.auditer(data_manager, masquer_justes=False)
     assert not [c for c in audit.cas if c.famille == "revue:meme_enregistrement"]
 
 
@@ -1305,13 +1305,17 @@ class TestFamillesNues:
         data_manager.save_track(autre)
         for tid in (t.id, autre.id):
             _sql(data_manager, "UPDATE tracks SET spotify_streams = 123456 WHERE id = :t", t=tid)
-        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        audit = au.auditer(
+            data_manager, ["Isha"], revue=False, persistance=False, masquer_justes=False
+        )
         (cas,) = [c for c in audit.cas if c.famille == "streams_double"]
         assert sorted(cas.pistes) == sorted([t.id, autre.id]) and "123,456" in cas.libelle
         # Sous 1 000 streams, un compteur égal ne dit rien.
         for tid in (t.id, autre.id):
             _sql(data_manager, "UPDATE tracks SET spotify_streams = 900 WHERE id = :t", t=tid)
-        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        audit = au.auditer(
+            data_manager, ["Isha"], revue=False, persistance=False, masquer_justes=False
+        )
         assert "streams_double" not in _familles(audit)
 
     @pytest.mark.parametrize(
@@ -1419,7 +1423,7 @@ class TestFamillesNues:
         from src.services import revue
 
         a, t, autre = self._meme_compteur_meme_disque(data_manager, isha)
-        audit = au.auditer(data_manager)
+        audit = au.auditer(data_manager, masquer_justes=False)
         (cas,) = [c for c in audit.cas if c.famille == "revue:meme_enregistrement"]
         assert cas.pistes == [t.id] and "compteur Spotify" in cas.libelle
         assert cas.nature == au.DECISION
@@ -1433,7 +1437,7 @@ class TestFamillesNues:
         ]
         assert du_panneau.preuves["autres"] == [autre.id]
         data_manager.trancher_cas(a.id, du_panneau.detecteur, du_panneau.cle)
-        audit = au.auditer(data_manager)
+        audit = au.auditer(data_manager, masquer_justes=False)
         assert not [c for c in audit.cas if c.famille == "revue:meme_enregistrement"]
 
     @pytest.mark.parametrize(
@@ -1818,7 +1822,7 @@ class TestHorsDuDisque:
     def test_autre_edition_du_disque_pour_information(self, data_manager, isha):
         _, t = isha
         self._disque(data_manager, t, album_de_la_piste="M.A.N (Deluxe)")
-        audit = au.auditer(data_manager)
+        audit = au.auditer(data_manager, masquer_justes=False)
         (cas,) = self._informations(audit)
         assert cas.nature == au.INFORMATION and not self._cas(audit)
         assert "hors_du_disque" in au.FAMILLES_HORS_CRITERE
@@ -2011,7 +2015,7 @@ class TestMemeEnregistrement:
 
     def test_autre_duree_version_non_nommee_pour_information(self, data_manager, isha):
         self._paire(data_manager, isha, durees=(200, 260))
-        audit = au.auditer(data_manager)
+        audit = au.auditer(data_manager, masquer_justes=False)
         (cas,) = self._informations(audit)
         assert cas.nature == au.INFORMATION and not self._cas(audit)
         assert "meme_enregistrement" in au.FAMILLES_HORS_CRITERE

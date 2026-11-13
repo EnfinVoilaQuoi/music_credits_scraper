@@ -140,7 +140,12 @@ async def resoudre_async(client, http, dm, artist, *, force_id: int | None = Non
         if t.album:
             albums_base.add(cle_album(t.album))
     artistes_des_pistes: list[int] = []
-    if len(candidats) > 1:
+    # Un candidat SEUL se juge aussi dès que la base a de quoi comparer : seul
+    # au nom exact ne prouve rien (The Graduates, 392414 : un groupe pop-rock,
+    # 47 fiches d'homonyme créées le 2026-11-13). Une base sans album ni
+    # morceau n'a rien à opposer : le seul candidat reste accepté.
+    a_comparer = bool(albums_base or album_ids_base or any(t.deezer_id for t in tracks))
+    if len(candidats) > 1 or a_comparer:
         for t in [t for t in tracks if t.deezer_id][:_MAX_PISTES_VOTE]:
             fiche = await client.get_track_async(http, int(t.deezer_id))
             aid = ((fiche or {}).get("artist") or {}).get("id")
@@ -155,6 +160,8 @@ async def resoudre_async(client, http, dm, artist, *, force_id: int | None = Non
             compter_recouvrement(c, albums_base, album_ids_base, artistes_des_pistes)
 
     elu = departager(candidats)
+    if elu is not None and a_comparer and elu.recouvrement == 0:
+        elu = None  # seul au nom, sans rien en commun avec la base : l'humain
     if elu is None:
         logger.warning(
             f"Deezer : « {artist.name} » ambigu — "

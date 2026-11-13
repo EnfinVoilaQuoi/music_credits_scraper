@@ -6570,6 +6570,32 @@ class TrackRepository:
             logger.error(f"Erreur set_album_record_type({artist_id}, {title!r}): {e}")
             return False
 
+    def retirer_albums_de_disques(self, artist_id: int, deezer_album_ids: set[int]) -> int:
+        """Retire les lignes `albums` de l'artiste posées pour ces disques Deezer
+        (refusés : un homonyme sur le même profil) quand plus aucune de ses
+        fiches ne porte leur titre. Restées après le retrait des fiches, elles
+        faisaient « connaître » le disque à l'oracle d'identité Deezer
+        (`deezer_identite`, vote ①) et au classement des écarts (WZRD, CFR,
+        The Graduates : 43 lignes le 2026-11-13). Rend le nombre retiré."""
+        if not deezer_album_ids:
+            return 0
+        retirees = 0
+        try:
+            with self.engine.begin() as conn:
+                for did in sorted(int(i) for i in deezer_album_ids):
+                    retirees += conn.execute(
+                        text(
+                            "DELETE FROM albums WHERE artist_id = :a AND deezer_album_id = :d "
+                            "AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id = :a "
+                            "AND t.album = albums.title)"
+                        ),
+                        {"a": artist_id, "d": did},
+                    ).rowcount
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur retirer_albums_de_disques({artist_id}): {e}")
+            return 0
+        return retirees
+
     def get_albums_for_artist(self, artist_id: int) -> list[dict[str, Any]]:
         """Retourne les albums d'un artiste triés par streams décroissants."""
         try:

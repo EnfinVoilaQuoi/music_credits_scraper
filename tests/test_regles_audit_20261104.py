@@ -107,10 +107,42 @@ class TestDisqueEtranger:
         ed.marquer_disques_etrangers([rap, rock], ecarts)
         assert not any(e.disque_etranger for e in ecarts)
 
-    def test_un_single_d_un_autre_genre_n_est_pas_un_homonyme(self):
+    def test_un_single_d_un_autre_genre_va_a_l_humain(self):
+        # Décision utilisateur 2026-11-14 (remplace celle du 2026-11-04) : les
+        # singles d'homonymes de WZRD et CFR passaient tous.
         rap, single = self._album(1, ["Rap/Hip Hop"], 3), self._album(2, ["Pop"], 1)
         ecarts = self._ecarts(single)
         ed.marquer_disques_etrangers([rap, single], ecarts)
+        assert all(e.disque_etranger and not e.coche for e in ecarts)
+
+    def test_un_single_du_meme_genre_reste_proposable(self):
+        rap, single = self._album(1, ["Rap/Hip Hop"], 3), self._album(2, ["Rap/Hip Hop"], 1)
+        ecarts = self._ecarts(single)
+        ed.marquer_disques_etrangers([rap, single], ecarts)
+        assert not any(e.disque_etranger for e in ecarts)
+
+    def test_un_single_inconnu_n_apporte_pas_son_genre(self):
+        # WZRD, 2026-11-13 : les singles rap de l'homonyme rendaient « connu »
+        # le genre de ses albums entiers.
+        alt = self._album(1, ["Alternative"], 3)
+        single_rap = self._album(2, ["Rap/Hip Hop"], 1)
+        album_rap = self._album(3, ["Rap/Hip Hop"], 14)
+        ecarts = self._ecarts(single_rap) + self._ecarts(album_rap)
+        ed.marquer_disques_etrangers([alt, single_rap, album_rap], ecarts)
+        assert all(e.disque_etranger for e in ecarts if e.album.id in (2, 3))
+
+    def test_un_profil_sans_aucun_disque_connu_va_a_l_humain(self):
+        # The Graduates, 2026-11-13 : tout le profil Deezer était un homonyme.
+        album, ep = self._album(1, ["Rock"], 12), self._album(2, ["Pop"], 1)
+        ecarts = self._ecarts(album) + self._ecarts(ep)
+        ed.marquer_disques_etrangers([album, ep], ecarts)
+        assert all(e.disque_etranger and not e.coche for e in ecarts)
+        assert "aucun disque de ce profil n'est connu" in ecarts[0].motifs[0]
+
+    def test_des_disques_connus_sans_genre_ne_jugent_rien(self):
+        connu, rock = self._album(1, [], 3), self._album(2, ["Rock"], 4)
+        ecarts = self._ecarts(rock)
+        ed.marquer_disques_etrangers([connu, rock], ecarts)
         assert not any(e.disque_etranger for e in ecarts)
 
     def test_le_panneau_le_laisse_a_l_humain(self):
@@ -182,6 +214,9 @@ class TestRefusDeDisque:
         a = Artist(name="Anton Serra")
         a.id = data_manager.save_artist(a)
         self._disque(data_manager, a, ["Ballade", "Romance", "Suite"])
+        data_manager.set_album_record_type(
+            a.id, "Flute and Piano", "album", deezer_album_id=6294406
+        )
         args = ["Anton Serra", "--base", str(data_manager.db_path)]
 
         assert script.main(args) == 0
@@ -191,6 +226,8 @@ class TestRefusDeDisque:
         assert script.main([*args, "--apply"]) == 0
         assert self._restantes(data_manager) == (0, 0)
         assert cf.disques_refuses("Anton Serra") == {6294406}
+        # 2026-11-14 : la ligne `albums` du disque part aussi (oracle d'identité).
+        assert data_manager.get_albums_for_artist(a.id) == []
 
         assert script.main([*args, "--oublier", "6294406", "--apply"]) == 0
         assert cf.disques_refuses("Anton Serra") == set()
@@ -235,6 +272,32 @@ class TestAuditDisqueHomonyme:
 
     def test_famille_declaree(self):
         assert "disque_homonyme" in au.FAMILLES
+
+    def test_le_disque_d_un_autre_n_est_pas_montre(self):
+        # Aketo chez L'Homme de L'Ombre, 2026-11-14 : une participation, pas
+        # même pour information (décision utilisateur).
+        pistes = [self._p(i, "Œuvre d'art, Vol. 3") for i in range(3)]
+        parutions = {i: [("L'Homme de L'Ombre", 317410177)] for i in range(3)}
+        assert au.disques_homonymes(pistes, parutions=parutions) == []
+
+    def test_le_disque_au_nom_de_l_artiste_reste_une_erreur(self):
+        pistes = [self._p(i, "Flute and Piano") for i in range(3)]
+        parutions = {i: [("Anton Serra", 6294406)] for i in range(3)}
+        (cas,) = au.disques_homonymes(pistes, parutions=parutions)
+        assert cas.nature == au.ERREUR
+
+    def test_un_disque_accepte_n_est_plus_montre(self):
+        # Médine, *Enfants du Destin (Acoustic)*, décision utilisateur 2026-11-14.
+        pistes = [self._p(i, "Flute and Piano") for i in range(3)]
+        parutions = {i: [("Anton Serra", 6294406)] for i in range(3)}
+        acceptes = {("Anton Serra", 6294406)}
+        assert au.disques_homonymes(pistes, parutions=parutions, acceptes=acceptes) == []
+
+    def test_l_acceptation_s_ecrit_et_se_lit(self, data_manager):
+        assert cf.memoriser_disque_accepte("Médine", 1137820031, "Enfants du Destin (Acoustic)")
+        assert cf.disques_acceptes() == {("Médine", 1137820031)}
+        assert cf.oublier_disque_accepte("Médine", 1137820031)
+        assert cf.disques_acceptes() == set()
 
 
 class TestSegmentDeDjMix:
@@ -598,3 +661,21 @@ class TestDureeIsoleeSansCatalogueContre:
         }
         motif, _ = revue.duree_isolee(t)
         assert "démentie par" in motif
+
+
+class TestInformationsJustes:
+    """Décision utilisateur 2026-11-14 : les cas « pour information » qu'une
+    règle juge justes ne sont plus montrés ; erreurs et décisions restent."""
+
+    def test_seules_les_informations_justes_partent(self):
+        cas = [
+            au.Cas("fiche_sans_participation", "A", [1], "x", au.INFORMATION),
+            au.Cas("id_partage", "A", [2], "panneau", au.INFORMATION),
+            au.Cas("id_partage", "A", [3], "erreur", au.ERREUR),
+            au.Cas("credit_graphie", "A", [4], "à corriger", au.INFORMATION),
+        ]
+        assert [c.pistes for c in au.sans_informations_justes(cas)] == [[3], [4]]
+
+    def test_les_familles_masquees_existent(self):
+        familles = set(au.FAMILLES) | {"revue:sans_info"}
+        assert set(au.INFORMATIONS_JUSTES) <= familles

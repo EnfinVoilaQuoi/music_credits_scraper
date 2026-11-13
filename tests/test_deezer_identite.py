@@ -139,3 +139,37 @@ class TestResoudre:
         client = _Client([_hit(3, "Isha Bel")], {})
         with pytest.raises(di.ArtisteDeezerAmbigu):
             asyncio.run(di.resoudre_async(client, None, _DM([], []), _artist()))
+
+
+class TestCandidatSeulSansPreuve:
+    """The Graduates, 2026-11-13 : seul profil au nom exact, un groupe pop-rock
+    sans rien en commun avec la base — 47 fiches d'homonyme créées d'office."""
+
+    def test_seul_sans_recouvrement_va_a_l_humain(self):
+        client = _Client(
+            [_hit(392414, "The Graduates")],
+            {392414: [{"id": 14838267, "title": "Up in Downtown"}]},
+        )
+        t = Track(title="Day ‘n’ Nite")
+        t.album = "The Graduates EP"
+        dm = _DM([], [t])
+        with pytest.raises(di.ArtisteDeezerAmbigu) as exc:
+            asyncio.run(di.resoudre_async(client, None, dm, _artist(name="The Graduates")))
+        assert [c.id for c in exc.value.candidats] == [392414]
+        assert dm.ecrit is None
+
+    def test_seul_avec_un_disque_commun_accepte(self):
+        client = _Client(
+            [_hit(9, "Lucio Bukowski")], {9: [{"id": 1, "title": "L'art raffiné de l'ecchymose"}]}
+        )
+        t = Track(title="X")
+        t.album = "L'art raffiné de l'ecchymose"
+        dm = _DM([], [t])
+        artist = _artist(name="Lucio Bukowski")
+        assert asyncio.run(di.resoudre_async(client, None, dm, artist)) == 9
+
+    def test_seul_sans_rien_a_comparer_accepte(self):
+        client = _Client([_hit(9, "Lucio Bukowski")], {9: []})
+        dm = _DM([], [Track(title="X")])
+        artist = _artist(name="Lucio Bukowski")
+        assert asyncio.run(di.resoudre_async(client, None, dm, artist)) == 9

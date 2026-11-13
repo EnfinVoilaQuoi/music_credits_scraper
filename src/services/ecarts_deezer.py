@@ -817,36 +817,47 @@ def accrocher_genius(ecarts: list[Ecart], artist, genius_api) -> None:
 # ── Détection (async) ────────────────────────────────────────────────────────
 
 
-#: Un disque se juge étranger à partir de ce nombre de pistes : un single d'un
-#: autre genre n'est pas un homonyme.
-PISTES_MIN_DISQUE_ETRANGER = 3
-
-
 def marquer_disques_etrangers(albums: list[AlbumDeezer], ecarts: list[Ecart]) -> None:
     """Un profil Deezer peut mêler deux homonymes (Anton Serra, 1666208 : le
     rappeur et le flûtiste, 22 fiches créées d'office le 2026-11-04). Un disque
     dont AUCUNE piste n'est connue, d'un genre qu'aucun disque connu de l'artiste
-    n'a, ne crée rien seul : il va à l'humain, décoché."""
+    n'a, ne crée rien seul : il va à l'humain, décoché.
+
+    Les genres « connus » ne viennent que des disques dont une piste au moins
+    est en base : un single d'homonyme entièrement inconnu n'en apporte pas
+    (WZRD, CFR, 2026-11-13). Un profil dont AUCUN disque n'est connu n'a pas
+    de genre de référence : tous ses disques entièrement inconnus vont à
+    l'humain, singles compris (The Graduates : tout le profil était un groupe
+    pop-rock, 47 fiches créées d'office le 2026-11-13).
+
+    Un SINGLE inconnu d'un genre étranger va aussi à l'humain (décision
+    utilisateur 2026-11-14, remplace « un single d'un autre genre n'est pas un
+    homonyme » du 2026-11-04) : simulée sur les 74 profils de la base, 46
+    singles hors base au genre étranger, dont 41 d'homonymes (WZRD 30, CFR 10,
+    KSG « Lil Demon ») et 5 vrais, laissés à l'humain."""
     absentes = {(e.album.id, e.piste.id) for e in ecarts if e.nature in ("absent", "album_absent")}
-    entiers = {
-        a.id
-        for a in albums
-        if len(a.pistes) >= PISTES_MIN_DISQUE_ETRANGER
-        and all((a.id, p.id) in absentes for p in a.pistes)
+    inconnus = {
+        a.id for a in albums if a.pistes and all((a.id, p.id) in absentes for p in a.pistes)
     }
-    connus = {g for a in albums if a.id not in entiers for g in a.genres}
-    if not connus:
-        return
-    etrangers = {
-        a.id: a for a in albums if a.id in entiers and a.genres and not connus & set(a.genres)
-    }
+    connus = {g for a in albums if a.pistes and a.id not in inconnus for g in a.genres}
+    if not any(a.pistes and a.id not in inconnus for a in albums):
+        etrangers = {
+            a.id: "aucun disque de ce profil n'est connu" for a in albums if a.id in inconnus
+        }
+    elif not connus:
+        return  # disques connus sans genre : rien à comparer
+    else:
+        etrangers = {
+            a.id: f"genre {', '.join(a.genres)}"
+            for a in albums
+            if a.id in inconnus and a.genres and not connus & set(a.genres)
+        }
     for e in ecarts:
         if e.album.id in etrangers and (e.album.id, e.piste.id) in absentes:
             e.disque_etranger = True
             e.coche = False
             e.motifs.append(
-                f"disque entier inconnu, genre {', '.join(etrangers[e.album.id].genres)} : "
-                "un homonyme sur le même profil ?"
+                f"disque entier inconnu, {etrangers[e.album.id]} : un homonyme sur le même profil ?"
             )
 
 

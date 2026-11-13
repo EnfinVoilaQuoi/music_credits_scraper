@@ -710,6 +710,62 @@ def oublier_disque_refuse(artiste: str, album_deezer: int) -> bool:
         )
 
 
+def memoriser_disque_accepte(artiste: str, album_deezer: int, titre: str) -> bool:
+    """Le pendant OUI du refus de disque : un disque Deezer que l'humain a
+    reconnu comme celui de l'artiste, bien qu'aucune fiche n'ait de page Genius
+    ni d'ID Spotify (Médine, *Enfants du Destin (Acoustic)*, 2026-11-14). La
+    famille d'audit `disque_homonyme` ne le montre plus (`disques_acceptes`)."""
+    from datetime import datetime
+
+    if moteur is None or not artiste:
+        return False
+    return _inserer(
+        {"titre": titre, "album": None},
+        artiste,
+        titre,
+        None,
+        "disque_deezer",
+        int(album_deezer),
+        datetime.now().isoformat(timespec="seconds"),
+        table="acceptations",
+    )
+
+
+def disques_acceptes() -> set[tuple[str, int]]:
+    """`{(artiste, album Deezer)}` des disques acceptés à la main (l'audit, qui
+    lit la base en sqlite3, a sa propre requête : `audit.disques_acceptes_de`)."""
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    if moteur is None:
+        return set()
+    sql = text("SELECT artiste, valeur FROM acceptations WHERE nature = 'disque_deezer'")
+    try:
+        with moteur.connect() as c:
+            lignes = c.execute(sql).all()
+    except SQLAlchemyError as e:
+        logger.warning(f"Disques acceptés illisibles : {e}")
+        return set()
+    return {(a, int(v)) for a, v in lignes}
+
+
+def oublier_disque_accepte(artiste: str, album_deezer: int) -> bool:
+    if moteur is None:
+        return False
+    from sqlalchemy import text
+
+    with moteur.begin() as conn:
+        return bool(
+            conn.execute(
+                text(
+                    "DELETE FROM acceptations WHERE nature = 'disque_deezer' AND artiste = :a "
+                    "AND valeur = :v"
+                ),
+                {"a": artiste, "v": str(int(album_deezer))},
+            ).rowcount
+        )
+
+
 def cle_parution(titre: str | None) -> str:
     """La valeur d'un refus `parution` : le titre normalisé du disque (une
     autre édition — « M.A.N (Deluxe) » — est un autre disque)."""

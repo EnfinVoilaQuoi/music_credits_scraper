@@ -50,6 +50,7 @@ EXCEPTIONS: dict[str, str] = {
     "poser_upc_parution": _PARUTIONS,
     "record_release_observations": _PARUTIONS,
     # ── Albums ──
+    "retirer_albums_de_disques": _ALBUMS + " (lignes de disques refusés, sans fiche)",
     "set_album_record_type": _ALBUMS,
     "update_album_ytm_streams": _ALBUMS,
     "upsert_album": _ALBUMS,

@@ -894,7 +894,10 @@ def politique_ecarts_deezer(
             # par SON identifiant (vérifié) parmi les contributeurs : un
             # featuring réel (« 600K » de Heuss L'enfoiré avec PLK).
             credite = [nom for cid, nom in piste.get("contributors") or [] if cid in ids_artiste]
-            if credite:
+            noms = [nom for _, nom in piste.get("contributors") or []]
+            if credite and not credits_de_complaisance(
+                titre, noms, piste.get("artist_name") or album.get("artist_name")
+            ):
                 return Arbitrage(
                     "créer la fiche (Deezer crédite l'artiste par son ID)",
                     "deezer_appliquer",
@@ -1925,6 +1928,32 @@ def _credits_de_la_piste(cas, lire_deezer: Callable) -> list[dict]:
     return [c for c in lue.get("contributors") or [] if isinstance(c, dict)]
 
 
+#: Contributeurs (hors principal) à partir desquels une liste de crédits
+#: muette dans le titre est suspecte : `credits_de_complaisance`.
+CONTRIBUTEURS_DE_COMPLAISANCE = 5
+
+
+def credits_de_complaisance(titre: str, contributeurs: list[str], principal: str | None) -> bool:
+    """PUR. Une piste qui crédite au moins `CONTRIBUTEURS_DE_COMPLAISANCE`
+    contributeurs en plus de son principal, dont moins de la moitié sont nommés
+    dans son titre : des crédits de complaisance (Felisberto Araujo, *TESTE DE
+    FÉ* : KIDS SEE GHOSTS, Juice WRLD, Pop Smoke, Only The Family… sur un rap
+    brésilien ; 16 fiches créées chez KSG et Kanye le 2026-11-13). Un vrai
+    featuring à crédit de piste reste en deçà (simulé le 2026-11-13 sur les 229
+    fiches sans page ni ID Spotify : aucun ; « J'entre dans le rap », 13
+    contributeurs, est sur le disque de Swift Guad lui-même). La création de
+    fiche va alors à l'humain."""
+    from src.utils.title_matching import contains_as_words, names_match_as_words
+
+    autres = [
+        n for n in contributeurs if n and not (principal and names_match_as_words(principal, n))
+    ]
+    if len(autres) < CONTRIBUTEURS_DE_COMPLAISANCE:
+        return False
+    nommes = sum(1 for n in autres if contains_as_words(n, titre or ""))
+    return nommes * 2 < len(autres)
+
+
 def _nomme_dans_un_credit(credits: list[dict], nom: str) -> bool:
     """Un contributeur dont le nom CONTIENT celui de l'artiste (mots entiers) :
     un duo, une formation (« Caballero & JeanJass »)."""
@@ -2007,6 +2036,10 @@ def _piste_creditee_sur_le_disque_d_un_autre(
     credits = _credits_de_la_piste(cas, lire_deezer)
     # L'ID seul (homonymes) ; un nom composé qui le contient (sa formation) : l'humain.
     if not credits or not _credite_l_artiste(credits, ids_artiste, ""):
+        return None
+    if credits_de_complaisance(
+        titre, [c.get("name") or "" for c in credits], album.get("artist_name")
+    ):
         return None
     if any(c.get("id") not in ids_artiste for c in credits) and _nomme_dans_un_credit(
         [c for c in credits if c.get("id") not in ids_artiste], nom_artiste

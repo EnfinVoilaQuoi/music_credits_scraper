@@ -169,3 +169,52 @@ class TestR5MentionsDeSupport:
             lire_deezer=_lire([(KAARIS, "Eminem")]),
         )
         assert arb.action == "deezer_rattacher_edition" and "#14297" in arb.raison
+
+
+class TestCreditsDeComplaisance:
+    """Felisberto Araujo, *TESTE DE FÉ* (2026-11-13) : un rap brésilien qui
+    crédite KIDS SEE GHOSTS, Juice WRLD, Pop Smoke, Only The Family… — 16 fiches
+    créées chez KSG et Kanye. Ni R1 ni DA2 ne créent ; l'humain."""
+
+    KSG = 14997345
+    SPAM = [
+        (221714385, "Felisberto Araujo"),
+        (1, "Molotof"),
+        (2, "Akhras"),
+        (3, "Internet Money"),
+        (4, "Only The Family"),
+        (KSG, "KIDS SEE GHOSTS"),
+        (5, "Juice WRLD"),
+    ]
+    TESTE = {"id": 909232782, "title": "TESTE DE FÉ", "artist_id": 221714385}
+
+    def test_le_juge(self):
+        noms = [n for _, n in self.SPAM]
+        assert pol.credits_de_complaisance("Benção", noms, "Felisberto Araujo")
+        assert not pol.credits_de_complaisance(
+            "Conséquence", ["Reda La pire des races", "Furax Barbarossa"], "Reda La pire des races"
+        )
+        # Un posse cut qui nomme ses invités dans son titre n'est pas suspect.
+        assert not pol.credits_de_complaisance(
+            "X (feat. A, B, C, D & E)", ["P", "A", "B", "C", "D", "E"], "P"
+        )
+
+    def test_r1_ne_cree_pas(self):
+        cas = _cas("deezer_absent", {"id": 3815650982, "title": "Benção"}, self.TESTE)
+        arb = pol.arbitrage_deezer(
+            cas, None, revue.contexte([]), {}, {self.KSG}, lire_deezer=_lire(self.SPAM)
+        )
+        assert arb is None or arb.action != "deezer_appliquer"
+
+    def test_da2_ne_cree_pas(self):
+        piste = {
+            "id": 3815650982,
+            "title": "Benção",
+            "artist_name": "Felisberto Araujo",
+            "contributors": [list(c) for c in self.SPAM],
+        }
+        cas = _cas("deezer_apparition", piste, {**self.TESTE, "artist_name": "Felisberto Araujo"})
+        arb = pol.arbitrage_deezer(
+            cas, None, revue.contexte([]), {}, {self.KSG}, lire_deezer=_lire(self.SPAM)
+        )
+        assert arb is None or arb.action != "deezer_appliquer"

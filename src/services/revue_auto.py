@@ -117,6 +117,12 @@ REGLES_VIDEO_BRANCHEES = True
 #: simulation (6 cas / 7).
 REGLES_TEMOIN_BRANCHEES = True
 
+#: Famille « hors du disque », ✓ Normal quand l'édition physique Discogs la
+#: liste (`politiques_revue.REGLES_HORS_DISQUE`, R3) : levé le 2026-11-13,
+#: validé par l'utilisateur sur la simulation (8 cas, la règle « Deezer + Apple »
+#: écartée : 6 erreurs sur 19).
+REGLES_HORS_DISQUE_BRANCHEES = True
+
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.
 _SANS_FICHE = frozenset(
@@ -128,6 +134,7 @@ _SANS_FICHE = frozenset(
         "deezer_edition",
         "confirmer_lien",
         "confirmer_formation",
+        "confirmer_formation_genius",
         "kworb_tiers",
         # Cas d'ARTISTE : ses fiches sont dans ses preuves.
         "retirer_video_partagee",
@@ -184,6 +191,7 @@ def cas_par_regle(
     compteur: bool = False,
     video: bool = False,
     temoin: bool = False,
+    hors_disque: bool = False,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
@@ -192,6 +200,7 @@ def cas_par_regle(
         arbitrage_compteur,
         arbitrage_deezer,
         arbitrage_etendu,
+        arbitrage_hors_disque,
         arbitrage_id_partage,
         arbitrage_id_propose,
         arbitrage_liens_deezer,
@@ -228,6 +237,8 @@ def cas_par_regle(
             arbitrage = arbitrage_video_hors_colonne(c, track, ctx)
         if arbitrage is None and temoin:
             arbitrage = arbitrage_temoin_hors_colonne(c, track, ctx)
+        if arbitrage is None and hors_disque:
+            arbitrage = arbitrage_hors_disque(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -467,6 +478,22 @@ def _confirmer_lien(_dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
         "nom": cas.preuves["nom"],
         "kind": cas.preuves["kind"],
     }
+
+
+def _confirmer_formation_genius(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """R4 : pose l'ID Genius de la formation que les morceaux du membre
+    prouvent (`id_prouve_par_le_membre`, relu au moment d'écrire), puis la
+    confirme comme `_confirmer_formation` — sa nature mesurée avec cet ID."""
+    from src.services.formations_genius import id_prouve_par_le_membre
+
+    nom = cas.preuves["nom"]
+    trouve = id_prouve_par_le_membre(artiste.genius_id, nom)
+    if trouve is None:
+        raise LookupError(f"« {nom} » : plus aucun morceau du membre ne la prouve")
+    if not dm.poser_genius_id_formation(artiste.id, nom, "member_of", trouve.genius_id):
+        raise LookupError(f"lien « {nom} » introuvable")
+    compte_rendu, annulation = _confirmer_formation(dm, track, cas, artiste=artiste)
+    return f"{compte_rendu} — ID Genius {trouve.genius_id}", annulation
 
 
 def _confirmer_formation(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
@@ -894,6 +921,7 @@ _CORRECTEURS_DE_REGLE = {
     "retirer_lrc": _corriger_lrc,
     "confirmer_lien": _confirmer_lien,
     "confirmer_formation": _confirmer_formation,
+    "confirmer_formation_genius": _confirmer_formation_genius,
     "kworb_tiers": _kworb_tiers,
     "retirer_video_partagee": _retirer_video_partagee,
     # Même geste pour UNE fiche : `track_ids` = [la fiche], refus de règle.
@@ -941,6 +969,7 @@ def a_corriger(dm, artiste, revue, ctx, tracks) -> list[tuple]:
         or REGLES_COMPTEUR_BRANCHEES
         or REGLES_VIDEO_BRANCHEES
         or REGLES_TEMOIN_BRANCHEES
+        or REGLES_HORS_DISQUE_BRANCHEES
     ):
         rendus = _rendus_a_l_humain(dm, artiste.id)
         a_faire += [
@@ -959,6 +988,7 @@ def a_corriger(dm, artiste, revue, ctx, tracks) -> list[tuple]:
                 compteur=REGLES_COMPTEUR_BRANCHEES,
                 video=REGLES_VIDEO_BRANCHEES,
                 temoin=REGLES_TEMOIN_BRANCHEES,
+                hors_disque=REGLES_HORS_DISQUE_BRANCHEES,
             )
             if (c.detecteur, c.cle) not in rendus
         ]

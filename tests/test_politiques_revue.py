@@ -1053,7 +1053,9 @@ class TestFormationMbEtDiscogs:
             kind=kind, related_name="Sniper", source=source, formation=formation, detail=None
         )
         natures = {"Sniper": nature} if nature else {}
-        ctx = SimpleNamespace(relations_proposees=[rel], disco=[], natures_formations=natures)
+        ctx = SimpleNamespace(
+            relations_proposees=[rel], disco=[], natures_formations=natures, formations_prouvees={}
+        )
         cas = _cas("liens_proposes", None, {"nom": "Sniper", "kind": kind})
         return pol.politique_alias(cas, None, ctx)
 
@@ -1099,14 +1101,18 @@ def test_les_regles_validees_sont_gelees():
     } == pol.REGLES_VALIDEES
 
 
-def test_un_retrait_exige_trois_catalogues():
-    """Validé sur la variante à 3 : à 2 catalogues contre, l'ID reste."""
+def test_un_retrait_a_deux_catalogues_exige_qu_aucun_temoin_ne_soutienne():
+    """Validé d'abord sur la variante à 3 (2026-10-20) ; depuis le 2026-11-13
+    (décision utilisateur après simulation), 2 catalogues d'accord suffisent
+    quand rien ne soutient la valeur démentie (`test_vote_deux_catalogues`)."""
     t = _t(
         spotify_id="SP",
         durations_observees={"spotify_web": 202, "reccobeats": 202, "deezer": 224, "youtube": 225},
     )
+    assert pol.arbitrage_valide(_cas("duree_spotify", t), t, None).action == "retirer_spotify"
+    t.durations_observees["discogs"] = 202  # une édition physique a cette durée
     assert pol.arbitrage_valide(_cas("duree_spotify", t), t, None) is None
-    t.durations_observees["apple_music"] = 224
+    t.durations_observees["apple_music"] = 224  # trois catalogues : la règle d'avant
     assert pol.arbitrage_valide(_cas("duree_spotify", t), t, None).action == "retirer_spotify"
 
 

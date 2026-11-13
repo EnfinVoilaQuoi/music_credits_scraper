@@ -60,7 +60,20 @@ def par_la_recherche(genius, nom: str, membre_id: int, pages_du_membre: set[int]
     return prouves[0] if len(prouves) == 1 else None
 
 
-def mesurer_nature(dm, nom: str, *, chemin_brut=None, index_membres=None):
+def id_prouve_par_le_membre(membre_genius_id, nom: str, chemin_brut=None):
+    """R4 (décision utilisateur 2026-11-13) : l'ID Genius de la formation `nom`
+    lu dans la liste Genius du MEMBRE gardée au brut — l'artiste principal au
+    nom de la formation, sous un seul ID (`id_par_les_morceaux`). None : pas de
+    liste, aucun morceau, ou plusieurs ID (ambigu)."""
+    if not membre_genius_id:
+        return None
+    trouve = fg.id_par_les_morceaux(fg.chansons_du_brut(int(membre_genius_id), chemin_brut), nom)
+    return trouve if trouve.genius_id else None
+
+
+def mesurer_nature(
+    dm, nom: str, *, chemin_brut=None, index_membres=None, formation_id: int | None = None
+):
     """La nature de la formation `nom` selon la règle validée
     (`formations_genius.nature_par_les_parts`), HORS LIGNE : sa liste Genius et
     celles de nos membres sont lues dans le brut, son nombre de membres aussi
@@ -69,7 +82,8 @@ def mesurer_nature(dm, nom: str, *, chemin_brut=None, index_membres=None):
     liste n'a jamais été lue (rien à mesurer)."""
     from src.utils import formations_membres as fm
 
-    formation_id, membres = dm.membres_de_formation(nom)
+    connu, membres = dm.membres_de_formation(nom)
+    formation_id = formation_id or connu
     if not formation_id:
         return None
     pages = fg.pages_de_la_formation(fg.chansons_du_brut(formation_id, chemin_brut), formation_id)

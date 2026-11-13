@@ -18,6 +18,7 @@ Chaque politique est PURE : `(cas, fiche, contexte) -> Arbitrage | None`
 
 from __future__ import annotations
 
+import functools
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -26,7 +27,11 @@ from src.services import revue
 
 # `titre_d_original` vit chez le juge des titres depuis le 2026-10-31 : le
 # verdict de durée (`reconcile`) le consulte aussi.
-from src.utils.version_descriptors import titre_d_original, titre_generique
+from src.utils.version_descriptors import (
+    titre_d_original,
+    titre_d_original_a_la_mention_pres,
+    titre_generique,
+)
 from src.utils.vote_durees import FRAGILES, ISOLEE, SOUTENUE, TOLERANCE_S, famille, voter
 
 #: Écart au-delà duquel deux durées ne sont plus une édition du même fichier :
@@ -958,7 +963,11 @@ def politique_alias(cas, _track, ctx):
         return None
     sources = set((rel.source or "").split("+"))
     if kind == "member_of":
-        return _formation_par_ses_morceaux(rel, ctx) or _formation_mb_et_discogs(rel, sources, ctx)
+        return (
+            _formation_par_ses_morceaux(rel, ctx)
+            or _formation_prouvee_par_genius(rel, ctx)
+            or _formation_mb_et_discogs(rel, sources, ctx)
+        )
     if kind == "has_member":
         return _formation_mb_et_discogs(rel, sources, ctx)
     if kind != "alias":
@@ -1046,6 +1055,29 @@ def _formation_mb_et_discogs(rel, sources: set, ctx=None) -> Arbitrage | None:
     )
 
 
+def _formation_prouvee_par_genius(rel, ctx) -> Arbitrage | None:
+    """R4 (décision utilisateur 2026-11-13) : une formation proposée est
+    confirmée quand la liste Genius du membre la donne pour artiste principal
+    d'au moins `FICHES_MIN_LIEN` morceaux, sous un seul ID, ET que la nature
+    mesurée avec cet ID est tranchée (groupe / collectif). Nature indécise,
+    part nulle : l'humain. Simulé sur la copie du 13/11 : 21 liens prouvés sur
+    40, aucune erreur vue (Bad Meets Evil, D12, Ideal J, Mafia K'1 Fry…)."""
+    # `formations_prouvees` ne retient que les liens sans nature, à l'ID concordant.
+    if rel.formation or ctx is None:
+        return None
+    entree = ctx.formations_prouvees.get(rel.related_name)
+    if entree is None:
+        return None
+    genius_id, pages, verdict = entree
+    if pages < FICHES_MIN_LIEN or verdict is None or verdict.nature is None:
+        return None
+    return Arbitrage(
+        f"confirmer la formation ({verdict.nature}) — prouvée par Genius",
+        "confirmer_formation_genius",
+        f"Genius {genius_id} principal de {pages} morceaux du membre ; {verdict.motif}",
+    )
+
+
 def _formation_par_ses_morceaux(rel, ctx) -> Arbitrage | None:
     """Une formation proposée dont la NATURE (groupe / collectif) est déjà
     connue, et que Genius donne pour interprète d'au moins `FICHES_MIN_LIEN`
@@ -1109,7 +1141,108 @@ def arbitrage_valide(cas, track, ctx) -> Arbitrage | None:
             continue  # un retrait ne se décide qu'au seuil de 3
         if (cas.detecteur, arbitrage.action) in REGLES_VALIDEES:
             return arbitrage
+    return _retrait_au_seuil_de_deux(cas, track, ctx)
+
+
+#: Retraits décidés au seuil de DEUX catalogues solides d'accord (décision
+#: utilisateur 2026-11-13, après simulation sur la copie du 13/11 : 21 retraits,
+#: 18 confirmés par un témoin indépendant ; la garde ci-dessous écarte « In The
+#: City » et « She Wanna Have My Baby » ; « Cœur de bombe » de Diam's, douteux,
+#: est montré à l'utilisateur).
+REGLES_VOTE_DEUX = frozenset(
+    {("duree_spotify", "retirer_spotify"), ("duree_deezer", "delier_deezer")}
+)
+
+#: La valeur démentie, par détecteur.
+_SOURCE_DEMENTIE = {"duree_spotify": "spotify_web", "duree_deezer": "deezer"}
+
+
+def _retrait_au_seuil_de_deux(cas, track, ctx) -> Arbitrage | None:
+    """Un retrait (ID Spotify, lien Deezer) que DEUX catalogues solides
+    d'accord démentent, quand rien ne soutient la valeur démentie : ni la
+    durée de l'audio d'un LRC (`lrc_duree_audio`, lu avec le LRC), ni Discogs
+    (une édition physique peut avoir cette durée), et que la fiche n'a pas
+    d'ÉDITION d'une autre durée que sa page Deezer (`durees_editions` : la
+    valeur démentie peut être celle de l'autre édition)."""
+    if track is None or (cas.detecteur not in _SOURCE_DEMENTIE):
+        return None
+    arbitrage = _DUREES_POUR_NORMAL(cas, track, ctx)
+    if arbitrage is None or (cas.detecteur, arbitrage.action) not in REGLES_VOTE_DEUX:
+        return None
+    if tuple(track.durees_editions or ()):
+        return None
+    durees = _durees(track)
+    valeur = durees.get(_SOURCE_DEMENTIE[cas.detecteur])
+    if not valeur:
+        return None
+    temoins = [durees.get("discogs")]
+    if ctx is not None:
+        temoins += [o.value for o in (ctx.obs.get(track.id) or ()) if o.field == "lrc_duree_audio"]
+    for t in temoins:
+        try:
+            if t and abs(int(float(t)) - int(valeur)) <= TOLERANCE_S:
+                return None
+        except (TypeError, ValueError):
+            continue
+    return Arbitrage(
+        arbitrage.sens,
+        arbitrage.action,
+        f"{arbitrage.raison} — deux catalogues d'accord, rien ne soutient {valeur} s",
+    )
+
+
+# ── 💿 Hors du disque : une édition physique la contient (R3, 2026-11-13) ──
+
+#: Interrupteur : `revue_auto.REGLES_HORS_DISQUE_BRANCHEES`.
+REGLES_HORS_DISQUE = frozenset({("hors_du_disque", "normal")})
+
+
+def parution_discogs_du_brut(release_id) -> dict | None:
+    """La parution Discogs `/releases/{id}` gardée au brut (lecture seule), sa
+    liste de pistes comprise ; None si jamais lue."""
+    import json
+
+    from src.persistence import brut
+
+    for corps in brut.corps_gardes(
+        "discogs", f"https://api.discogs.com/releases/{int(release_id)}"
+    ):
+        try:
+            d = json.loads(corps)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("tracklist"):
+            return d
     return None
+
+
+def arbitrage_hors_disque(cas, track, _ctx, lire_discogs=None) -> Arbitrage | None:
+    """R3 (décision utilisateur 2026-11-13) : la fiche que Deezer (et Apple)
+    sortent du disque où Genius la range, quand l'ÉDITION PHYSIQUE Discogs de
+    ce disque — la parution Discogs de la fiche, au même nom de disque — la
+    liste : elle y est, ✓ Normal (Dosseh « Tout est neuf » sur *VIDALO$$A*,
+    Vald « PTSD » sur *PANDEMONIUM*). Simulé sur la copie du 13/11 : la règle
+    « Deezer + Apple l'excluent » aurait eu tort 6 fois sur 19 ; 8 cas tranchés
+    ainsi. Sans parution Discogs lue, rien n'est prouvé : l'humain."""
+    from src.utils.version_descriptors import meme_disque, meme_titre_de_base, titres_equivalents
+
+    if cas.detecteur != "hors_du_disque" or track is None or not track.discogs_id:
+        return None
+    parution = (cas.preuves or {}).get("parution") or ""
+    lire = lire_discogs or parution_discogs_du_brut
+    d = lire(track.discogs_id)
+    if not d or not meme_disque(d.get("title"), parution):
+        return None
+    titres = [p.get("title") or "" for p in d.get("tracklist") or [] if isinstance(p, dict)]
+    if not any(
+        titres_equivalents(t, track.title) or meme_titre_de_base(t, track.title) for t in titres
+    ):
+        return None
+    return Arbitrage(
+        "une édition physique du disque la contient : ✓ Normal",
+        "normal",
+        f"Discogs {track.discogs_id} « {d.get('title')} » liste « {track.title} »",
+    )
 
 
 # ── Vidéo ordinaire d'un autre montage (2026-10-27) ────────────────────────
@@ -1374,7 +1507,21 @@ def _rattacher_par_isrc(cas, ctx, isrcs_connus: dict, ids_artiste: set) -> Arbit
     )
 
 
-def _version_d_un_disque_de_versions(cas, ctx) -> Arbitrage | None:
+def _disque_tout_entier_de_la_famille(album_id, fam: str, lire_album: Callable | None) -> bool:
+    """R2 (décision utilisateur 2026-11-13) : TOUTES les pistes du disque Deezer
+    sont de la famille `fam` (« Projet Purrp Beam » d'Ocho : 11 pistes « …
+    (Chopped & $crewed) », le titre du disque ne le dit pas). Illisible : non."""
+    from src.utils.version_heritage import famille_de
+
+    if lire_album is None or not album_id:
+        return False
+    pistes = lire_album(int(album_id)) or []
+    return bool(pistes) and all(famille_de(p.get("title")) == fam for p in pistes)
+
+
+def _version_d_un_disque_de_versions(
+    cas, ctx, lire_album: Callable | None = None
+) -> Arbitrage | None:
     """DA1 (décision utilisateur 2026-10-31) : la piste d'un disque d'un TIERS
     qui est tout entier une version (« LM$ (Chopped & $crewed) » d'Ocho, C&S de
     l'album de Freeze Corleone), sans page Genius, de la même famille que son
@@ -1410,7 +1557,10 @@ def _version_d_un_disque_de_versions(cas, ctx) -> Arbitrage | None:
     if fam in (None, "edition", "instrumental", "a_cappella"):
         return None
     if cas.detecteur == "deezer_apparition":
-        if famille_de(album) != fam:
+        album_id = (ecart.get("album") or {}).get("id")
+        if famille_de(album) != fam and not _disque_tout_entier_de_la_famille(
+            album_id, fam, lire_album
+        ):
             return None
         sens = "disque de versions d'un tiers"
     else:
@@ -1492,7 +1642,11 @@ def _edition_de_support(cas, ctx) -> Arbitrage | None:
     support d'une fiche (`fiche_de_l_edition_de_support`) : rattacher — une
     seconde page Deezer, une édition de diffusion, notées en ÉDITION de la
     fiche (`ecarts_deezer._renseigner_fiche`), jamais une fiche."""
-    if cas.detecteur not in ("deezer_version", "deezer_album_absent") or ctx is None:
+    if (
+        cas.detecteur
+        not in ("deezer_version", "deezer_album_absent", "deezer_absent", "deezer_apparition")
+        or ctx is None
+    ):
         return None
     piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
     trouvee = fiche_de_l_edition_de_support(piste, ctx.disco)
@@ -1761,31 +1915,69 @@ def _piste_nue_d_un_disque_live(cas) -> bool:
     return not porte_une_version((ecart.get("piste") or {}).get("title") or cas.morceau)
 
 
-def _piste_d_un_autre_artiste(cas, ids_artiste: set, lire_deezer: Callable) -> Arbitrage | None:
-    """La piste « absente » d'un disque PROPRE que Deezer ne crédite pas à
-    l'artiste — ni par l'ID de l'artiste ou de ses formations, ni par son nom
-    sous un autre profil : la piste d'un autre sur une compilation, un EP
-    partagé, une bande originale (The Game, 2026-11-03 : *G-Code*, les quatre
-    pistes de Garry ; « Shoot First » de Big Kuza sur la BO de *Bosco*). Pas de
-    fiche. Les crédits se lisent à la piste (`GET /track/{id}`, `contributors`) ;
-    illisibles ou vides, rien n'est prouvé : l'humain."""
+def _credits_de_la_piste(cas, lire_deezer: Callable) -> list[dict]:
+    """Les contributeurs Deezer de la piste du cas (`GET /track/{id}`) ; vide
+    si illisibles."""
+    piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
+    if not piste.get("id"):
+        return []
+    lue = lire_deezer(int(piste["id"])) or {}
+    return [c for c in lue.get("contributors") or [] if isinstance(c, dict)]
+
+
+def _nomme_dans_un_credit(credits: list[dict], nom: str) -> bool:
+    """Un contributeur dont le nom CONTIENT celui de l'artiste (mots entiers) :
+    un duo, une formation (« Caballero & JeanJass »)."""
+    from src.utils.title_matching import contains_as_words
+
+    return bool(nom) and any(contains_as_words(nom, c.get("name") or "") for c in credits)
+
+
+def _nom_de_l_artiste(ctx) -> str:
+    """Le nom de l'artiste de la discographie du contexte (le plus fréquent)."""
+    from collections import Counter
+
+    noms = Counter(t.artist.name for t in (ctx.disco if ctx is not None else ()) if t.artist)
+    return noms.most_common(1)[0][0] if noms else ""
+
+
+def _credite_l_artiste(credits: list[dict], ids_artiste: set, nom: str) -> bool:
     from src.utils.title_matching import names_match_as_words
 
+    return any(
+        c.get("id") in ids_artiste or (nom and names_match_as_words(nom, c.get("name") or ""))
+        for c in credits
+    )
+
+
+def _piste_d_un_autre_artiste(
+    cas, ids_artiste: set, lire_deezer: Callable, nom_artiste: str = ""
+) -> Arbitrage | None:
+    """La piste « absente » que Deezer ne crédite pas à l'artiste — ni par
+    l'ID de l'artiste ou de ses formations, ni par son nom sous un autre profil :
+    la piste d'un autre sur une compilation, un EP partagé, une bande originale
+    (The Game, 2026-11-03 : *G-Code*, les quatre pistes de Garry ; « Shoot
+    First » de Big Kuza sur la BO de *Bosco*). Pas de fiche. Vaut aussi sur le
+    disque d'un TIERS où l'artiste n'a qu'une piste (R1, décision utilisateur
+    2026-11-13 : Kaaris sur *Classico* de Galactik beat, JID sur la BO de
+    *Madden NFL 22* — 27 pistes d'autres artistes). Les crédits se lisent à la
+    piste (`GET /track/{id}`, `contributors`) ; illisibles ou vides, rien n'est
+    prouvé : l'humain."""
     if cas.detecteur not in ("deezer_absent", "deezer_album_absent"):
         return None
     ecart = (cas.preuves or {}).get("ecart") or {}
     piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
-    if album.get("artist_id") not in ids_artiste or not piste.get("id"):
-        return None
-    lue = lire_deezer(int(piste["id"])) or {}
-    credits = [c for c in lue.get("contributors") or [] if isinstance(c, dict)]
+    credits = _credits_de_la_piste(cas, lire_deezer)
     if not credits:
         return None
-    nom = album.get("artist_name") or ""
-    if any(
-        c.get("id") in ids_artiste or (nom and names_match_as_words(nom, c.get("name") or ""))
-        for c in credits
-    ):
+    propre = album.get("artist_id") in ids_artiste
+    # Sur le disque d'un tiers, l'ID seul prouve l'artiste (homonymes).
+    nom = (album.get("artist_name") if propre else "") or ""
+    if _credite_l_artiste(credits, ids_artiste, nom):
+        return None
+    if not propre and _nomme_dans_un_credit(credits, nom_artiste):
+        # « Caballero & JeanJass » sur *Double Hélice 2* : sa formation, peut-être
+        # pas encore liée — ni « pas de fiche » ni création : l'humain.
         return None
     return Arbitrage(
         "piste d'un autre artiste (crédits Deezer) : pas de fiche",
@@ -1795,7 +1987,50 @@ def _piste_d_un_autre_artiste(cas, ids_artiste: set, lire_deezer: Callable) -> A
     )
 
 
-def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set, lire_deezer=None):
+def _piste_creditee_sur_le_disque_d_un_autre(
+    cas, ids_artiste: set, lire_deezer: Callable, nom_artiste: str
+) -> Arbitrage | None:
+    """R1, variante « créer » (décision utilisateur 2026-11-13) : la piste
+    « absente » du disque d'un TIERS que Deezer crédite à l'artiste (invité :
+    Furax sur *Jour De Deuil* de Reda La pire des races, Aketo chez L'Homme de
+    L'Ombre) est une participation : la fiche se crée, comme une apparition.
+    Titre d'original aux mentions près ; un titre générique reste à l'humain."""
+    if cas.detecteur not in ("deezer_absent", "deezer_album_absent"):
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    if album.get("artist_id") in ids_artiste:
+        return None
+    titre = piste.get("title") or cas.morceau
+    if titre_generique(titre) or not titre_d_original_a_la_mention_pres(titre):
+        return None
+    credits = _credits_de_la_piste(cas, lire_deezer)
+    # L'ID seul (homonymes) ; un nom composé qui le contient (sa formation) : l'humain.
+    if not credits or not _credite_l_artiste(credits, ids_artiste, ""):
+        return None
+    if any(c.get("id") not in ids_artiste for c in credits) and _nomme_dans_un_credit(
+        [c for c in credits if c.get("id") not in ids_artiste], nom_artiste
+    ):
+        return None
+    return Arbitrage(
+        f"piste créditée à l'artiste sur le disque de {album.get('artist_name') or 'un autre'} : "
+        "créer la fiche",
+        "deezer_appliquer",
+        f"« {titre} » de « {album.get('title')} » — "
+        + ", ".join(c.get("name") or "?" for c in credits),
+    )
+
+
+def arbitrage_deezer(
+    cas,
+    track,
+    ctx,
+    isrcs_connus: dict,
+    ids_artiste: set,
+    lire_deezer=None,
+    lire_album=None,
+    nom_artiste: str = "",
+):
     """L'arbitrage de la famille « écarts Deezer », restreint aux originaux
     sans ambiguïté — le titre de la PISTE Deezer et celui de la fiche.
     `lire_deezer` (`id -> GET /track`) : par défaut, Deezer."""
@@ -1807,7 +2042,11 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set, lire
         return None  # un homonyme sur le même profil Deezer ? l'humain
     if lire_deezer is None:
         from src.utils.deezer_identity import lire_piste_http as lire_deezer
-    d_un_autre = _piste_d_un_autre_artiste(cas, ids_artiste, lire_deezer)
+    lire_deezer = functools.lru_cache(maxsize=None)(lire_deezer)
+    nom_artiste = nom_artiste or _nom_de_l_artiste(ctx)
+    if lire_album is None:
+        from src.utils.deezer_identity import lire_pistes_album_http as lire_album
+    d_un_autre = _piste_d_un_autre_artiste(cas, ids_artiste, lire_deezer, nom_artiste)
     if d_un_autre is not None:
         return d_un_autre
     par_isrc = _rattacher_par_isrc(cas, ctx, isrcs_connus, ids_artiste)
@@ -1828,6 +2067,9 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set, lire
     a_la_duree_spotify = _edition_a_la_duree_de_l_id_spotify(cas, track)
     if a_la_duree_spotify is not None:
         return a_la_duree_spotify
+    creditee = _piste_creditee_sur_le_disque_d_un_autre(cas, ids_artiste, lire_deezer, nom_artiste)
+    if creditee is not None:
+        return creditee
     if cas.detecteur == "deezer_version":
         # Une version n'est jamais un original : le « ✓ Normal » de
         # l'instrumental / a cappella (aucune fiche créée, DV1), ou la fiche
@@ -1835,16 +2077,28 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set, lire
         arbitrage = politique_ecarts_deezer(isrcs_connus, ids_artiste)(cas, track, ctx)
         if arbitrage is not None and arbitrage.action == "normal":
             return arbitrage
-        return _version_d_un_disque_de_versions(cas, ctx)
+        return _version_d_un_disque_de_versions(cas, ctx, lire_album)
     piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
-    disque_de_versions = _version_d_un_disque_de_versions(cas, ctx)
+    disque_de_versions = _version_d_un_disque_de_versions(cas, ctx, lire_album)
     if disque_de_versions is not None:
         return disque_de_versions
     generique = _generique_de_son_disque(cas, track, ctx)
     if generique is not None:
         return generique
-    if not titre_d_original(piste.get("title") or cas.morceau):
-        return None
+    titre_piste = piste.get("title") or cas.morceau
+    aux_mentions_pres = False
+    if not titre_d_original(titre_piste):
+        if cas.detecteur == "deezer_link_candidate":
+            return None
+        if not titre_d_original_a_la_mention_pres(titre_piste):
+            return None
+        # R5 (décision utilisateur 2026-11-13) : une mention de support (« Bonus
+        # Track », bande originale, feat.) ne rend pas le titre ambigu — pour
+        # CRÉER seulement, et si aucune fiche n'a ce titre de base ni cet ISRC
+        # (sinon c'est elle, ou une édition à prouver par la durée : l'humain).
+        if _une_fiche_porte_deja(piste, titre_piste, ctx):
+            return None
+        aux_mentions_pres = True
     if track is not None and not titre_d_original(track.title):
         return None
     if cas.detecteur == "deezer_link_candidate":
@@ -1857,9 +2111,23 @@ def arbitrage_deezer(cas, track, ctx, isrcs_connus: dict, ids_artiste: set, lire
         arbitrage = politique_liens_deezer(cas, track, ctx)
     else:
         arbitrage = politique_ecarts_deezer(isrcs_connus, ids_artiste)(cas, track, ctx)
+    if aux_mentions_pres and (arbitrage is None or arbitrage.action != "deezer_appliquer"):
+        return None
     if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_DEEZER:
         return arbitrage
     return None
+
+
+def _une_fiche_porte_deja(piste: dict, titre: str, ctx) -> bool:
+    """Une fiche de l'artiste a le même titre de base que la piste (« The King
+    and I » pour « The King and I (From … Soundtrack ELVIS) ») ou son ISRC."""
+    from src.utils.version_descriptors import meme_titre_de_base
+
+    isrc = str(piste.get("isrc") or "").upper()
+    return any(
+        meme_titre_de_base(t.title, titre) or (isrc and str(t.isrc or "").upper() == isrc)
+        for t in (ctx.disco if ctx is not None else ())
+    )
 
 
 # ── Famille « liens Deezer » (délier) — branchée le 2026-10-29 ─────────────
@@ -2225,6 +2493,8 @@ REGLES_ETENDUES = frozenset(
         ("liens_proposes", "confirmer_lien"),
         # 2026-11-06 : formation MusicBrainz + Discogs, « collectif » par défaut.
         ("liens_proposes", "confirmer_formation"),
+        # 2026-11-13 (R4) : formation prouvée par les morceaux Genius du membre.
+        ("liens_proposes", "confirmer_formation_genius"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
         ("kworb_proposition", "kworb_tiers"),

@@ -37,6 +37,7 @@ from src.utils.credits_genius_api import (
 from src.utils.credits_genius_api import unir as unir_credits
 from src.utils.dates import completer, la_plus_ancienne, meme_jour
 from src.utils.encodage import reparer_c1
+from src.utils.forme_parution import TYPES_LONGS, parution_compatible, single_fondu
 from src.utils.inedits import constat_a_ecrire
 from src.utils.logger import get_logger
 from src.utils.paroles_genius import a_des_paroles, paroles_factices
@@ -5209,6 +5210,7 @@ class TrackRepository:
                     meme_titre_normalise(row["title"], title)
                     and same_artist
                     and self._release_dates_match(row["release_date"], observation.release_date)
+                    and self._parution_compatible(conn, int(row["id"]), observation)
                 ):
                     candidate = row
                     break
@@ -5485,6 +5487,271 @@ class TrackRepository:
         )
         conn.execute(text("DELETE FROM releases WHERE id = :a"), {"a": absorbee})
 
+    def singles_fondus(self, *, appliquer: bool = False) -> list[dict[str, Any]]:
+        """Sépare les parutions d'album fondues avec le single de leur titre.
+
+        Le single Deezer « Vinyl Days » (1 piste) avait adopté AU TITRE la
+        parution de l'album Genius du même nom (`_adopter_parution_heritee`
+        avant `_parution_compatible`, 2026-11-13) : la parution portait l'ID
+        Deezer, le code-barres, le type et la date du single, et les contrôles
+        Apple / MusicBrainz / Spotify faits sur ce code-barres. Pour chacune
+        (`forme_parution.single_fondu`) :
+
+        - le single retrouve SA parution (`deezer:<id>`) : ID Deezer, code-barres,
+          type, date, la place de sa piste et ce qui dérive du code-barres
+          (identifiant `spotify_web`, constats Apple et MusicBrainz) ; l'ID
+          Apple aussi quand toutes ses places sur la parution sont celles du
+          single, ou qu'il n'en a aucune et vient donc du code-barres (sinon
+          c'est l'album Apple, il reste) ;
+        - la parution de l'album perd tout cela ; elle est fondue dans la
+          parution de l'album Deezer du même titre quand elle existe (même
+          artiste et périmètre, type album / EP, la moitié au moins de ses
+          pistes déjà liées) — garde : l'album Deezer.
+
+        Rend le plan `[{release_id, titre, artist_id, single, pistes_single,
+        apple_au_single, album_deezer, pistes, communes}]` ; n'écrit qu'avec
+        `appliquer`, en une transaction."""
+        with self.engine.begin() as conn:
+            plan = self._plan_singles_fondus(conn)
+            if appliquer:
+                for cas in plan:
+                    self._separer_single_fondu(conn, cas)
+        return plan
+
+    @staticmethod
+    def _pistes_de_parution(conn, release_id: int) -> set[int]:
+        return {
+            int(t)
+            for (t,) in conn.execute(
+                text("SELECT track_id FROM release_tracks WHERE release_id = :r"),
+                {"r": release_id},
+            )
+        }
+
+    @staticmethod
+    def _plan_singles_fondus(conn) -> list[dict[str, Any]]:
+        lignes = (
+            conn.execute(
+                text(
+                    "SELECT r.*, (SELECT COUNT(*) FROM release_tracks rt WHERE rt.release_id = r.id) "
+                    "AS n FROM releases r WHERE r.record_type = 'single' ORDER BY r.id"
+                )
+            )
+            .mappings()
+            .all()
+        )
+        plan = []
+        for r in lignes:
+            if not single_fondu(r["record_type"], int(r["n"])):
+                continue
+            rid = int(r["id"])
+            ids = conn.execute(
+                text("SELECT source, external_id FROM release_identifiers WHERE release_id = :r"),
+                {"r": rid},
+            ).all()
+            deezer = [e for s, e in ids if s == "deezer"]
+            if len(deezer) != 1:
+                continue  # rien ne désigne le single sans ambiguïté : à l'humain
+            sources = conn.execute(
+                text(
+                    "SELECT rts.source, rt.track_id FROM release_track_sources rts "
+                    "JOIN release_tracks rt ON rt.id = rts.release_track_id "
+                    "WHERE rt.release_id = :r"
+                ),
+                {"r": rid},
+            ).all()
+            pistes_single = sorted({int(t) for s, t in sources if s == "deezer"})
+            apple = {int(t) for s, t in sources if s == "apple_music"}
+            pistes = TrackRepository._pistes_de_parution(conn, rid)
+            album, communes = None, 0
+            candidates = (
+                conn.execute(
+                    text(
+                        "SELECT r.id, r.title, r.record_type FROM releases r WHERE r.artist_id = :a "
+                        "AND r.scope = :s AND r.id <> :r AND r.status = 'confirmed' "
+                        "AND EXISTS (SELECT 1 FROM release_identifiers ri "
+                        "WHERE ri.release_id = r.id AND ri.source = 'deezer') ORDER BY r.id"
+                    ),
+                    {"a": r["artist_id"], "s": r["scope"], "r": rid},
+                )
+                .mappings()
+                .all()
+            )
+            for a in candidates:
+                if cle_album(a["title"]) != cle_album(r["title"]):
+                    continue
+                if str(a["record_type"] or "").lower() not in TYPES_LONGS:
+                    continue
+                n = len(pistes & TrackRepository._pistes_de_parution(conn, int(a["id"])))
+                if n * 2 >= len(pistes) and n > communes:
+                    album, communes = int(a["id"]), n
+            plan.append(
+                {
+                    "release_id": rid,
+                    "artist_id": int(r["artist_id"]),
+                    "titre": r["title"],
+                    "single": {
+                        "deezer": deezer[0],
+                        "upc": r["upc"],
+                        "date": r["release_date"],
+                        "spotify_web": [e for s, e in ids if s == "spotify_web"],
+                        "apple": [e for s, e in ids if s == "apple_music"],
+                    },
+                    "pistes_single": pistes_single,
+                    # Sans aucune place, l'album Apple vient du code-barres
+                    # (`apple_parutions`) : celui du single.
+                    "apple_au_single": (apple <= set(pistes_single) if apple else bool(r["upc"])),
+                    "album_deezer": album,
+                    "pistes": len(pistes),
+                    "communes": communes,
+                }
+            )
+        return plan
+
+    def _separer_single_fondu(self, conn, cas: dict[str, Any]) -> None:
+        now = datetime.now()
+        rid, single = cas["release_id"], cas["single"]
+        r = conn.execute(text("SELECT * FROM releases WHERE id = :r"), {"r": rid}).mappings().one()
+        sources_du_single = sorted(
+            {"deezer", "spotify_web"} | ({"apple_music"} if cas["apple_au_single"] else set())
+        )
+        cle_du_single = f"deezer:{single['deezer']}"
+        if r["identity_key"] == cle_du_single:
+            # Forme inverse : la parution est née du single, l'album s'y est
+            # greffé (SCH « Le classico organisé », *BULLY*). La parution de
+            # l'album prend la clé de sa page Genius, sinon celle d'un album
+            # hérité (`legacy:<artiste>:<titre>`, comme e31).
+            genius = conn.execute(
+                text(
+                    "SELECT external_id FROM release_identifiers "
+                    "WHERE release_id = :r AND source = 'genius' ORDER BY id LIMIT 1"
+                ),
+                {"r": rid},
+            ).scalar()
+            cle_album_seul = (
+                f"genius:{genius}"
+                if genius
+                else f"legacy:{r['artist_id']}:{str(r['title']).strip().lower()}"
+            )
+            conn.execute(
+                text("UPDATE releases SET identity_key = :k WHERE id = :r"),
+                {"k": cle_album_seul, "r": rid},
+            )
+        nouvelle = int(
+            conn.execute(
+                text(
+                    "INSERT INTO releases (artist_id, title, credited_artist_name, release_date, "
+                    "record_type, deezer_album_id, scope, status, identity_key, upc, "
+                    "apple_checked_at, mb_checked_at, mb_live, created_at, updated_at) VALUES "
+                    "(:a, :t, :c, :d, 'single', :dz, :s, 'confirmed', :k, :upc, :ac, :mc, :ml, "
+                    ":now, :now)"
+                ),
+                {
+                    "a": r["artist_id"],
+                    "t": r["title"],
+                    "c": r["credited_artist_name"],
+                    "d": r["release_date"],
+                    "dz": r["deezer_album_id"],
+                    "s": r["scope"],
+                    "k": cle_du_single,
+                    "upc": r["upc"],
+                    "ac": r["apple_checked_at"],
+                    "mc": r["mb_checked_at"],
+                    "ml": r["mb_live"],
+                    "now": now,
+                },
+            ).lastrowid
+        )
+        for source in sources_du_single:
+            conn.execute(
+                text(
+                    "UPDATE release_identifiers SET release_id = :n "
+                    "WHERE release_id = :r AND source = :s"
+                ),
+                {"n": nouvelle, "r": rid, "s": source},
+            )
+        for track_id in cas["pistes_single"]:
+            self._rendre_la_piste_au_single(conn, rid, nouvelle, track_id, sources_du_single, now)
+        # La parution de l'album perd ce qui venait du single, sa date comprise
+        # (la plus ancienne vue : celle du single) ; la discographie la repose.
+        conn.execute(
+            text(
+                "UPDATE releases SET deezer_album_id = NULL, upc = NULL, record_type = NULL, "
+                "release_date = NULL, apple_checked_at = NULL, mb_checked_at = NULL, "
+                "mb_live = NULL, updated_at = :now WHERE id = :r"
+            ),
+            {"r": rid, "now": now},
+        )
+        if cas["album_deezer"] is not None:
+            self._absorber_parution(conn, cas["album_deezer"], rid)
+
+    @staticmethod
+    def _rendre_la_piste_au_single(
+        conn, album: int, single: int, track_id: int, sources: list[str], now
+    ) -> None:
+        lien = (
+            conn.execute(
+                text("SELECT * FROM release_tracks WHERE release_id = :r AND track_id = :t"),
+                {"r": album, "t": track_id},
+            )
+            .mappings()
+            .one()
+        )
+        dz = (
+            conn.execute(
+                text(
+                    "SELECT external_track_id, matched_by FROM release_track_sources "
+                    "WHERE release_track_id = :l AND source = 'deezer'"
+                ),
+                {"l": lien["id"]},
+            )
+            .mappings()
+            .first()
+        )
+        place = lien["position_source"] in sources
+        nouveau_lien = conn.execute(
+            text(
+                "INSERT INTO release_tracks (release_id, track_id, disc_number, track_number, "
+                "source, matched_by, external_track_id, position_source, position_brute, "
+                "created_at, updated_at) VALUES (:r, :t, :d, :n, 'deezer', :m, :x, :ps, :pb, "
+                ":now, :now)"
+            ),
+            {
+                "r": single,
+                "t": track_id,
+                "d": lien["disc_number"] if place else None,
+                "n": lien["track_number"] if place else None,
+                "ps": lien["position_source"] if place else None,
+                "pb": lien["position_brute"] if place else None,
+                "m": dz["matched_by"] if dz else lien["matched_by"],
+                "x": dz["external_track_id"] if dz else None,
+                "now": now,
+            },
+        ).lastrowid
+        for source in sources:
+            conn.execute(
+                text(
+                    "UPDATE release_track_sources SET release_track_id = :n "
+                    "WHERE release_track_id = :l AND source = :s"
+                ),
+                {"n": nouveau_lien, "l": lien["id"], "s": source},
+            )
+        if place:
+            conn.execute(
+                text(
+                    "UPDATE release_tracks SET disc_number = NULL, track_number = NULL, "
+                    "position_source = NULL, position_brute = NULL, updated_at = :now "
+                    "WHERE id = :l"
+                ),
+                {"l": lien["id"], "now": now},
+            )
+        reste = conn.execute(
+            text("SELECT COUNT(*) FROM release_track_sources WHERE release_track_id = :l"),
+            {"l": lien["id"]},
+        ).scalar()
+        if not reste:  # la piste n'était sur l'album que par le single
+            conn.execute(text("DELETE FROM release_tracks WHERE id = :l"), {"l": lien["id"]})
+
     def _adopter_parution_heritee(
         self, conn, artist_id: int, title: str, observation: ReleaseObservation
     ) -> int | None:
@@ -5513,6 +5780,8 @@ class TrackRepository:
         cle = cle_album(title)
         for row in rows:
             if cle_album(row["title"]) != cle:
+                continue
+            if not self._parution_compatible(conn, int(row["id"]), observation):
                 continue
             release_id = int(row["id"])
             params = {"id": release_id, "scope": observation.scope, "now": datetime.now()}
@@ -5547,6 +5816,33 @@ class TrackRepository:
             )
             return release_id
         return None
+
+    @staticmethod
+    def _parution_compatible(conn, release_id: int, observation: ReleaseObservation) -> bool:
+        """Une parution rapprochée par le TITRE peut-elle être cette édition ?
+
+        Le titre seul ne fait pas l'édition : le single « Vinyl Days » de Logic
+        (Deezer, 1 piste) avait adopté la parution de l'album Genius du même
+        nom (28 pistes), puis lui avait donné son code-barres et son type
+        (9 parutions le 2026-11-13, 📀 `meme_place`). Refusée : une parution
+        qui a déjà plus de pistes que l'édition observée n'en compte, un
+        single face à un album / EP déclaré, et l'inverse."""
+        return parution_compatible(
+            *TrackRepository._forme_de_parution(conn, release_id),
+            observation.record_type,
+            observation.nb_pistes,
+        )
+
+    @staticmethod
+    def _forme_de_parution(conn, release_id: int) -> tuple[str | None, int]:
+        row = conn.execute(
+            text(
+                "SELECT r.record_type, (SELECT COUNT(*) FROM release_tracks rt "
+                "WHERE rt.release_id = r.id) FROM releases r WHERE r.id = :id"
+            ),
+            {"id": release_id},
+        ).first()
+        return (row[0], int(row[1] or 0)) if row else (None, 0)
 
     def _complete_release(
         self, conn, release_id: int, title: str, observation: ReleaseObservation

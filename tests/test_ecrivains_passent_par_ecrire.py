@@ -43,6 +43,7 @@ EXCEPTIONS: dict[str, str] = {
     "fusionner_parutions_meme_upc": _PARUTIONS + " (réparation par lots, passage à blanc)",
     "link_track_to_release": _PARUTIONS,
     "marquer_parutions_live": _PARUTIONS,
+    "singles_fondus": _PARUTIONS + " (réparation par lots, passage à blanc)",
     "noter_parution_apple": _PARUTIONS,
     "noter_parution_musicbrainz": _PARUTIONS,
     "oublier_parution_apple": _PARUTIONS,

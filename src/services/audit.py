@@ -70,6 +70,7 @@ from src.utils.duree_youtube import (
     segment_de_dj_mix,
     trop_courte_pour_les_paroles,
 )
+from src.utils.forme_parution import single_fondu
 from src.utils.meme_enregistrement import (
     durees_par_identifiant,
     fusion_par_isrc,
@@ -188,6 +189,7 @@ FAMILLES = {
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
+    "single_fondu": "parution d'un album fondue avec le single de son titre (type, ID Deezer, code-barres)",
     "disque_homonyme": "disque d'au moins 3 fiches, ni page Genius ni ID Spotify d'un profil connu (homonyme ?)",
     "hors_du_disque": "fiche absente de la liste Deezer de sa parution, sa piste sur une autre édition du disque",
     # ── Hors critère (natures `RUN` et `INFORMATION`) ──
@@ -1697,6 +1699,43 @@ def studio_sur_live(c, pistes) -> list[Cas]:
     return cas
 
 
+def singles_fondus(c, pistes) -> list[Cas]:
+    """Une parution déclarée SINGLE qui porte plus de `PISTES_SINGLE_MAX`
+    pistes : le single Deezer a adopté, au seul titre, la parution de l'album
+    du même nom (Logic *Vinyl Days* : 28 pistes, type, ID Deezer et
+    code-barres du single ; 9 parutions le 2026-11-13). Juge partagé avec la
+    pose (`forme_parution`) ; réparation `scripts/separer_singles_fondus.py`."""
+    fiches = {t["id"]: t for t in pistes}
+    if not fiches:
+        return []
+    liens: dict[int, list] = {}
+    for r in c.execute(
+        "SELECT r.id, r.title, r.record_type, r.deezer_album_id, rt.track_id, "
+        "rt.position_source FROM releases r JOIN release_tracks rt ON rt.release_id = r.id "
+        "WHERE r.record_type = 'single' ORDER BY r.id, rt.track_id"
+    ):
+        liens.setdefault(int(r["id"]), []).append(r)
+    cas = []
+    for release_id, lignes in liens.items():
+        if not single_fondu(lignes[0]["record_type"], len(lignes)):
+            continue
+        a_nous = [int(x["track_id"]) for x in lignes if int(x["track_id"]) in fiches]
+        if not a_nous:
+            continue
+        tete = [int(x["track_id"]) for x in lignes if x["position_source"] == "deezer"]
+        ordre = sorted(a_nous, key=lambda t: (t not in tete, t))
+        cas.append(
+            Cas(
+                "single_fondu",
+                fiches[ordre[0]]["artiste"],
+                ordre,
+                f"parution #{release_id} « {lignes[0]['title']} » : type single, "
+                f"Deezer {lignes[0]['deezer_album_id'] or '—'}, {len(lignes)} pistes liées",
+            )
+        )
+    return cas
+
+
 def ids_spotify_principaux_desalignes(c, pistes) -> list[Cas]:
     """`tracks.spotify_id` et sa ligne de `track_spotify_ids` en désaccord :
     la colonne sans sa ligne, ou `is_primary` levé sur un autre ID (ou baissé
@@ -2372,6 +2411,7 @@ def auditer(
         audit.cas += heritage_sans_source(c, pistes)
         audit.cas += credit_graphie(c, pistes)
         audit.cas += studio_sur_live(c, pistes)
+        audit.cas += singles_fondus(c, pistes)
         audit.cas += disques_homonymes(pistes, juge_des_ids_spotify(c))
         audit.cas += colonnes_sans_provenance(c, pistes)
         audit.cas += ids_spotify_sans_compteur(c, pistes)

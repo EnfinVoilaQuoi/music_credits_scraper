@@ -1114,7 +1114,108 @@ def arbitrage_valide(cas, track, ctx) -> Arbitrage | None:
             continue  # un retrait ne se décide qu'au seuil de 3
         if (cas.detecteur, arbitrage.action) in REGLES_VALIDEES:
             return arbitrage
+    return _retrait_au_seuil_de_deux(cas, track, ctx)
+
+
+#: Retraits décidés au seuil de DEUX catalogues solides d'accord (décision
+#: utilisateur 2026-11-13, après simulation sur la copie du 13/11 : 21 retraits,
+#: 18 confirmés par un témoin indépendant ; la garde ci-dessous écarte « In The
+#: City » et « She Wanna Have My Baby » ; « Cœur de bombe » de Diam's, douteux,
+#: est montré à l'utilisateur).
+REGLES_VOTE_DEUX = frozenset(
+    {("duree_spotify", "retirer_spotify"), ("duree_deezer", "delier_deezer")}
+)
+
+#: La valeur démentie, par détecteur.
+_SOURCE_DEMENTIE = {"duree_spotify": "spotify_web", "duree_deezer": "deezer"}
+
+
+def _retrait_au_seuil_de_deux(cas, track, ctx) -> Arbitrage | None:
+    """Un retrait (ID Spotify, lien Deezer) que DEUX catalogues solides
+    d'accord démentent, quand rien ne soutient la valeur démentie : ni la
+    durée de l'audio d'un LRC (`lrc_duree_audio`, lu avec le LRC), ni Discogs
+    (une édition physique peut avoir cette durée), et que la fiche n'a pas
+    d'ÉDITION d'une autre durée que sa page Deezer (`durees_editions` : la
+    valeur démentie peut être celle de l'autre édition)."""
+    if track is None or (cas.detecteur not in _SOURCE_DEMENTIE):
+        return None
+    arbitrage = _DUREES_POUR_NORMAL(cas, track, ctx)
+    if arbitrage is None or (cas.detecteur, arbitrage.action) not in REGLES_VOTE_DEUX:
+        return None
+    if tuple(track.durees_editions or ()):
+        return None
+    durees = _durees(track)
+    valeur = durees.get(_SOURCE_DEMENTIE[cas.detecteur])
+    if not valeur:
+        return None
+    temoins = [durees.get("discogs")]
+    if ctx is not None:
+        temoins += [o.value for o in (ctx.obs.get(track.id) or ()) if o.field == "lrc_duree_audio"]
+    for t in temoins:
+        try:
+            if t and abs(int(float(t)) - int(valeur)) <= TOLERANCE_S:
+                return None
+        except (TypeError, ValueError):
+            continue
+    return Arbitrage(
+        arbitrage.sens,
+        arbitrage.action,
+        f"{arbitrage.raison} — deux catalogues d'accord, rien ne soutient {valeur} s",
+    )
+
+
+# ── 💿 Hors du disque : une édition physique la contient (R3, 2026-11-13) ──
+
+#: Interrupteur : `revue_auto.REGLES_HORS_DISQUE_BRANCHEES`.
+REGLES_HORS_DISQUE = frozenset({("hors_du_disque", "normal")})
+
+
+def parution_discogs_du_brut(release_id) -> dict | None:
+    """La parution Discogs `/releases/{id}` gardée au brut (lecture seule), sa
+    liste de pistes comprise ; None si jamais lue."""
+    import json
+
+    from src.persistence import brut
+
+    for corps in brut.corps_gardes(
+        "discogs", f"https://api.discogs.com/releases/{int(release_id)}"
+    ):
+        try:
+            d = json.loads(corps)
+        except ValueError:
+            continue
+        if isinstance(d, dict) and d.get("tracklist"):
+            return d
     return None
+
+
+def arbitrage_hors_disque(cas, track, _ctx, lire_discogs=None) -> Arbitrage | None:
+    """R3 (décision utilisateur 2026-11-13) : la fiche que Deezer (et Apple)
+    sortent du disque où Genius la range, quand l'ÉDITION PHYSIQUE Discogs de
+    ce disque — la parution Discogs de la fiche, au même nom de disque — la
+    liste : elle y est, ✓ Normal (Dosseh « Tout est neuf » sur *VIDALO$$A*,
+    Vald « PTSD » sur *PANDEMONIUM*). Simulé sur la copie du 13/11 : la règle
+    « Deezer + Apple l'excluent » aurait eu tort 6 fois sur 19 ; 8 cas tranchés
+    ainsi. Sans parution Discogs lue, rien n'est prouvé : l'humain."""
+    from src.utils.version_descriptors import meme_disque, meme_titre_de_base, titres_equivalents
+
+    if cas.detecteur != "hors_du_disque" or track is None or not track.discogs_id:
+        return None
+    parution = (cas.preuves or {}).get("parution") or ""
+    lire = lire_discogs or parution_discogs_du_brut
+    d = lire(track.discogs_id)
+    if not d or not meme_disque(d.get("title"), parution):
+        return None
+    titres = [p.get("title") or "" for p in d.get("tracklist") or [] if isinstance(p, dict)]
+    if not any(
+        titres_equivalents(t, track.title) or meme_titre_de_base(t, track.title) for t in titres
+    ):
+        return None
+    return Arbitrage(
+        "une édition physique du disque la contient : ✓ Normal",
+        "normal",
+        f"Discogs {track.discogs_id} « {d.get('title')} » liste « {track.title} »",
+    )
 
 
 # ── Vidéo ordinaire d'un autre montage (2026-10-27) ────────────────────────

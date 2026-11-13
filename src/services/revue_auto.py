@@ -117,6 +117,12 @@ REGLES_VIDEO_BRANCHEES = True
 #: simulation (6 cas / 7).
 REGLES_TEMOIN_BRANCHEES = True
 
+#: Famille « hors du disque », ✓ Normal quand l'édition physique Discogs la
+#: liste (`politiques_revue.REGLES_HORS_DISQUE`, R3) : levé le 2026-11-13,
+#: validé par l'utilisateur sur la simulation (8 cas, la règle « Deezer + Apple »
+#: écartée : 6 erreurs sur 19).
+REGLES_HORS_DISQUE_BRANCHEES = True
+
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.
 _SANS_FICHE = frozenset(
@@ -184,6 +190,7 @@ def cas_par_regle(
     compteur: bool = False,
     video: bool = False,
     temoin: bool = False,
+    hors_disque: bool = False,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
@@ -192,6 +199,7 @@ def cas_par_regle(
         arbitrage_compteur,
         arbitrage_deezer,
         arbitrage_etendu,
+        arbitrage_hors_disque,
         arbitrage_id_partage,
         arbitrage_id_propose,
         arbitrage_liens_deezer,
@@ -228,6 +236,8 @@ def cas_par_regle(
             arbitrage = arbitrage_video_hors_colonne(c, track, ctx)
         if arbitrage is None and temoin:
             arbitrage = arbitrage_temoin_hors_colonne(c, track, ctx)
+        if arbitrage is None and hors_disque:
+            arbitrage = arbitrage_hors_disque(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -941,6 +951,7 @@ def a_corriger(dm, artiste, revue, ctx, tracks) -> list[tuple]:
         or REGLES_COMPTEUR_BRANCHEES
         or REGLES_VIDEO_BRANCHEES
         or REGLES_TEMOIN_BRANCHEES
+        or REGLES_HORS_DISQUE_BRANCHEES
     ):
         rendus = _rendus_a_l_humain(dm, artiste.id)
         a_faire += [
@@ -959,6 +970,7 @@ def a_corriger(dm, artiste, revue, ctx, tracks) -> list[tuple]:
                 compteur=REGLES_COMPTEUR_BRANCHEES,
                 video=REGLES_VIDEO_BRANCHEES,
                 temoin=REGLES_TEMOIN_BRANCHEES,
+                hors_disque=REGLES_HORS_DISQUE_BRANCHEES,
             )
             if (c.detecteur, c.cle) not in rendus
         ]

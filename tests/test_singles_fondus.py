@@ -186,3 +186,53 @@ def test_sans_album_deezer_l_album_perd_seulement_le_single(fondue):
         assert conn.execute(
             text("SELECT COUNT(*) FROM release_tracks WHERE release_id = :r"), {"r": genius}
         ).scalar() == len(fiches)
+
+
+def test_forme_inverse_l_album_greffe_sur_la_parution_du_single(data_manager):
+    """SCH « Le classico organisé », *BULLY* : la parution est NÉE du single
+    Deezer (`deezer:<id>`), les pistes de l'album s'y sont greffées. Le single
+    garde sa clé ; l'album prend celle de sa page Genius."""
+    dm = data_manager
+    artist = Artist(name="SCH", deezer_id=2)
+    artist.id = dm.save_artist(artist)
+    titre = Track(title="BULLY", artist=artist, album="BULLY")
+    titre.id = dm.save_track(titre)
+    dm.record_release_observations(
+        titre.id,
+        [
+            ReleaseObservation(
+                title="BULLY",
+                source="deezer",
+                external_release_id=907179762,
+                record_type="single",
+                nb_pistes=1,
+                track_number=1,
+            )
+        ],
+    )
+    with dm.engine.begin() as conn:
+        (single,) = conn.execute(text("SELECT id FROM releases")).one()
+    for i in range(4):
+        t = Track(title=f"Piste {i}", artist=artist, album="BULLY")
+        t.id = dm.save_track(t)
+        dm.link_track_to_release(single, t.id, source="genius", matched_by="genius")
+    with dm.engine.begin() as conn:
+        conn.execute(
+            text(
+                "INSERT INTO release_identifiers (release_id, artist_id, source, external_id) "
+                "VALUES (:r, :a, 'genius', '42')"
+            ),
+            {"r": single, "a": artist.id},
+        )
+    (cas,) = dm.singles_fondus()
+    assert cas["album_deezer"] is None
+    dm.singles_fondus(appliquer=True)
+    with dm.engine.connect() as conn:
+        lignes = conn.execute(
+            text(
+                "SELECT identity_key, record_type, (SELECT COUNT(*) FROM release_tracks rt "
+                "WHERE rt.release_id = r.id) FROM releases r ORDER BY id"
+            )
+        ).all()
+    assert lignes == [("genius:42", None, 4), ("deezer:907179762", "single", 1)]
+    assert dm.singles_fondus() == []

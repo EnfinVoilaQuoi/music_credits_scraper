@@ -5615,6 +5615,28 @@ class TrackRepository:
         sources_du_single = sorted(
             {"deezer", "spotify_web"} | ({"apple_music"} if cas["apple_au_single"] else set())
         )
+        cle_du_single = f"deezer:{single['deezer']}"
+        if r["identity_key"] == cle_du_single:
+            # Forme inverse : la parution est née du single, l'album s'y est
+            # greffé (SCH « Le classico organisé », *BULLY*). La parution de
+            # l'album prend la clé de sa page Genius, sinon celle d'un album
+            # hérité (`legacy:<artiste>:<titre>`, comme e31).
+            genius = conn.execute(
+                text(
+                    "SELECT external_id FROM release_identifiers "
+                    "WHERE release_id = :r AND source = 'genius' ORDER BY id LIMIT 1"
+                ),
+                {"r": rid},
+            ).scalar()
+            cle_album_seul = (
+                f"genius:{genius}"
+                if genius
+                else f"legacy:{r['artist_id']}:{str(r['title']).strip().lower()}"
+            )
+            conn.execute(
+                text("UPDATE releases SET identity_key = :k WHERE id = :r"),
+                {"k": cle_album_seul, "r": rid},
+            )
         nouvelle = int(
             conn.execute(
                 text(
@@ -5631,7 +5653,7 @@ class TrackRepository:
                     "d": r["release_date"],
                     "dz": r["deezer_album_id"],
                     "s": r["scope"],
-                    "k": f"deezer:{single['deezer']}",
+                    "k": cle_du_single,
                     "upc": r["upc"],
                     "ac": r["apple_checked_at"],
                     "mc": r["mb_checked_at"],

@@ -90,6 +90,7 @@ def _oracle_spotify_hors_ligne(monkeypatch):
     # Même règle pour l'oracle Deezer de l'audit des ids (2026-09-22) et de
     # l'audit des ISRC hérités (2026-09-23).
     monkeypatch.setattr("src.utils.deezer_identity.lire_piste_http", lambda deezer_id: None)
+    monkeypatch.setattr("src.utils.deezer_identity.lire_pistes_album_http", lambda album_id: None)
     monkeypatch.setattr("src.utils.deezer_identity.lire_piste_isrc_http", lambda isrc: None)
 
 

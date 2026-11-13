@@ -265,6 +265,32 @@ def lire_piste_http(deezer_id: int) -> dict | None:
     return data
 
 
+def lire_pistes_album_http(album_id: int) -> list[dict] | None:
+    """Les pistes d'un disque Deezer (`GET /album/{id}/tracks`, 300 au plus),
+    en `requests` nu comme `lire_piste_http` (règle R2 des écarts Deezer,
+    2026-11-13). Neutralisé en test (conftest). None : illisible."""
+    import requests
+
+    try:
+        resp = requests.get(
+            f"https://api.deezer.com/album/{int(album_id)}/tracks",
+            params={"limit": 300},
+            timeout=15,
+        )
+    except requests.RequestException as e:
+        logger.debug(f"Pistes du disque Deezer illisibles ({album_id}) : {e}")
+        return None
+    if not resp.ok:
+        return None
+    try:
+        data = resp.json()
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or data.get("error"):
+        return None
+    return [p for p in data.get("data") or [] if isinstance(p, dict)]
+
+
 def lire_piste_isrc_http(isrc: str) -> dict | None:
     """Pendant de `lire_piste_http` pour l'audit des ISRC hérités (lot 2,
     2026-09-23) : `GET /track/isrc:{isrc}`. Même forme (`requests` nu, verdict

@@ -1370,6 +1370,24 @@ def titre_d_original(titre: str | None) -> bool:
     return not porte_une_version(titre) and not titre_generique(titre)
 
 
+def titre_d_original_a_la_mention_pres(titre: str | None) -> bool:
+    """PUR. `titre_d_original`, aux MENTIONS près : édition de diffusion
+    (« (Bonus Track) », « (2024 Remastered) », « (Album Version Edited) ») et
+    sous-titre sans version (« (From "8 Mile" Soundtrack) », « (feat. Oldpee) »,
+    « [G-Code] »). Jamais un mot de version, de prise ni de titre générique,
+    même en sous-titre (« J'déboule (Intro) », « … (Live) » restent ambigus).
+    Règle R5 des écarts Deezer (décision utilisateur 2026-11-13)."""
+    if titre_d_original(titre):
+        return True
+    if not titre:
+        return False
+    sans_edition = titre_sans_edition(titre) or titre
+    if _MOTS_AMBIGUS.search(sans_edition):
+        return False
+    base = titre_de_base(sans_edition)
+    return bool(base) and titre_d_original(base)
+
+
 def meme_famille_de_version(a: str | None, b: str | None) -> bool:
     """PUR. Les DESCRIPTEURS des deux titres désignent la même version
     (`meme_famille`) ; le reste du titre n'est pas jugé ici."""

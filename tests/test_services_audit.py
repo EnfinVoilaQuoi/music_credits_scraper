@@ -1297,6 +1297,25 @@ class TestFamillesNues:
         assert cas.pistes == [t.id] and cas.nature == au.ERREUR
         assert cas.libelle.endswith("167s, 1350 mots")
 
+    def test_un_segment_de_mixtape_decide_n_est_pas_juge_au_debit(self, data_manager, isha):
+        """The Game « I'm From The Ghetto » (2026-11-14) : 73 s sur une mixtape
+        avec un DJ, Genius transcrit le morceau entier (847 mots)."""
+        from src.utils import corrections_fiches as cf
+
+        a, t = isha
+        _sql(
+            data_manager,
+            "UPDATE tracks SET duration = 73, lyrics = :p, lyrics_source = 'genius' WHERE id = :t",
+            p="mot " * 847,
+            t=t.id,
+        )
+        assert cf.memoriser_segment_de_mixtape(t) and cf.segment_de_mixtape(t)
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        assert not [c for c in audit.cas if c.famille == "duree_paroles"]
+        assert cf.oublier_segment_de_mixtape(t) and not cf.segment_de_mixtape(t)
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        assert [c.pistes for c in audit.cas if c.famille == "duree_paroles"] == [[t.id]]
+
     def test_streams_double(self, data_manager, isha):
         """Le même compteur Spotify sur deux pages aux titres sans parenté."""
         a, t = isha

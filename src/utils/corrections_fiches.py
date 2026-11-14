@@ -150,6 +150,7 @@ PAR_ENREGISTREMENT = frozenset(
         "id_apple",
         "isrc",
         "constat_instrumental",
+        "segment_mixtape",
     }
 )
 
@@ -396,6 +397,27 @@ def refus_videos_a_la_fusion(conn, keep_id: int, delete_id: int) -> set[str]:
             params,
         )
     }
+
+
+#: Valeur unique de l'acceptation `segment_mixtape`.
+SEGMENT = "1"
+
+
+def segment_de_mixtape(track) -> bool:
+    """La fiche est le SEGMENT d'une mixtape, décidé à la main : sa durée est
+    celle du passage, pas du morceau que Genius transcrit — le débit des
+    paroles n'en dit rien (The Game « I'm From The Ghetto », 73 s sur *BWS
+    Radio 2*, avec DJ Infamous Haze ; décision utilisateur 2026-11-14). Le
+    pendant manuel de `duree_youtube.segment_de_dj_mix`."""
+    return bool(_lignes(track, "segment_mixtape", "acceptations"))
+
+
+def memoriser_segment_de_mixtape(track) -> bool:
+    return _memoriser(track, "segment_mixtape", SEGMENT, table="acceptations")
+
+
+def oublier_segment_de_mixtape(track) -> bool:
+    return _oublier(track, "segment_mixtape", SEGMENT, table="acceptations")
 
 
 def ids_acceptes(track) -> set[str]:

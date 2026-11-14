@@ -2315,6 +2315,10 @@ def coupe_de_catalogue(track, ctx=None):
         return None
     if segment_de_dj_mix(track.title, track.album):
         return None
+    from src.utils.corrections_fiches import segment_de_mixtape
+
+    if segment_de_mixtape(track):
+        return None
     media = [v for v in track.videos or [] if v.source == "genius_media" and v.duration]
     if len(media) != 1:
         return None

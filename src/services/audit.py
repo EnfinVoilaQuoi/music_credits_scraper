@@ -715,12 +715,14 @@ def durees(c, pistes) -> list[Cas]:
             )
         )
     cas += lrc_trop_longs(c, pistes)
+    segments = segments_de_mixtape_de(c)
     for t in pistes:
         ref = paroles_de_reference(t["lyrics"], t["lyrics_source"])
         if (
             t["duration"]
             and trop_courte_pour_les_paroles(t["duration"], ref)
             and not segment_de_dj_mix(t["title"], t["album"])
+            and not est_un_segment(t, segments)
         ):
             mots = len(ref.split())
             cas.append(
@@ -1625,6 +1627,29 @@ def parutions_deezer_des_fiches(c) -> dict[int, list[tuple[str | None, int]]]:
     ):
         sortie[tid].append((credite, int(did)))
     return sortie
+
+
+def segments_de_mixtape_de(c) -> tuple[set[int], set[tuple[str, str, str]]]:
+    """Fiches décidées SEGMENT de mixtape (`memoriser_segment_de_mixtape`) :
+    `(pages Genius, {(artiste, titre, album)} des fiches sans page)`."""
+    pages, sans_page = set(), set()
+    for gid, artiste, titre, album in c.execute(
+        "SELECT genius_id, artiste, titre, album FROM acceptations "
+        "WHERE nature = 'segment_mixtape'"
+    ):
+        if gid is not None:
+            pages.add(int(gid))
+        else:
+            sans_page.add((artiste, titre, album or ""))
+    return pages, sans_page
+
+
+def est_un_segment(t, segments) -> bool:
+    """PUR. La ligne `t` (genius_id, artiste, title, album) est-elle un segment décidé ?"""
+    pages, sans_page = segments
+    if t["genius_id"] is not None:
+        return int(t["genius_id"]) in pages
+    return (t["artiste"], t["title"], t["album"] or "") in sans_page
 
 
 def disques_acceptes_de(c) -> set[tuple[str, int]]:

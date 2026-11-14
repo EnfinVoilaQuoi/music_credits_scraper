@@ -215,6 +215,7 @@ class TestEtapeCredits:
     @pytest.fixture(autouse=True)
     def _aucune_absence(self, monkeypatch):
         monkeypatch.setattr("src.services.runtime.absences_recentes", lambda rt, s: {})
+        monkeypatch.setattr("src.services.runtime.morceaux_en_echec", lambda rt, s: set())
         monkeypatch.setattr("src.services.runtime.constater_absences", lambda *a: None)
 
     def test_genius_ne_lit_pas_un_contenant_sans_page(self):
@@ -263,6 +264,8 @@ class TestSansPageGenius:
 
     def test_le_crawl_ne_recoit_que_les_fiches_avec_page(self, monkeypatch):
         monkeypatch.setattr("src.services.runtime.constater_absences", lambda *a: None)
+        monkeypatch.setattr("src.services.runtime.absences_recentes", lambda rt, s: {})
+        monkeypatch.setattr("src.services.runtime.morceaux_en_echec", lambda rt, s: set())
         from src.services import credits
         from src.services.runtime import Hooks
         from tests.test_services_credits import _clients, _rt

@@ -28,6 +28,9 @@ def _constats(monkeypatch):
         "src.services.runtime.constater_absences",
         lambda rt, cle, poser, retirer=(): CONSTATS.append((cle, list(poser), list(retirer))),
     )
+    # La sélection des pages utiles lit constats et échecs : sans base, aucun.
+    monkeypatch.setattr("src.services.runtime.absences_recentes", lambda rt, sources: {})
+    monkeypatch.setattr("src.services.runtime.morceaux_en_echec", lambda rt, sources: set())
 
 
 class _Genius:
@@ -353,6 +356,56 @@ def test_le_run_ne_passe_au_scraper_que_les_pages_a_relire():
     )
     bilan = credits.run(_rt(), Artist(name="Swing"), [recente, ancienne], opts, Hooks(), cl)
     assert lues == ["Ancienne"] and bilan.genius_recents == 1
+
+
+class TestPagesGeniusUtiles:
+    """2026-11-14 : `credits "Kanye West"` ouvrait 3 170 pages Genius pour 57
+    cas — toute page de plus de 30 j était relue, même aux crédits déjà en
+    base, dès que la fiche était là pour son LRC ou Discogs."""
+
+    @staticmethod
+    def _complete(titre):
+        from datetime import datetime, timedelta
+
+        t = _track(titre, last_scraped=datetime.now() - timedelta(days=60))
+        t.credits = [Credit(name="G", role=CreditRole.PRODUCER, source="genius")]
+        return t
+
+    def _lues(self, tracks, **opts):
+        lues = []
+
+        class _GeniusTrace(_Genius):
+            def scrape_multiple_tracks(self, tracks, progress_callback=None):
+                lues.extend(t.title for t in tracks)
+                return super().scrape_multiple_tracks(tracks, progress_callback)
+
+        cl, _, _ = _clients(genius=_GeniusTrace())
+        opts = credits.OptionsCredits(
+            genius=True,
+            discogs=False,
+            paroles_genius=False,
+            paroles_ytm=False,
+            sync_lrclib=False,
+            **opts,
+        )
+        bilan = credits.run(_rt(), Artist(name="Swing"), tracks, opts, Hooks(), cl)
+        return lues, bilan
+
+    def test_une_page_ancienne_aux_credits_en_base_n_est_pas_relue(self):
+        complete, sans = self._complete("Complète"), _track("Sans crédit")
+        lues, bilan = self._lues([complete, sans])
+        assert lues == ["Sans crédit"] and bilan.genius_complets == 1
+
+    def test_une_lecture_en_echec_est_relue_meme_complete(self, monkeypatch):
+        complete = self._complete("En échec")
+        monkeypatch.setattr(
+            "src.services.runtime.morceaux_en_echec",
+            lambda rt, sources: {complete.id} if credits.LECTURE_GENIUS in sources else set(),
+        )
+        assert self._lues([complete])[0] == ["En échec"]
+
+    def test_forcer_relit_tout(self):
+        assert self._lues([self._complete("Complète")], force_credits=True)[0] == ["Complète"]
 
 
 class TestPagesLuesSansCredit:

@@ -22,6 +22,7 @@ def _aucune_absence_memorisee(monkeypatch):
     """Les faux runtimes de ce fichier n'ont pas de base : la lecture des
     constats d'absence (e46) est neutralisée — aucun constat, ni lu ni posé."""
     monkeypatch.setattr("src.services.runtime.absences_recentes", lambda runtime, sources: {})
+    monkeypatch.setattr("src.services.runtime.morceaux_en_echec", lambda runtime, sources: set())
     monkeypatch.setattr("src.services.runtime.constater_absences", lambda *a: None)
 
 

@@ -131,6 +131,8 @@ class BilanCredits(Bilan):
     sauves: int = 0
     #: Pages Genius lues il y a moins de `RELECTURE_GENIUS`, non relues.
     genius_recents: int = 0
+    #: Pages Genius non relues : la fiche a ses crédits Genius (hors forcé).
+    genius_complets: int = 0
     #: Pages Genius lues (ce run ou récemment) sans aucun crédit : constat posé.
     genius_sans_credit: int = 0
     #: Morceaux non redemandés à Discogs : crédits déjà là, ou « rien » récent.
@@ -153,6 +155,28 @@ def avec_page_genius(tracks, phase: str) -> list:
     if len(avec) < len(tracks):
         logger.info(f"{phase} : {len(tracks) - len(avec)} morceau(x) sans page Genius, non lu(s)")
     return avec
+
+
+#: Clé d'observabilité des lectures de page Genius (`GeniusScraper.HEALTH_KEY`).
+LECTURE_GENIUS = "genius_scrape"
+
+
+def pages_genius_utiles(runtime: Runtime, tracks, *, force: bool) -> list:
+    """Les morceaux dont la page Genius a quelque chose à apporter à la phase
+    crédits : crédits Genius manquants (constat d'absence récent compris, comme
+    partout), ou dernière lecture en échec. Forcé : tous.
+
+    2026-11-14 : la phase relisait TOUTE page de plus de `RELECTURE_GENIUS`,
+    même complète, dès que la fiche était là pour une autre donnée (LRC,
+    Discogs) — `credits "Kanye West"` ouvrait 3 170 pages pour 57 cas, coupé
+    à 27 % après 2 h. Les paroles ont leur propre phase
+    (`page_genius_a_relire`) ; ce que la page a déjà donné est dans la base et
+    son HTML dans le brut. Comme la phase Discogs : seulement ce qui manque."""
+    if force:
+        return list(tracks)
+    return morceaux_a_traiter(
+        runtime, tracks, manquants=(Manque.CREDITS_GENIUS,), echecs=(LECTURE_GENIUS,)
+    )
 
 
 def pages_a_relire(tracks, *, force: bool, maintenant: datetime | None = None) -> list:
@@ -522,8 +546,15 @@ def run(
             # remplace les crédits `genius` d'un morceau quand SA page est lue,
             # et seulement alors — un échec de page n'efface rien.
             avec_page = avec_page_genius(tracks, "Genius")
-            a_lire = pages_a_relire(avec_page, force=options.force_credits)
-            bilan.genius_recents = len(avec_page) - len(a_lire)
+            besoin = pages_genius_utiles(runtime, avec_page, force=options.force_credits)
+            bilan.genius_complets = len(avec_page) - len(besoin)
+            if bilan.genius_complets:
+                logger.info(
+                    f"Genius : {bilan.genius_complets} page(s) déjà lue(s), crédits Genius "
+                    "en base, non relue(s) (forcer pour tout relire)"
+                )
+            a_lire = pages_a_relire(besoin, force=options.force_credits)
+            bilan.genius_recents = len(besoin) - len(a_lire)
             if bilan.genius_recents:
                 logger.info(
                     f"Genius : {bilan.genius_recents} page(s) lue(s) depuis moins de "
@@ -755,6 +786,8 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
                 f"  - Pages lues depuis moins de {RELECTURE_GENIUS.days} j, non relues: "
                 f"{bilan.genius_recents}\n"
             )
+        if bilan.genius_complets:
+            msg += f"  - Pages aux crédits déjà en base, non relues: {bilan.genius_complets}\n"
         if bilan.genius.get("errors"):
             msg += f"  - Erreurs: {len(bilan.genius['errors'])}\n"
         if bilan.genius.get("api_remplaces"):

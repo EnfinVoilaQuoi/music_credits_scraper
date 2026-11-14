@@ -1951,6 +1951,20 @@ def test_un_id_pose_sur_une_autre_fiche_va_a_la_fiche_du_titre():
     assert res["ids_mal_places"] == [("SPX", "Only", "Only One")]
 
 
+def test_un_id_accepte_reste_a_sa_fiche(monkeypatch):
+    """Kery James (2026-11-14) : la ligne « Le ghetto français » porte l'ID,
+    accepté à la main, de « Le Ghetto Français (version acoustique) » ; elle
+    n'est pas rendue à la page d'Ideal J au titre exact."""
+    monkeypatch.setattr(uk, "est_accepte", lambda t, sid: (t.id, sid) == (1, "SPA"))
+    tracks = [
+        _track(1, "Le Ghetto Français (version acoustique)", spotify_id="SPA"),
+        _track(2, "Le ghetto français"),
+    ]
+    res, dm = _run(tracks, [_entry("Le ghetto français", 1000, 10, "SPA")])
+    assert [tid for tid, *_ in dm.streams_writes] == [1]
+    assert res["ids_mal_places"] == []
+
+
 def test_un_titre_generique_ne_deplace_pas_l_id():
     """PLK : Kworb sert « Interlude * » avec l'ID d'« Interlude ****** (Pt. 3) »,
     et une fiche Deezer s'appelle « Interlude * ». Chaque projet a son intro, ses

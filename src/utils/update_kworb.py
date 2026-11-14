@@ -1116,9 +1116,17 @@ def rapprocher(
             # plusieurs interludes — « Interlude * » ne désigne pas une fiche,
             # l'ID (« Interlude ****** (Pt. 3) ») est la seule identité fiable.
             # `page` : toutes les lignes de la page (`_revient_au_titre`).
+            # Un ID ACCEPTÉ à la main sur sa fiche y reste : Kery James « Le
+            # ghetto français » (ID de la version acoustique de 92.2012) allait
+            # à la page d'Ideal J au titre exact (2026-11-14).
             generique = titre_generique(entry["title"])
             bonnes = [t for t in index.by_title.get(norm, []) if t.id != porteur.id]
-            if len(bonnes) == 1 and not generique and _revient_au_titre(entry, bonnes[0], page):
+            if (
+                len(bonnes) == 1
+                and not generique
+                and not est_accepte(porteur, sid)
+                and _revient_au_titre(entry, bonnes[0], page)
+            ):
                 return Rapprochement(track=bonnes[0], via="id_mal_place", motif=porteur.title)
         return Rapprochement(track=porteur, via="id")
     # Édition de DIFFUSION (« Impossible - Radio Edit », « Put On - Album

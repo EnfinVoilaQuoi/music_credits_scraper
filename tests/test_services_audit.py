@@ -1905,6 +1905,41 @@ class TestHorsDuDisque:
         assert not self._cas(audit)
         assert not [c for c in audit.cas if c.famille == "refus_vivant"]
 
+    def test_le_disque_refuse_ne_revient_pas_par_son_identifiant(self, data_manager, isha):
+        """SCH « Loup noir (A COLORS SHOW) » (2026-11-14) : sortie à la main du
+        single « Loup noir », elle y revenait par Apple — l'observation porte un
+        autre titre (« … (A COLORS SHOW) - Single »), mais son ID de collection
+        était noté sur ce disque. La garde juge le disque OÙ la fiche atterrit."""
+        from src.models import ReleaseObservation
+        from src.utils.corrections_fiches import memoriser_parution_refusee
+
+        a, t = isha
+        self._disque(data_manager, t)
+        _sql(data_manager, "DELETE FROM release_tracks WHERE track_id = :t", t=t.id)
+        _sql(
+            data_manager,
+            "INSERT INTO release_identifiers (release_id, artist_id, source, external_id) "
+            "VALUES (1, :a, 'apple_music', '77')",
+            a=a.id,
+        )
+        a.tracks = data_manager.discographie_reunie(a)
+        memoriser_parution_refusee(next(x for x in a.tracks if x.id == t.id), "M.A.N")
+        data_manager.record_release_observations(
+            t.id,
+            [
+                ReleaseObservation(
+                    title="M.A.N (Live) - Single",
+                    source="apple_music",
+                    scope="own",
+                    external_release_id=77,
+                )
+            ],
+        )
+        with data_manager.engine.connect() as conn:
+            assert not conn.exec_driver_sql(
+                "SELECT 1 FROM release_tracks WHERE track_id = ? AND release_id = 1", (t.id,)
+            ).fetchall()
+
     def test_un_disque_refuse_encore_lie_est_un_refus_vivant(self, data_manager, isha):
         from src.utils.corrections_fiches import memoriser_parution_refusee
 

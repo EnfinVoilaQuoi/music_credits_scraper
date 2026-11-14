@@ -268,3 +268,22 @@ def test_un_feat_dans_un_groupe_ne_part_qu_avec_l_invite():
     assert strip_featuring("Titre (feat. X)") == "Titre"
     assert strip_featuring("Ronaldinho qui jongle ft. ISHA") == "Ronaldinho qui jongle"
     assert strip_featuring("CLM Cypher ft  Dinos, A2H Palace), X") == "CLM Cypher"
+
+
+def test_feat_nu_garde_le_descripteur_et_groupe_tronque():
+    """Kworb (2026-11-14) : un « feat. » sans parenthèses emportait le « - Remix »
+    qui le suit (« t r a n s p a r e n t s o u l feat. Kid Cudi & Travis Barker
+    - Remix » lu comme l'original) ; un groupe d'invités que Kworb coupe à 100
+    signes, sans parenthèse fermante, restait dans le titre (« Costa Rica (with
+    Bas & JID feat. … Ski Ma »). Mesuré sur 24 426 titres en base : 6 changent,
+    tous en mieux."""
+    from src.utils.title_matching import normalize_title, strip_featuring
+
+    assert strip_featuring("Song feat. A & B - Remix") == "Song - Remix"
+    assert normalize_title("Song feat. A & B - Remix") == normalize_title("Song (Remix)")
+    assert strip_featuring("Costa Rica (with Bas & JID feat. Guapdad 4000, Ski Ma") == (
+        "Costa Rica"
+    )
+    assert strip_featuring("Stay Down [ft. Juicy J") == "Stay Down"
+    # Un groupe tronqué qui n'est pas une liste d'invités reste.
+    assert strip_featuring("Titre (with You Remix") == "Titre (with You Remix"

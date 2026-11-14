@@ -5179,7 +5179,18 @@ class TrackRepository:
                     continue
             else:
                 release_id = self._resolve_release_observation(conn, artist_id, title, observation)
+            if refusees and self._titre_de_parution(conn, release_id) in refusees:
+                # Le disque où l'observation ATTERRIT, par son identifiant, sous
+                # un autre titre (SCH « Loup noir (A COLORS SHOW) », 2026-11-14).
+                continue
             self._link_track_to_release_conn(conn, release_id, track_id, observation)
+
+    @staticmethod
+    def _titre_de_parution(conn, release_id: int) -> str:
+        titre = conn.execute(
+            text("SELECT title FROM releases WHERE id = :r"), {"r": release_id}
+        ).scalar()
+        return normalize_title(titre or "")
 
     def _release_par_identifiant(
         self, conn, artist_id: int, observation: ReleaseObservation

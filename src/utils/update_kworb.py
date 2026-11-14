@@ -366,6 +366,44 @@ def sous_titre(titre: str | None) -> tuple[str, str] | None:
     return _normalize_title(court), groupe
 
 
+def _socle_au_sous_titre(titre: str, fiches) -> object | None:
+    """La fiche UNIQUE de l'artiste (hors rôle secondaire) dont le titre SANS
+    SES SOUS-TITRES est l'original de l'édition de diffusion `titre` : Spotify
+    omet le sous-titre Genius (« Pursuit Of Happiness - Radio Edit », 3,6 M,
+    pour « Pursuit of Happiness (Nightmare) », seules trois reprises au titre
+    exact ; Kid Cudi, 2026-11-14). Sans durée, comme `_par_sous_titre` : le radio
+    edit est souvent bien plus court (242 s contre 295). Jamais un générique.
+    Une candidate dont les sous-titres CONTIENNENT strictement ceux d'une autre
+    en est une déclinaison (« … (Nightmare) (Prime Day Show x Kid Cudi) », une
+    prestation) : elle s'efface devant elle."""
+    from src.services.editions import titre_sans_edition
+    from src.utils.version_descriptors import (
+        meme_titre_normalise,
+        sous_titres,
+        titre_sans_sous_titre,
+    )
+
+    cible = titre_sans_edition(titre)
+    if cible is None or titre_generique(cible):
+        return None
+    candidats = {
+        t.id: t
+        for t in fiches
+        if not t.secondary_role
+        and not edition_de_diffusion(t.title)
+        and meme_titre_normalise(titre_sans_sous_titre(t.title), cible)
+    }
+    groupes = {
+        tid: {_normalize_title(g) for g in sous_titres(t.title)} for tid, t in candidats.items()
+    }
+    gardes = [
+        t
+        for tid, t in candidats.items()
+        if not any(autre < groupes[tid] for o, autre in groupes.items() if o != tid)
+    ]
+    return gardes[0] if len(gardes) == 1 else None
+
+
 def _par_sous_titre(titre: str, norm: str, index: "Index"):
     """La fiche UNIQUE dont le titre ne diffère de la ligne que par un sous-titre,
     d'un côté ou de l'autre (Kworb « Make Her Say » / Genius « Make Her Say (I
@@ -1000,7 +1038,9 @@ def rapprocher(
     if not index.by_title.get(norm):
         from src.services.editions import socle_de
 
-        socle_ed = socle_de(entry["title"], index.tracks)
+        socle_ed = socle_de(entry["title"], index.tracks) or _socle_au_sous_titre(
+            entry["title"], index.tracks
+        )
         if socle_ed is not None:
             return Rapprochement(track=socle_ed, via="edition")
     if sid and sid in index.by_rendition_id:

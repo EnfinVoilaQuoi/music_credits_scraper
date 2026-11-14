@@ -254,8 +254,25 @@ _PAS_DES_INVITES = frozenset(
 )
 
 
+#: Un groupe d'invités que la source a COUPÉ, sans parenthèse fermante, en fin
+#: de titre : Kworb tronque à 100 signes (« Costa Rica (with Bas & JID feat.
+#: Guapdad 4000, … Buddy & Ski Ma », 2026-11-14).
+_GROUPE_D_INVITES_TRONQUE = re.compile(
+    r"\s*[\(\[]\s*(feat|ft|featuring|avec|with)\b\.?([^\(\)\[\]]*)$", re.IGNORECASE
+)
+
+#: « Titre ft. X » sans parenthèses : la mention court jusqu'à la fin, ou
+#: jusqu'à un « - Descripteur » FINAL qui la suit (« … feat. Kid Cudi & Travis
+#: Barker - Remix » : le « - Remix » reste, 2026-11-14). Seul un descripteur
+#: court : « Artiste feat. X - Titre (Clip) » (titres de vidéos) ne change pas.
+_FEAT_NU = re.compile(
+    r"\s+(?:feat|ft)\.?\s+.*?(?=\s+[-–]\s+(?:[\w']+\s+){0,2}(?:remix|rmx|mix|edit|live)\s*$|$)",
+    re.IGNORECASE,
+)
+
+
 def _retirer_si_invites(m: re.Match) -> str:
-    if m.group(1).lower() in ("feat", "ft"):
+    if m.group(1).lower() in ("feat", "ft", "featuring"):
         return ""
     mots = re.findall(r"[a-z0-9]+", _strip_accents(m.group(2).lower()))
     if not mots or _PAS_DES_INVITES & set(mots):
@@ -285,8 +302,9 @@ def strip_featuring(s: str) -> str:
     # comme le titre nu). Mesuré le 2026-10-10 sur 68 915 titres en base : 9
     # changent, tous en mieux.
     s = _FEAT_DANS_UN_GROUPE.sub(r"\1", s)
+    s = _GROUPE_D_INVITES_TRONQUE.sub(_retirer_si_invites, s)
     # "Titre ft. X" sans parenthèses (vu sur kworb : "Ronaldinho qui jongle ft. ISHA")
-    return re.sub(r"\s+(?:feat|ft)\.?\s+.*$", "", s, flags=re.IGNORECASE)
+    return _FEAT_NU.sub("", s)
 
 
 def normalize_title(s: str) -> str:

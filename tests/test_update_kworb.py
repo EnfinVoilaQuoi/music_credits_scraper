@@ -1401,6 +1401,33 @@ class TestEditionsDeDiffusion:
         assert dm.editions == [(1, "Radio Edit", "SPR")]
         assert dm.track_spotify_ids == []  # jamais l'ID principal
 
+    def test_l_original_au_sous_titre_pres(self):
+        """Kid Cudi (2026-11-14) : « Pursuit Of Happiness - Radio Edit » (3,6 M)
+        restait sans fiche : au titre exact, seules trois reprises (rôle
+        secondaire) ; l'original est « Pursuit of Happiness (Nightmare) »."""
+        reprises = [_track(i, "Pursuit of Happiness", primary="Lissie") for i in (2, 3)]
+        for r in reprises:
+            r.secondary_role = "Cover"
+        tracks = [
+            _track(1, "Pursuit of Happiness (Nightmare)", spotify_id="SP1"),
+            # Une prestation : ses sous-titres contiennent ceux de l'original.
+            _track(4, "Pursuit Of Happiness (Nightmare) (Prime Day Show x Kid Cudi)"),
+            *reprises,
+        ]
+        _, dm = _run(
+            tracks,
+            [
+                _entry("Pursuit Of Happiness (Nightmare)", 1000, 10, "SP1"),
+                _entry("Pursuit Of Happiness - Radio Edit", 400, 4, "SPR"),
+            ],
+        )
+        assert [(tid, st) for tid, st, *_ in dm.streams_writes] == [(1, 1400)]
+
+    def test_deux_originaux_au_sous_titre_pres_ne_recoivent_rien(self):
+        tracks = [_track(1, "Song (Part A)"), _track(2, "Song (Nightmare)")]
+        _, dm = _run(tracks, [_entry("Song - Radio Edit", 400, 4, "SPR")])
+        assert dm.streams_writes == []
+
     def test_une_fiche_au_titre_exact_garde_la_main(self):
         tracks = [_track(1, "Impossible", spotify_id="SP1"), _track(2, "Impossible - Radio Edit")]
         _, dm = _run(tracks, [_entry("Impossible - Radio Edit", 400, 4, "SPR")])

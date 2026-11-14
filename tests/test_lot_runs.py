@@ -29,6 +29,31 @@ class TestLireLot:
         assert not set(nom) & set(' "/\\:*?<>|')
 
 
+class TestRunsCibles:
+    """2026-11-14 : un lot de rattrapage lançait `streams` et `credits` sur
+    l'artiste entier pour quelques fiches (~10 h, puis 3 170 pages Genius)."""
+
+    def test_une_etape_d_artiste_entier_est_refusee(self):
+        runs = lot_runs.lire_lot(
+            'credits "Kanye West"\nstreams Booba --fiches 1,2\n'
+            'disco SCH --maj\ncycle "IAM" --genius-id 1770\n'
+        )
+        assert lot_runs.runs_non_cibles(runs) == ["credits Kanye West"]
+
+    def test_la_marque_rend_l_artiste_entier_voulu_et_part_avant_l_appel(self):
+        run = ["streams", "Booba", "--artiste-entier"]
+        assert lot_runs.runs_non_cibles([run]) == []
+        assert lot_runs.sans_marque(run) == ["streams", "Booba"]
+
+    def test_le_lot_entier_est_refuse_avant_de_figer(self, tmp_path, monkeypatch, capsys):
+        lot = tmp_path / "lot.txt"
+        lot.write_text("streams Booba\n", encoding="utf-8")
+        monkeypatch.setattr(sys, "argv", ["lot_runs.py", str(lot)])
+        monkeypatch.setattr(lot_runs, "figer_le_code", lambda *a: pytest.fail("ne doit pas figer"))
+        assert lot_runs.main() == 5
+        assert "streams Booba" in capsys.readouterr().out
+
+
 class TestVerdict:
     def test_un_run_qui_bouge_continue(self):
         assert (
@@ -236,7 +261,7 @@ class TestCodeRefuse:
         (depot / "data").mkdir(parents=True)
         (fige / "data").mkdir(parents=True)
         lot = tmp_path / "lot.txt"
-        lot.write_text("credits Booba\n", encoding="utf-8")
+        lot.write_text("credits Booba --fiches 1\n", encoding="utf-8")
         monkeypatch.setattr(lot_runs, "RACINE", depot)
         monkeypatch.setattr(sys, "argv", ["lot_runs", str(lot), "--code", str(fige)])
         monkeypatch.setattr(sys.stdout, "reconfigure", lambda **_: None, raising=False)
@@ -314,7 +339,7 @@ class TestCodeFige:
     def test_le_lot_tourne_sur_le_fige_et_le_retire(self, tmp_path, monkeypatch, capsys):
         depot, _ = _depot_git(tmp_path)
         lot = tmp_path / "lot.txt"
-        lot.write_text("credits Booba\n", encoding="utf-8")
+        lot.write_text("credits Booba --fiches 1\n", encoding="utf-8")
         monkeypatch.setattr(lot_runs, "RACINE", depot)
         monkeypatch.setattr(sys, "argv", ["lot_runs", str(lot), "--sortie", str(tmp_path / "s")])
         monkeypatch.setattr(sys.stdout, "reconfigure", lambda **_: None, raising=False)
@@ -334,7 +359,7 @@ class TestCodeFige:
     def test_le_fige_est_retire_meme_si_le_lot_tombe(self, tmp_path, monkeypatch):
         depot, _ = _depot_git(tmp_path)
         lot = tmp_path / "lot.txt"
-        lot.write_text("credits Booba\n", encoding="utf-8")
+        lot.write_text("credits Booba --fiches 1\n", encoding="utf-8")
         monkeypatch.setattr(lot_runs, "RACINE", depot)
         monkeypatch.setattr(sys, "argv", ["lot_runs", str(lot), "--sortie", str(tmp_path / "s")])
         monkeypatch.setattr(sys.stdout, "reconfigure", lambda **_: None, raising=False)
@@ -355,7 +380,7 @@ class TestCodeFige:
     def test_code_point_lance_le_code_vivant(self, tmp_path, monkeypatch):
         depot, _ = _depot_git(tmp_path)
         lot = tmp_path / "lot.txt"
-        lot.write_text("credits Booba\n", encoding="utf-8")
+        lot.write_text("credits Booba --fiches 1\n", encoding="utf-8")
         monkeypatch.setattr(lot_runs, "RACINE", depot)
         monkeypatch.chdir(depot)
         monkeypatch.setattr(

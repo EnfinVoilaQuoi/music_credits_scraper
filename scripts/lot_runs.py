@@ -39,7 +39,9 @@ se rattrape, un run de trop non.
 Journal du lot : `data/logs/lots/<date>/lot.log` (DÉBUT / FIN / FIGÉ / DÉLAI),
 la sortie de chaque run à côté. Codes : 0 tout est passé, 1 au moins un run en
 échec, figé ou hors délai, 2 code refusé ou impossible à figer, 3 un autre écrivain occupe la base,
-4 des colonnes dérivées ne suivent plus le code.
+4 des colonnes dérivées ne suivent plus le code, 5 une étape `identite`, `credits`,
+`enrich` ou `streams` sur l'artiste entier sans `--fiches` (2026-11-14 : un lot de
+rattrapage est CIBLÉ ; `--artiste-entier` sur la ligne quand c'est voulu).
 
 Verdicts à jour (2026-11-12) : avant le premier run, `scripts/rematerialiser.py` À
 BLANC sur toute la base, avec le code du lot. Si des fiches changeraient, une
@@ -86,6 +88,35 @@ FICHIER_ARRET = "ARRET"
 #: tuait le run, et tout ce qu'il restait à en faire. FENETRE_VISIBLE_MAX_S=0 dans
 #: l'environnement du lot la lève, pour qui reste devant.
 FENETRE_VISIBLE_MAX_S = 180
+
+#: Étapes qui savent se limiter à des fiches (`--fiches <id,…>`). Lancées sur
+#: l'artiste entier dans un lot, elles relisent tout pour quelques cas
+#: (2026-11-14 : `streams <artiste>` pour 1 à 9 fiches sans compteur, ~25 min
+#: chacun, ~10 h ; `credits "Kanye West"` pour 57 fiches, 3 170 pages Genius,
+#: coupé à 27 % après 2 h). Demande utilisateur répétée : un lot de rattrapage
+#: est CIBLÉ.
+ETAPES_CIBLABLES = frozenset({"identite", "credits", "enrich", "streams"})
+#: Marque de lot (retirée avant l'appel) : l'artiste entier est VOULU (artiste
+#: neuf, demande explicite).
+MARQUE_ARTISTE_ENTIER = "--artiste-entier"
+
+
+def runs_non_cibles(runs: list[list[str]]) -> list[str]:
+    """PUR. Les lignes d'une étape ciblable lancée sur l'artiste entier sans
+    `--fiches` ni la marque `--artiste-entier`."""
+    return [
+        " ".join(run)
+        for run in runs
+        if run
+        and run[0] in ETAPES_CIBLABLES
+        and "--fiches" not in run
+        and MARQUE_ARTISTE_ENTIER not in run
+    ]
+
+
+def sans_marque(run: list[str]) -> list[str]:
+    """PUR. Les arguments à passer à `src.cli` : sans la marque de lot."""
+    return [a for a in run if a != MARQUE_ARTISTE_ENTIER]
 
 
 def lire_lot(texte: str) -> list[list[str]]:
@@ -473,6 +504,15 @@ def main() -> int:
     if not runs:
         print(f"Aucun run dans {args.lot}")
         return 1
+    entiers = runs_non_cibles(runs)
+    if entiers:
+        print(
+            "Lot refusé : étape(s) sur l'artiste entier, sans --fiches "
+            f"(ajouter {MARQUE_ARTISTE_ENTIER} si c'est voulu) :"
+        )
+        for ligne in entiers:
+            print(f"  {ligne}")
+        return 5
     horodatage = f"{datetime.now():%Y%m%d_%H%M%S}"
     fige = None
     if args.code is None:
@@ -509,7 +549,7 @@ def main() -> int:
             sortie=sortie,
             data=code / "data",
             code=code,
-            commande=lambda a: [sys.executable, "-m", "src.cli", *a],
+            commande=lambda a: [sys.executable, "-m", "src.cli", *sans_marque(a)],
             delai_s=args.delai * 60,
             gel_s=args.gel * 60,
             arreter_si_fige=args.arreter_si_fige,

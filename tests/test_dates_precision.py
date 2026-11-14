@@ -305,3 +305,47 @@ class TestPositionDansLaPeriode:
     )
     def test_verdict(self, sortie, debut, fin, attendu):
         assert dates.position_dans_la_periode(sortie, debut, fin) == attendu
+
+
+class TestDateRefusee:
+    """2026-11-14 : « Suicide (dont wanna die anymore) » (2k Mike, Kanye
+    producteur) daté de 1861 par Genius. Le refus `date` écarte la valeur du
+    verdict de la colonne, chez les sœurs aussi ; chaque relecture de la page
+    la reposerait en observation sans la rendre à la colonne."""
+
+    def test_refus_ecarte_la_date_et_se_retablit(self, data_manager):
+        from sqlalchemy import text
+
+        from src.models import Artist, Track
+        from src.utils import corrections_fiches as cf
+
+        lignes = []
+        for nom in ("Kanye West", "2k Mike"):
+            artiste = Artist(name=nom)
+            artiste.id = data_manager.save_artist(artiste)
+            t = Track(title="Suicide", artist=artiste)
+            t.genius_id = 9911
+            data_manager.save_track(t)
+            lignes.append(t)
+        kanye, mike = lignes
+        data_manager.record_discography_observations(
+            kanye.id, [Observation("release_date", "1861-01-01", "genius")]
+        )
+
+        def colonnes():
+            with data_manager.engine.connect() as conn:
+                return [
+                    conn.execute(
+                        text("SELECT release_date FROM tracks WHERE id = :t"), {"t": t.id}
+                    ).scalar()
+                    for t in lignes
+                ]
+
+        assert all(c and str(c).startswith("1861") for c in colonnes())
+        assert cf.memoriser_date_refusee(kanye, "1861-01-01")
+        data_manager.rematerialiser([kanye.id, mike.id], appliquer=True)
+        assert colonnes() == [None, None]
+
+        assert cf.oublier_date_refusee(kanye, "1861-01-01")
+        data_manager.rematerialiser([kanye.id, mike.id], appliquer=True)
+        assert all(c and str(c).startswith("1861") for c in colonnes())

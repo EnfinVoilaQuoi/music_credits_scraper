@@ -3422,6 +3422,45 @@ class TrackRepository:
     #: Colonne `tracks` de chaque champ arbitré par `DISCOGRAPHY_PRIORITIES`.
     COLONNES_DISCOGRAPHIE = {"duration": "duration", "release_date": "release_date", "isrc": "isrc"}
 
+    @staticmethod
+    def _dates_refusees(conn, track_id: int) -> set[str]:
+        """Les dates de sortie refusées à la main pour l'enregistrement (refus
+        `date`, `corrections_fiches.memoriser_date_refusee`) : une saisie
+        fausse de Genius (« Suicide (dont wanna die anymore) » daté de 1861,
+        2026-11-14) que chaque relecture de la page reposerait. Une règle de
+        VERDICT : la date reste observée, la colonne ne la retient pas."""
+        from src.utils.corrections_fiches import designe
+
+        fiche = conn.execute(
+            text(
+                "SELECT t.genius_id, t.title, t.album, a.name FROM tracks t "
+                "JOIN artists a ON a.id = t.artist_id WHERE t.id = :id"
+            ),
+            {"id": track_id},
+        ).first()
+        if fiche is None:
+            return set()
+        lignes = conn.execute(
+            text(
+                "SELECT genius_id, artiste, titre, album, valeur FROM refus "
+                "WHERE nature = 'date' AND (genius_id = :g OR artiste = :a)"
+            ),
+            {"g": fiche.genius_id, "a": fiche.name},
+        ).all()
+        refusees = set()
+        for r in lignes:
+            if r.genius_id is not None:
+                if fiche.genius_id is not None and int(r.genius_id) == int(fiche.genius_id):
+                    refusees.add(r.valeur)
+            elif r.artiste == fiche.name and designe(
+                {"titre": r.titre, "album": r.album},
+                genius_id=fiche.genius_id,
+                titre=fiche.title,
+                album=fiche.album,
+            ):
+                refusees.add(r.valeur)
+        return refusees
+
     def _arbitrer_discographie(self, conn, track_id: int, fields) -> dict:
         """`{colonne: valeur}` d'après TOUTES les observations du morceau, pour
         les champs demandés (⊂ `DISCOGRAPHY_PRIORITIES`).
@@ -3460,6 +3499,9 @@ class TrackRepository:
             # et c'est la MÊME fonction que celle de `reconcile()` : en brancher
             # une seule des deux ferait dépendre le verdict du flux qui écrit.
             if field == "release_date":
+                refusees = self._dates_refusees(conn, track_id)
+                if refusees:
+                    obs_du_champ = [o for o in obs_du_champ if str(o.value) not in refusees]
                 verdict = resoudre_date_de_sortie(obs_du_champ, ordre)
             elif field == "duration":
                 verdict = resoudre_duree(

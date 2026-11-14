@@ -206,3 +206,56 @@ class TestHeritageCouvert:
     def test_sans_source_directe_l_heritage_reste(self):
         credits = [self._c("A2H", CreditRole.WRITER, "heritage")]
         assert vh.sans_heritage_couvert(credits) == credits
+
+
+class TestOriginalDesigneParGenius:
+    """2026-11-14 : l'original que Genius désigne (`remix_of` / `version_of`)
+    vaut quand le titre n'en trouve pas — remixes de « Pursuit Of Happiness »
+    face à deux pages du même titre. Le titre garde la main : la page de la
+    relation est souvent la moins renseignée (20 crédits justes retirés)."""
+
+    @staticmethod
+    def _f(id_, titre, url=None, rels=()):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            id=id_, title=titre, genius_url=url, relationships=list(rels), secondary_role=None
+        )
+
+    def test_la_relation_quand_le_titre_est_ambigu(self):
+        from src.utils.version_heritage import socle_de_version
+
+        nightmare = self._f(1, "Pursuit of Happiness (Nightmare)", "https://genius.com/n")
+        autre = self._f(2, "Pursuit of Happiness")
+        homonyme = self._f(4, "Pursuit of Happiness")
+        remix = self._f(
+            3,
+            "Pursuit Of Happiness - Steve Aoki Remix",
+            rels=[{"type": "remix_of", "url": "https://genius.com/n"}],
+        )
+        assert socle_de_version(remix, [nightmare, autre, homonyme, remix]) is nightmare
+        assert socle_de_version(remix, [nightmare, autre, remix]) is autre  # le titre d'abord
+
+    def test_par_track_id_et_sans_relation_le_titre(self):
+        from src.utils.version_heritage import socle_de_version
+
+        self_conscious = self._f(1, "Self Conscious")
+        all_falls = self._f(2, "All Falls Down")
+        original = self._f(
+            3, "All Falls Down (Original)", rels=[{"type": "version_of", "track_id": 1}]
+        )
+        assert socle_de_version(original, [self_conscious, original]) is self_conscious
+        assert socle_de_version(original, [self_conscious, all_falls, original]) is all_falls
+        sans = self._f(4, "All Falls Down (Live)")
+        assert socle_de_version(sans, [all_falls, sans]) is all_falls
+
+    def test_un_medley_n_a_pas_un_seul_original(self):
+        from src.utils.version_heritage import socle_designe
+
+        role_model = self._f(1, "Role Model", "https://genius.com/r")
+        medley = self._f(
+            2,
+            "Role Model / Throw Ya Gunz (Mixed)",
+            rels=[{"type": "version_of", "url": "https://genius.com/r"}],
+        )
+        assert socle_designe(medley, [role_model, medley]) is None

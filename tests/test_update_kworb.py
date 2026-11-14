@@ -2206,3 +2206,32 @@ def test_le_signalement_d_une_ligne_garde_son_id_sans_changer_de_cle():
     preuves = preuves_de_ligne("Just Don't Give a F**", "5ldt0nAAAAAAAAAAAAAAAA")
     assert preuves["spotify_id"] == "5ldt0nAAAAAAAAAAAAAAAA"
     assert cle_du_cas(fiche, preuves) == avant
+
+
+class TestMemeCompteurQuUneFicheReliee:
+    """2026-11-14 : une ligne Kworb sans fiche au compteur d'une fiche reliée
+    du même titre est une autre parution du même enregistrement — rien n'y
+    manque (226 M de « Last One Standing … - From Venom », 984 M de « Venom -
+    Music From The Motion Picture »)."""
+
+    @staticmethod
+    def _f(titre):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(title=titre)
+
+    def test_meme_compteur_meme_titre(self):
+        from src.utils.update_kworb import compteur_d_une_fiche_reliee
+
+        venom = self._f("Venom")
+        reliees = [(venom, 984_069_450), (self._f("Kamikaze"), 500_000_000)]
+        ligne = "Venom - Music From The Motion Picture"
+        assert compteur_d_une_fiche_reliee(ligne, 984_239_894, reliees) is venom
+
+    def test_autre_compteur_ou_autre_titre(self):
+        from src.utils.update_kworb import compteur_d_une_fiche_reliee
+
+        reliees = [(self._f("Venom"), 984_069_450)]
+        assert compteur_d_une_fiche_reliee("Venom (Live)", 12_000_000, reliees) is None
+        assert compteur_d_une_fiche_reliee("Rap God", 984_069_450, reliees) is None
+        assert compteur_d_une_fiche_reliee("Venomous", 984_069_450, reliees) is None

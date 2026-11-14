@@ -320,6 +320,34 @@ def somme_connue(valeurs) -> int | None:
     return sum(connues) if connues else None
 
 
+#: Écart relatif sous lequel deux compteurs Spotify sont le MÊME compteur (lus
+#: à quelques heures d'intervalle).
+ECART_MEME_COMPTEUR = 0.001
+
+
+def compteur_d_une_fiche_reliee(titre: str, streams, reliees) -> object | None:
+    """PUR. La fiche déjà reliée dont une ligne Kworb sans fiche porte le MÊME
+    compteur (à 0,1 % près), le titre de base de la fiche étant un mot entier
+    du titre de la ligne : une autre parution du même enregistrement, dont
+    Spotify montre le compteur (« Last One Standing … - From Venom » 226 M,
+    « Venom - Music From The Motion Picture » 984 M, « Costa Rica (with Bas &
+    JID …) » 240 M ; décision utilisateur 2026-11-14). Rien n'y manque : ce
+    n'est pas un cas `kworb_non_relie`. `reliees` = `[(fiche, streams)]`."""
+    from src.utils.title_matching import contains_as_words, normalize_title, strip_featuring
+    from src.utils.version_descriptors import titre_de_base
+
+    if not streams:
+        return None
+    ligne = normalize_title(strip_featuring(titre or ""))
+    for fiche, compteur in reliees:
+        if not compteur or abs(compteur - streams) > ECART_MEME_COMPTEUR * max(compteur, streams):
+            continue
+        base = normalize_title(titre_de_base(fiche.title) or fiche.title or "")
+        if base and contains_as_words(base, ligne):
+            return fiche
+    return None
+
+
 def sous_titre(titre: str | None) -> tuple[str, str] | None:
     """PUR (6D, 2026-09-24). `(titre court normalisé, sous-titre)` quand le titre
     finit par un groupe entre parenthèses qui n'est PAS un descripteur de version
@@ -1785,7 +1813,19 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
 
     result["unmatched_details"].sort(key=lambda x: x[1], reverse=True)
     ecartees = {titre for titre, _, _ in result["lignes_ecartees"]}
+    reliees = [
+        (index.by_id[tid], agg["streams"])
+        for tid, agg in agg_by_track.items()
+        if tid in index.by_id
+    ]
     for titre, streams in result["unmatched_details"]:
+        meme = compteur_d_une_fiche_reliee(titre, streams, reliees)
+        if meme is not None:
+            logger.info(
+                f"Ligne Kworb « {titre} » : même compteur que « {meme.title} » "
+                "(autre parution du même enregistrement)"
+            )
+            continue
         if titre not in ecartees:
             _a_trancher(
                 result,

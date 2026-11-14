@@ -1051,7 +1051,7 @@ def heritages_perimes(c, pistes) -> list[tuple]:
     la fiche ne transmet pas est jugé — la production héritée d'une REPRISE
     (Kid Cudi, huit « Heartless », 2026-11-10) ; le reste, rien ne dit d'où il
     vient. Partagé par l'audit et le rattrapage (`scripts/recalculer_heritage.py`)."""
-    from src.utils.version_heritage import ROLE_NON_TRANSMIS, IndexSocles, socle_parmi
+    from src.utils.version_heritage import ROLE_NON_TRANSMIS, IndexSocles, socle_de_version
     from src.utils.version_heritage import heritage_sans_source as juger
 
     ids = {t["id"]: t for t in pistes}
@@ -1061,13 +1061,21 @@ def heritages_perimes(c, pistes) -> list[tuple]:
     fiches = collections.defaultdict(list)
     for t in pistes:
         fiches[t["artist_id"]].append(
-            SimpleNamespace(id=t["id"], title=t["title"], secondary_role=t["secondary_role"])
+            SimpleNamespace(
+                id=t["id"],
+                title=t["title"],
+                secondary_role=t["secondary_role"],
+                genius_url=t["genius_url"],
+                relationships=t["relationships"],
+            )
         )
     index = {a: IndexSocles(f) for a, f in fiches.items()}
+    par_id = {f.id: f for liste in fiches.values() for f in liste}
     socles = {}
     for tid in herites:
         t = ids[tid]
-        socles[tid] = socle_parmi(t["title"], fiches[t["artist_id"]], index[t["artist_id"]])
+        version = par_id[tid]
+        socles[tid] = socle_de_version(version, fiches[t["artist_id"]], index[t["artist_id"]])
     du_socle = _credits_par_fiche(c, {s.id for s in socles.values() if s is not None})
     rendus = []
     for tid, credits in herites.items():
@@ -1465,6 +1473,8 @@ def refus_vivants(c, pistes) -> list[Cas]:
             return valeur in disques[t["id"]]
         if nature == "constat_instrumental":
             return t["instrumental"] == 1
+        if nature == "date":
+            return str(t["release_date"] or "")[: len(valeur)] == valeur
         return False
 
     cas = []
@@ -1472,7 +1482,7 @@ def refus_vivants(c, pistes) -> list[Cas]:
         "SELECT genius_id, artiste, titre, album, nature, valeur FROM refus "
         "WHERE nature IN ('id_spotify', 'id_deezer', 'id_apple', 'id_discogs','isrc', 'video', 'lrc', 'paroles', "
         "'page_songbpm', "
-        "'page_getsongbpm', 'mesure_songbpm', 'parution', 'constat_instrumental')"
+        "'page_getsongbpm', 'mesure_songbpm', 'parution', 'constat_instrumental', 'date')"
     ):
         if r["genius_id"] is not None:
             visees = par_genius.get(int(r["genius_id"]), [])

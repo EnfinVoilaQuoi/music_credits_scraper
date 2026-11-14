@@ -151,6 +151,7 @@ PAR_ENREGISTREMENT = frozenset(
         "isrc",
         "constat_instrumental",
         "segment_mixtape",
+        "date",
     }
 )
 
@@ -397,6 +398,17 @@ def refus_videos_a_la_fusion(conn, keep_id: int, delete_id: int) -> set[str]:
             params,
         )
     }
+
+
+def memoriser_date_refusee(track, date: str, origine: str | None = None) -> bool:
+    """Une date de sortie fausse, telle que la source l'observe (« 1861-01-01 ») :
+    le verdict de la colonne l'écarte (`TrackRepository._dates_refusees`), sœurs
+    comprises. La colonne se recalcule à la prochaine écriture de la fiche."""
+    return _memoriser(track, "date", str(date), origine=origine)
+
+
+def oublier_date_refusee(track, date: str) -> bool:
+    return _oublier(track, "date", str(date))
 
 
 #: Valeur unique de l'acceptation `segment_mixtape`.

@@ -357,6 +357,52 @@ class IndexSocles:
                 self.nues.add(id(t))
 
 
+#: Relations Genius qui désignent l'original d'une version.
+TYPES_DESIGNANT_L_ORIGINAL = ("remix_of", "version_of")
+
+
+def socle_designe(version, fiches) -> object | None:
+    """PUR. L'original que GENIUS désigne pour la version : relation
+    `remix_of` / `version_of` vers une fiche de `fiches` (même artiste), par
+    son `track_id` ou l'adresse de sa page ; une seule. Jamais pour un medley
+    « A / B » : il a plusieurs originaux."""
+    import json
+
+    from src.utils.contenants import parties_du_titre
+
+    if parties_du_titre(version.title):
+        return None
+    relations = version.relationships or []
+    if isinstance(relations, str):
+        try:
+            relations = json.loads(relations)
+        except ValueError:
+            return None
+    par_id = {f.id: f for f in fiches}
+    par_url = {f.genius_url: f for f in fiches if f.genius_url}
+    trouves = set()
+    for r in relations:
+        if not isinstance(r, dict) or r.get("type") not in TYPES_DESIGNANT_L_ORIGINAL:
+            continue
+        f = par_id.get(r.get("track_id")) or par_url.get(r.get("url"))
+        if f is not None and f.id != version.id:
+            trouves.add(f.id)
+    return par_id[trouves.pop()] if len(trouves) == 1 else None
+
+
+def socle_de_version(version, fiches, index: IndexSocles | None = None) -> object | None:
+    """PUR. L'original d'une version : par le titre (`socle_parmi`), sinon
+    celui que Genius désigne (`socle_designe`). Le juge commun de l'héritage
+    et de son audit (2026-11-14). Simulé sur la base : la relation trouve un
+    original à 111 versions que le titre laisse sans (remixes de « Pursuit Of
+    Happiness » → la page « (Nightmare) », lives de Kery James et de Diam's).
+    Quand les deux en désignent un DIFFÉRENT (42), la page de la relation est
+    souvent la moins renseignée : la mettre devant retirait 20 crédits justes
+    (« Scott Mescudi (Writer) » des remixes de « Day 'N' Nite », la production
+    de « Fugitif (Instrumental) ») — le titre garde la main."""
+    return socle_parmi(version.title, fiches, index) or socle_designe(version, fiches)
+
+
 def socle_parmi(titre: str | None, fiches, index: IndexSocles | None = None) -> object | None:
     """PUR. L'original UNIQUE d'une version parmi `fiches` (même artiste) : même
     socle de titre, sans descripteur de version. None si absent ou ambigu —

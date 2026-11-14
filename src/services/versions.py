@@ -26,7 +26,7 @@ from src.utils.version_heritage import (
     famille_de,
     heriter,
     remixeurs_du_titre,
-    socle_parmi,
+    socle_de_version,
 )
 
 #: Le titre désigne le remixeur, une source directe confirme qu'il a bien
@@ -52,7 +52,7 @@ def heriter_versions(dm, tracks) -> int:
     for version in tracks:
         if famille_de(version.title) is None:
             continue
-        socle = socle_parmi(version.title, tracks, index)
+        socle = socle_de_version(version, tracks, index)
         if socle is version:
             continue
         perimes = {(nom, role) for nom, role, _ in credits_herites_perimes(version, socle)}

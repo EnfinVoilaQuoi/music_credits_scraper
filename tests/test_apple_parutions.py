@@ -153,6 +153,40 @@ def test_oublier_parution_apple_garde_la_date(data_manager):
     assert not data_manager.oublier_parution_apple(parution["id"], 42)
 
 
+def test_un_album_apple_retire_ne_revient_pas(data_manager):
+    """SCH « Loup noir » (2026-11-14) : défait le 30/10, l'album Apple revenait
+    à la recherche par code-barres suivante (iTunes le rend pour l'UPC du
+    single studio). Le retrait se refuse, par disque Deezer ; rétablissable."""
+    from src.utils.corrections_fiches import (
+        albums_apple_refuses,
+        cle_album_apple,
+        oublier_album_apple_refuse,
+    )
+
+    artiste = Artist(name="OrelSan")
+    artiste.id = data_manager.save_artist(artiste)
+    shonen = _parution(data_manager, artiste, "Shonen", (2, 1))
+    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
+    resultats = load_fixture_json("itunes/lookup_upc_civilisation.json")["results"]
+    rattacher_parutions_apple(data_manager, artiste, [_album()], client=_ITunes(resultats))
+    (parution,) = data_manager.get_track_releases(shonen.id)
+    collection, _ = data_manager.etat_parution_apple(parution["id"])
+
+    assert data_manager.oublier_parution_apple(parution["id"], collection)
+    assert albums_apple_refuses("OrelSan") == {cle_album_apple(_album().id, collection)}
+    bilan = rattacher_parutions_apple(
+        data_manager, artiste, [_album()], client=_ITunes(resultats), force=True
+    )
+    assert (bilan.refuses, bilan.rattaches) == (1, 0)
+    assert data_manager.etat_parution_apple(parution["id"])[0] is None
+
+    assert oublier_album_apple_refuse("OrelSan", _album().id, collection)
+    bilan = rattacher_parutions_apple(
+        data_manager, artiste, [_album()], client=_ITunes(resultats), force=True
+    )
+    assert bilan.rattaches == 1
+
+
 def test_ambigu_ou_inconnu_est_date_sans_rattacher(data_manager):
     artiste = Artist(name="OrelSan")
     artiste.id = data_manager.save_artist(artiste)

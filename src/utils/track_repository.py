@@ -4309,9 +4309,13 @@ class TrackRepository:
         Apple n'est plus un identifiant de la parution, la date du constat
         reste (pas redemandé avant expiration). Les liens déjà posés par cet
         identifiant se défont à part (`unlink_track_from_release`). Rend True
-        si l'identifiant était là."""
+        si l'identifiant était là. Le retrait se REFUSE (nature `album_apple`,
+        par disque Deezer) : sans refus, la recherche par code-barres suivante
+        le reposait (SCH « Loup noir », défait le 30/10, revenu le 14/11)."""
+        from src.utils.corrections_fiches import memoriser_album_apple_refuse
+
         with self.engine.begin() as conn:
-            return (
+            retire = (
                 conn.execute(
                     text(
                         "DELETE FROM release_identifiers WHERE release_id = :r "
@@ -4321,6 +4325,16 @@ class TrackRepository:
                 ).rowcount
                 > 0
             )
+            parution = conn.execute(
+                text(
+                    "SELECT a.name, r.deezer_album_id, r.title FROM releases r "
+                    "JOIN artists a ON a.id = r.artist_id WHERE r.id = :r"
+                ),
+                {"r": release_id},
+            ).first()
+        if parution is not None and parution[1] is not None:
+            memoriser_album_apple_refuse(parution[0], parution[1], collection_id, parution[2])
+        return retire
 
     def etat_parution_spotify(self, release_id: int) -> tuple[str | None, Any]:
         """`(ID d'album Spotify de la parution ou None, date de la dernière

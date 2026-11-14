@@ -744,6 +744,72 @@ def oublier_disque_refuse(artiste: str, album_deezer: int) -> bool:
         )
 
 
+def cle_album_apple(album_deezer, collection) -> str:
+    """La valeur d'un refus `album_apple` : le disque Deezer et l'album Apple."""
+    return f"{int(album_deezer)}:{collection}"
+
+
+def memoriser_album_apple_refuse(
+    artiste: str, album_deezer, collection, titre: str, origine: str | None = None
+) -> bool:
+    """Consigne un album Apple qui n'est PAS celui d'un disque Deezer, bien que
+    iTunes le rende pour son code-barres (SCH : l'UPC du single « Loup noir »
+    rend « Loup noir (A COLORS SHOW) - Single », 2026-11-14 ; défait le 30/10,
+    revenu). Désigné par le disque, comme `disque_deezer` :
+    `rattacher_parutions_apple` ne le note plus (`albums_apple_refuses`)."""
+    from datetime import datetime
+
+    if moteur is None or not artiste or album_deezer is None:
+        return False
+    return _inserer(
+        {"titre": titre, "album": None},
+        artiste,
+        titre,
+        None,
+        "album_apple",
+        cle_album_apple(album_deezer, collection),
+        datetime.now().isoformat(timespec="seconds"),
+        origine=origine,
+    )
+
+
+def albums_apple_refuses(artiste: str | None) -> set[str]:
+    """Les `cle_album_apple` refusées pour cet artiste."""
+    if moteur is None or not artiste:
+        return set()
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        with moteur.connect() as conn:
+            lignes = conn.execute(
+                text("SELECT valeur FROM refus WHERE nature = 'album_apple' AND artiste = :a"),
+                {"a": artiste},
+            ).all()
+    except SQLAlchemyError as e:
+        logger.warning(f"Refus d'albums Apple illisibles : {e} — rien d'appliqué")
+        return set()
+    return {v for (v,) in lignes}
+
+
+def oublier_album_apple_refuse(artiste: str, album_deezer, collection) -> bool:
+    """Pendant : l'album Apple pourra de nouveau être noté sur ce disque."""
+    if moteur is None:
+        return False
+    from sqlalchemy import text
+
+    with moteur.begin() as conn:
+        return bool(
+            conn.execute(
+                text(
+                    "DELETE FROM refus WHERE nature = 'album_apple' AND artiste = :a "
+                    "AND valeur = :v"
+                ),
+                {"a": artiste, "v": cle_album_apple(album_deezer, collection)},
+            ).rowcount
+        )
+
+
 def memoriser_disque_accepte(artiste: str, album_deezer: int, titre: str) -> bool:
     """Le pendant OUI du refus de disque : un disque Deezer que l'humain a
     reconnu comme celui de l'artiste, bien qu'aucune fiche n'ait de page Genius

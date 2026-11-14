@@ -62,6 +62,8 @@ class BilanApple:
     #: Ambigus pour iTunes, départagés par MusicBrainz (comptés aussi dans
     #: `rattaches`).
     departages_mb: int = 0
+    #: Albums trouvés, mais retirés de ce disque à la main (`album_apple`).
+    refuses: int = 0
     propositions: int = 0
     erreurs: list[str] = field(default_factory=list)
 
@@ -169,8 +171,10 @@ def rattacher_parutions_apple(
     from src.api.itunes_api import ITunesAPI, album_du_code_barres
     from src.services.runtime import constat_perime
     from src.utils.apple_identity import CHAMP_APPLE_PROPOSE
+    from src.utils.corrections_fiches import albums_apple_refuses, cle_album_apple
 
     bilan = BilanApple()
+    refuses = albums_apple_refuses(artist.name)
     client = client or ITunesAPI()
     positions = dm.get_artist_positions(artist.id)
     fiches = {t.id: t for t in artist.tracks}
@@ -214,6 +218,12 @@ def rattacher_parutions_apple(
                 resultats, parutions, album.id, album.explicit_lyrics
             )
             bilan.departages_mb += trouve is not None
+        if trouve is not None and (
+            cle_album_apple(album.id, trouve["collection"]["collectionId"]) in refuses
+        ):
+            # Un album Apple retiré à la main de ce disque ne revient pas.
+            bilan.refuses += 1
+            trouve = None
         if trouve is None:
             if ambigu:
                 bilan.ambigus += 1

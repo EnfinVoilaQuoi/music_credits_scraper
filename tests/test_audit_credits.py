@@ -111,7 +111,9 @@ def test_familles_de_credits_dans_l_audit(data_manager):
     _credit(data_manager, fiches["Fugitif (Instrumental)"], "Shurik’n", "Producer", "heritage")
     _credit(data_manager, fiches["Fugitif (Instrumental)"], "IAM", "Producer", "heritage")
     _credit(data_manager, fiches["Heartless (Studio Version)"], "No I.D.", "Producer", "heritage")
-    audit = au.auditer(data_manager, ["Shurik’n"], revue=False, persistance=False)
+    audit = au.auditer(
+        data_manager, ["Shurik’n"], revue=False, persistance=False, masquer_justes=False
+    )
     heritage = sorted(
         (c for c in audit.cas if c.famille.startswith("heritage_sans")), key=lambda c: c.nature
     )

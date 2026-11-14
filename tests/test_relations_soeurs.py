@@ -89,6 +89,19 @@ def test_une_seule_graphie_quel_que_soit_l_ecrivain(data_manager, soeurs):
     assert _divergences(data_manager) == []
 
 
+def test_la_page_relue_chez_une_soeur_vaut_chez_toutes(data_manager, soeurs):
+    """« Cudi Montage » (2026-11-13) : la page relue à la création de la ligne
+    de KIDS SEE GHOSTS donnait l'adresse renommée d'une relation ; écrite chez
+    elle seule, après l'alignement, elle divergeait des deux autres lignes."""
+    kanye, cudi = soeurs
+    ancienne = {**_SAMPLE, "url": "https://genius.com/Ancienne-adresse-lyrics"}
+    nouvelle = {**_SAMPLE, "url": "https://genius.com/Nouvelle-adresse-lyrics"}
+    data_manager.record_relationships(kanye.id, [dict(ancienne)])
+    data_manager.record_relationships(cudi.id, [dict(nouvelle)])
+    assert json.loads(_relations(data_manager, kanye.id)) == [nouvelle]
+    assert _divergences(data_manager) == []
+
+
 def test_reparation_retire_les_cles_locales(data_manager, soeurs):
     kanye, cudi = soeurs
     with data_manager.engine.begin() as conn:  # l'état laissé par l'ancien code

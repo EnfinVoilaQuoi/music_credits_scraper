@@ -115,6 +115,50 @@ def credits_youtube_en_double(credits) -> list:
     return en_double
 
 
+def cles_fondues(tracks) -> dict[str, str]:
+    """`identity_key` → `identity_key` retenue, pour les graphies d'UNE personne
+    que le juge `credits_sous_deux_graphies` réunit sur un MÊME morceau
+    (« Al Tarba » de Discogs / « Al’Tarba » de Genius). Le graphe du studio
+    gardait deux nœuds — une fausse collaboration de la personne avec
+    elle-même sur 22 fiches de production, 16 chez Swift Guad (2026-11-14).
+    Jamais par la seule ressemblance de deux noms sur deux morceaux : sur la
+    base entière, 139 paires n'ont aucune preuve sur un même morceau. La clé
+    retenue est la plus fréquente parmi les crédits de `tracks`, à égalité la
+    première dans l'ordre ; seules les clés à fondre sont rendues. PUR."""
+    parent: dict[str, str] = {}
+
+    def racine(k: str) -> str:
+        while parent.get(k, k) != k:
+            k = parent[k]
+        return k
+
+    frequence: dict[str, int] = {}
+    for track in tracks:
+        for c in track.credits:
+            k = identity_key(c.name)
+            if k:
+                frequence[k] = frequence.get(k, 0) + 1
+        for groupe in credits_sous_deux_graphies(track.credits):
+            cles = sorted({identity_key(c.name) for c in groupe} - {""})
+            for k in cles[1:]:
+                a, b = racine(cles[0]), racine(k)
+                if a != b:
+                    parent[max(a, b)] = min(a, b)
+    classes: dict[str, list[str]] = {}
+    for k in parent:
+        classes.setdefault(racine(k), []).append(k)
+    for r, membres in list(classes.items()):
+        if r not in membres:
+            membres.append(r)
+    fondues = {}
+    for membres in classes.values():
+        retenue = min(membres, key=lambda k: (-frequence.get(k, 0), k))
+        for k in membres:
+            if k != retenue:
+                fondues[k] = retenue
+    return fondues
+
+
 def _role(credit) -> str:
     role = credit.role
     return role if isinstance(role, str) else role.value

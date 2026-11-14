@@ -3099,10 +3099,19 @@ class TrackRepository:
                             )
                         )
                     )
-                conn.execute(
-                    text("UPDATE tracks SET relationships = :rels WHERE id = :id"),
-                    {"rels": brut, "id": track_id},
-                )
+                # La lecture qu'on écrit est la plus récente de la famille : elle
+                # vaut chez TOUTES les sœurs. Écrite sur une seule ligne APRÈS
+                # l'alignement de `save_track`, elle divergeait (« Cudi Montage »,
+                # 2026-11-13 : l'adresse renommée de « SKELETONS (Demo) » chez
+                # KIDS SEE GHOSTS seulement ; à horloges égales, l'alignement
+                # suivant aurait rendu l'ancienne, celle du plus petit id).
+                for tid in [track_id, *jumelles]:
+                    if tid != track_id:
+                        self._toucher(conn, tid)
+                    conn.execute(
+                        text("UPDATE tracks SET relationships = :rels WHERE id = :id"),
+                        {"rels": brut, "id": tid},
+                    )
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur record_relationships({track_id}): {e}")

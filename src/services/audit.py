@@ -2404,6 +2404,7 @@ INFORMATIONS_JUSTES = {
     "paroles_identiques": "version nommée, ou déjà au panneau",
     "streams_double": "égalité de hasard, deux morceaux, ou déjà au panneau",
     "id_partage": "déjà montré par le panneau",
+    "credit_graphie": "graphies fondues par le studio au même juge (`cles_fondues`)",
 }
 
 

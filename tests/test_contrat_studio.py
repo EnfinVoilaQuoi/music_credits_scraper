@@ -47,7 +47,11 @@ CONTRAT: dict[str, dict[str, list[str] | None]] = {
         "RANG_PALIERS": None,
         "decouper_multiplicateur": ["niveau"],
     },
-    "src.utils.credit_normalize": {"display_name": ["name"], "identity_key": ["name"]},
+    "src.utils.credit_normalize": {
+        "cles_fondues": ["tracks"],
+        "display_name": ["name"],
+        "identity_key": ["name"],
+    },
     "src.utils.data_manager": {"DataManager": None},
     "src.utils.dates": {"parse_flexible": ["value"]},
     "src.utils.disabled_tracks_manager": {"DisabledTracksManager": None},

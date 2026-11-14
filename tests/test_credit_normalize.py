@@ -12,6 +12,7 @@ import pytest
 from src.models.track import Credit, CreditRole
 from src.utils.credit_normalize import (
     cle_de_doublon,
+    cles_fondues,
     credits_youtube_en_double,
     display_name,
     identity_key,
@@ -132,3 +133,22 @@ def test_deux_credits_youtube_de_la_meme_personne():
     topic = Credit(name="RDB (FRA)", role=CreditRole.PRODUCER, source="youtube_topic")
     clip = Credit(name="RDB", role=CreditRole.PRODUCER, source="youtube_clip")
     assert credits_youtube_en_double([topic, clip]) == [clip]
+
+
+def test_cles_fondues_seulement_sur_preuve_d_un_meme_morceau():
+    """« Al Tarba » / « Al’Tarba » sur un même morceau : fondues. « Black O » /
+    « Blacko » jamais vus ensemble : gardées à part (pas de preuve)."""
+    from types import SimpleNamespace
+
+    def piste(*noms):
+        return SimpleNamespace(
+            credits=[Credit(name=n, role=CreditRole.PRODUCER, source=s) for n, s in noms]
+        )
+
+    pistes = [
+        piste(("Al Tarba", "discogs"), ("Al’Tarba", "genius")),
+        piste(("Al’Tarba", "genius")),
+        piste(("Black O", "genius")),
+        piste(("Blacko", "discogs")),
+    ]
+    assert cles_fondues(pistes) == {"al tarba": "al'tarba"}

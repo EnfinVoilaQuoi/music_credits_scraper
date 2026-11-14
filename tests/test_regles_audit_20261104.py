@@ -683,7 +683,7 @@ class TestInformationsJustes:
             au.Cas("fiche_sans_participation", "A", [1], "x", au.INFORMATION),
             au.Cas("id_partage", "A", [2], "panneau", au.INFORMATION),
             au.Cas("id_partage", "A", [3], "erreur", au.ERREUR),
-            au.Cas("credit_graphie", "A", [4], "à corriger", au.INFORMATION),
+            au.Cas("revue:video_etrangere", "A", [4], "à corriger", au.INFORMATION),
         ]
         assert [c.pistes for c in au.sans_informations_justes(cas)] == [[3], [4]]
 

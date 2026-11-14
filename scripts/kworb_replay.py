@@ -38,6 +38,9 @@ class _Enregistreur:
     def get_artist_tracks(self, artist_id):
         return self._dm.get_artist_tracks(artist_id)
 
+    def get_track_releases(self, track_id):
+        return self._dm.get_track_releases(track_id)
+
     def get_stream_observation_values(self, source):
         return self._dm.get_stream_observation_values(source)
 

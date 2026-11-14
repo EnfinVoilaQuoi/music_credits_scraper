@@ -77,6 +77,9 @@ class _DataManager:
     def get_stream_observation_values(self, source):
         return getattr(self, "lus", {}).get(source, {})
 
+    def get_track_releases(self, track_id):
+        return getattr(self, "parutions", {}).get(track_id, [])
+
     def record_spotify_streams(self, track_id, streams, source, updated_at=None, **kw):
         # L'appelant ne DÉCLARE que ce qu'il a vu : la valeur retenue en colonne
         # est arbitrée côté repository (`reconcile_spotify_streams`).
@@ -1466,6 +1469,46 @@ class TestLigneDUneAutreFiche:
 
     def test_sans_fiche_a_sa_duree_la_ligne_reste_sommee(self):
         _, dm = _run(self._fiches(), self._lignes(), identites=self._identites(duree_bo=190))
+        assert [(tid, st) for tid, st, *_ in dm.streams_writes] == [(1, 239_500_000)]
+
+    def test_un_live_date_de_sa_reedition_rejoint_sa_fiche_par_son_disque(self):
+        """MC Solaar : « Caroline » (312 s, 1998) est « Caroline (Live 1998) »,
+        datée 2006 (réédition Deezer) mais rangée sur *Le tour de la question*
+        (1998) ; l'original dure 283 s."""
+        studio = _track(1, "Caroline", spotify_id="SP1")
+        studio.duration, studio.release_date = 283, "1991-10-15"
+        live = _track(2, "Caroline (Live 1998)", album="Le tour de la question")
+        live.duration, live.release_date = 312, "2006-04-18"
+        identites = {
+            "SP1": _identite("Caroline", ["MC Solaar"], 283) | {"release_date": "1991-10-15"},
+            "SPL": _identite("Caroline", ["MC Solaar"], 312) | {"release_date": "1998-10-02"},
+        }
+        lignes = [
+            _entry("Caroline", 15_000_000, 1, "SP1"),
+            _entry("Caroline", 13_000_000, 1, "SPL"),
+        ]
+        dm = _DataManager([studio, live])
+        update_kworb_streams(
+            _Artist(), dm, scraper=_Scraper(songs=_page(lignes)), lire_identite=identites.get
+        )
+        # Sans le disque de 1998, la fiche live n'est datée que de 2006 : sommée.
+        assert sorted((tid, st) for tid, st, *_ in dm.streams_writes) == [(1, 28_000_000)]
+        dm = _DataManager([studio, live])
+        dm.parutions = {2: [{"release_date": "1998-07-21"}]}
+        update_kworb_streams(
+            _Artist(), dm, scraper=_Scraper(songs=_page(lignes)), lire_identite=identites.get
+        )
+        assert sorted((tid, st) for tid, st, *_ in dm.streams_writes) == [
+            (1, 15_000_000),
+            (2, 13_000_000),
+        ]
+
+    def test_jamais_une_instrumentale_que_spotify_ne_dit_pas(self):
+        """Eminem : « We Made You » (287 s) n'est pas « We Made You
+        (Instrumental) » (288 s), à la même durée par hasard."""
+        fiches = self._fiches()
+        fiches[1].title = "Ballin (Instrumental)"
+        _, dm = _run(fiches, self._lignes(), identites=self._identites())
         assert [(tid, st) for tid, st, *_ in dm.streams_writes] == [(1, 239_500_000)]
 
     def test_un_radio_edit_nomme_reste_a_sa_fiche(self):

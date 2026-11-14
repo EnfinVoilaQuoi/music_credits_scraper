@@ -608,25 +608,45 @@ ECART_AUTRE_FICHE_S = 10
 ACCORD_AUTRE_FICHE_S = 2
 
 
-def lignes_d_une_autre_fiche(lignes: list[dict], track, fiches, lire_identite):
+def _de_l_annee(fiche, annee: str, annees_de) -> bool:
+    """La fiche est-elle de l'année `annee` (date de la fiche ou d'une de ses
+    parutions) ? Vrai quand l'une des deux dates manque."""
+    connues = set(annees_de(fiche.id)) | (
+        {str(fiche.release_date)[:4]} if fiche.release_date else set()
+    )
+    return not annee or not connues or annee in connues
+
+
+def lignes_d_une_autre_fiche(
+    lignes: list[dict], track, fiches, lire_identite, annees_de=lambda tid: set()
+):
     """Parmi les lignes sommées sur `track`, celles qui sont une AUTRE fiche de
-    l'artiste au même titre de base : l'ID de la ligne (embed) dure plus de
-    `ECART_AUTRE_FICHE_S` autrement que `track`, et une seule autre fiche a sa
-    durée à `ACCORD_AUTRE_FICHE_S` près (même année de sortie quand les deux
-    sont connues). Rend `(gardées, [(ligne, autre fiche)])`.
+    l'artiste du même morceau souche (`titre_de_base` pour les éditions et
+    sous-titres, `cle_de_socle` pour les versions) : l'ID de la ligne (embed)
+    dure plus de `ECART_AUTRE_FICHE_S` autrement que `track`, et une seule
+    autre fiche a sa durée à `ACCORD_AUTRE_FICHE_S` près, de la même année que
+    l'ID quand les dates sont connues (date de la fiche ou d'une de ses
+    parutions, `annees_de` : les lives de MC Solaar sont datés de leur
+    réédition Deezer, 2006, leur disque de 1998), et jamais une fiche
+    instrumentale que Spotify ne dit pas instrumentale (« We Made You
+    (Instrumental) » à 288 s, la ligne à 287 s). Rend `(gardées, [(ligne,
+    autre fiche)])`.
 
     La durée seule ne départage pas (`_departager_homonymes` : rééditions et
     radio edits du même enregistrement durent autrement) ; ici, c'est la fiche
     qui porte EXACTEMENT cette durée qui tranche. Simulé le 2026-11-14 sur les
-    91 fiches à plusieurs lignes : 4 lignes, toutes à la même date que leur
-    fiche d'arrivée — Logic « Ballin » 231 M (166 s) → « Ballin' (Soundtrack
-    Version) » 168 s, et non la fiche de *Young Sinatra* (229 s) ; « Steve
-    Berman - Skit » et « Ken Kaniff - Skit » d'Eminem → les skits de 2002 et
-    1999 ; « Outside » de The Game → « Outside (2022) ». Une édition de
-    diffusion nommée par Spotify (« Radio Edit ») reste à sa fiche. Ne coûte
-    une lecture que dans le litige de `_departager_homonymes`."""
+    91 fiches à plusieurs lignes : 15 lignes, toutes justes au témoin (date de
+    l'ID) — Logic « Ballin » 231 M (166 s) → « Ballin' (Soundtrack Version) »
+    168 s, et non la fiche de *Young Sinatra* (229 s) ; dix lives de MC Solaar
+    (*Le tour de la question*) ; « Steve Berman - Skit » et « Ken Kaniff -
+    Skit » d'Eminem → les skits de 2002 et 1999 ; « Jimmy Crack Corn (Remix) » ;
+    « Outside (2022) » de The Game. Sans les gardes d'année et d'instrumental,
+    3 de plus, faux. Une édition de diffusion nommée par Spotify (« Radio
+    Edit ») reste à sa fiche. Ne coûte une lecture que dans le litige de
+    `_departager_homonymes`."""
     from src.utils.title_matching import strip_featuring
-    from src.utils.version_descriptors import titre_de_base
+    from src.utils.version_descriptors import cle_de_socle, titre_de_base
+    from src.utils.version_heritage import est_instrumental
 
     avec_id = [x for x in lignes if x.get("spotify_id")]
     if len({x["spotify_id"] for x in avec_id}) < 2 or not track.duration:
@@ -635,12 +655,13 @@ def lignes_d_une_autre_fiche(lignes: list[dict], track, fiches, lire_identite):
     if valeurs[-1] and (valeurs[-1] - valeurs[0]) <= 0.02 * valeurs[-1]:
         return lignes, []
 
-    def base(titre):
+    def souches(titre) -> set[str]:
         titre = strip_featuring(titre or "")
-        return _normalize_title(titre_de_base(titre) or titre)
+        edition = titre_de_base(titre) or titre
+        return {_normalize_title(edition), cle_de_socle(titre), cle_de_socle(edition)} - {"", "|"}
 
-    socle = base(track.title)
-    soeurs = [f for f in fiches if f.id != track.id and f.duration and base(f.title) == socle]
+    socle = souches(track.title)
+    soeurs = [f for f in fiches if f.id != track.id and f.duration and souches(f.title) & socle]
     if not soeurs:
         return lignes, []
     gardees, deplacees = [], []
@@ -655,11 +676,14 @@ def lignes_d_une_autre_fiche(lignes: list[dict], track, fiches, lire_identite):
             gardees.append(ligne)
             continue
         annee = str((identite or {}).get("release_date") or "")[:4]
+        nom = (identite or {}).get("name") or ""
+
         autres = [
             f
             for f in soeurs
             if abs(f.duration - duree) <= ACCORD_AUTRE_FICHE_S
-            and not (annee and f.release_date and str(f.release_date)[:4] != annee)
+            and _de_l_annee(f, annee, annees_de)
+            and not (est_instrumental(f.title) and not est_instrumental(nom))
         ]
         if len(autres) == 1:
             deplacees.append((ligne, autres[0]))
@@ -1861,9 +1885,16 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         result[_key] += 1
         logger.debug(f"✅ Match ({via}): '{entry['title']}' → {entry['streams']:,} streams")
 
+    def annees_de(tid) -> set[str]:
+        return {
+            str(p["release_date"])[:4]
+            for p in data_manager.get_track_releases(tid)
+            if p.get("release_date")
+        }
+
     for track_id, lignes in list(agg.items()):
         gardees, deplacees = lignes_d_une_autre_fiche(
-            lignes, index.by_id[track_id], index.tracks, lire_identite
+            lignes, index.by_id[track_id], index.tracks, lire_identite, annees_de
         )
         for ligne, autre in deplacees:
             logger.info(

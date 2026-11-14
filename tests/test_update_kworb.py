@@ -1434,6 +1434,46 @@ class TestEditionsDeDiffusion:
         assert [tid for tid, *_ in dm.streams_writes] == [2] and dm.editions == []
 
 
+class TestLigneDUneAutreFiche:
+    """Logic (2026-11-14) : « Ballin » 231 M (166 s, 2018) était sommé à la fiche
+    de *Young Sinatra* (229 s) ; c'est « Ballin' (Soundtrack Version) » (168 s,
+    2018), seule fiche du même titre de base à sa durée."""
+
+    @staticmethod
+    def _fiches():
+        ys = _track(1, "Ballin", spotify_id="SP1", album="Young Sinatra")
+        ys.duration, ys.release_date = 229, "2013-05-07"
+        bo = _track(2, "Ballin’ (Soundtrack Version)", album="Uncle Drew")
+        bo.duration, bo.release_date = 168, "2018-06-15"
+        return [ys, bo]
+
+    @staticmethod
+    def _identites(duree_bo=166, nom="Ballin"):
+        return {
+            "SP1": _identite("Ballin", ["Logic"], 229) | {"release_date": "2021-06-25"},
+            "SPB": _identite(nom, ["Logic"], duree_bo) | {"release_date": "2018-06-15"},
+        }
+
+    def _lignes(self):
+        return [_entry("Ballin", 8_500_000, 1, "SP1"), _entry("Ballin", 231_000_000, 9, "SPB")]
+
+    def test_la_ligne_va_a_la_fiche_de_sa_duree(self):
+        _, dm = _run(self._fiches(), self._lignes(), identites=self._identites())
+        assert sorted((tid, st) for tid, st, *_ in dm.streams_writes) == [
+            (1, 8_500_000),
+            (2, 231_000_000),
+        ]
+
+    def test_sans_fiche_a_sa_duree_la_ligne_reste_sommee(self):
+        _, dm = _run(self._fiches(), self._lignes(), identites=self._identites(duree_bo=190))
+        assert [(tid, st) for tid, st, *_ in dm.streams_writes] == [(1, 239_500_000)]
+
+    def test_un_radio_edit_nomme_reste_a_sa_fiche(self):
+        identites = self._identites(nom="Ballin - Radio Edit")
+        _, dm = _run(self._fiches(), self._lignes(), identites=identites)
+        assert [(tid, st) for tid, st, *_ in dm.streams_writes] == [(1, 239_500_000)]
+
+
 def test_suffixe_d_homonymie_spotify():
     """Spotify nomme un second upload « Mercy.1 » (131 M chez Kanye)."""
     tracks = [_track(1, "Mercy", spotify_id="SP1")]

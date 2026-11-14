@@ -602,6 +602,72 @@ def _departager_homonymes(lignes: list[dict], track, lire_identite) -> tuple[lis
     return retenues, ecartees
 
 
+#: Écart au-delà duquel l'ID d'une ligne ne dure pas comme sa fiche.
+ECART_AUTRE_FICHE_S = 10
+#: Accord de durée avec la fiche qui reçoit la ligne.
+ACCORD_AUTRE_FICHE_S = 2
+
+
+def lignes_d_une_autre_fiche(lignes: list[dict], track, fiches, lire_identite):
+    """Parmi les lignes sommées sur `track`, celles qui sont une AUTRE fiche de
+    l'artiste au même titre de base : l'ID de la ligne (embed) dure plus de
+    `ECART_AUTRE_FICHE_S` autrement que `track`, et une seule autre fiche a sa
+    durée à `ACCORD_AUTRE_FICHE_S` près (même année de sortie quand les deux
+    sont connues). Rend `(gardées, [(ligne, autre fiche)])`.
+
+    La durée seule ne départage pas (`_departager_homonymes` : rééditions et
+    radio edits du même enregistrement durent autrement) ; ici, c'est la fiche
+    qui porte EXACTEMENT cette durée qui tranche. Simulé le 2026-11-14 sur les
+    91 fiches à plusieurs lignes : 4 lignes, toutes à la même date que leur
+    fiche d'arrivée — Logic « Ballin » 231 M (166 s) → « Ballin' (Soundtrack
+    Version) » 168 s, et non la fiche de *Young Sinatra* (229 s) ; « Steve
+    Berman - Skit » et « Ken Kaniff - Skit » d'Eminem → les skits de 2002 et
+    1999 ; « Outside » de The Game → « Outside (2022) ». Une édition de
+    diffusion nommée par Spotify (« Radio Edit ») reste à sa fiche. Ne coûte
+    une lecture que dans le litige de `_departager_homonymes`."""
+    from src.utils.title_matching import strip_featuring
+    from src.utils.version_descriptors import titre_de_base
+
+    avec_id = [x for x in lignes if x.get("spotify_id")]
+    if len({x["spotify_id"] for x in avec_id}) < 2 or not track.duration:
+        return lignes, []
+    valeurs = sorted(x["streams"] or 0 for x in avec_id)
+    if valeurs[-1] and (valeurs[-1] - valeurs[0]) <= 0.02 * valeurs[-1]:
+        return lignes, []
+
+    def base(titre):
+        titre = strip_featuring(titre or "")
+        return _normalize_title(titre_de_base(titre) or titre)
+
+    socle = base(track.title)
+    soeurs = [f for f in fiches if f.id != track.id and f.duration and base(f.title) == socle]
+    if not soeurs:
+        return lignes, []
+    gardees, deplacees = [], []
+    for ligne in lignes:
+        identite = lire_identite(ligne["spotify_id"]) if ligne.get("spotify_id") else None
+        duree = (identite or {}).get("duration")
+        if (
+            not duree
+            or abs(duree - track.duration) <= ECART_AUTRE_FICHE_S
+            or edition_de_diffusion((identite or {}).get("name") or ligne["title"])
+        ):
+            gardees.append(ligne)
+            continue
+        annee = str((identite or {}).get("release_date") or "")[:4]
+        autres = [
+            f
+            for f in soeurs
+            if abs(f.duration - duree) <= ACCORD_AUTRE_FICHE_S
+            and not (annee and f.release_date and str(f.release_date)[:4] != annee)
+        ]
+        if len(autres) == 1:
+            deplacees.append((ligne, autres[0]))
+        else:
+            gardees.append(ligne)
+    return gardees, deplacees
+
+
 @dataclass
 class Socle:
     """La fiche ORIGINALE d'une version Kworb, telle que `original_de` l'a trouvée."""
@@ -1794,6 +1860,19 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
         _key = {"id": "matched_by_id", "fuzzy": "matched_by_fuzzy"}.get(via, "matched_by_title")
         result[_key] += 1
         logger.debug(f"✅ Match ({via}): '{entry['title']}' → {entry['streams']:,} streams")
+
+    for track_id, lignes in list(agg.items()):
+        gardees, deplacees = lignes_d_une_autre_fiche(
+            lignes, index.by_id[track_id], index.tracks, lire_identite
+        )
+        for ligne, autre in deplacees:
+            logger.info(
+                f"Ligne Kworb « {ligne['title']} » : durée de « {autre.title} », "
+                f"pas de « {index.by_id[track_id].title} »"
+            )
+            agg.setdefault(autre.id, []).append(ligne)
+        agg[track_id] = gardees
+    agg = {tid: lignes for tid, lignes in agg.items() if lignes}
 
     agg_by_track: dict[int, dict] = {}
     for track_id, lignes in agg.items():

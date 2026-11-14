@@ -212,6 +212,7 @@ FAMILLES = {
     "isrc_edition_autre_fiche": "INVARIANT — ISRC d'une édition = celui d'une AUTRE fiche",
     "spotify_principal": "INVARIANT — ID Spotify principal sans sa ligne `track_spotify_ids` principale",
     "credit_doublon": "INVARIANT — crédit YouTube qui redit un crédit déjà porté, ou nom composé",
+    "credit_sans_personne": "INVARIANT — crédit dont le nom ne désigne personne (« Deleted Artist »)",
     "tete_fabriquee": "INVARIANT — tête de section des paroles nommée à tort (« [Couplet 1 : <ligne>] »)",
     "photo_par_defaut": "INVARIANT — silhouette Deezer gardée comme photo d'artiste ou de personne",
     "heritage_sans_source": "INVARIANT — crédit hérité que l'héritage d'aujourd'hui ne poserait "
@@ -255,6 +256,7 @@ INVARIANTS = (
     "isrc_edition_autre_fiche",
     "spotify_principal",
     "credit_doublon",
+    "credit_sans_personne",
     "tete_fabriquee",
     "photo_par_defaut",
     "heritage_sans_source",
@@ -1883,6 +1885,29 @@ class _LigneDeCredit:
     source: str | None
 
 
+def credits_sans_personne(c, pistes) -> list[Cas]:
+    """Un crédit dont le « nom » ne désigne personne (`credit_roles.valeur_vide` :
+    « Deleted Artist », « Unknown », « N/A »…). Les lecteurs le refusent à
+    l'entrée depuis le 2026-11-15 (4 « Deleted Artist » Genius, 1 « Unknown »
+    d'une description Topic) ; rattrapage : `scripts/retirer_credits_sans_personne.py`."""
+    from src.utils.credit_roles import valeur_vide
+
+    fiches = {t["id"]: t for t in pistes}
+    cas = []
+    for r in c.execute("SELECT track_id, name, role FROM credits ORDER BY id"):
+        f = fiches.get(r["track_id"])
+        if f and valeur_vide(r["name"]):
+            cas.append(
+                Cas(
+                    "credit_sans_personne",
+                    f["artiste"],
+                    [r["track_id"]],
+                    f"{_lib(f)} {r['role']} « {r['name']} » ne désigne personne",
+                )
+            )
+    return cas
+
+
 def tetes_fabriquees(c, pistes) -> list[Cas]:
     """Une tête de section des paroles à laquelle le scraper a ajouté à tort
     « : <artiste de la ligne> » (« [Couplet 1 : Booba] » sur « Fenwick » de
@@ -2555,6 +2580,7 @@ def auditer(
             audit.cas += isrc_d_une_autre_fiche(c, pistes)
             audit.cas += ids_spotify_principaux_desalignes(c, pistes)
             audit.cas += credits_en_double(c, pistes)
+            audit.cas += credits_sans_personne(c, pistes)
             audit.cas += tetes_fabriquees(c, pistes)
             # Le dossier des photos de personnes (~1 min) : base entière seule.
             audit.cas += photos_par_defaut(c, artistes, dossier_entier=not noms)

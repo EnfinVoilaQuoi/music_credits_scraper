@@ -12,7 +12,7 @@ import re
 from typing import TYPE_CHECKING
 
 from src.models.track import Credit, CreditRole
-from src.utils.credit_roles import map_role
+from src.utils.credit_roles import map_role, valeur_vide
 
 if TYPE_CHECKING:
     pass
@@ -43,7 +43,9 @@ _NOM_ANONYME = re.compile(r"d\.?\s?r\.?|droits?\s+r[ée]serv[ée]s", re.IGNORECA
 
 
 def _nom_anonyme(name: str) -> bool:
-    return bool(_NOM_ANONYME.fullmatch(name.strip()))
+    # « Unknown » d'une description Topic (« Star Galaxy », 2026-11-15) : le
+    # juge commun des noms qui ne désignent personne.
+    return bool(_NOM_ANONYME.fullmatch(name.strip())) or valeur_vide(name)
 
 
 def est_description_topic(text: str | None, channel: str | None = None) -> bool:
@@ -300,6 +302,8 @@ def parse_description_clip(text: str) -> list[Credit]:
                 continue  # la ligne peut nommer un autre poste (« … / Mastering : X »)
             for name in _split_names(m.group(1)):
                 if role is CreditRole.PRODUCER and not _producteur_plausible(name):
+                    continue
+                if valeur_vide(name):
                     continue
                 credits.append(Credit(name=name, role=role, source="youtube_clip"))
             break

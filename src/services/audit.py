@@ -2019,9 +2019,22 @@ def ids_spotify_sans_compteur(c, pistes) -> list[Cas]:
     chaque run s'arrête à `spotify_web_max_pages_per_run` (120 pages sur Sheldon,
     Eminem, The Game, Mac Miller…). Une page lue sans compteur existe aussi
     (*VULTURES*). Un compteur compté sur une autre fiche (refus `compteur_spotify`)
-    n'en est pas un manque."""
+    n'en est pas un manque. Une page lue SANS compteur, constat encore valable
+    (`CLE_SANS_COMPTEUR`, `runtime.sans_compteur_perime`), n'est pas à faire
+    par un run : Spotify n'affiche pas un petit compteur, la page se rouvre à
+    l'expiration (décision utilisateur 2026-11-15) — tu, comme un cas juste."""
+    from src.observability.repository import CLE_SANS_COMPTEUR
+    from src.services.runtime import sans_compteur_perime
+
     refuses = {
         r["valeur"] for r in c.execute("SELECT valeur FROM refus WHERE nature = 'compteur_spotify'")
+    }
+    constats = {
+        r["track_id"]: r["derniere_absence"]
+        for r in c.execute(
+            "SELECT track_id, derniere_absence FROM source_track_absences WHERE source_key = ?",
+            (CLE_SANS_COMPTEUR,),
+        )
     }
     lues = {
         r["track_id"]
@@ -2032,6 +2045,9 @@ def ids_spotify_sans_compteur(c, pistes) -> list[Cas]:
     cas = []
     for t in pistes:
         if not t["spotify_id"] or t["spotify_streams"] is not None or t["spotify_id"] in refuses:
+            continue
+        vu = constats.get(t["id"])
+        if vu is not None and not sans_compteur_perime(vu, t["release_date"]):
             continue
         etat = "page lue, sans compteur" if t["id"] in lues else "jamais lue (plafond de pages)"
         cas.append(

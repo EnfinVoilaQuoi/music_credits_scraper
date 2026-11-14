@@ -1327,8 +1327,33 @@ def _ecrire_rendition(data_manager, parent, entry, kworb_date, result, via) -> N
         result["unmatched_details"].append((entry["title"], entry["streams"]))
 
 
+COMPTEUR_DE_LA_FICHE_TOLERANCE = 0.02
+
+
+def compteur_de_la_fiche_sur_la_page(track, sid: str, lus_web: dict[int, int], lignes) -> bool:
+    """PUR (2026-11-15). Une AUTRE ligne de la page, au titre de la fiche,
+    porte-t-elle le compteur que Spotify lit sur l'ID de la fiche (± 2 %) ?
+
+    Alors l'upload de la fiche EST sur la page, sous un autre ID (Spotify relie
+    les rééditions : l'ID « 10th Anniversary » de Mac Miller, absent de Kworb,
+    lit les 194 M de la ligne d'origine) : une ligne plus petite au même titre
+    est un SECOND upload, qui se somme, pas un upload qui prendrait sa place."""
+    from src.utils.version_descriptors import meme_titre_normalise
+
+    lu = lus_web.get(track.id) or 0
+    if lu <= 0:
+        return False
+    return any(
+        (e.get("spotify_id") or "") != (sid or "")
+        and e.get("streams")
+        and abs(e["streams"] - lu) <= COMPTEUR_DE_LA_FICHE_TOLERANCE * lu
+        and meme_titre_normalise(e.get("title"), track.title)
+        for e in lignes or ()
+    )
+
+
 def autre_upload_que_la_fiche(
-    track, sid: str, streams: int, ids_page: set, lus_web: dict[int, int]
+    track, sid: str, streams: int, ids_page: set, lus_web: dict[int, int], lignes=None
 ) -> bool:
     """PUR (6F, 2026-09-24). Une ligne Kworb rapprochée par le TITRE, portant
     l'ID `sid`, est-elle un AUTRE upload que celui de la fiche ?
@@ -1342,11 +1367,17 @@ def autre_upload_que_la_fiche(
     en écartait encore 139 — l'ID propre est souvent une autre ÉDITION du même
     enregistrement, et Spotify compte par enregistrement : même nombre, un peu
     plus frais (11 M contre 10,8 M). Un autre upload diffère d'un ordre.
+
+    Sauf quand une autre ligne au titre de la fiche porte déjà le compteur lu
+    sur son ID (`compteur_de_la_fiche_sur_la_page`) : la ligne plus petite est
+    alors un second upload, sommé (Mac Miller, *Watching Movies*, 2026-11-15).
     """
     propres = {track.spotify_id, *(e.spotify_id for e in track.spotify_id_entries or [])} - {None}
     if not propres or sid in propres or propres & ids_page:
         return False
-    return lus_web.get(track.id, 0) > 2 * (streams or 0)
+    if lus_web.get(track.id, 0) <= 2 * (streams or 0):
+        return False
+    return not compteur_de_la_fiche_sur_la_page(track, sid, lus_web, lignes)
 
 
 def _oublier_observations_perimees(
@@ -1490,7 +1521,9 @@ def relier_ids_kworb(artist, data_manager, scraper=None, lire_identite=None) -> 
             "duree",
             "equivalent",
             "sous_titre",
-        ) and autre_upload_que_la_fiche(track, sid, entry["streams"], ids_page, lus_web):
+        ) and autre_upload_que_la_fiche(
+            track, sid, entry["streams"], ids_page, lus_web, page_songs["entries"]
+        ):
             continue
         if via == "edition":
             # L'ID de l'édition est noté SUR l'édition, jamais comme ID principal
@@ -1774,7 +1807,9 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 "sous_titre",
             )
             and sid
-            and autre_upload_que_la_fiche(track, sid, entry["streams"], ids_page, lus_web)
+            and autre_upload_que_la_fiche(
+                track, sid, entry["streams"], ids_page, lus_web, page_songs["entries"]
+            )
             and not lien_tranche(entry, track, _decisions)
         ):
             refusees_titre.add(track.id)

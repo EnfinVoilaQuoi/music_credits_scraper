@@ -6,9 +6,10 @@ from types import SimpleNamespace
 from src.services.revue import video_nomme
 
 
-def _fiche(titre, artiste, durees):
+def _fiche(titre, artiste, durees, album=None):
     return SimpleNamespace(
         title=titre,
+        album=album,
         artist=SimpleNamespace(name=artiste),
         primary_artist_name=None,
         secondary_role=None,
@@ -26,6 +27,19 @@ def test_generique_de_la_chaine_topic_a_la_bonne_duree():
     assert video_nomme(
         fiche, _video("Intro (Album Version)", "search_auto", 81, "The Game - Topic")
     )
+
+
+def test_generique_au_nom_de_son_disque_par_la_chaine_topic():
+    """Kery James « Intro - Savoir et Vivre Ensemble » (2026-11-15) : Genius
+    ajoute le nom du disque, la vidéo Topic s'appelle « Intro »."""
+    fiche = _fiche(
+        "Intro - Savoir et Vivre Ensemble",
+        "Kery James",
+        {"deezer": 64, "spotify_web": 64},
+        album="Savoir & vivre ensemble",
+    )
+    assert video_nomme(fiche, _video("Intro", "search_auto", 65, "Kery James - Topic"))
+    assert not video_nomme(fiche, _video("Intro", "search_auto", 65, "Autre Rappeur - Topic"))
 
 
 def test_generique_sans_duree_independante_refuse():

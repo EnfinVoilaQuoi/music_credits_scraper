@@ -190,7 +190,13 @@ class SpotifyWebScraper(CrawlAIScraperBase):
             durations = parse.parse_row_durations(html)
             if identite and identite.get("duration"):
                 durations[track_id] = identite["duration"]
-            return {"playcounts": playcounts, "durations": durations}
+            # `sans_compteur` : en-tête lu, aucun compteur pour CE morceau — une
+            # réponse de Spotify, constatée et datée par l'appelant (2026-11-15).
+            return {
+                "playcounts": playcounts,
+                "durations": durations,
+                "sans_compteur": bool(identite) and track_id not in playcounts,
+            }
 
     async def afetch_track_identity(self, sess, track_id: str) -> dict | None:
         """Ce que la page titre dit du morceau, sans connexion (2026-09-21).

@@ -2041,7 +2041,15 @@ def video_nomme(track, v) -> bool:
     # Une parenthèse qui n'est pas un descripteur fait partie du titre Genius
     # (« Pursuit of Happiness (Nightmare) » : le clip officiel ne la porte pas) —
     # sauf sur un titre générique, qu'elle seule distingue (« Intro (A2) »).
-    nu = _mots_d_un_titre(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", track.title or ""))
+    # Le nom de SON disque que Genius ajoute à un générique (« Intro - Savoir
+    # et Vivre Ensemble » sur *Savoir & vivre ensemble*, 2026-11-15) part aussi :
+    # la vidéo Topic s'appelle « Intro », et le générique exige alors la preuve.
+    # Des appelants passent une fiche réduite à son titre (audit `duree_youtube`,
+    # désignation YTM) : sans disque, rien à retirer.
+    from src.utils.version_descriptors import titre_sans_son_disque
+
+    sans_disque = titre_sans_son_disque(track.title, getattr(track, "album", None))
+    nu = _mots_d_un_titre(re.sub(r"\s*[\(\[][^)\]]*[\)\]]", "", sans_disque))
     titre = _mots_d_un_titre(v.title)
     if titre_generique(nu):
         # … mais la vidéo que la page Genius du morceau désigne elle-même, et

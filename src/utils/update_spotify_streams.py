@@ -76,6 +76,46 @@ def _is_fresh(raw, now: datetime, max_age_days: int) -> bool:
     return seen is not None and (now - seen) < timedelta(days=max_age_days)
 
 
+class _ConstatsSansCompteur:
+    """Les pages titre lues SANS compteur (`CLE_SANS_COMPTEUR`, 2026-11-15) :
+    Spotify n'affiche pas un petit compteur. Une page constatée n'est rouverte
+    par les files (sans stream, péremption) qu'à l'expiration du constat, selon
+    l'âge de la sortie (`runtime.sans_compteur_perime`) ; une fiche NOMMÉE est
+    toujours relue. Sans moteur (faux des tests), rien n'est lu ni écrit."""
+
+    def __init__(self, data_manager, now: datetime):
+        from src.observability.repository import CLE_SANS_COMPTEUR, SourceUsageRepository
+
+        self._cle = CLE_SANS_COMPTEUR
+        self._now = now
+        try:
+            engine = data_manager.engine
+        except AttributeError:
+            engine = None
+        self._depot = SourceUsageRepository(engine) if engine is not None else None
+        self._dates = self._depot.dates_absences(self._cle) if self._depot else {}
+
+    def tait(self, track) -> bool:
+        """Le constat de `track` vaut encore : ne pas rouvrir sa page."""
+        from src.services.runtime import sans_compteur_perime
+
+        vu = self._dates.get(track.id)
+        return vu is not None and not sans_compteur_perime(vu, track.release_date, self._now)
+
+    def noter(self, spotify_id: str, data: dict, id_map: dict) -> None:
+        """Pose le constat sur les fiches de `spotify_id` si la page n'a pas de
+        compteur pour lui, le lève si elle en a un."""
+        if self._depot is None or not data:
+            return
+        fiches = [tid for tid, _aid in id_map.get(spotify_id) or []]
+        if not fiches:
+            return
+        if spotify_id in (data.get("playcounts") or {}):
+            self._depot.constater_absences(self._cle, [], fiches)
+        elif data.get("sans_compteur"):
+            self._depot.constater_absences(self._cle, [(tid, self._now) for tid in fiches])
+
+
 def _identity_ok(page_name: str | None, artist_name: str) -> bool:
     """Le nom porté par la page Spotify est-il bien le nôtre ?
 
@@ -200,6 +240,7 @@ async def _crawl(
     # le total d'un album se somme sur ses pistes, y compris celles qui ne
     # sont pas en base (un album commun en contient toujours).
     releves: dict[str, int] = {}
+    constats = _ConstatsSansCompteur(data_manager, now)
 
     async with scraper.session() as sess:
         # ── Passe A : la page artiste (une seule page, toujours) ─────────────
@@ -231,7 +272,16 @@ async def _crawl(
             # cela, un run d'UNE fiche ouvrait 120 pages (file par péremption,
             # puis les albums) : 20 min au lieu d'une vingtaine de secondes.
             await _visiter_fiches(
-                sess, scraper, artist, data_manager, id_map, fiches, releves, stop_requested, result
+                sess,
+                scraper,
+                artist,
+                data_manager,
+                id_map,
+                fiches,
+                releves,
+                stop_requested,
+                result,
+                constats,
             )
             return result
 
@@ -251,6 +301,7 @@ async def _crawl(
                 releves,
                 stop_requested,
                 result,
+                constats,
             )
             # Mode léger : la page artiste seule. Elle rend déjà les auditeurs
             # mensuels — que Kworb ne donne pas du tout — et le top 10, soit
@@ -261,7 +312,7 @@ async def _crawl(
             return result
 
         # ── Passe B : les pages titre, par péremption, sous plafond ──────────
-        queue = _build_queue(artist, data_manager, seen_dates, now, releves)
+        queue = _build_queue(artist, data_manager, seen_dates, now, releves, constats.tait)
         budget = settings.spotify_web_max_pages_per_run - result["pages"]
         logger.info(
             f"Spotify web '{artist.name}' : {len(queue)} morceau(x) à visiter, "
@@ -282,6 +333,7 @@ async def _crawl(
             result["pages"] += 1
             if not data:
                 continue
+            constats.noter(spotify_id, data, id_map)
             _record(data["playcounts"], artist, data_manager, id_map, releves, result)
             _declarer_durees(data.get("durations"), data_manager, id_map, result)
 
@@ -302,10 +354,13 @@ async def _crawl(
     return result
 
 
-def file_sans_stream(tracks, seen_dates: dict, now: datetime, releves: dict) -> list[str]:
+def file_sans_stream(
+    tracks, seen_dates: dict, now: datetime, releves: dict, tait=None
+) -> list[str]:
     """PUR. IDs Spotify des morceaux SANS AUCUN stream (colonne vide), non
     observés récemment par `spotify_web` : un morceau déjà vu à zéro ou
-    illisible n'est pas revisité à chaque run."""
+    illisible n'est pas revisité à chaque run. `tait(track)` vrai = page lue
+    sans compteur, constat encore valable (`_ConstatsSansCompteur`)."""
     max_age = settings.spotify_web_freshness_days
     return [
         t.spotify_id
@@ -314,15 +369,27 @@ def file_sans_stream(tracks, seen_dates: dict, now: datetime, releves: dict) -> 
         and not t.streams.spotify_streams
         and t.spotify_id not in releves
         and not _is_fresh(seen_dates.get(t.id), now, max_age)
+        and not (tait and tait(t))
     ]
 
 
 async def _visiter_sans_stream(
-    sess, scraper, artist, data_manager, id_map, seen_dates, now, releves, stop_requested, result
+    sess,
+    scraper,
+    artist,
+    data_manager,
+    id_map,
+    seen_dates,
+    now,
+    releves,
+    stop_requested,
+    result,
+    constats=None,
 ) -> None:
-    file = file_sans_stream(data_manager.get_artist_tracks(artist.id), seen_dates, now, releves)[
-        : settings.spotify_web_pages_sans_stream
-    ]
+    tait = constats.tait if constats else None
+    file = file_sans_stream(
+        data_manager.get_artist_tracks(artist.id), seen_dates, now, releves, tait
+    )[: settings.spotify_web_pages_sans_stream]
     if file:
         logger.info(f"Spotify web '{artist.name}' : {len(file)} morceau(x) à ID sans stream")
     for spotify_id in file:
@@ -335,12 +402,23 @@ async def _visiter_sans_stream(
         result["sans_stream"] += 1
         if not data:
             continue
+        if constats:
+            constats.noter(spotify_id, data, id_map)
         _record(data["playcounts"], artist, data_manager, id_map, releves, result)
         _declarer_durees(data.get("durations"), data_manager, id_map, result)
 
 
 async def _visiter_fiches(
-    sess, scraper, artist, data_manager, id_map, fiches, releves, stop_requested, result
+    sess,
+    scraper,
+    artist,
+    data_manager,
+    id_map,
+    fiches,
+    releves,
+    stop_requested,
+    result,
+    constats=None,
 ) -> None:
     """La page titre de chaque fiche nommée, par son ID PRINCIPAL. Pas de
     filtre de fraîcheur : qui nomme une fiche veut la relire. La page est
@@ -368,11 +446,15 @@ async def _visiter_fiches(
         result["pages"] += 1
         if not data:
             continue
+        if constats:
+            constats.noter(spotify_id, data, id_map)
         _record(data["playcounts"], artist, data_manager, id_map, releves, result)
         _declarer_durees(data.get("durations"), data_manager, id_map, result)
 
 
-def _build_queue(artist, data_manager, seen_dates: dict, now: datetime, releves: dict) -> list[str]:
+def _build_queue(
+    artist, data_manager, seen_dates: dict, now: datetime, releves: dict, tait=None
+) -> list[str]:
     """Morceaux de l'artiste à visiter, du plus périmé au moins.
 
     Sont écartés : ceux sans ID Spotify (rien à ouvrir) et ceux dont
@@ -391,6 +473,8 @@ def _build_queue(artist, data_manager, seen_dates: dict, now: datetime, releves:
         raw = seen_dates.get(track.id)
         if _is_fresh(raw, now, max_age):
             continue
+        if tait and tait(track):
+            continue  # lue sans compteur, constat encore valable (2026-11-15)
         # Sans AUCUN compteur d'abord (2026-10-10 : chez Kanye, le budget de
         # pages s'épuisait sur des morceaux que Kworb couvre déjà, et 114
         # morceaux restaient sans stream) ; puis jamais vu → tout en haut

@@ -2109,6 +2109,22 @@ class TestAutreUploadAuMemeTitre:
         res, dm = self._lancer({1: 66_193_696}, [propre])
         assert [w[0] for w in dm.streams_writes] == [1] and res["lignes_ecartees"] == []
 
+    def test_compteur_de_la_fiche_sous_un_autre_id_la_petite_ligne_se_somme(self):
+        """Mac Miller « Objects in the Mirror » (2026-11-15) : l'ID de la fiche
+        (réédition 10th Anniversary) n'est pas sur Kworb, mais une AUTRE ligne au
+        même titre porte le compteur qu'il lit (194 M) ; la ligne à 8,7 M est un
+        second upload, sommé — plus écartée."""
+        relie = _entry("Day 'N' Nite", 66_000_000, 9, "RELIE")
+        res, dm = self._lancer({1: 66_193_696}, [relie])
+        assert res["lignes_ecartees"] == []
+        assert [w[0] for w in dm.streams_writes] == [1]
+        assert dm.streams_writes[0][1] == 66_000_000 + 9_110_682
+
+    def test_un_compteur_egal_sous_un_autre_titre_ne_compte_pas(self):
+        autre = _entry("Pursuit of Happiness", 66_000_000, 9, "RELIE")
+        res, dm = self._lancer({1: 66_193_696}, [autre])
+        assert res["lignes_ecartees"] == [("Day 'N' Nite", 9_110_682, "Day 'N' Nite")]
+
     def test_observation_kworb_d_un_ancien_run_retiree(self):
         """La ligne ne rapproche plus (titre ambigu), mais l'observation Kworb
         d'un run antérieur restait maîtresse à 9 M contre 66 M lus."""

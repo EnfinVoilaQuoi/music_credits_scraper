@@ -172,6 +172,28 @@ def _instant(valeur) -> datetime | None:
         return None
 
 
+def sans_compteur_perime(vu_le, release_date, maintenant: datetime | None = None) -> bool:
+    """La page titre Spotify lue SANS compteur le `vu_le` est-elle à rouvrir ?
+    Jamais constaté ou illisible : oui. Sinon après `delai_sans_compteur_*`
+    selon l'âge de la sortie (décision utilisateur 2026-11-15) : un morceau
+    récent passe plus vite le seuil d'affichage de Spotify qu'un vieux."""
+    from src.config import settings
+
+    vu = _instant(vu_le)
+    if vu is None:
+        return True
+    maintenant = maintenant or datetime.now()
+    sortie = _instant(release_date)
+    age = (maintenant - sortie.replace(tzinfo=None)).days if sortie is not None else None
+    if age is not None and age < settings.fenetre_sortie_recente_jours:
+        delai = settings.delai_sans_compteur_recent_jours
+    elif age is not None and age < settings.fenetre_sans_compteur_ancien_jours:
+        delai = settings.delai_sans_compteur_jours
+    else:
+        delai = settings.delai_sans_compteur_ancien_jours
+    return (maintenant - vu.replace(tzinfo=None)) >= timedelta(days=delai)
+
+
 def constat_perime(checked_at, release_date, maintenant: datetime | None = None) -> bool:
     """Un « pas sur cette plateforme » daté (`*_checked_at`) est-il à
     redemander ? Jamais constaté : oui. Sinon il expire (décision utilisateur

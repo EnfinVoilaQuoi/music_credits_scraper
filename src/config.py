@@ -183,6 +183,15 @@ class Settings(BaseSettings):
     delai_constat_sortie_recente_jours: int = 30
     delai_constat_jours: int = 180
     fenetre_sortie_recente_jours: int = 365
+    # Page titre Spotify LUE sans compteur (Spotify n'affiche pas un petit
+    # compteur) : constat daté (`CLE_SANS_COMPTEUR`), page rouverte à son
+    # expiration seulement — un morceau récent a plus de chances de passer le
+    # seuil (décision utilisateur 2026-11-15) : 30 j sous un an, 90 j sous
+    # trois ans, 180 j au-delà ou date inconnue.
+    delai_sans_compteur_recent_jours: int = 30
+    delai_sans_compteur_jours: int = 90
+    delai_sans_compteur_ancien_jours: int = 180
+    fenetre_sans_compteur_ancien_jours: int = 3 * 365
 
     # --- Streams Spotify : qui écrit la colonne, et à quel rythme scraper ---
     # `streams_master` désigne la source qui écrit `tracks.spotify_streams` ;

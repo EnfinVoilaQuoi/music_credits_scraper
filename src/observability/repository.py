@@ -48,6 +48,10 @@ def cle_absence(source: str, donnee: str) -> str:
     return f"{source}:{donnee}"
 
 
+#: La page titre Spotify lue SANS compteur (2026-11-15) : Spotify n'affiche pas
+#: un petit compteur. Expire selon l'âge de la sortie (`runtime.sans_compteur_perime`).
+CLE_SANS_COMPTEUR = cle_absence("spotify_web", "streams")
+
 #: Le constat « YouTube a répondu sans cette vidéo » : un par vidéo, sur la fiche.
 PREFIXE_VIDEO_MORTE = cle_absence("youtube_data", "video:")
 
@@ -382,6 +386,16 @@ class SourceUsageRepository:
                 r["source_key"].removeprefix(PREFIXE_VIDEO_MORTE)
             )
         return mortes
+
+    def dates_absences(self, cle: str) -> dict[int, str]:
+        """`{track_id: derniere_absence}` des constats de clé `cle`, sans délai :
+        l'appelant juge l'expiration (`runtime.sans_compteur_perime`)."""
+        lignes = self._rows(
+            "SELECT track_id, derniere_absence FROM source_track_absences "
+            "WHERE source_key = :cle",
+            {"cle": cle},
+        )
+        return {r["track_id"]: r["derniere_absence"] for r in lignes}
 
     def requalifier_anciens_echecs(self) -> tuple[int, int]:
         """Applique aux lignes DÉJÀ suivies les règles de classement du

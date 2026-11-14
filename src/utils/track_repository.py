@@ -2213,6 +2213,21 @@ class TrackRepository:
             ).mappings()
             return [dict(ligne) for ligne in lignes]
 
+    def credits_sans_personne(self) -> list[dict[str, Any]]:
+        """Les crédits dont le nom ne désigne personne (`credit_roles.valeur_vide` :
+        « Deleted Artist », « Unknown »…), avec le titre de leur fiche, pour
+        `reclasser_credits`."""
+        from src.utils.credit_roles import valeur_vide
+
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text(
+                    "SELECT c.id, c.track_id, c.name, c.role, c.source, t.title "
+                    "FROM credits c JOIN tracks t ON t.id = c.track_id ORDER BY c.id"
+                )
+            ).mappings()
+            return [dict(ligne) for ligne in lignes if valeur_vide(ligne["name"])]
+
     def credits_au_nom_d_annee(self) -> list[dict[str, Any]]:
         """Les crédits dont le nom est une année, avec le titre de leur fiche."""
         with self.engine.connect() as conn:

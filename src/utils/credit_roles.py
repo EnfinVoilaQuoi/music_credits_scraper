@@ -27,11 +27,17 @@ LIBELLES_HORS_CREDITS = (
 #: texte libre (« Recorded At » : « N/A » sur deux « references » de Kanye,
 #: « ??? » sur un mashup — mesuré 2026-09-26, seuls cas sur toute la base).
 #: « na » et « none » n'y sont PAS : ils pourraient nommer quelqu'un.
-_VALEURS_VIDES = frozenset({"n/a", "n.a.", "n.a", "unknown", "inconnu", "tbd", "tba"})
+#: « Deleted Artist » : ce que Genius affiche à la place d'un compte d'artiste
+#: supprimé (2026-11-15 : 3 Producer lus sur des pages, 1 Writer par l'API).
+_VALEURS_VIDES = frozenset(
+    {"n/a", "n.a.", "n.a", "unknown", "inconnu", "tbd", "tba", "deleted artist"}
+)
 
 
 def valeur_vide(nom: str | None) -> bool:
-    """Ce « nom » ne désigne personne : « N/A », « ??? », « - »…"""
+    """Ce « nom » ne désigne personne : « N/A », « ??? », « - », « Deleted Artist »…
+    Seul juge, à l'entrée de chaque source (pages et API Genius, descriptions
+    YouTube) comme dans l'invariant d'audit `credit_sans_personne`."""
     n = (nom or "").strip().lower()
     return n in _VALEURS_VIDES or not any(ch.isalnum() for ch in n)
 

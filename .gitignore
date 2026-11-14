@@ -220,6 +220,7 @@ scripts/*
 !scripts/recalculer_heritage.py
 !scripts/reparer_encodage_genius.py
 !scripts/retirer_credits_de_date.py
+!scripts/retirer_credits_sans_personne.py
 !scripts/retirer_paroles_factices.py
 # Titre de la page Spotify relu dans le brut (2026-10-31).
 !scripts/rafraichir_titres_spotify.py

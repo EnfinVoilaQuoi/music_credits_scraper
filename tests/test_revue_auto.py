@@ -293,6 +293,29 @@ def test_id_spotify_d_un_autre_enregistrement_retire_puis_retabli(data_manager, 
     assert fiche.spotify_id == "SPX" and "SPX" not in ids_refuses(fiche)
 
 
+def test_un_id_accepte_a_la_main_n_est_pas_retire_par_regle(data_manager, artiste, regles):
+    """Kery James (2026-11-14) : l'ID accepté à la main de « Le Ghetto Français
+    (version acoustique) » a été retiré et refusé par `compteur_partage`. Une
+    règle ne défait pas un geste humain."""
+    from src.utils.corrections_fiches import ids_refuses, memoriser_id_accepte
+
+    durees = {
+        "spotify_web": 202,
+        "reccobeats": 202,
+        "deezer": 224,
+        "youtube": 225,
+        "apple_music": 224,
+    }
+    _fiche_durees(data_manager, artiste, "I’m Leanin’", 12, durees, spotify_id="SPX")
+    memoriser_id_accepte(_charger(data_manager, artiste)["I’m Leanin’"], "SPX")
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert not any("SPX" in a for a in bilan.appliquees), bilan
+    fiche = _charger(data_manager, artiste)["I’m Leanin’"]
+    assert fiche.spotify_id == "SPX" and "SPX" not in ids_refuses(fiche)
+
+
 # ── Famille « ID Spotify proposé » (NON validée : interrupteur baissé) ───────
 
 

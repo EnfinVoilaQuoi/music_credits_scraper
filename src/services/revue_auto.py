@@ -398,6 +398,14 @@ def _corriger_spotify(dm, track, cas: Cas) -> tuple[str, dict]:
     sid = cas.preuves.get("spotify_id")
     if not sid or sid not in {track.spotify_id, *(track.spotify_ids or [])}:
         raise LookupError("la fiche ne porte plus cet ID Spotify")
+    from src.utils.spotify_identity import est_accepte
+
+    if est_accepte(track, sid):
+        # Une règle ne défait pas un geste humain : Kery James « Le Ghetto
+        # Français (version acoustique) », ID accepté à la main, retiré par
+        # `compteur_partage` à cause d'une observation Kworb périmée sur la page
+        # d'Ideal J (2026-11-14).
+        raise LookupError("ID accepté à la main : pas de retrait par une règle")
     from src.utils.track_repository import TrackRepository
 
     # Le rapport du retrait ne garde que (champ, source) : les VALEURS, de quoi

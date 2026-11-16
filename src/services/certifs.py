@@ -285,26 +285,15 @@ def noms_de_recherche_pour(runtime: Runtime, artist: Artist) -> list[str]:
     « M&M ») non plus : la RIAA balayait « Em » sans fin (2026-11-02). Une
     FORMATION au nom court (« MZ ») reste interrogée.
     """
-    from src.utils.artist_repository import ALIAS_LETTRES_MIN
-    from src.utils.cert_artist import noms_de_recherche
-    from src.utils.formations import NATURES_DE_RECHERCHE, nature_alias
+    from src.utils.cert_artist import noms_de_recherche_de
 
-    formations: list[str] = []
+    relations = []
     if artist.id:
         try:
-            formations = [
-                rel.related_name
-                for rel in runtime.data_manager.get_artist_relations(artist.id)
-                if rel.kind == "member_of"
-                or (
-                    rel.kind == "alias"
-                    and nature_alias(rel.detail, rel.source) in NATURES_DE_RECHERCHE
-                    and sum(c.isalnum() for c in rel.related_name or "") >= ALIAS_LETTRES_MIN
-                )
-            ]
+            relations = runtime.data_manager.get_artist_relations(artist.id)
         except Exception:
             logger.exception("Formations indisponibles pour la recherche de certifs")
-    return noms_de_recherche(artist.name, formations)
+    return noms_de_recherche_de(artist.name, relations)
 
 
 def noms_d_audit_pour(runtime: Runtime, artist: Artist) -> tuple[list[str], list[str]]:
@@ -318,19 +307,15 @@ def noms_d_audit_pour(runtime: Runtime, artist: Artist) -> tuple[list[str], list
     GROUPE apporte tous ses morceaux, son nom s'audite donc contre la même
     discographie.
     """
-    recherche = noms_de_recherche_pour(runtime, artist)
-    ecartes: set[str] = set()
+    from src.utils.cert_artist import noms_d_audit_de
+
+    relations = []
     if artist.id:
         try:
-            ecartes = {
-                rel.related_name
-                for rel in runtime.data_manager.get_artist_relations(artist.id)
-                if rel.kind == "member_of" and rel.formation != "groupe"
-            }
+            relations = runtime.data_manager.get_artist_relations(artist.id)
         except Exception:
             logger.exception("Formations indisponibles pour l'audit des certifs")
-    noms = [n for n in recherche if n not in ecartes]
-    return noms, sorted(ecartes)
+    return noms_d_audit_de(artist.name, relations)
 
 
 @etape_de_flux(

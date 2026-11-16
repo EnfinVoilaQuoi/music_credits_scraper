@@ -77,6 +77,52 @@ def noms_de_recherche(principal: str, alias: Iterable[str] = ()) -> list[str]:
     return sortie
 
 
+def noms_de_recherche_de(nom: str, relations: Iterable) -> list[str]:
+    """PUR. Les noms sous lesquels CHERCHER les certifs de l'artiste `nom`,
+    d'après ses liens CONFIRMÉS (`relations` : objets à `kind`, `related_name`,
+    `detail`, `source`) : lui, ses formations (`member_of`), ses alias de scène
+    ou de graphie d'au moins `ALIAS_LETTRES_MIN` lettres ou chiffres. Raisons :
+    `certifs.noms_de_recherche_pour`, qui l'appelle."""
+    from src.utils.artist_repository import ALIAS_LETTRES_MIN
+    from src.utils.formations import NATURES_DE_RECHERCHE, nature_alias
+
+    autres = [
+        rel.related_name
+        for rel in relations
+        if rel.related_name
+        and (
+            rel.kind == "member_of"
+            or (
+                rel.kind == "alias"
+                and nature_alias(rel.detail, rel.source) in NATURES_DE_RECHERCHE
+                and sum(c.isalnum() for c in rel.related_name) >= ALIAS_LETTRES_MIN
+            )
+        )
+    ]
+    return noms_de_recherche(nom, autres)
+
+
+def noms_d_audit_de(nom: str, relations: Iterable) -> tuple[list[str], list[str]]:
+    """PUR. Les noms de la recherche moins les formations qui ne sont pas des
+    GROUPES (collectifs, formations sans nature), et ces formations écartées.
+    Raisons : `certifs.noms_d_audit_pour`, qui l'appelle."""
+    relations = list(relations)
+    ecartes = {
+        rel.related_name
+        for rel in relations
+        if rel.kind == "member_of" and rel.formation != "groupe" and rel.related_name
+    }
+    noms = [n for n in noms_de_recherche_de(nom, relations) if n not in ecartes]
+    return noms, sorted(ecartes)
+
+
+def cle_certification(cert: dict) -> tuple:
+    """Ce qui fait qu'une certification est LA MÊME, vue depuis deux noms — ou
+    lue dans le magasin et dans la colonne d'une fiche (même dict, celui du
+    matcher)."""
+    return _cle_certification(cert)
+
+
 def _cle_certification(cert: dict) -> tuple:
     """Ce qui fait qu'une certification est LA MÊME, vue depuis deux noms."""
     return (
@@ -329,8 +375,11 @@ __all__ = [
     "bilan_de",
     "bilan_local",
     "certifications",
+    "cle_certification",
     "evolution",
+    "noms_d_audit_de",
     "noms_de_recherche",
+    "noms_de_recherche_de",
     "nouveautes",
     "recap",
     "repartition",

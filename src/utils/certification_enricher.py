@@ -78,6 +78,22 @@ def _tete_du_credit(credit: str | None) -> str:
     return _INVITES_DU_CREDIT.split(credit or "", maxsplit=1)[0]
 
 
+#: La BPI joint les interprètes d'un même disque par « / » (« YOUNG THUG/J
+#: COLE/TRAVIS SCOTT »), le SNEP parfois aussi (« NAS / N.T.M. »).
+_BARRE = re.compile(r"\s*/\s*")
+
+
+def interpretes_en_tete(credit: str | None) -> list[str]:
+    """PUR. Les interprètes en TÊTE du crédit d'un organisme, un par un :
+    « JAY-Z & KANYE WEST FEAT. X » → [« JAY-Z », « KANYE WEST »]. Sert à dire
+    qu'une certif EST celle d'un artiste (`audit.certifs_non_reliees`), par
+    égalité de nom — jamais par mots contenus : « TAYLOR SWIFT » n'est pas
+    « Swift » (alias de Swift Guad), « RANDY TRAVIS » pas « Travis »."""
+    return [
+        n for morceau in _BARRE.split(_tete_du_credit(credit)) for n in _noms_du_credit(morceau)
+    ]
+
+
 def _qui_chercher(
     track: Track, artist_name: str, alias=(), formations=()
 ) -> tuple[str | None, list[str], list[str], list[str]]:

@@ -158,6 +158,16 @@ def _images_isolees(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _magasin_des_certifs_vide(monkeypatch):
+    """AUCUN audit de test ne lit les CSV de certifs réels (`data/certifications/`,
+    ~20 s de chargement) : la famille `certif_non_reliee` reçoit un magasin
+    absent. Un test qui l'exerce injecte le sien."""
+    from src.services import audit
+
+    monkeypatch.setattr(audit, "magasin_des_certifs", lambda: None)
+
+
+@pytest.fixture(autouse=True)
 def _pages_desactivees_isolees(tmp_path, monkeypatch):
     """AUCUN test ne lit `data/disabled_tracks/` réel : le panneau les relit
     (`revue.fiches_actives`, 2026-10-31)."""

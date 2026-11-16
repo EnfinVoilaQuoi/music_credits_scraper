@@ -185,6 +185,8 @@ FAMILLES = {
     "certif_album": "certif de catégorie album sur un morceau",
     "certif_version": "certif de l'original sur une version à descripteur",
     "certif_autre": "certif à titre non équivalent (autre écart)",
+    "certif_non_reliee": "certif du corpus qui crédite l'artiste en tête, portée par aucune de "
+    "ses fiches (le juge l'admet sur une fiche : erreur ; sans fiche : information)",
     "streams_double": "même compteur Spotify sur deux pages Genius",
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
@@ -836,6 +838,158 @@ def certifs(pistes) -> list[Cas]:
             # tous admis par le juge.
             nature = INFORMATION if certif_du_morceau(t["title"], ct) else ERREUR
             cas.append(Cas(famille, t["artiste"], [t["id"]], lib, nature))
+    return cas
+
+
+def magasin_des_certifs():
+    """Le magasin des certifs (CSV clean des quatre organismes), chargé une
+    fois par processus (`get_cert_matcher`). Point d'injection : la suite de
+    tests le remplace (`conftest`), elle ne lit jamais `data/` réel."""
+    from src.utils.cert_matcher import get_cert_matcher
+
+    return get_cert_matcher()
+
+
+def _est_une_video(categorie: str | None) -> bool:
+    """Un DVD, un clip, une vidéo longue (« video », « video longform » de la
+    RIAA) : aucune fiche n'est un DVD, la certif n'a pas de morceau où aller."""
+    return (categorie or "").startswith("video")
+
+
+def _cles_portees(c) -> list[tuple[str, int | None, set[tuple]]]:
+    """(nom de l'artiste, page Genius, clés des certifs portées) de chaque fiche
+    de la BASE qui porte une certif, de morceau ou d'album."""
+    from src.utils.cert_artist import cle_certification
+
+    sortie = []
+    for r in c.execute(
+        "SELECT a.name AS artiste, t.genius_id, t.certifications, t.album_certifications "
+        "FROM tracks t JOIN artists a ON a.id = t.artist_id "
+        "WHERE COALESCE(t.certifications, '') NOT IN ('', '[]') "
+        "OR COALESCE(t.album_certifications, '') NOT IN ('', '[]')"
+    ):
+        cles = set()
+        for colonne in (r["certifications"], r["album_certifications"]):
+            for e in json.loads(colonne or "[]"):
+                if not e.get("echo"):
+                    cles.add(cle_certification(e))
+        sortie.append((r["artiste"], r["genius_id"], cles))
+    return sortie
+
+
+def certifs_non_reliees(c, pistes, magasin) -> list[Cas]:
+    """Les certifs du CORPUS (`magasin`) qui créditent l'artiste et qu'aucune
+    de ses fiches ne porte : le signe d'un rapprochement raté (2026-11-16).
+
+    · « créditent l'artiste » : un de ses noms d'audit (`noms_d_audit_de` :
+      lui, ses alias de scène ou de graphie confirmés, ses GROUPES — un
+      collectif n'apporte que les morceaux où il est présent) est ÉGAL à un
+      interprète en tête du crédit (`interpretes_en_tete`). Par mots contenus,
+      « TAYLOR SWIFT » répondait à l'alias « Swift » de Swift Guad : 1 690
+      certifs mesurées au lieu de 336.
+    · « portée » : par une fiche de l'artiste, une de ses lignes sœurs, ou une
+      fiche d'un artiste de la base qui porte un de ses noms (pseudonyme, groupe :
+      les certifs de Mac Miller portées par Mac Miller ne manquent pas à
+      Delusional Thomas — 193 certifs). Une certif retirée à la main (refus
+      `certif`) est tranchée ; une vidéo (DVD) n'a pas de fiche où aller.
+
+    Une œuvre (titre, catégorie) = un cas, ses paliers et organismes réunis :
+    · le juge de la pose (`certif_du_morceau`, sur le titre de la fiche, ou de
+      son album pour une certif d'album) l'admet sur des fiches de l'artiste :
+      ERREUR, le cas les nomme (la pose ne l'a pas posée : pré-filtre du
+      matcher, exclusivité, crédit de l'invité…) ;
+    · aucune fiche ne l'admet : morceau ou album absent de la base, ou titre
+      que le juge ne rapproche pas — pour information, sa nature reste à
+      décider (2026-11-16). Le libellé signale l'alias dont AUCUNE certif n'est
+      portée (« JEWEL » pour Jewel Usain) : un homonyme probable.
+    """
+    if magasin is None or magasin.df.empty:
+        return []
+    from src.utils.cert_artist import cle_certification, noms_d_audit_de
+    from src.utils.cert_normalize import normalize_text
+    from src.utils.cert_titres import cle
+    from src.utils.certification_enricher import interpretes_en_tete
+    from src.utils.corrections_fiches import cle_certif
+
+    par = _par_artiste(pistes)
+    if not par:
+        return []
+    relations = collections.defaultdict(list)
+    for r in c.execute(
+        "SELECT artist_id, related_name, kind, source, formation, detail "
+        "FROM artist_relations WHERE status = 'confirmed'"
+    ):
+        relations[r["artist_id"]].append(SimpleNamespace(**dict(r)))
+    portees = _cles_portees(c)
+    refusees = {
+        tuple(json.loads(r["valeur"]))
+        for r in c.execute("SELECT valeur FROM refus WHERE nature = 'certif'")
+    }
+    cas = []
+    for aid, ts in par.items():
+        nom = ts[0]["artiste"]
+        noms, _ = noms_d_audit_de(nom, relations[aid])
+        cles_noms = {normalize_text(n) for n in noms}
+        pages = {t["genius_id"] for t in ts if t["genius_id"]}
+        ici = set().union(
+            *(
+                cles
+                for artiste, page, cles in portees
+                if normalize_text(artiste) in cles_noms or (page and page in pages)
+            )
+        )
+        # Par nom crédité en tête : ses certifs, et combien sont portées.
+        oeuvres: dict[tuple, list[dict]] = {}
+        portees_par_nom: collections.Counter = collections.Counter()
+        vues: set[tuple] = set()
+        for n in noms:
+            for e in magasin.get_artist_certifications(n):
+                tete = {normalize_text(x) for x in interpretes_en_tete(e["artist_name"])}
+                nommes = cles_noms & tete
+                k = cle_certification(e)
+                if not nommes or k in vues:
+                    continue
+                vues.add(k)
+                if k in ici:
+                    portees_par_nom.update(nommes)
+                    continue
+                if _est_une_video(e["category"]) or tuple(cle_certif(e)) in refusees:
+                    continue
+                cle_oeuvre = (e["category"] == "album", cle(e["title"]))
+                oeuvres.setdefault(cle_oeuvre, []).append({**e, "nommes": nommes})
+        for (album, _), certs in sorted(oeuvres.items()):
+            titre = certs[0]["title"]
+            if album:
+                fiches = [t for t in ts if t["album"] and certif_du_morceau(t["album"], titre)]
+            else:
+                fiches = [t for t in ts if certif_du_morceau(t["title"], titre)]
+            paliers = ", ".join(
+                f"{e['body']} {e['certification']} {(e['certification_date'] or '')[:10]}"
+                for e in sorted(certs, key=lambda e: (e["body"], e["certification_date"] or ""))
+            )
+            credits = " / ".join(sorted({e["artist_name"] for e in certs}))
+            lib = f"«{titre}» ({credits}) [{'album' if album else certs[0]['category']}] {paliers}"
+            if fiches:
+                cible = ", ".join(_lib(t) for t in fiches[:3])
+                if len(fiches) > 3:
+                    cible += f" (+{len(fiches) - 3})"
+                cas.append(
+                    Cas(
+                        "certif_non_reliee",
+                        nom,
+                        sorted(t["id"] for t in fiches),
+                        f"{lib} — admise par le juge sur {cible}, non posée",
+                    )
+                )
+                continue
+            raison = "album absent de la base" if album else "aucune fiche à ce titre"
+            muets = sorted(
+                {n for e in certs for n in e["nommes"] if not portees_par_nom[n]}
+                - {normalize_text(nom)}
+            )
+            if muets:
+                raison += f" ; aucune certif de « {', '.join(muets)} » portée (homonyme ?)"
+            cas.append(Cas("certif_non_reliee", nom, [], f"{lib} — {raison}", INFORMATION))
     return cas
 
 
@@ -2554,6 +2708,7 @@ def auditer(
         audit.cas += instrumentaux(pistes)
         audit.cas += durees(c, pistes)
         audit.cas += certifs(pistes)
+        audit.cas += certifs_non_reliees(c, pistes, magasin_des_certifs())
         audit.cas += streams(c, par)
         audit.cas += echecs(c, pistes)
         audit.cas += heritage_sans_source(c, pistes)

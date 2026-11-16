@@ -1106,6 +1106,27 @@ class ArtistRepository:
             )
         return True
 
+    def retirer_profil_spotify(self, artist_id: int, spotify_id: str) -> bool:
+        """RETIRE un profil Spotify refusé (homonyme) : l'ID de l'artiste s'il
+        est celui-là, et ses lignes `artist_spotify_ids`. À appeler avec
+        `corrections_fiches.memoriser_profil_spotify_refuse`, sinon le vote
+        suivant le reposerait. Rend True si quelque chose a été retiré."""
+        with self._ecrire_artiste() as conn:
+            efface = conn.execute(
+                update(artists)
+                .where((artists.c.id == artist_id) & (artists.c.spotify_id == spotify_id))
+                .values(spotify_id=None, updated_at=datetime.now())
+            ).rowcount
+            lignes = conn.execute(
+                delete(artist_spotify_ids).where(
+                    (artist_spotify_ids.c.artist_id == artist_id)
+                    & (artist_spotify_ids.c.spotify_id == spotify_id)
+                )
+            ).rowcount
+            if efface or lignes:
+                self._invalider(conn, artist_id, "identite_spotify")
+        return bool(efface or lignes)
+
     def _profils_manuels(self, artist_id: int) -> set[str]:
         with self.engine.connect() as conn:
             return set(

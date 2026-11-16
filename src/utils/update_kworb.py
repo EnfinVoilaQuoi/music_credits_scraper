@@ -141,12 +141,17 @@ def _vote_artist_spotify_id(
         if getattr(t, "spotify_id", None) and not getattr(t, "is_featuring", False)
     ]
 
+    from src.utils.corrections_fiches import profils_spotify_refuses
+
+    # Un profil refusé à la main (homonyme) ne vote ni ne sort de la recherche
+    # par nom (The Classmates, 2026-11-16).
+    refuses = profils_spotify_refuses(artist.name)
     votes = Counter()
     try:
         with SpotifyIDScraper(headless=True) as scraper:
             for sid in track_ids[:max_pages]:
                 aid = scraper.get_artist_id_from_track(sid, expected_name=artist.name)
-                if aid:
+                if aid and aid not in refuses:
                     votes[aid] += 1
             if votes:
                 best, count = votes.most_common(1)[0]
@@ -158,7 +163,11 @@ def _vote_artist_spotify_id(
                 logger.warning(f"🗳️ Vote ID artiste non concluant: {dict(votes)}")
             # Secours : recherche par nom (ambiguïté possible)
             detail.update(methode="nom", voix=0, total=sum(votes.values()))
-            return scraper.get_artist_spotify_id(artist.name)
+            par_nom = scraper.get_artist_spotify_id(artist.name)
+            if par_nom in refuses:
+                logger.info(f"🗳️ Profil Spotify {par_nom} refusé pour {artist.name} — écarté")
+                return None
+            return par_nom
     except (PlaywrightError, AttributeError, KeyError, TypeError, ValueError) as e:
         logger.error(f"Vote ID artiste Spotify échoué: {e}")
         return None

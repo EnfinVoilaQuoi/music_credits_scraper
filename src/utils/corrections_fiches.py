@@ -927,6 +927,67 @@ def oublier_profil_deezer_refuse(artiste: str, profil_deezer: int) -> bool:
         )
 
 
+def memoriser_profil_spotify_refuse(
+    artiste: str, profil_spotify: str, nom: str, origine: str | None = None
+) -> bool:
+    """Consigne un PROFIL Spotify d'artiste qui n'est pas le sien : un homonyme
+    (The Classmates 5156YRN7cvcszG3asLPcTF, reprises rock, quand le duo de
+    Travis Scott n'est pas sur Spotify, 2026-11-16). Le vote de l'étape
+    identité (`update_kworb._vote_artist_spotify_id`) ne le rend plus, ni par
+    les voix ni par la recherche par nom ; un AUTRE profil reste candidat."""
+    from datetime import datetime
+
+    if moteur is None or not artiste or not profil_spotify:
+        return False
+    return _inserer(
+        {"titre": nom, "album": None},
+        artiste,
+        nom,
+        None,
+        "profil_spotify",
+        str(profil_spotify).strip(),
+        datetime.now().isoformat(timespec="seconds"),
+        origine=origine,
+    )
+
+
+def profils_spotify_refuses(artiste: str | None) -> set[str]:
+    """Les profils Spotify refusés pour cet artiste."""
+    if moteur is None or not artiste:
+        return set()
+    from sqlalchemy import text
+    from sqlalchemy.exc import SQLAlchemyError
+
+    try:
+        with moteur.connect() as conn:
+            lignes = conn.execute(
+                text("SELECT valeur FROM refus WHERE nature = 'profil_spotify' AND artiste = :a"),
+                {"a": artiste},
+            ).all()
+    except SQLAlchemyError as e:
+        logger.warning(f"Refus de profils Spotify illisibles : {e} — rien d'appliqué")
+        return set()
+    return {str(v) for (v,) in lignes}
+
+
+def oublier_profil_spotify_refuse(artiste: str, profil_spotify: str) -> bool:
+    """Pendant : le profil redevient candidat au prochain vote."""
+    if moteur is None:
+        return False
+    from sqlalchemy import text
+
+    with moteur.begin() as conn:
+        return bool(
+            conn.execute(
+                text(
+                    "DELETE FROM refus WHERE nature = 'profil_spotify' AND artiste = :a "
+                    "AND valeur = :v"
+                ),
+                {"a": artiste, "v": str(profil_spotify).strip()},
+            ).rowcount
+        )
+
+
 def cle_parution(titre: str | None) -> str:
     """La valeur d'un refus `parution` : le titre normalisé du disque (une
     autre édition — « M.A.N (Deluxe) » — est un autre disque)."""

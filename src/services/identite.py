@@ -688,6 +688,13 @@ def _artiste_spotify(runtime, artist, options: OptionsIdentite, hooks: Hooks) ->
         dm.update_artist_spotify_id(artist.id, options.spotify_id)
         artist.spotify_id = options.spotify_id
         return f"forcée ({options.spotify_id})"
+    from src.utils.corrections_fiches import profils_spotify_refuses
+
+    if artist.spotify_id and artist.spotify_id in profils_spotify_refuses(artist.name):
+        # Refus importé d'une autre base, ou posé sans le script : le profil
+        # mémorisé est un homonyme, il part avant le vote (2026-11-16).
+        dm.retirer_profil_spotify(artist.id, artist.spotify_id)
+        artist.spotify_id = None
     if artist.spotify_id and not options.force:
         return f"mémorisée ({artist.spotify_id})"
     hooks.progress(0, 1, "Artiste", "Spotify")

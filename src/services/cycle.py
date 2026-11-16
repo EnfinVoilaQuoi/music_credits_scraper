@@ -206,6 +206,7 @@ def executer_etape(
                     noms,
                     sources=options.certifs_sources,
                     progres=lambda msg: hooks.progress(0, 0, msg, "Certifs"),
+                    artiste=artist.name,
                 )
                 _recharger(runtime, artist)
                 appli = certifs.appliquer(runtime, artist)

@@ -156,9 +156,10 @@ class TestExecuterEtape:
         journal = []
         monkeypatch.setattr(cycle.certifs, "noms_de_recherche_pour", lambda rt, a: ["Swing"])
 
-        def recherche(noms, *, sources, progres):
+        def recherche(noms, *, sources, progres, artiste=None):
             progres("SNEP…")
             journal.append(("recherche", noms, sources))
+            journal.append(("registre", artiste))
             b = certifs.BilanCertifs(lignes=["SNEP : ok"], rapport="rapport")
             return b
 
@@ -175,7 +176,11 @@ class TestExecuterEtape:
         art = _artist([])
         rt = _rt([_track(1), _track(2)])  # la disco RÉUNIE relue avant l'application
         b = cycle.executer_etape(rt, art, "certifs", cycle.OptionsCycle(), hooks)
-        assert journal == [("recherche", ["Swing"], certifs.SOURCES_PAR_ARTISTE), ("appliquer", 2)]
+        assert journal == [
+            ("recherche", ["Swing"], certifs.SOURCES_PAR_ARTISTE),
+            ("registre", "Swing"),  # le run est noté au nom de l'artiste (cert_runs)
+            ("appliquer", 2),
+        ]
         assert b.certifies == 3 and b.erreurs == ["X"] and b.rapport == "rapport\n\n3 certifiés"
         assert progres == [("SNEP…", "Certifs")]
 

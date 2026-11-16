@@ -80,6 +80,7 @@ CONTRAT: dict[str, dict[str, list[str] | None]] = {
         "split_title_paren": ["title"],
     },
     # Synchro de la liste de publications (studio, `publications/`, 2026-11-16).
+    "src.utils.cert_runs": {"derniers_runs": []},
     "src.utils.version_descriptors": {
         "cle_titre": ["titre"],
         "meme_disque": ["a", "b"],

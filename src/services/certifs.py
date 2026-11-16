@@ -342,6 +342,7 @@ def rechercher_artiste(
     sources: Iterable[str] = SOURCES_PAR_ARTISTE,
     progres: Callable[[str], None] = _rien,
     lancer: Callable[..., tuple[int, str]] = run_streaming,
+    artiste: str | None = None,
 ) -> BilanCertifs:
     """Certifs d'un artiste sur les sources qui s'interrogent par artiste.
 
@@ -349,6 +350,9 @@ def rechercher_artiste(
     source, quel que soit le nombre de noms. RIAA : headless d'abord, CDP en
     repli. Le magasin ayant changé sur disque, le matcher est reconstruit AVANT
     le bilan d'après (sinon il relirait l'état d'avant le run).
+
+    `artiste` (nom en base) : chaque source qui ABOUTIT est notée dans le registre
+    des runs par artiste (`cert_runs`) ; une source en échec ne l'est pas.
     """
     from src.utils.cert_artist import (
         bilan_de,
@@ -381,7 +385,12 @@ def rechercher_artiste(
                 code, sortie = _relancer_via_cdp(
                     source, commande, tag, code, sortie, progres=progres, lancer=lancer
                 )
-            bilan.lignes.append(ligne_bilan(source, code, sortie))
+            ligne = ligne_bilan(source, code, sortie)
+            bilan.lignes.append(ligne)
+            if artiste and code == 0 and "❌" not in ligne:
+                from src.utils.cert_runs import noter_run
+
+                noter_run(artiste, source)
         except Exception as e:
             # Boucle résiliente : une source qui tombe ne doit pas priver des
             # autres. Trace complète en dernier ressort.

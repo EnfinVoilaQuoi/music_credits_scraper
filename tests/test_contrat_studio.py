@@ -79,6 +79,13 @@ CONTRAT: dict[str, dict[str, list[str] | None]] = {
         "normalize_title": ["s"],
         "split_title_paren": ["title"],
     },
+    # Synchro de la liste de publications (studio, `publications/`, 2026-11-16).
+    "src.utils.version_descriptors": {
+        "cle_titre": ["titre"],
+        "meme_disque": ["a", "b"],
+        "meme_enregistrement": ["a", "b"],
+        "meme_titre_normalise": ["a", "b"],
+    },
 }
 
 # Méthodes de DataManager appelées par le studio.

@@ -57,10 +57,10 @@ class _Matcher:
     def __init__(self, certifs):
         self.certifs = certifs
 
-    def get_track_certifications(self, artist, title, extra_artists=None):
+    def get_track_certifications(self, artist, title, extra_artists=None, **_):
         return list(self.certifs)
 
-    def get_album_certifications(self, artist, album):
+    def get_album_certifications(self, artist, album, **_):
         return []
 
 

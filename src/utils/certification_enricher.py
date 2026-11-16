@@ -23,6 +23,7 @@ from src.utils.version_descriptors import (
     meme_version_certifiee,
     porte_une_version,
     socle_normalise,
+    titres_equivalents,
 )
 
 logger = get_logger(__name__)
@@ -289,13 +290,19 @@ def echos_de_versions(tracks: list[Track]) -> int:
     return n
 
 
-def _exclusivite(tracks: list[Track]) -> int:
+def _exclusivite(tracks: list[Track], sans_certif: frozenset[int] = frozenset()) -> int:
     """Une certif dont le titre est EXACTEMENT celui d'une autre fiche de
     l'artiste n'appartient qu'à elle (CORRECTIFS 1.9) : c'est ce qui départage
     l'original et sa version au descripteur inconnu (« Mr. Rager (Prime Day Show
     x Kid Cudi) » ← « MR RAGER », « Au bout des rêves (Freestyle) »). Rend le
-    nombre de fiches qui n'ont plus aucune certification réelle."""
-    titres = {cle(t.title) for t in tracks if t.title}
+    nombre de fiches qui n'ont plus aucune certification réelle.
+
+    Une fiche qui ne PEUT recevoir aucune certif (`sans_certif` : reprise où
+    l'artiste n'est qu'auteur, morceau d'un autre sur son disque — `_qui_chercher`
+    rend None) ne prend rien en exclusivité : la reprise de Lissie « Pursuit of
+    Happiness » ôtait aux fiches de Kid Cudi les certifs BPI et BRMA du titre,
+    que personne ne recevait (2026-11-16, famille d'audit `certif_non_reliee`)."""
+    titres = {cle(t.title) for t in tracks if t.title and id(t) not in sans_certif}
     perdues = 0
     for track in tracks:
         if not track.certs.needs_write or not track.certs.entries:
@@ -381,15 +388,20 @@ def apply_certifications(
 
     enriched = 0
     echecs = 0
+    sans_certif: set[int] = set()  # fiches qui ne cherchent rien (`_exclusivite`)
     album_cache: dict[tuple, list[dict]] = {}  # évite de re-chercher le même album
 
     for track in tracks:
         try:
             title = _normalize_title(track.title)
             cherche, extra, exiges, en_tete = _qui_chercher(track, artist.name, alias, formations)
+            if not cherche:
+                sans_certif.add(id(track))
 
             matches = (
-                matcher.get_track_certifications(cherche, title, extra_artists=extra)
+                matcher.get_track_certifications(
+                    cherche, title, extra_artists=extra, juge=titres_equivalents
+                )
                 if cherche
                 else []
             )
@@ -430,7 +442,15 @@ def apply_certifications(
             if track.album and cherche:
                 cle_cache = (cherche, track.album)
                 if cle_cache not in album_cache:
-                    album_cache[cle_cache] = matcher.get_album_certifications(cherche, track.album)
+                    # Sous les alias aussi (« GAME » pour The Game : la pose des
+                    # morceaux les passait, celle des albums non) et par le juge
+                    # (album coupé par la source) — 2026-11-16.
+                    album_cache[cle_cache] = matcher.get_album_certifications(
+                        cherche,
+                        track.album,
+                        juge=titres_equivalents,
+                        autres_noms=tuple(alias) if cherche == artist.name else (),
+                    )
                 track.certs.album_entries = [
                     Certification.from_match(m).to_column_dict() for m in album_cache[cle_cache]
                 ]
@@ -454,7 +474,7 @@ def apply_certifications(
             # ce qui est en base et on le fait savoir en fin de flux.
             track.certs.needs_write = False
 
-    enriched -= _exclusivite(tracks)
+    enriched -= _exclusivite(tracks, frozenset(sans_certif))
     enriched -= _homonymes(tracks)
     if enriched:
         logger.info(f"🏆 {enriched}/{len(tracks)} morceaux enrichis avec certifications")

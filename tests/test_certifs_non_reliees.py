@@ -42,6 +42,7 @@ def _magasin(*certs) -> CertMatcher:
             for corps, artiste, titre, cat, palier, date in certs
         ]
     )
+    m.df["title_len"] = m.df["title_clean"].str.len()  # posé par `_load_all`
     m._cache_artiste = {}
     return m
 
@@ -278,3 +279,82 @@ class TestNomsPurs:
             ["Kanye West", "Yeezy", "KIDS SEE GHOSTS"],
             ["Sunday Service Choir"],
         )
+
+
+class TestPoseRattrapee:
+    """Les trous de la pose que la famille a montrés (2026-11-16), rejoués sur
+    un vrai `CertMatcher` (sans CSV) et `apply_certifications`."""
+
+    @staticmethod
+    def _poser(artiste, fiches, magasin, alias=()):
+        from src.utils.certification_enricher import apply_certifications
+
+        apply_certifications(artiste, fiches, magasin, alias=alias)
+        return {t.title: sorted(e["title"] for e in t.certs.reelles) for t in fiches}
+
+    def test_le_juge_rattrape_une_autre_graphie(self):
+        """« FEIN » / « FE!N », « NI**AS IN PARIS » : le pré-filtre normalisé
+        ne les proposait jamais au juge."""
+        a = Artist(name="Travis Scott")
+        fiches = [Track(title="FE!N", artist=a), Track(title="Niggas in Paris", artist=a)]
+        m = _magasin(
+            _certif("BPI", "TRAVIS SCOTT FT PLAYBOI CARTI", "FEIN"),
+            _certif("RIAA", "JAY-Z & TRAVIS SCOTT", "NI**AS IN PARIS"),
+            _certif("RIAA", "TRAVIS SCOTT", "FEAR"),  # même initiale, autre titre
+        )
+        assert self._poser(a, fiches, m) == {
+            "FE!N": ["FEIN"],
+            "Niggas in Paris": ["NI**AS IN PARIS"],
+        }
+
+    def test_certif_d_album_sous_un_alias(self):
+        """« GAME » (alias confirmé de The Game) : les morceaux passaient
+        l'alias au matcher, les albums non."""
+        a = Artist(name="The Game")
+        t = Track(title="Dreams", artist=a, album="The Documentary")
+        m = _magasin(_certif("BPI", "GAME", "THE DOCUMENTARY", cat="album", palier="Gold"))
+        self._poser(a, [t], m, alias=("Game",))
+        assert [e["title"] for e in t.certs.album_entries] == ["THE DOCUMENTARY"]
+
+    def test_sous_un_alias_pas_de_repli_par_mots_contenus(self):
+        """« G.A.M.E » se normalise en « GAME » : sous l'alias « Game », le
+        repli d'album prenait « GAME OVER » de l'artiste Game Over."""
+        a = Artist(name="The Game")
+        t = Track(title="Ali Bomaye", artist=a, album="G.A.M.E")
+        m = _magasin(_certif("SNEP", "GAME OVER", "GAME OVER", cat="album"))
+        self._poser(a, [t], m, alias=("Game",))
+        assert t.certs.album_entries == []
+
+    def test_album_coupe_par_la_source(self):
+        a = Artist(name="Hugo TSR")
+        t = Track(title="Rei", artist=a, album="Tant qu'on est là")
+        m = _magasin(_certif("SNEP", "HUGO TSR", "TANT QUON EST LA", cat="album"))
+        self._poser(a, [t], m)
+        assert [e["title"] for e in t.certs.album_entries] == ["TANT QUON EST LA"]
+
+    def test_ni_sous_titre_ni_titre_coupe_par_le_juge(self):
+        """Simulé sur toute la base : `certif_du_morceau` comme porte posait
+        « ASTROWORLD » sur l'album « Astroworld Festival 2021 » et « RUNAWAY »
+        sur « Runaway (Film) ». La porte est l'équivalence des titres."""
+        a = Artist(name="Travis Scott")
+        t = Track(title="Runaway (Film)", artist=a, album="Astroworld Festival 2021")
+        m = _magasin(
+            _certif("RIAA", "TRAVIS SCOTT", "ASTROWORLD", cat="album"),
+            _certif("RIAA", "TRAVIS SCOTT", "RUNAWAY"),
+        )
+        assert self._poser(a, [t], m) == {"Runaway (Film)": []}
+        assert t.certs.album_entries == []
+
+    def test_une_reprise_ne_prend_rien_en_exclusivite(self):
+        """La reprise (« Cover ») au titre exact de la certif ne la reçoit pas :
+        elle ne doit pas l'ôter à la fiche de l'artiste au sous-titre."""
+        a = Artist(name="Kid Cudi")
+        reprise = Track(title="Pursuit of Happiness", artist=a)
+        reprise.primary_artist_name = "Lissie"
+        reprise.secondary_role = "Cover"
+        original = Track(title="Pursuit of Happiness (Nightmare)", artist=a)
+        m = _magasin(_certif("BPI", "KID CUDI", "PURSUIT OF HAPPINESS"))
+        assert self._poser(a, [reprise, original], m) == {
+            "Pursuit of Happiness": [],
+            "Pursuit of Happiness (Nightmare)": ["PURSUIT OF HAPPINESS"],
+        }

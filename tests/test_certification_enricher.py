@@ -61,10 +61,10 @@ class _FakeMatcher:
         self._tracks = tracks or {}
         self._albums = albums or {}
 
-    def get_track_certifications(self, artist, title, extra_artists=None):
+    def get_track_certifications(self, artist, title, extra_artists=None, **_):
         return self._tracks.get(title, [])
 
-    def get_album_certifications(self, artist, album):
+    def get_album_certifications(self, artist, album, **_):
         return self._albums.get(album, [])
 
 
@@ -116,7 +116,7 @@ class TestApplyCertifications:
         calls = {"n": 0}
 
         class _CountingMatcher(_FakeMatcher):
-            def get_album_certifications(self, a, alb):
+            def get_album_certifications(self, a, alb, **_):
                 calls["n"] += 1
                 return []
 
@@ -146,7 +146,7 @@ class TestUneExceptionNEfaceRien:
     """
 
     class _MatcherQuiCasse(_FakeMatcher):
-        def get_track_certifications(self, artist, title, extra_artists=None):
+        def get_track_certifications(self, artist, title, extra_artists=None, **_):
             if title == "Casse":
                 raise TypeError("date en NaN")
             return self._tracks.get(title, [])
@@ -359,14 +359,14 @@ class _MatcherParArtiste:
         self.par_artiste = par_artiste
         self.cherches = []
 
-    def get_track_certifications(self, artist, title, extra_artists=None):
+    def get_track_certifications(self, artist, title, extra_artists=None, **_):
         self.cherches.append(artist)
         out = []
         for a in [artist, *(extra_artists or [])]:
             out += self.par_artiste.get(a, [])
         return out
 
-    def get_album_certifications(self, artist, album):
+    def get_album_certifications(self, artist, album, **_):
         return []
 
 

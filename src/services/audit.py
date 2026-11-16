@@ -894,8 +894,11 @@ def certifs_non_reliees(c, pistes, magasin) -> list[Cas]:
       `certif`) est tranchée ; une vidéo (DVD) n'a pas de fiche où aller.
 
     Une œuvre (titre, catégorie) = un cas, ses paliers et organismes réunis :
-    · le juge de la pose (`certif_du_morceau`, sur le titre de la fiche, ou de
-      son album pour une certif d'album) l'admet sur des fiches de l'artiste :
+    · le juge de la pose l'admet sur des fiches de l'artiste — `certif_du_morceau`
+      sur le titre de la fiche ; pour une certif d'album, `titres_equivalents`
+      sur son album, le juge des albums de la pose (`certif_du_morceau`, fait
+      pour des titres de morceau, prenait « ASTROWORLD » pour « Astroworld
+      Festival 2021 ») :
       ERREUR, le cas les nomme (la pose ne l'a pas posée : pré-filtre du
       matcher, exclusivité, crédit de l'invité…) ;
     · aucune fiche ne l'admet : morceau ou album absent de la base, ou titre
@@ -960,7 +963,7 @@ def certifs_non_reliees(c, pistes, magasin) -> list[Cas]:
         for (album, _), certs in sorted(oeuvres.items()):
             titre = certs[0]["title"]
             if album:
-                fiches = [t for t in ts if t["album"] and certif_du_morceau(t["album"], titre)]
+                fiches = [t for t in ts if t["album"] and titres_equivalents(t["album"], titre)]
             else:
                 fiches = [t for t in ts if certif_du_morceau(t["title"], titre)]
             paliers = ", ".join(

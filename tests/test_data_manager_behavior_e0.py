@@ -742,10 +742,10 @@ class TestCertificationsPersistence:
         cert = self._cert("Hit")
 
         class _Matcher:
-            def get_track_certifications(self, a, t, extra_artists=None):
+            def get_track_certifications(self, a, t, extra_artists=None, **_):
                 return [cert] if t == "Hit" else []
 
-            def get_album_certifications(self, a, alb):
+            def get_album_certifications(self, a, alb, **_):
                 return []
 
         n = apply_certifications(artist, [track], _Matcher())

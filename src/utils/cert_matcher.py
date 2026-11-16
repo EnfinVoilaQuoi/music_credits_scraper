@@ -452,7 +452,7 @@ class CertMatcher:
         return seen
 
     def get_track_certifications(
-        self, artist: str, title: str, extra_artists=None
+        self, artist: str, title: str, extra_artists=None, juge=None
     ) -> list[dict[str, Any]]:
         """Toutes les certifs (tous pays) raccordées à ce morceau, triées.
 
@@ -460,6 +460,10 @@ class CertMatcher:
         `primary_artist_name`, featurings) → permet de rattacher une certif
         déposée sous l'ARTISTE PRINCIPAL à un morceau où notre artiste n'est
         que secondaire/feat (cas « morceau secondaire »).
+
+        `juge` (`version_descriptors.titres_equivalents`) : ajoute les certifs
+        dont il dit le titre équivalent sous une autre graphie
+        (`_indices_par_le_juge`).
         """
         t = self._norm(title)
         candidates = [self._norm(artist)]
@@ -474,7 +478,55 @@ class CertMatcher:
                 if i not in seen:
                     seen.add(i)
                     idx.append(i)
+        for i in self._indices_par_le_juge([artist, *(extra_artists or [])], title, juge):
+            if i not in seen:
+                seen.add(i)
+                idx.append(i)
         return self._format(self.df.loc[idx]) if idx else []
+
+    def _indices_par_le_juge(
+        self, noms: Iterable[str], titre: str, juge, *, album: bool = False
+    ) -> list:
+        """Les lignes des certifs de ces artistes (mot entier) dont `juge(titre,
+        titre de la certif)` admet le titre — de catégorie album si `album`,
+        sinon toute autre catégorie. Sans `juge`, aucune.
+
+        Le complément du pré-filtre (2026-11-16) : les stratégies S1-S4
+        comparent des titres NORMALISÉS, et ratent le même titre sous une
+        autre graphie — « NI**AS IN PARIS » (lettres masquées), « FEIN » /
+        « FE!N », « INCH' ALLAH » / « Inch’Allah », « SCELLÉ PART.2 » /
+        « Scellé Part. 2 », l'album « TANT QUON EST LA ». Le juge de la pose
+        (`cert_titres.certif_du_morceau`) ne voyait jamais ces certifs. Le juge
+        passé ici est l'ÉQUIVALENCE (`titres_equivalents`), pas
+        `certif_du_morceau` : simulé sur toute la base, celui-ci ajoutait des
+        sous-titres et des titres coupés faux (« ASTROWORLD » sur l'album
+        « Astroworld Festival 2021 », « SWIMMING » sur « Swimming in Circles »,
+        « RUNAWAY » sur « Runaway (Film) »). ~60 µs l'appel : une porte bon
+        marché (même première lettre ou chiffre du titre normalisé) le réserve
+        aux lignes qui peuvent passer ; aucune des graphies admises ne touche
+        l'initiale.
+        """
+        cle = self._norm(titre)
+        if juge is None or self.df.empty or not cle:
+            return []
+        idx: list = []
+        vus: set = set()
+        juges: dict[str, bool] = {}
+        for nom in noms:
+            a = self._norm(nom)
+            if not a:
+                continue
+            df = self._sous_ensemble_artiste(a)
+            df = df[((df["cat"] == "album") == album) & (df["title_clean"].str[:1] == cle[:1])]
+            for i, titre_certif in zip(df.index, df["title"], strict=True):
+                if i in vus:
+                    continue
+                if titre_certif not in juges:
+                    juges[titre_certif] = juge(titre, titre_certif)
+                if juges[titre_certif]:
+                    vus.add(i)
+                    idx.append(i)
+        return idx
 
     def get_artist_certifications(self, artist: str) -> list[dict[str, Any]]:
         """Toutes les certifs (tous pays) de l'artiste (artiste en MOT ENTIER)."""
@@ -483,8 +535,32 @@ class CertMatcher:
             return []
         return self._format(self._sous_ensemble_artiste(a))
 
-    def get_album_certifications(self, artist: str, album: str) -> list[dict[str, Any]]:
-        """Certifs d'ALBUM (catégorie album) raccordées à cet album, tous pays."""
+    def get_album_certifications(
+        self, artist: str, album: str, juge=None, autres_noms: Iterable[str] = ()
+    ) -> list[dict[str, Any]]:
+        """Certifs d'ALBUM (catégorie album) raccordées à cet album, tous pays.
+
+        `autres_noms` : les alias sous lesquels chercher aussi (« GAME » pour
+        The Game, « NTM » pour Suprême NTM) ; `juge` : ajoute ce qu'il dit
+        équivalent sous une autre graphie (« TANT QUON EST LA »,
+        « CURTAIN CALL - THE HITS »). 2026-11-16, famille `certif_non_reliee`."""
+        idx: list = []
+        for nom in [artist, *autres_noms]:
+            for i in self._indices_album(nom, album, repli=nom == artist):
+                if i not in idx:
+                    idx.append(i)
+        for i in self._indices_par_le_juge([artist, *autres_noms], album, juge, album=True):
+            if i not in idx:
+                idx.append(i)
+        return self._format(self.df.loc[idx]) if idx else []
+
+    def _indices_album(self, artist: str, album: str, repli: bool = True) -> list:
+        """Les lignes de la stratégie d'album d'origine : exact, sinon (`repli`)
+        titre de la certif qui CONTIENT l'album en mots entiers.
+
+        Sous un alias, pas de repli (simulé le 2026-11-16) : l'album « G.A.M.E »
+        de The Game se normalise en « GAME », et sous l'alias « Game » le repli
+        lui donnait « GAME OVER » de l'artiste Game Over."""
         a = self._norm(artist)
         t = self._norm(album)
         if self.df.empty or not a or not t:
@@ -495,9 +571,9 @@ class CertMatcher:
         df = self._sous_ensemble_artiste(a)
         alb = df[df["cat"] == "album"]
         exact = alb[(alb["artist_clean"] == a) & (alb["title_clean"] == t)]
-        if exact.empty:
+        if exact.empty and repli:
             exact = alb[_contient_en_mots(alb["title_clean"], t)]
-        return self._format(exact)
+        return list(exact.index)
 
     def audit_artist_certifications(
         self,

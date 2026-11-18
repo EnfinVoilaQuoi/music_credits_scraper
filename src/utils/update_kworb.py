@@ -260,6 +260,16 @@ def _fuzzy_unique(entry_title, tracks, threshold: float = 0.87):
         if min(len(nk), len(nt)) < 6:
             continue
         r = difflib.SequenceMatcher(None, nk, nt).ratio()
+        # La ressemblance se juge aussi sur le MORCEAU, sans la version qu'ils
+        # partagent : un long suffixe live commun faisait passer « IV My People
+        # - Live au Zénith de Paris 1998 » pour « That's My People (Live…) »
+        # (92 %), « Intro - Live à l'AccorHotels Arena 2019 » pour « Police
+        # (Live…) » (87 %) — audit du 2026-11-18, Suprême NTM.
+        sk, st = socle_normalise(entry_title), socle_normalise(t.title)
+        if (sk, st) != (nk, nt):
+            if min(len(sk), len(st)) < 6:
+                continue
+            r = min(r, difflib.SequenceMatcher(None, sk, st).ratio())
         if r >= threshold:
             hits.append((r, t))
     return (hits[0][1], hits[0][0]) if len(hits) == 1 else (None, 0.0)

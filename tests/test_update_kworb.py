@@ -311,6 +311,30 @@ class TestRapprochementFlou:
         trouve, _ = _fuzzy_unique("Titre", tracks)
         assert trouve is None or trouve.id == 1
 
+    def test_le_suffixe_live_commun_ne_fait_pas_la_ressemblance(self):
+        """Audit du 2026-11-18, Suprême NTM : deux lives d'un même concert ne
+        se ressemblent que par leur suffixe — le morceau, lui, diffère."""
+        paires = [
+            (
+                "IV My People - Live au Zénith de Paris 1998",
+                "That's My People (Live au Zénith de Paris 1998)",
+            ),
+            (
+                "Come Again - Live à l'AccorHotels Arena 2019",
+                "C'est clair (Live à l'AccorHotels Arena 2019)",
+            ),
+            (
+                "Intro - Live à l'AccorHotels Arena 2019",
+                "Police (Live à l'AccorHotels Arena 2019)",
+            ),
+        ]
+        for kworb, base in paires:
+            assert _fuzzy_unique(kworb, [_track(1, base)]) == (None, 0.0), kworb
+
+    def test_le_meme_live_reste_rapproche(self):
+        fiche = _track(1, "Rythm is love (Live au Zénith de Paris 1998)")
+        assert _fuzzy_unique("Rhythm is love - Live au Zénith de Paris 1998", [fiche])[0] is fiche
+
     def test_liste_vide(self):
         assert _fuzzy_unique("Titre", []) == (None, 0.0)
 

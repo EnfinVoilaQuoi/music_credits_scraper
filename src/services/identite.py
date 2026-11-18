@@ -178,6 +178,12 @@ def catalogue_deezer(
             + ", ".join(str(i) for i in sorted(e.refuses))
             + ")"
         )
+        # Les écarts lus sur le profil refusé partent avec lui : une détection
+        # VIDE et complète remplace les signalements Deezer (La Confrérie,
+        # 2026-11-18 : 15 « disques absents » restés au panneau après le refus).
+        ecarts_deezer.enregistrer_signalements(
+            runtime.data_manager, artist, ecarts_deezer.BilanEcarts(complete=True)
+        )
         return res
     except deezer_identite.ArtisteDeezerAmbigu as e:
         res.motif = "artiste Deezer ambigu — à choisir dans la fenêtre « Écarts Deezer »"

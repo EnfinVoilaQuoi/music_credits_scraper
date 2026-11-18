@@ -761,9 +761,17 @@ def run(
 def _sauver(
     runtime: Runtime, artist: Artist, tracks: list[Track], bilan: BilanCredits
 ) -> BilanCredits:
-    """Sauve TOUT ce qui a été touché, même sur arrêt : le travail fait reste fait."""
+    """Sauve TOUT ce qui a été touché, même sur arrêt : le travail fait reste fait.
+
+    Une fiche apportée par une FORMATION (`discographie_reunie` : tout le
+    groupe, la part du membre dans un collectif) se sauve chez SON artiste.
+    Réécrite au nom du membre, `save_track` ne la trouvait pas chez lui et en
+    créait une copie (2026-11-17 : 54 fiches sans page et 18 lignes de pages
+    d'IAM recopiées chez Akhenaton, 9 de 113 chez Rim’K ; les données lues ne
+    rejoignaient que la copie)."""
     for t in tracks:
-        t.artist = artist
+        if not (t.artist and t.artist.id and artist.id and t.artist.id != artist.id):
+            t.artist = artist
         try:
             runtime.data_manager.save_track(t)
             # Les relations Genius ne passent plus par save_track (écrivain

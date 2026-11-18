@@ -1529,6 +1529,19 @@ class TrackRepository:
             # décide plus que pour une fiche sans aucune vidéo mesurée.
             with self._ecrire() as conn:
                 self._toucher(conn, keep_id)
+                # Les AUTRES fiches de l'artiste de la fiche absorbée qui
+                # portaient ses vidéos les voient cesser d'être partagées, comme
+                # à `delete_track` — la fiche gardée peut être d'un autre artiste
+                # (copie d'un groupe chez un membre, 2026-11-18 : 5 totaux YTM
+                # restés sur l'ancien partage chez Akhenaton et Rim’K).
+                videos_absorbees = [
+                    r[0]
+                    for r in conn.execute(
+                        text("SELECT video_id FROM track_videos WHERE track_id = :tid"),
+                        {"tid": delete_id},
+                    )
+                ]
+                self._toucher(conn, *self._porteurs_des_videos(conn, delete_id, videos_absorbees))
                 # Identité : la fiche gardée COMBLE ses colonnes vides depuis
                 # l'autre, sans jamais en remplacer une (« le premier renseigne,
                 # personne ne remplace »). Sans ça, une fiche Deezer absorbée par

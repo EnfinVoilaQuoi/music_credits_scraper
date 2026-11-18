@@ -584,6 +584,21 @@ class TestCatalogueDeezer:
         assert res.absent and not res.panne and res.deezer_id is None
         assert "pas sur Deezer" in res.motif and "392414" in res.motif
         assert recus == [] and "detection" not in appels
+        # Les signalements du profil refusé sont remplacés par une détection vide.
+        assert appels == ["identite", "signalements"]
+
+    def test_pas_sur_deezer_vide_les_signalements_deezer(self):
+        from src.services import ecarts_deezer as ed
+
+        remplaces = {}
+        dm = SimpleNamespace(
+            remplacer_signalements=lambda aid, code, cas: len(remplaces.setdefault(code, cas))
+        )
+        a = Artist(name="La Confrérie")
+        a.id = 75
+        ed.enregistrer_signalements(dm, a, ed.BilanEcarts(complete=True))
+        assert remplaces and all(cas == [] for cas in remplaces.values())
+        assert "deezer_album_absent" in remplaces
 
     def test_deezer_en_panne_est_dit_jamais_leve(self, monkeypatch):
         res, recus, _ = self._run(monkeypatch, detection=RuntimeError("timeout"))

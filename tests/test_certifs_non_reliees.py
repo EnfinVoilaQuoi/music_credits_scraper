@@ -286,10 +286,10 @@ class TestPoseRattrapee:
     un vrai `CertMatcher` (sans CSV) et `apply_certifications`."""
 
     @staticmethod
-    def _poser(artiste, fiches, magasin, alias=()):
+    def _poser(artiste, fiches, magasin, alias=(), **kw):
         from src.utils.certification_enricher import apply_certifications
 
-        apply_certifications(artiste, fiches, magasin, alias=alias)
+        apply_certifications(artiste, fiches, magasin, alias=alias, **kw)
         return {t.title: sorted(e["title"] for e in t.certs.reelles) for t in fiches}
 
     def test_le_juge_rattrape_une_autre_graphie(self):
@@ -315,6 +315,27 @@ class TestPoseRattrapee:
         m = _magasin(_certif("BPI", "GAME", "THE DOCUMENTARY", cat="album", palier="Gold"))
         self._poser(a, [t], m, alias=("Game",))
         assert [e["title"] for e in t.certs.album_entries] == ["THE DOCUMENTARY"]
+
+    def test_certif_d_album_d_un_groupe_chez_le_membre(self):
+        """Un GROUPE apporte tous ses morceaux : ses certifs d'album se posent
+        chez le membre, comme celles de ses morceaux (House of Pain chez
+        Everlast, 2026-11-18)."""
+        a = Artist(name="Everlast")
+        t = Track(title="Jump Around", artist=a, album="House of Pain")
+        t.primary_artist_name = "House of Pain"
+        m = _magasin(_certif("RIAA", "HOUSE OF PAIN", "HOUSE OF PAIN", cat="album"))
+        self._poser(a, [t], m, formations=("House of Pain",), groupes=("House of Pain",))
+        assert [e["title"] for e in t.certs.album_entries] == ["HOUSE OF PAIN"]
+
+    def test_pas_la_certif_d_album_d_un_collectif(self):
+        """Un COLLECTIF n'apporte que les morceaux où le membre est présent :
+        son album n'est pas le sien (même juge que l'audit)."""
+        a = Artist(name="PLK")
+        t = Track(title="X", artist=a, album="Disque du collectif")
+        t.primary_artist_name = "La Confrérie"
+        m = _magasin(_certif("SNEP", "LA CONFRERIE", "DISQUE DU COLLECTIF", cat="album"))
+        self._poser(a, [t], m, formations=("La Confrérie",))
+        assert t.certs.album_entries == []
 
     def test_sous_un_alias_pas_de_repli_par_mots_contenus(self):
         """« G.A.M.E » se normalise en « GAME » : sous l'alias « Game », le

@@ -200,7 +200,7 @@ class TestAppliquer:
         monkeypatch.setattr("src.utils.cert_matcher.get_cert_matcher", lambda: "matcher")
         monkeypatch.setattr(
             "src.utils.certification_enricher.apply_certifications",
-            lambda artist, tracks, matcher, alias=(), formations=(): journal.append(
+            lambda artist, tracks, matcher, alias=(), formations=(), groupes=(): journal.append(
                 ("apply", len(tracks), matcher)
             )
             or 2,
@@ -208,6 +208,7 @@ class TestAppliquer:
         dm = SimpleNamespace(
             noms_de_lartiste=lambda aid, nom: {nom},
             noms_des_formations=lambda aid: set(),
+            get_artist_relations=lambda aid: [],
             record_pending=lambda t: journal.append(("pending", t.title)),
             certifications_non_enregistrees=lambda tracks: ["B"],
         )

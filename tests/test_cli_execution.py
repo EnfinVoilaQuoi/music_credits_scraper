@@ -79,7 +79,15 @@ class TestSousCommandes:
             return certifs.BilanCertifs(lignes=["SNEP : ok", "BPI : ok"])
 
         monkeypatch.setattr(cli.certifs, "mettre_a_jour", maj)
+        # Jamais le vrai corpus (`data/`) : la pose des nouvelles est rejouée à vide.
+        monkeypatch.setattr(cli.certifs, "cles_du_corpus", lambda: {"avant"})
+        monkeypatch.setattr(
+            cli.certifs,
+            "reposer_apres_maj",
+            lambda rt, avant, progres=None: vus.setdefault("avant", avant) and [],
+        )
         assert cli.main(["certifs", "update", "SNEP", "BPI"]) == cli.COMPLET
+        assert vus["avant"] == {"avant"}
         assert vus["noms"] == ["SNEP", "BPI"] and "SNEP : ok\nBPI : ok" in capsys.readouterr().out
         # Sans source : `None` = toutes.
         cli.main(["certifs", "update"])

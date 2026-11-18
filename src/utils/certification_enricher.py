@@ -375,13 +375,19 @@ def _homonymes(tracks: list[Track]) -> int:
 
 
 def apply_certifications(
-    artist: Artist, tracks: list[Track], matcher, *, alias=(), formations=()
+    artist: Artist, tracks: list[Track], matcher, *, alias=(), formations=(), groupes=()
 ) -> int:
     """Pose `track.certs.entries`/`album_certifications` depuis le matcher unifié.
 
     Matérialise chaque correspondance en `Certification` (frontière typée) puis la
     re-sérialise au format colonne. Renvoie le nombre de morceaux portant au moins
     une certification. Offline (matcher en mémoire), NE PERSISTE PAS.
+
+    `groupes` : les formations de nature GROUPE (pas les collectifs). Un groupe
+    apporte tous ses morceaux au membre, ses certifs d'album se cherchent donc
+    aussi sous son nom — comme celles de ses morceaux (`en_tete`) et comme le
+    juge de l'audit (`noms_d_audit_de`). Sans lui, les albums de House of Pain
+    restaient sans certif chez Everlast (2026-11-18, `certif_non_reliee`).
     """
     if not tracks or not artist:
         return 0
@@ -449,7 +455,11 @@ def apply_certifications(
                         cherche,
                         track.album,
                         juge=titres_equivalents,
-                        autres_noms=tuple(alias) if cherche == artist.name else (),
+                        autres_noms=(
+                            (*alias, *(g for g in groupes if g not in alias))
+                            if cherche == artist.name
+                            else ()
+                        ),
                     )
                 track.certs.album_entries = [
                     Certification.from_match(m).to_column_dict() for m in album_cache[cle_cache]

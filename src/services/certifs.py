@@ -479,12 +479,18 @@ def _rematcher(dm, artist: Artist, bilan: BilanCertifs) -> None:
     reset_cert_matcher()
     alias = dm.noms_de_lartiste(artist.id, artist.name) - {artist.name}
     formations = dm.noms_des_formations(artist.id)
+    groupes = {
+        rel.related_name
+        for rel in dm.get_artist_relations(artist.id)
+        if rel.kind == "member_of" and rel.formation == "groupe" and rel.related_name
+    }
     bilan.certifies = apply_certifications(
         artist,
         artist.tracks,
         get_cert_matcher(),
         alias=tuple(sorted(alias)),
         formations=tuple(sorted(formations)),
+        groupes=tuple(sorted(groupes & formations)),
     )
     for track in artist.tracks:
         dm.record_pending(track)

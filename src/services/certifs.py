@@ -266,6 +266,67 @@ def mettre_a_jour(
     return bilan
 
 
+def cles_du_corpus() -> set[tuple]:
+    """Les clés (`cle_certification`) de tout le corpus, relu des CSV clean."""
+    from src.utils.cert_artist import cle_certification
+    from src.utils.cert_matcher import get_cert_matcher, reset_cert_matcher
+
+    reset_cert_matcher()
+    return {cle_certification(e) for e in get_cert_matcher().toutes()}
+
+
+def artistes_credites(
+    nouvelles: Iterable[dict], noms_par_artiste: dict[str, list[str]]
+) -> list[str]:
+    """PUR. Les artistes qu'une certif `nouvelles` crédite EN TÊTE sous un de
+    leurs noms d'audit — égalité exacte, comme l'audit `certif_non_reliee`
+    (par mots contenus, « Swift » répondait à TAYLOR SWIFT)."""
+    from src.utils.cert_normalize import normalize_text
+    from src.utils.certification_enricher import interpretes_en_tete
+
+    tetes: set[str] = set()
+    for e in nouvelles:
+        tetes |= {normalize_text(x) for x in interpretes_en_tete(e["artist_name"])}
+    return [
+        nom for nom, noms in noms_par_artiste.items() if tetes & {normalize_text(n) for n in noms}
+    ]
+
+
+def reposer_apres_maj(
+    runtime: Runtime, avant: set[tuple], progres: Callable[[str], None] = _rien
+) -> list[str]:
+    """Pose les certifs NOUVELLES du corpus chez les artistes qu'elles créditent.
+
+    La mise à jour globale remplit le corpus pour tous, mais seule l'étape
+    `certifs <nom>` d'un artiste pose ses certifs : une certif arrivée pendant
+    le passage d'un autre attendait le prochain passage du sien (audit du
+    2026-11-18 : 12 `certif_non_reliee` en erreur). La pose est hors ligne.
+    Rend une ligne par artiste reposé."""
+    from src.services import artiste
+    from src.utils.cert_artist import cle_certification
+    from src.utils.cert_matcher import get_cert_matcher, reset_cert_matcher
+
+    reset_cert_matcher()
+    nouvelles = [e for e in get_cert_matcher().toutes() if cle_certification(e) not in avant]
+    if not nouvelles:
+        return []
+    dm = runtime.data_manager
+    noms_par_artiste = {}
+    for nom in dm.get_artist_names():
+        art = dm.get_artist_by_name(nom)
+        if art is not None:
+            noms_par_artiste[nom] = noms_d_audit_pour(runtime, art)[0]
+    lignes = []
+    for nom in artistes_credites(nouvelles, noms_par_artiste):
+        art = artiste.charger(runtime, nom)
+        if art is None:
+            continue
+        progres(f"Pose des certifs nouvelles : {nom}")
+        b = appliquer(runtime, art)
+        lignes.append(f"{nom} : {b.rapport or 'rien à poser'}")
+    return lignes
+
+
 def noms_de_recherche_pour(runtime: Runtime, artist: Artist) -> list[str]:
     """L'artiste, puis les formations sous lesquelles il est crédité.
 

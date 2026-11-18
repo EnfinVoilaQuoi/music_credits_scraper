@@ -528,6 +528,11 @@ class CertMatcher:
                     idx.append(i)
         return idx
 
+    def toutes(self) -> list[dict[str, Any]]:
+        """Tout le corpus, au format des autres lectures (la pose après une
+        mise à jour globale y cherche les certifs nouvelles)."""
+        return [] if self.df.empty else self._format(self.df)
+
     def get_artist_certifications(self, artist: str) -> list[dict[str, Any]]:
         """Toutes les certifs (tous pays) de l'artiste (artiste en MOT ENTIER)."""
         a = self._norm(artist)

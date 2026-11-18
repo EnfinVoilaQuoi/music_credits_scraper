@@ -605,10 +605,15 @@ def _executer_commande(a: argparse.Namespace, runtime: Runtime) -> tuple[int, ob
         return COMPLET, None
 
     if a.commande == "certifs" and a.action == "update":
+        avant = certifs.cles_du_corpus()
         bilan = certifs.mettre_a_jour(
             a.sources or None, should_stop=lifecycle.stop_requested, progres=print
         )
         _imprimer_bilan("Certifs — mise à jour globale", "\n".join(bilan.lignes))
+        # Une source aboutie suffit : ses certifs nouvelles se posent tout de suite.
+        poses = certifs.reposer_apres_maj(runtime, avant, progres=print)
+        if poses:
+            _imprimer_bilan("Certifs — pose des nouvelles", "\n".join(poses))
         return code_de(bilan), None
 
     if a.commande == "certifs" and a.action == "apply":

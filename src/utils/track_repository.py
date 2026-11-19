@@ -3989,8 +3989,9 @@ class TrackRepository:
         rattrapage des familles divergées avant la règle « la lecture la plus
         récente de la page l'emporte » (2026-10-12), du lien YouTube arbitré
         (2026-10-26), de l'union des éditions (2026-10-29) et de celle des vidéos
-        (2026-11-06). Rend `{genius_id: lignes réécrites (données de page, lien
-        YouTube, éditions, vidéos)}` pour les familles qui changent ; sans `appliquer`, rien
+        (2026-11-06), puis du principal Spotify (2026-11-19). Rend `{genius_id:
+        lignes réécrites (données de page, lien YouTube, éditions, vidéos,
+        principal Spotify)}` pour les familles qui changent ; sans `appliquer`, rien
         n'est gardé (passage à blanc). Aucune règle n'est réimplémentée ici :
         c'est la synchronisation de `save_track`.
 
@@ -4024,7 +4025,13 @@ class TrackRepository:
                             transaction.rollback()
                     reecrites = sum(
                         rapport.get(cle, 0)
-                        for cle in ("donnees_de_page", "lien_youtube", "editions", "videos")
+                        for cle in (
+                            "donnees_de_page",
+                            "lien_youtube",
+                            "editions",
+                            "videos",
+                            "principal_spotify",
+                        )
                     )
                     if reecrites:
                         changes[gid] = reecrites

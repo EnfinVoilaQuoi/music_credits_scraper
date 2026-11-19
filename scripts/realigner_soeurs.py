@@ -30,7 +30,7 @@ def main() -> int:
     changes = dm.realigner_soeurs()
     print(
         f"{len(changes)} famille(s) changent, {sum(changes.values())} ligne(s) réécrite(s) "
-        "(données de page, lien YouTube, éditions, vidéos)"
+        "(données de page, lien YouTube, éditions, vidéos, principal Spotify)"
     )
     if not args.apply:
         print("(à blanc — relancer avec --apply pour écrire)")

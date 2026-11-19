@@ -943,6 +943,8 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
     rapport["observations"] = unir_observations(conn, famille)
     rapport["videos"] = unir_videos(conn, famille)
     rapport["spotify_ids"] = _unir_table_additive(conn, famille, "track_spotify_ids", "spotify_id")
+    # APRÈS l'union : chaque ligne connaît alors tous les ID de la famille.
+    rapport["principal_spotify"] = aligner_principal_spotify(conn, famille)
     rapport["editions"] = unir_editions(conn, famille)
     # `is_primary` RECOPIE `tracks.spotify_id` : une colonne comblée par une
     # sœur et un ID reçu par l'union n'étaient jamais marqués principaux
@@ -956,6 +958,112 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
         {f"f{n}": tid for n, tid in enumerate(famille)},
     )
     return rapport
+
+
+def choisir_principal_spotify(
+    principaux: dict[int, str],
+    *,
+    acceptes: set[str] = frozenset(),
+    de_la_page: set[str] = frozenset(),
+    lignes_du_principal: set[int] = frozenset(),
+) -> str | None:
+    """PUR. L'ID principal commun d'une famille de sœurs dont les lignes en ont
+    choisi des différents (`principaux` : `{track_id: spotify_id}`), ou None
+    s'il n'y a rien à aligner. Par ordre :
+
+    1. l'ID ACCEPTÉ à la main ;
+    2. l'ID que la page Genius désigne (`genius_media`), commun à la famille ;
+    3. celui des lignes de l'INTERPRÈTE PRINCIPAL de la page ;
+    4. celui de la plus ancienne ligne (le premier posé).
+
+    Chaque critère ne tranche que s'il désigne UN seul des principaux.
+    """
+    valeurs = set(principaux.values())
+    if len(valeurs) < 2:
+        return None
+    for preferes in (
+        acceptes & valeurs,
+        de_la_page & valeurs,
+        {principaux[t] for t in lignes_du_principal if t in principaux},
+    ):
+        if len(preferes) == 1:
+            return next(iter(preferes))
+    return principaux[min(principaux)]
+
+
+def aligner_principal_spotify(conn, famille: list[int]) -> int:
+    """Un seul ID Spotify PRINCIPAL par enregistrement (décision utilisateur
+    2026-11-19). Chaque artiste trouve l'ID par SON catalogue, donc par une
+    autre parution du même enregistrement : Brav et Médine (*Table d'écoute
+    2*), Diam's et Sinik (« Marine ») gardaient chacun le leur, et l'audit
+    comptait une divergence entre sœurs. Après l'union (`track_spotify_ids`),
+    toutes les lignes portent tous les ID ; seul le choix du principal
+    diffère — `choisir_principal_spotify` le fait. Aucun ID ne part. Rend le
+    nombre de lignes changées."""
+    from sqlalchemy import text
+
+    from src.utils.title_matching import normalize_name
+
+    marques = ", ".join(f":f{n}" for n in range(len(famille)))
+    params = {f"f{n}": tid for n, tid in enumerate(famille)}
+    lignes = (
+        conn.execute(
+            text(
+                "SELECT t.id, t.spotify_id, t.genius_id, t.primary_artist_name, a.name AS artiste "
+                f"FROM tracks t JOIN artists a ON a.id = t.artist_id WHERE t.id IN ({marques})"
+            ),  # noqa: S608
+            params,
+        )
+        .mappings()
+        .all()
+    )
+    principaux = {r["id"]: r["spotify_id"] for r in lignes if r["spotify_id"]}
+    if len(set(principaux.values())) < 2:
+        return 0
+    pages = {r["genius_id"] for r in lignes if r["genius_id"]}
+    acceptes = {
+        r[0]
+        for r in conn.execute(
+            text(
+                "SELECT valeur FROM acceptations WHERE nature = 'id_spotify' "
+                f"AND genius_id IN ({', '.join(str(int(p)) for p in pages) or 'NULL'})"
+            )  # noqa: S608
+        )
+    }
+    de_la_page = {
+        r[0]
+        for r in conn.execute(
+            text(
+                "SELECT spotify_id FROM track_spotify_ids WHERE source = 'genius_media' "
+                f"AND track_id IN ({marques})"
+            ),  # noqa: S608
+            params,
+        )
+    }
+    lignes_du_principal = {
+        r["id"]
+        for r in lignes
+        if not r["primary_artist_name"]
+        or normalize_name(r["primary_artist_name"]) == normalize_name(r["artiste"])
+    }
+    choisi = choisir_principal_spotify(
+        principaux,
+        acceptes=acceptes,
+        de_la_page=de_la_page,
+        lignes_du_principal=lignes_du_principal,
+    )
+    if choisi is None:
+        return 0
+    changees = 0
+    for tid, sid in principaux.items():
+        if sid != choisi:
+            changees += conn.execute(
+                text(
+                    "UPDATE tracks SET spotify_id = :s, spotify_page_title = NULL WHERE id = :tid"
+                ),
+                {"s": choisi, "tid": tid},
+            ).rowcount
+    return changees
 
 
 def effacer_chez_les_soeurs(conn, track_id: int, effacement) -> int:

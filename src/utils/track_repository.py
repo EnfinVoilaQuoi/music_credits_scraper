@@ -8611,6 +8611,13 @@ class TrackRepository:
             text("DELETE FROM track_spotify_ids WHERE track_id = :tid AND spotify_id = :sid"),
             {"tid": track_id, "sid": vise},
         )
+        if ligne["spotify_id"] and ligne["spotify_id"] != vise:
+            # Un ID SECONDAIRE : les sources à valeur unique (spotify_web,
+            # Kworb, ReccoBeats…) ne s'alimentent que depuis l'ID PRINCIPAL,
+            # resté en place — leurs mesures ne sont pas celles de l'ID retiré.
+            # Les effacer perdait les streams et la durée justes de la fiche
+            # (« New God Flow.1 », 25 M de streams, 2026-11-19).
+            return rapport
 
         if ligne["spotify_id"] == vise:
             conn.execute(
@@ -8743,20 +8750,9 @@ class TrackRepository:
                 # la ligne d'où on venait de le retirer (2026-10-11 : Kid Cudi
                 # « Sky City » portait un ID refusé chez Kanye West).
                 # Une sœur dont la colonne porte un AUTRE ID (non remplaçable) ne
-                # perd que la ligne de table : ses mesures peuvent venir du sien.
+                # perd que la ligne de table (`_retirer_id_spotify`) : ses
+                # mesures peuvent venir du sien.
                 def chez_la_soeur(jumelle):
-                    propre = conn.execute(
-                        text("SELECT spotify_id FROM tracks WHERE id = :tid"), {"tid": jumelle}
-                    ).scalar()
-                    if propre and propre != vise:
-                        conn.execute(
-                            text(
-                                "DELETE FROM track_spotify_ids "
-                                "WHERE track_id = :tid AND spotify_id = :sid"
-                            ),
-                            {"tid": jumelle, "sid": vise},
-                        )
-                        return
                     self._retirer_id_spotify(
                         conn,
                         jumelle,

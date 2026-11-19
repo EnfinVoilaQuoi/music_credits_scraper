@@ -315,6 +315,43 @@ class TestRejetDeLId:
                 == _ID
             )
 
+    def test_rejeter_une_edition_garde_les_mesures_du_principal(self, data_manager):
+        """Les sources à valeur unique (spotify_web, Kworb, ReccoBeats) ne
+        s'alimentent que depuis l'ID PRINCIPAL : retirer un ID secondaire ne
+        touche pas à leurs mesures (« New God Flow.1 », 2026-11-19 : retirer un
+        ID refusé emportait les 25 M de streams et la durée de la fiche)."""
+        track = _morceau(data_manager, spotify_id=_ID)
+        autre = "5go793BaOjzfop2JwctQ0r"
+        data_manager.record_track_spotify_ids(
+            track.id,
+            [
+                TrackSpotifyId(spotify_id=_ID, source="manual"),
+                TrackSpotifyId(spotify_id=autre, source="reccobeats_isrc"),
+            ],
+        )
+        data_manager.record_spotify_streams(track.id, 25232894, "spotify_web")
+        data_manager.upsert_observations(
+            track.id,
+            [
+                Observation(field="spotify_streams", value="25232894", source="spotify_web"),
+                Observation(field="duration", value=357, source="spotify_web"),
+            ],
+        )
+
+        rapport = data_manager.clear_track_spotify_id(track.id, autre)
+
+        assert rapport["id_retire"] == autre
+        assert rapport["observations_retirees"] == []
+        restantes = {(o.field, o.source) for o in data_manager.get_observations(track.id)}
+        assert {("spotify_streams", "spotify_web"), ("duration", "spotify_web")} <= restantes
+        with data_manager.engine.connect() as conn:
+            assert (
+                conn.execute(
+                    text("SELECT spotify_streams FROM tracks WHERE id = :tid"), {"tid": track.id}
+                ).scalar()
+                == 25232894
+            )
+
     def test_une_edition_survivante_cesse_d_etre_principale(self, data_manager):
         """`is_primary` recopie `tracks.spotify_id` : la colonne effacée, plus
         aucune édition n'est principale.

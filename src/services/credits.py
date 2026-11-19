@@ -513,6 +513,17 @@ def lrc_sans_duree_audio(observations) -> bool:
 
 
 @etape_de_flux("Crédits & paroles")
+def _recalculer_heritage(runtime: Runtime, artist: Artist) -> None:
+    """L'héritage des versions se recalcule (ce qui n'a plus de source part,
+    2026-11-10), sur TOUTE la discographie — l'original d'une version n'est
+    pas forcément parmi les fiches de ce passage."""
+    if not artist.id:
+        return
+    from src.services.versions import heriter_versions
+
+    heriter_versions(runtime.data_manager, runtime.data_manager.get_artist_tracks(artist.id))
+
+
 def run(
     runtime: Runtime,
     artist: Artist,
@@ -533,6 +544,10 @@ def run(
     bilan = BilanCredits(morceaux=len(tracks))
     if not tracks:
         conclure_sans_morceau(bilan, artist, options.track_ids)
+        # Rien à lire, mais l'héritage se recalcule quand même : un original
+        # désigné à la main (`version_de`) change sans qu'aucune page ne soit
+        # relue (live « Come Again (feat. Big Red) », fiche sans page, 2026-11-19).
+        _recalculer_heritage(runtime, artist)
         return bilan
     scraper = None
     n = len(tracks)
@@ -732,16 +747,9 @@ def run(
             from src.services.versions import constater_instrumentaux
 
             constater_instrumentaux(runtime.data_manager, tracks)
-        if artist.id:
-            # Les crédits des originaux viennent d'être relus : l'héritage de
-            # leurs versions se recalcule (ce qui n'a plus de source part,
-            # 2026-11-10), sur TOUTE la discographie — l'original d'une version
-            # n'est pas forcément parmi les fiches de ce passage.
-            from src.services.versions import heriter_versions
-
-            heriter_versions(
-                runtime.data_manager, runtime.data_manager.get_artist_tracks(artist.id)
-            )
+        # Les crédits des originaux viennent d'être relus : l'héritage de
+        # leurs versions se recalcule.
+        _recalculer_heritage(runtime, artist)
         if options.sync or options.paroles:
             # Un LRC fraîchement posé peut être celui d'une autre fiche.
             from src.services import revue_auto

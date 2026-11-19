@@ -262,3 +262,21 @@ def test_le_script_a_blanc_n_ecrit_pas_puis_applique(data_manager, monkeypatch, 
     assert script.main(["--base", str(data_manager.db_path), "--apply"]) == 0
     assert _credits(data_manager, v.id) == {("Kanye West", "Producer", "heritage")}
     assert script.a_retirer(data_manager.db_path) == []
+
+
+def test_l_etape_credits_sans_rien_a_lire_recalcule_l_heritage(data_manager):
+    """Fiche sans page : l'étape crédits n'a rien à lire et s'arrêtait avant le
+    recalcul (live « Come Again (feat. Big Red) », 2026-11-19)."""
+    from src.services import credits
+    from src.services.runtime import Runtime
+
+    a = _artiste(data_manager, "The Game")
+    o = _original(data_manager, a, ["Kanye West", "Just Blaze"])
+    v = _version(data_manager, a)
+    _repasser(data_manager, a)
+    _l_original_perd(data_manager, o, {"Kanye West"})
+    rt = Runtime(
+        data_manager=data_manager, genius_api=None, data_enricher=None, deleted=None, disabled=None
+    )
+    credits.run(rt, a, [], credits.OptionsCredits(), credits.Hooks())
+    assert _credits(data_manager, v.id) == {("Kanye West", "Producer", "heritage")}

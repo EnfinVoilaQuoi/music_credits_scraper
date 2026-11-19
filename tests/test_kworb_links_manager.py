@@ -210,12 +210,15 @@ def test_un_fichier_illisible_n_est_jamais_ecrase(manager):
 
 
 def test_le_dossier_par_defaut_ne_depend_pas_du_dossier_courant(monkeypatch, tmp_path):
-    from src.config import DATA_DIR
+    from pathlib import Path
 
+    from src.utils import kworb_links_manager as km
+
+    # `km.DATA_DIR` : le conftest l'isole du data/ réel.
     monkeypatch.chdir(tmp_path)
     m = KworbLinksManager.__new__(KworbLinksManager)
     KworbLinksManager.__init__(m)
-    assert m.base_dir == DATA_DIR / "kworb_links"
+    assert m.base_dir.is_absolute() and m.base_dir == Path(km.DATA_DIR) / "kworb_links"
 
 
 def test_en_base_par_defaut_quand_une_base_est_ouverte(data_manager, tmp_path):

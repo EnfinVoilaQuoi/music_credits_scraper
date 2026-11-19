@@ -192,6 +192,13 @@ def test_la_discographie_passe_les_pistes_des_fiches_en_base(monkeypatch):
 
     monkeypatch.setattr("src.api.deezer_api.DeezerAPI", lambda: "deezer")
     monkeypatch.setattr("src.utils.media_enricher.apply_images", apply_images)
+    # Ni sauvegarde de la vraie base, ni corpus de certifs réel (2026-11-19).
+    monkeypatch.setattr(
+        "src.utils.database_backup.get_backup_manager",
+        lambda: SimpleNamespace(create_backup=lambda *a, **k: None),
+    )
+    monkeypatch.setattr("src.utils.cert_matcher.get_cert_matcher", lambda: None)
+    monkeypatch.setattr("src.utils.certification_enricher.apply_certifications", lambda *a, **k: 0)
     artiste = _artiste_disco()
     existant = _t("x", gid=1, tid=5)
     existant.deezer_id = 77

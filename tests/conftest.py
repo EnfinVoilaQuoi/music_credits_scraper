@@ -192,6 +192,9 @@ def _corrections_de_fiches_isolees(tmp_path, monkeypatch):
     from src.utils import kworb_links_manager
 
     monkeypatch.setattr(kworb_links_manager, "moteur", None)
+    # Sans base, les décisions Kworb se lisent dans `data/kworb_links/` réel
+    # (`test_fenetre_se_construit` lisait celles d'A2H, 2026-11-19).
+    monkeypatch.setattr(kworb_links_manager, "DATA_DIR", tmp_path)
 
 
 @pytest.fixture(autouse=True)
@@ -251,6 +254,88 @@ def _aucune_copie_du_brut(monkeypatch):
     lui-même `config.BRUT_BACKUP_DIR`."""
     monkeypatch.setattr("src.config.BRUT_BACKUP_DIR", None)
     monkeypatch.setattr("src.config.BASE_BACKUP_EXTERNE_DIR", None)
+
+
+def chemin_sous(chemin, dossier: str) -> bool:
+    """PUR. `chemin` (str, Path, octets ; un descripteur entier n'est pas un
+    chemin) est-il sous `dossier` (absolu, normalisé par `os.path.normcase`) ?"""
+    if isinstance(chemin, int):
+        return False
+    try:
+        brut = os.fsdecode(os.fspath(chemin))
+    except TypeError:
+        return False
+    absolu = os.path.normcase(os.path.abspath(brut))
+    return absolu == dossier or absolu.startswith(dossier + os.sep)
+
+
+@pytest.fixture(scope="session")
+def _versionnes_de_data():
+    """Les fichiers de `data/` VERSIONNÉS (icônes, corpus de certifs,
+    `corrections/fiches.json`) : identiques sur le CI, un test peut les lire.
+    Sans git, aucun : la garde est alors stricte."""
+    import subprocess
+
+    from src import config
+
+    racine = os.path.dirname(os.path.abspath(config.DATA_DIR))
+    try:
+        sortie = subprocess.run(
+            ["git", "-C", racine, "ls-files", "-z", "data"],
+            capture_output=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return frozenset()
+    return frozenset(
+        os.path.normcase(os.path.abspath(os.path.join(racine, os.fsdecode(f))))
+        for f in sortie.split(b"\0")
+        if f
+    )
+
+
+@pytest.fixture(autouse=True)
+def _aucune_lecture_de_data_reel(monkeypatch, request, _versionnes_de_data):
+    """AUCUN test n'ouvre un fichier sous le `data/` réel (`config.DATA_DIR`) :
+    ni `open` (donc `Path.read_text`, pandas…), ni `sqlite3.connect` — sauf les
+    fichiers versionnés (`_versionnes_de_data`), les mêmes partout.
+
+    Les crans précédents isolent chaque fichier CONNU ; celui-ci attrape les
+    autres. Récidive du 2026-11-18 : `test_certifs_update` chargeait tout le
+    corpus de certifs réel (98 s), vu à sa seule lenteur. L'ouverture lève
+    `PermissionError` ET la faute est notée : un `except OSError` du code testé
+    qui l'avalerait n'empêche pas le test d'échouer.
+    """
+    import builtins
+    import io
+    import sqlite3
+
+    from src import config
+
+    dossier = os.path.normcase(os.path.abspath(config.DATA_DIR))
+    fautes: list[str] = []
+
+    def garde(reel):
+        def ouvrir(chemin, *a, **k):
+            if chemin_sous(chemin, dossier) and (
+                os.path.normcase(os.path.abspath(os.fsdecode(os.fspath(chemin))))
+                not in _versionnes_de_data
+            ):
+                fautes.append(os.fsdecode(os.fspath(chemin)))
+                raise PermissionError(f"test : lecture du data/ réel interdite ({chemin})")
+            return reel(chemin, *a, **k)
+
+        return ouvrir
+
+    ouvrir = garde(io.open)
+    monkeypatch.setattr(builtins, "open", ouvrir)
+    monkeypatch.setattr(io, "open", ouvrir)
+    monkeypatch.setattr(sqlite3, "connect", garde(sqlite3.connect))
+    # SQLAlchemy (pysqlite) passe par `sqlite3.dbapi2.connect`.
+    monkeypatch.setattr(sqlite3.dbapi2, "connect", garde(sqlite3.dbapi2.connect))
+    yield fautes  # un test de la garde vide la liste
+    if fautes:
+        pytest.fail(f"{request.node.nodeid} ouvre le data/ réel : {sorted(set(fautes))[:5]}")
 
 
 @pytest.fixture(scope="session")

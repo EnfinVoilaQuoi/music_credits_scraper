@@ -607,6 +607,38 @@ def memoriser_contenus(artiste: str, contenant: dict, contenus: list[dict]) -> l
     return liste
 
 
+def remplacer_correction(artiste: str, fiche: dict, action: str, valeur) -> bool:
+    """Remplace la VALEUR d'une correction déjà consignée (`fiche` : sa
+    désignation) — une décision humaine qui change d'avis. La migration du
+    fichier est additive (`INSERT OR IGNORE`) : sans ce geste, l'original
+    désigné du live « Come Again (feat. Big Red) » ne pouvait pas passer de la
+    version studio au remix avec Big Red (2026-11-19). Rend False si aucune
+    correction de cette action n'est consignée pour la fiche."""
+    if moteur is None:
+        raise RuntimeError("aucune base ouverte (construire un DataManager d'abord)")
+    if action not in ACTIONS:
+        raise ValueError(f"Action de correction inconnue : {action!r}")
+    from datetime import datetime
+
+    from sqlalchemy import text
+
+    with moteur.begin() as conn:
+        n = conn.execute(
+            text(
+                "UPDATE corrections SET valeur = :valeur, decide_le = :le "
+                "WHERE cle_fiche = :cle AND artiste = :artiste AND action = :action"
+            ),
+            {
+                "valeur": json.dumps(valeur, ensure_ascii=False, sort_keys=True),
+                "le": datetime.now().isoformat(timespec="seconds"),
+                "cle": _cle_fiche(fiche),
+                "artiste": artiste,
+                "action": action,
+            },
+        ).rowcount
+    return n == 1
+
+
 def cle_contenu(contenu) -> str:
     """La valeur d'un refus `contenu` : la fiche contenue, désignée sans clé
     locale (page Genius, sinon titre + album)."""

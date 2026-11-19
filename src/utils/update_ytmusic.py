@@ -1052,6 +1052,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
                         or titres_connus.get((track_id, v)),
                         source=sources.get((track_id, v)),
                         recherche=recherches.get((track_id, v)),
+                        duration=(details_videos.get(v) or {}).get("duration"),
                     )
                     for v in vids
                 ],
@@ -1142,7 +1143,9 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
             # « Chaos » de Jango Jack (2026-10-20).
             and (
                 sources.get((track_id, v)) != "search_auto"
-                or recherche_valide(fiche, recherches.get((track_id, v)))
+                or recherche_valide(
+                    fiche, recherches.get((track_id, v)), details_videos[v].get("duration")
+                )
             )
         ]
         verdict = duree_a_declarer(

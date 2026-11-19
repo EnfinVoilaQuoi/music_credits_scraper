@@ -45,6 +45,8 @@ PORTIERS: dict[str, tuple[str, ...]] = {
     "recherche_youtube": (
         "src.youtube.youtube_searcher",
         "src.services.vues_comptees",
+        # Les titres des fiches absorbées par une fusion (règle A, 2026-11-19).
+        "src.utils.corrections_fiches",
         "src.services.revue",
         "src.utils.version_descriptors",
         "src.utils.version_heritage",

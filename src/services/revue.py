@@ -2156,7 +2156,9 @@ def recherche_perimee(track, _ctx=None):
     refusees = [
         (raison_du_refus_de_recherche(track, v.recherche), v)
         for v in track.videos or []
-        if v.source == "search_auto" and v.recherche and not recherche_valide(track, v.recherche)
+        if v.source == "search_auto"
+        and v.recherche
+        and not recherche_valide(track, v.recherche, v.duration)
     ]
     if not refusees:
         return None

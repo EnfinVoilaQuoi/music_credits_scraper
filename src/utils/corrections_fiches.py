@@ -479,6 +479,25 @@ def genius_ids_absorbes(artiste: str) -> set[int]:
     }
 
 
+def titres_absorbes(track) -> set[str]:
+    """Titres des fiches (désignées par leur titre) fusionnées dans `track` :
+    la fusion a prouvé le même enregistrement, ce que la recherche a trouvé
+    sous ces titres reste de la fiche (« Je vous passe le salam » dans
+    « Salam », règle A, 2026-11-19)."""
+    artiste = track.artist.name if track.artist else None
+    if not artiste:
+        return set()
+    return {
+        str(e["fiche"]["titre"])
+        for e in charger().get(artiste, [])
+        if e.get("fusionner_dans")
+        and (e.get("fiche") or {}).get("titre")
+        and designe(
+            e["fusionner_dans"], genius_id=track.genius_id, titre=track.title, album=track.album
+        )
+    }
+
+
 def fiches_par_id(track_ids) -> dict:
     """`{track_id: Track}` réduits à leur DÉSIGNATION (artiste, titre, album,
     page Genius) et à ce que le gate Spotify regarde (durée, durées observées,

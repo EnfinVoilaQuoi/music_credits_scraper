@@ -1101,10 +1101,20 @@ def streams(c, par) -> list[Cas]:
         valides[r["artist_id"]].add(r["cle"])
     # Une vidéo de la recherche ne compte que si ce que la recherche a vu passe
     # le score COURANT (e60, 2026-10-20) — base d'avant e60 : on ne conclut pas.
-    a_recherche = "recherche" in {x[1] for x in c.execute("PRAGMA table_info(track_videos)")}
+    colonnes_videos = {x[1] for x in c.execute("PRAGMA table_info(track_videos)")}
+    a_recherche = "recherche" in colonnes_videos
+    # Règle A (2026-11-19) : la durée de la vidéo contre les catalogues de la fiche.
+    durees_obs: dict[int, dict] = collections.defaultdict(dict)
+    for r in c.execute("SELECT track_id, source, value FROM observations WHERE field = 'duration'"):
+        try:
+            durees_obs[r["track_id"]][r["source"]] = int(float(r["value"]))
+        except (TypeError, ValueError):
+            continue
     for r in c.execute(
         "SELECT track_id, video_id, views, title, source, "
-        f"{'recherche' if a_recherche else 'NULL AS recherche'} FROM track_videos"
+        f"{'recherche' if a_recherche else 'NULL AS recherche'}, "
+        f"{'duration' if 'duration' in colonnes_videos else 'NULL AS duration'} "
+        "FROM track_videos"
     ):
         if r["track_id"] in ids:
             t = ids[r["track_id"]]
@@ -1116,12 +1126,19 @@ def streams(c, par) -> list[Cas]:
                 primary_artist_name=t["primary_artist_name"],
                 featured_artists=t["featured_artists"],
                 artist=SimpleNamespace(name=t["artiste"]),
+                durations_observees=durees_obs.get(t["id"], {}),
             )
             recherche = recherche_de_ligne(r["recherche"])
             # Une vidéo de la recherche refusée se tranche au panneau
             # (`revue:recherche_perimee`) ; l'audit n'en garde que l'exclusion.
             if not vues_comptees.vue_comptee(
-                fiche, r["video_id"], r["title"], r["source"], valides[t["artist_id"]], recherche
+                fiche,
+                r["video_id"],
+                r["title"],
+                r["source"],
+                valides[t["artist_id"]],
+                recherche,
+                r["duration"],
             ):
                 exclues[r["track_id"]].add(r["video_id"])
             # Par ARTISTE : les lignes sœurs (même enregistrement chez l'invité)

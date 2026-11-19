@@ -41,17 +41,18 @@ def cles_validees(dm, artist_id: int) -> set[str]:
     return {cle for (det, cle) in dm.verdicts_revue(artist_id) if det == DETECTEUR}
 
 
-def recherche_valide(fiche, recherche: dict | None) -> bool:
-    """Ce que la recherche a vu passe-t-il le score COURANT pour cette fiche ?
-    Sous le nom de l'artiste de la fiche OU de son principal (la recherche
-    d'un featuring se fait sous le principal, `artiste_de_recherche`).
-    `fiche` : `title`, `album`, `artist.name`, `primary_artist_name`,
-    `featured_artists` (les invités jugent un remixeur nommé, 2026-10-26)."""
+#: Catalogues lus par identifiant : témoins de la durée d'une vidéo trouvée
+#: sous le titre d'une fiche absorbée (règle A).
+CATALOGUES_TEMOINS = ("deezer", "spotify_web", "apple_music", "reccobeats")
+
+#: Écart toléré entre la vidéo et un catalogue de la fiche (règle A).
+ECART_DUREE_S = 2
+
+
+def _score_suffit(fiche, recherche: dict, titre: str) -> bool:
     from src.config import YOUTUBE_CONFIDENCE_THRESHOLD
     from src.youtube.youtube_searcher import relevance_score
 
-    if not recherche:
-        return True  # faits inconnus : on ne conclut pas
     noms = [
         n for n in (fiche.artist.name if fiche.artist else None, fiche.primary_artist_name) if n
     ]
@@ -60,7 +61,7 @@ def recherche_valide(fiche, recherche: dict | None) -> bool:
             recherche["titre"],
             recherche.get("artistes") or [],
             nom,
-            fiche.title,
+            titre,
             album=fiche.album,
             result_album=recherche.get("album"),
             artistes_connus=[
@@ -73,6 +74,43 @@ def recherche_valide(fiche, recherche: dict | None) -> bool:
     )
 
 
+def duree_au_catalogue(fiche, duree: int | None) -> bool:
+    """La durée de la vidéo est-elle à ± `ECART_DUREE_S` d'un catalogue de la
+    fiche lu par identifiant (`CATALOGUES_TEMOINS`) ? `fiche.durations_observees` :
+    `{source: secondes}` (une `Track`, ou la fiche légère de l'audit et du dépôt)."""
+    if not duree:
+        return False
+    durees = fiche.durations_observees or {}
+    return any(
+        durees.get(s) and abs(int(durees[s]) - int(duree)) <= ECART_DUREE_S
+        for s in CATALOGUES_TEMOINS
+    )
+
+
+def recherche_valide(fiche, recherche: dict | None, duree: int | None = None) -> bool:
+    """Ce que la recherche a vu passe-t-il le score COURANT pour cette fiche ?
+    Sous le nom de l'artiste de la fiche OU de son principal (la recherche
+    d'un featuring se fait sous le principal, `artiste_de_recherche`).
+    `fiche` : `title`, `album`, `artist.name`, `primary_artist_name`,
+    `featured_artists` (les invités jugent un remixeur nommé, 2026-10-26).
+
+    Règle A (décision utilisateur 2026-11-19) : une fiche qui en a ABSORBÉ une
+    autre par une fusion consignée (`titres_absorbes`) garde ce que la
+    recherche avait trouvé sous le titre de l'absorbée — la vidéo est jugée
+    contre ce titre-là, et sa durée (`duree`) doit être à ± 2 s d'un catalogue
+    de la fiche lu par identifiant (« Je vous passe le salam » dans « Salam » ;
+    simulée : 26 vidéos, 24 rendues, 2 que la durée dément)."""
+    if not recherche:
+        return True  # faits inconnus : on ne conclut pas
+    if _score_suffit(fiche, recherche, fiche.title):
+        return True
+    if not duree_au_catalogue(fiche, duree):
+        return False
+    from src.utils.corrections_fiches import titres_absorbes
+
+    return any(_score_suffit(fiche, recherche, t) for t in titres_absorbes(fiche))
+
+
 def vue_comptee(
     fiche,
     video_id: str,
@@ -80,6 +118,7 @@ def vue_comptee(
     source: str | None,
     valides,
     recherche: dict | None = None,
+    duree: int | None = None,
 ) -> bool:
     # Le disque ENTIER (« FULL EP ») n'est pas le morceau : compté une fois
     # au niveau de l'album (`streams_calculator.clips_doubles`), quelle que
@@ -87,7 +126,7 @@ def vue_comptee(
     if video_de_disque(titre, fiche.album):
         return False
     if source == "search_auto":
-        return recherche_valide(fiche, recherche)
+        return recherche_valide(fiche, recherche, duree)
     if source != "genius_media" or not titre:
         return True  # titre inconnu : on ne conclut pas
     video = SimpleNamespace(title=titre, source=source)
@@ -98,12 +137,13 @@ def vue_comptee(
 
 def videos_exclues(fiche, videos, valides) -> set[str]:
     """`video_id` des vidéos de `fiche` dont les vues ne comptent pas.
-    `videos` : objets à `video_id`, `title`, `source`, `recherche` (`TrackVideo`)."""
+    `videos` : objets à `video_id`, `title`, `source`, `recherche`, `duration`
+    (`TrackVideo`)."""
     return {
         v.video_id
         for v in videos
         if v.video_id
-        and not vue_comptee(fiche, v.video_id, v.title, v.source, valides, v.recherche)
+        and not vue_comptee(fiche, v.video_id, v.title, v.source, valides, v.recherche, v.duration)
     }
 
 

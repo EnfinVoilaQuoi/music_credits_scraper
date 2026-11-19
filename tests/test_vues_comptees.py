@@ -255,3 +255,50 @@ def test_le_portier_de_la_recherche_rejoue_les_totaux(data_manager):
     assert regles.rejouer_recherche_youtube(data_manager, a).startswith("1 total")
     assert _ytm(data_manager, t.id) is None
     assert regles.perimes(data_manager, "Django") == []
+
+
+# ── Règle A (décision utilisateur 2026-11-19) : la recherche d'une fiche absorbée
+
+
+SALAM = {"titre": "Je vous passe le salam", "artistes": ["Rim'K"], "album": "Famille nombreuse"}
+
+
+def _salam(monkeypatch, fusions=True):
+    from src.utils import corrections_fiches
+
+    entrees = {
+        "Rim'K": [
+            {
+                "fiche": {"titre": "Je vous passe le salam", "album": "Famille nombreuse"},
+                "fusionner_dans": {"genius_id": 3177417},
+            }
+        ]
+    }
+    monkeypatch.setattr(corrections_fiches, "charger", lambda: entrees if fusions else {})
+    fiche = Track(
+        title="Salam", artist=Artist(name="Rim'K"), genius_id=3177417, album="Famille nombreuse"
+    )
+    fiche.durations_observees = {"deezer": 131, "ytmusic": 150}
+    return fiche
+
+
+def test_la_recherche_de_la_fiche_absorbee_reste_a_la_fiche(monkeypatch):
+    """« Je vous passe le salam » (fiche Deezer) fusionnée dans « Salam » : la
+    vidéo que la recherche avait trouvée sous ce titre compte, à ± 2 s du
+    catalogue (2026-11-19)."""
+    fiche = _salam(monkeypatch)
+    assert vue_comptee(fiche, "n" * 11, "Je vous passe le salam", "search_auto", set(), SALAM, 132)
+
+
+def test_la_duree_contraire_garde_le_refus(monkeypatch):
+    """Une durée lue hors catalogue (YouTube Music) ne témoigne pas ; à plus de
+    2 s des catalogues, la vidéo reste refusée (« Man On The Moon (Album
+    Version (Explicit)) », 212 s contre 207 s)."""
+    fiche = _salam(monkeypatch)
+    assert not vue_comptee(fiche, "n" * 11, "Je vous passe", "search_auto", set(), SALAM, 150)
+    assert not vue_comptee(fiche, "n" * 11, "Je vous passe", "search_auto", set(), SALAM, None)
+
+
+def test_sans_fusion_consignee_le_score_seul_juge(monkeypatch):
+    fiche = _salam(monkeypatch, fusions=False)
+    assert not vue_comptee(fiche, "n" * 11, "Je vous passe", "search_auto", set(), SALAM, 132)

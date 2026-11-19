@@ -1935,6 +1935,18 @@ class TrackRepository:
             primary_artist_name=ligne["primary_artist_name"],
             featured_artists=ligne["featured_artists"],
             artist=SimpleNamespace(name=ligne["artiste"]),
+            # Règle A (2026-11-19) : la durée d'une vidéo contre les catalogues.
+            durations_observees={
+                r[0]: int(float(r[1]))
+                for r in conn.execute(
+                    text(
+                        "SELECT source, value FROM observations "
+                        "WHERE track_id = :t AND field = 'duration'"
+                    ),
+                    {"t": track_id},
+                )
+                if r[1]
+            },
         )
         videos = [
             SimpleNamespace(
@@ -1942,10 +1954,11 @@ class TrackRepository:
                 title=r["title"],
                 source=r["source"],
                 recherche=recherche_de_ligne(r["recherche"]),
+                duration=r["duration"],
             )
             for r in conn.execute(
                 text(
-                    "SELECT video_id, title, source, recherche FROM track_videos "
+                    "SELECT video_id, title, source, recherche, duration FROM track_videos "
                     "WHERE track_id = :t"
                 ),
                 {"t": track_id},

@@ -105,6 +105,35 @@ def test_l_audit_voit_la_parution_fondue(fondue):
     assert "single_fondu" in au.FAMILLES and "single_fondu" not in au.FAMILLES_HORS_CRITERE
 
 
+def test_un_maxi_que_deezer_liste_n_est_pas_fondu(data_manager):
+    """IAM « Je Danse Le Mia » (2026-11-19) : un single Deezer de 4 pistes
+    (remixes, faces B), toutes posées par sa propre liste Deezer — ce n'est pas
+    un album fondu, ni pour l'audit, ni pour la réparation."""
+    dm = data_manager
+    artist = Artist(name="IAM", deezer_id=2)
+    artist.id = dm.save_artist(artist)
+    for i, titre in enumerate(["Je Danse Le Mia (Remix)", "Ombre est lumière", "L'ultra mia", "X"]):
+        t = Track(title=titre, artist=artist, album="Je Danse Le Mia")
+        t.id = dm.save_track(t)
+        dm.record_release_observations(
+            t.id,
+            [
+                ReleaseObservation(
+                    title="Je Danse Le Mia",
+                    source="deezer",
+                    external_release_id=299737,
+                    external_track_id=500 + i,
+                    record_type="single",
+                    nb_pistes=4,
+                    disc_number=1,
+                    track_number=i + 1,
+                )
+            ],
+        )
+    assert _cas_d_audit(dm) == []
+    assert dm.singles_fondus() == []
+
+
 def test_a_blanc_rien_ne_change(fondue):
     dm, _fiches, genius, album = fondue
     (cas,) = dm.singles_fondus()

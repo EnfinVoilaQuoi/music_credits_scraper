@@ -5645,7 +5645,9 @@ class TrackRepository:
             conn.execute(
                 text(
                     "SELECT r.*, (SELECT COUNT(*) FROM release_tracks rt WHERE rt.release_id = r.id) "
-                    "AS n FROM releases r WHERE r.record_type = 'single' ORDER BY r.id"
+                    "AS n, (SELECT COUNT(*) FROM release_tracks rt WHERE rt.release_id = r.id "
+                    "AND rt.source = 'deezer') AS n_deezer "
+                    "FROM releases r WHERE r.record_type = 'single' ORDER BY r.id"
                 )
             )
             .mappings()
@@ -5653,7 +5655,7 @@ class TrackRepository:
         )
         plan = []
         for r in lignes:
-            if not single_fondu(r["record_type"], int(r["n"])):
+            if not single_fondu(r["record_type"], int(r["n"]), int(r["n_deezer"])):
                 continue
             rid = int(r["id"])
             ids = conn.execute(

@@ -1947,13 +1947,15 @@ def singles_fondus(c, pistes) -> list[Cas]:
     liens: dict[int, list] = {}
     for r in c.execute(
         "SELECT r.id, r.title, r.record_type, r.deezer_album_id, rt.track_id, "
-        "rt.position_source FROM releases r JOIN release_tracks rt ON rt.release_id = r.id "
+        "rt.position_source, rt.source FROM releases r "
+        "JOIN release_tracks rt ON rt.release_id = r.id "
         "WHERE r.record_type = 'single' ORDER BY r.id, rt.track_id"
     ):
         liens.setdefault(int(r["id"]), []).append(r)
     cas = []
     for release_id, lignes in liens.items():
-        if not single_fondu(lignes[0]["record_type"], len(lignes)):
+        par_deezer = sum(1 for x in lignes if x["source"] == "deezer")
+        if not single_fondu(lignes[0]["record_type"], len(lignes), par_deezer):
             continue
         a_nous = [int(x["track_id"]) for x in lignes if int(x["track_id"]) in fiches]
         if not a_nous:

@@ -58,7 +58,13 @@ def parution_compatible(
     return True
 
 
-def single_fondu(record_type: str | None, pistes_liees: int) -> bool:
+def single_fondu(record_type: str | None, pistes_liees: int, pistes_deezer: int = 0) -> bool:
     """Forme d'audit : une parution déclarée single qui porte plus de
-    `PISTES_SINGLE_MAX` pistes — un single fondu avec l'album de son titre."""
-    return _type(record_type) == "single" and pistes_liees > PISTES_SINGLE_MAX
+    `PISTES_SINGLE_MAX` pistes — un single fondu avec l'album de son titre.
+
+    `pistes_deezer` : les pistes que la liste Deezer du single donne elle-même.
+    Un maxi-single que Deezer liste à 4 pistes (remixes, faces B) n'est pas
+    fondu : seules comptent les pistes AU-DELÀ de sa propre liste (IAM « Je
+    Danse Le Mia », « Le Feu », 2026-11-19)."""
+    plafond = max(PISTES_SINGLE_MAX, pistes_deezer or 0)
+    return _type(record_type) == "single" and pistes_liees > plafond

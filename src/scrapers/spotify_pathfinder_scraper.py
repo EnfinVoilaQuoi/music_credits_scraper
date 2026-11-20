@@ -1,0 +1,195 @@
+"""La passe Spotify de l'étape streams SANS navigateur, avec repli sur les pages.
+
+`SpotifyPathfinderScraper` offre EXACTEMENT l'interface de `SpotifyWebScraper`
+(`session()`, `afetch_artist`, `afetch_track`, `afetch_album`, mêmes dictionnaires
+rendus) au-dessus des requêtes internes du lecteur web (`src/api/spotify_pathfinder`).
+`update_spotify_streams` ne change donc pas : il reçoit un autre scraper.
+
+Les observations restent écrites sous la source `spotify_web` : ce sont LES MÊMES
+compteurs, durées et auditeurs que la page affiche (mesuré le 2026-11-20 : compteurs
+égaux à la croissance près, durées à moins de 1 s, auditeurs à ± 1 %). Seul le
+transport change ; il a sa propre clé d'observabilité (`spotify_pathfinder`), qui
+dit sa santé à part. L'ordre de `DISCOGRAPHY_PRIORITIES`, la fraîcheur des relevés
+et les constats « sans compteur » valent donc tels quels.
+
+Ce que le JSON donne en plus de la page :
+- la page album porte le compteur de CHAQUE piste (`playcounts`) : le total d'un
+  disque coûte une requête par édition au lieu d'une page par piste ;
+- la durée est celle de la piste, à la milliseconde (tronquée à la seconde, comme
+  l'affichage « m:ss » que lisait la page : aucune observation ne bouge pour rien).
+
+`SpotifyAvecRepli` : chaque lecture passe d'abord par les requêtes internes ; sur
+un échec (`SansReponse` : bridage, panne, requête renommée), la page du navigateur
+est lue à la place — la session navigateur ne s'ouvre qu'au premier repli. Après
+`ECHECS_AVANT_BASCULE` échecs DE SUITE, le run bascule sur le navigateur seul.
+"""
+
+from __future__ import annotations
+
+from contextlib import AsyncExitStack, asynccontextmanager
+
+from src.api.spotify_pathfinder import PisteSpotify, SpotifyPathfinder
+from src.observability.issues import SansReponse
+from src.utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+#: Échecs de suite des requêtes internes avant de passer au navigateur seul.
+ECHECS_AVANT_BASCULE = 3
+
+
+def _secondes(piste: PisteSpotify) -> int | None:
+    """Durée en secondes ENTIÈRES, tronquées comme l'affichage « m:ss » de la
+    page (213 573 ms → 213, que la page affiche « 3:33 »)."""
+    return int(piste.duree_s) if piste.duree_s else None
+
+
+class SpotifyPathfinderScraper:
+    """`SpotifyWebScraper` sans navigateur. Une session = un client (la
+    découverte des requêtes ne se fait qu'une fois par run)."""
+
+    def __init__(self, client: SpotifyPathfinder | None = None) -> None:
+        self._client_fourni = client
+
+    @asynccontextmanager
+    async def session(self):
+        if self._client_fourni is not None:
+            yield self._client_fourni
+            return
+        async with SpotifyPathfinder() as client:
+            yield client
+
+    def close(self) -> None:
+        """Rien à fermer hors session (interface de `SpotifyWebScraper`)."""
+
+    async def afetch_artist(self, sess: SpotifyPathfinder, artist_id: str) -> dict | None:
+        """{'name', 'monthly_listeners', 'playcounts' (titres populaires),
+        'albums': {album_id: titre}} — None si le profil n'existe pas."""
+        artiste = await sess.artiste(artist_id)
+        if artiste is None:
+            return None
+        if artiste.auditeurs_mensuels is None:
+            logger.warning(f"Spotify {artist_id} : auditeurs mensuels absents de la réponse")
+        return {
+            "name": artiste.nom,
+            "monthly_listeners": artiste.auditeurs_mensuels,
+            "playcounts": dict(artiste.top_titres),
+            "albums": dict(artiste.disques),
+        }
+
+    async def afetch_track(self, sess: SpotifyPathfinder, track_id: str) -> dict | None:
+        """{'playcounts': {id: n}, 'durations': {id: s}, 'sans_compteur'} —
+        None si la piste n'existe pas. Sans compteur, Spotify n'en affiche pas :
+        un constat (`sans_compteur`), comme l'en-tête lu sans compteur."""
+        piste = await sess.piste(track_id)
+        if piste is None:
+            return None
+        secondes = _secondes(piste)
+        return {
+            "playcounts": {track_id: piste.compteur} if piste.compteur is not None else {},
+            "durations": {track_id: secondes} if secondes else {},
+            "sans_compteur": piste.compteur is None,
+        }
+
+    async def afetch_album(self, sess: SpotifyPathfinder, album_id: str) -> dict | None:
+        """{'title', 'tracks', 'track_ids', 'announced', 'indisponibles',
+        'durations', 'playcounts'} — None si l'album n'existe pas.
+
+        Une piste INDISPONIBLE (`playable` faux) est la ligne grisée de la page :
+        hors des pistes et du total, comptée à part (décision utilisateur
+        2026-11-10). `title` : la requête ne le sert pas (l'appelant nomme le
+        disque par sa base)."""
+        pistes = await sess.pistes_album(album_id)
+        if pistes is None:
+            return None
+        lisibles = [p for p in pistes if p.jouable is not False]
+        return {
+            "title": None,
+            "tracks": [(p.id, p.titre) for p in lisibles],
+            "track_ids": [p.id for p in lisibles],
+            "announced": len(pistes),
+            "indisponibles": len(pistes) - len(lisibles),
+            "durations": {p.id: s for p in lisibles if (s := _secondes(p))},
+            "playcounts": {p.id: p.compteur for p in lisibles if p.compteur is not None},
+        }
+
+
+class SpotifyAvecRepli:
+    """Les requêtes internes d'abord, la page du navigateur en repli."""
+
+    def __init__(self, principal: SpotifyPathfinderScraper, repli) -> None:
+        self.principal = principal
+        self.repli = repli
+        self.echecs_de_suite = 0
+        self.bascule = False
+        self.replis = 0
+
+    @asynccontextmanager
+    async def session(self):
+        async with AsyncExitStack() as pile, self.principal.session() as sess:
+            yield _SessionsAvecRepli(sess, pile, self.repli)
+
+    def close(self) -> None:
+        self.repli.close()
+
+    async def _lire(self, sessions: _SessionsAvecRepli, cle: str, lecture):
+        """`lecture(scraper, session)` : la même lecture chez l'un ou l'autre."""
+        if not self.bascule:
+            try:
+                rendu = await lecture(self.principal, sessions.principale)
+            except SansReponse as e:
+                self.echecs_de_suite += 1
+                logger.info(f"Spotify {cle} : requête interne sans réponse ({e.kind}) — repli page")
+                if self.echecs_de_suite >= ECHECS_AVANT_BASCULE:
+                    self.bascule = True
+                    logger.warning(
+                        f"🔁 Spotify : {self.echecs_de_suite} requêtes internes en échec de "
+                        "suite — le reste du run passe par les pages (navigateur)"
+                    )
+            else:
+                self.echecs_de_suite = 0
+                return rendu
+        self.replis += 1
+        sess_repli = await sessions.repli_ouvert()
+        return await lecture(self.repli, sess_repli)
+
+    async def afetch_artist(self, sessions, artist_id: str) -> dict | None:
+        return await self._lire(
+            sessions, artist_id, lambda s, sess: s.afetch_artist(sess, artist_id)
+        )
+
+    async def afetch_track(self, sessions, track_id: str) -> dict | None:
+        return await self._lire(sessions, track_id, lambda s, sess: s.afetch_track(sess, track_id))
+
+    async def afetch_album(self, sessions, album_id: str) -> dict | None:
+        return await self._lire(sessions, album_id, lambda s, sess: s.afetch_album(sess, album_id))
+
+
+class _SessionsAvecRepli:
+    """La session des requêtes internes, et celle du navigateur ouverte au
+    premier besoin (un lancement de navigateur coûte ; un run sans échec n'en
+    paie aucun)."""
+
+    def __init__(self, principale, pile: AsyncExitStack, repli) -> None:
+        self.principale = principale
+        self._pile = pile
+        self._repli = repli
+        self._sess_repli = None
+
+    async def repli_ouvert(self):
+        if self._sess_repli is None:
+            logger.info("Spotify : ouverture de la session navigateur (repli)")
+            self._sess_repli = await self._pile.enter_async_context(self._repli.session())
+        return self._sess_repli
+
+
+def scraper_des_streams():
+    """Le scraper de la passe Spotify de l'étape streams : requêtes internes avec
+    repli sur les pages si `SPOTIFY_STREAMS_PAR_PATHFINDER`, sinon les pages."""
+    from src.config import SPOTIFY_STREAMS_PAR_PATHFINDER
+    from src.scrapers.spotify_web_scraper import SpotifyWebScraper
+
+    pages = SpotifyWebScraper(headless=True)
+    if not SPOTIFY_STREAMS_PAR_PATHFINDER:
+        return pages
+    return SpotifyAvecRepli(SpotifyPathfinderScraper(), pages)

@@ -752,7 +752,7 @@ class TestEntreePublique:
             def close(self):
                 ferme.append(True)
 
-        monkeypatch.setattr(uss, "SpotifyWebScraper", lambda headless=True: _ScraperMuet())
+        monkeypatch.setattr(uss, "scraper_des_streams", lambda: _ScraperMuet())
 
         async def faux_crawl(artist, dm, scraper, sid, stop, result, full, fiches):
             result["spotify_artist_id_vu"] = sid

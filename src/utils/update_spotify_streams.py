@@ -38,7 +38,7 @@ from datetime import datetime, timedelta
 from src.concurrency import async_loop
 from src.config import settings
 from src.scrapers.crawl4ai_scraper_base import ChronoPages, CrawlAIScraperBase
-from src.scrapers.spotify_web_scraper import SpotifyWebScraper
+from src.scrapers.spotify_pathfinder_scraper import scraper_des_streams
 from src.utils.logger import get_logger
 from src.utils.title_matching import base_album_key, normalize_title
 
@@ -143,7 +143,7 @@ def update_spotify_streams(
     Args:
         artist: objet Artist (`id`, `name`, `spotify_id`).
         data_manager: instance de DataManager.
-        scraper: SpotifyWebScraper injecté (tests / provider) ; créé sinon.
+        scraper: scraper injecté (tests / provider) ; sinon `scraper_des_streams()`.
         stop_requested: callable testé ENTRE deux morceaux (jamais au milieu
             d'une écriture), pour une fermeture propre du worker.
         full_crawl: à False, SEULE la page artiste est ouverte — auditeurs
@@ -179,7 +179,7 @@ def update_spotify_streams(
     result["spotify_artist_id"] = spotify_artist_id
 
     own_scraper = scraper is None
-    scraper = scraper or SpotifyWebScraper(headless=True)
+    scraper = scraper or scraper_des_streams()
     # Temps par type de page et par phase (2026-10-31) : un VRAI scraper
     # seulement, les faux des tests n'en ont pas.
     chronometre = isinstance(scraper, CrawlAIScraperBase)
@@ -733,6 +733,10 @@ async def _totaliser_albums(
             result["pages"] += 1
             if album:
                 compositions[album_id] = album
+                # Les requêtes internes servent le compteur de CHAQUE piste avec
+                # la composition (`spotify_pathfinder_scraper`, 2026-11-20) : le
+                # total ne paie plus une page par piste. La page web n'en a aucun.
+                releves.update(album.get("playcounts") or {})
                 if id_map is not None:
                     for fiche, sid in resoudre_ids_par_album(
                         album, artist.name, sans_id.get(cle, []), id_map.__contains__

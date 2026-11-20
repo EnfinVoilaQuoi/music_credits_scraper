@@ -13,6 +13,95 @@
   "stats": {
    "followers": 5790328,
    "monthlyListeners": 20280373
+  },
+  "discography": {
+   "topTracks": {
+    "items": [
+     {
+      "track": {
+       "uri": "spotify:track:2MLHyLy5z5l5YRp7momlgw",
+       "name": "Island In The Sun",
+       "playcount": "1230018324"
+      }
+     },
+     {
+      "track": {
+       "uri": "spotify:track:1O9D7P7Z1wMJXW19zTXrXi",
+       "name": "Go Away",
+       "playcount": "184770943"
+      }
+     },
+     {
+      "track": {
+       "uri": "spotify:track:0J9PAXxCZqFplANb0MPjT9",
+       "name": "Say It Ain't So - 2024 Remaster",
+       "playcount": "758250464"
+      }
+     }
+    ]
+   },
+   "popularReleasesAlbums": {
+    "totalCount": 20,
+    "items": [
+     {
+      "id": "2OBSz5Nlto0Q5CtYPzPY7c",
+      "name": "Weezer",
+      "uri": "spotify:album:2OBSz5Nlto0Q5CtYPzPY7c"
+     },
+     {
+      "id": "5bwoCpDhski3iIxwsdgPTM",
+      "name": "Everything Will Be Alright In The End",
+      "uri": "spotify:album:5bwoCpDhski3iIxwsdgPTM"
+     }
+    ]
+   },
+   "albums": {
+    "totalCount": 28,
+    "items": [
+     {
+      "releases": {
+       "items": [
+        {
+         "id": "4X3LhfPfmdcMQblc5k11WC",
+         "name": "Weezer",
+         "uri": "spotify:album:4X3LhfPfmdcMQblc5k11WC"
+        }
+       ]
+      }
+     },
+     {
+      "releases": {
+       "items": [
+        {
+         "id": "6RQcT00KSYpm6mqCLzGwJg",
+         "name": "1192",
+         "uri": "spotify:album:6RQcT00KSYpm6mqCLzGwJg"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "singles": {
+    "totalCount": 42,
+    "items": [
+     {
+      "releases": {
+       "items": [
+        {
+         "id": "02x4x22HOnv0j9Zk1FJpeY",
+         "name": "C.E.O.",
+         "uri": "spotify:album:02x4x22HOnv0j9Zk1FJpeY"
+        }
+       ]
+      }
+     }
+    ]
+   },
+   "compilations": {
+    "totalCount": 0,
+    "items": []
+   }
   }
  }
 }

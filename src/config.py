@@ -175,6 +175,14 @@ class Settings(BaseSettings):
     # comprises) : après un 429, SpotAPI met l'hôte en pause jusqu'à son
     # `Retry-After`, plafonné à une HEURE — sans borne, un run attendrait.
     spotify_pathfinder_delai_s: float = 60.0
+    # La passe Spotify de l'étape streams lit les requêtes internes d'abord, les
+    # pages du navigateur en repli (`spotify_pathfinder_scraper`). Mêmes
+    # observations `spotify_web` ; à False, les pages seules (l'ancien chemin).
+    # Activée après simulation (`scripts/simuler_spotify_pathfinder.py`,
+    # 2026-11-20 : 200 / 200 pistes, compteurs × 1,0001 à 1,19 = la croissance
+    # depuis le relevé, aucun en baisse, durées identiques à la seconde ; 40 / 40
+    # totaux d'album recalculés, médiane × 1,002 ; aucun échec).
+    spotify_streams_par_pathfinder: bool = True
     # Délai pendant lequel une source qui a RÉPONDU « rien » pour un morceau
     # n'est pas redemandée hors mode forcé (`source_track_absences`, e46). Même
     # valeur que les mémoires d'absence existantes (ReccoBeats, Musixmatch,
@@ -302,6 +310,7 @@ RECCOBEATS_NOT_FOUND_TTL_DAYS = settings.reccobeats_not_found_ttl_days
 
 # Spotify par les requêtes internes du lecteur web (délai de garde d'un appel)
 SPOTIFY_PATHFINDER_DELAI_S = settings.spotify_pathfinder_delai_s
+SPOTIFY_STREAMS_PAR_PATHFINDER = settings.spotify_streams_par_pathfinder
 
 # Désambiguïsation canal YTM (gate d'identité)
 YTM_IDENTITY_MIN_MATCHED = settings.ytm_identity_min_matched

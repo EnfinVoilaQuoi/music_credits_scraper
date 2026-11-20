@@ -45,9 +45,9 @@ class StreamsProvider:
 
     def _spotify_web_client(self):
         if self._spotify_web is None:
-            from src.scrapers.spotify_web_scraper import SpotifyWebScraper
+            from src.scrapers.spotify_pathfinder_scraper import scraper_des_streams
 
-            self._spotify_web = SpotifyWebScraper(headless=True)
+            self._spotify_web = scraper_des_streams()
         return self._spotify_web
 
     def _ytm_client(self):

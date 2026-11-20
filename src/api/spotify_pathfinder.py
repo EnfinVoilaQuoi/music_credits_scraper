@@ -76,6 +76,9 @@ class PisteSpotify:
     disque: int | None
     #: (nom, ID Spotify) des artistes crédités, dans l'ordre servi.
     artistes: tuple[tuple[str, str | None], ...]
+    #: `playability.playable` : False = piste indisponible sur Spotify (la ligne
+    #: grisée, sans lien, de la page album) ; None si non servi.
+    jouable: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +87,12 @@ class ArtisteSpotify:
     nom: str
     auditeurs_mensuels: int | None
     abonnes: int | None
+    #: Titres populaires de la page artiste : (ID de piste, compteur).
+    top_titres: tuple[tuple[str, int], ...] = ()
+    #: Disques cités par la page artiste, (ID d'album, titre), dans l'ordre :
+    #: sorties populaires, albums, singles, compilations (les ~10 premiers de
+    #: chaque rayon, comme la page).
+    disques: tuple[tuple[str, str], ...] = ()
 
 
 class StructureInattendue(ValueError):
@@ -127,6 +136,13 @@ def _union(data: object, cle: str) -> Mapping[str, Any] | None:
     return objet
 
 
+def _jouable(piste: Mapping[str, Any]) -> bool | None:
+    jouabilite = piste.get("playability")
+    if isinstance(jouabilite, Mapping) and isinstance(jouabilite.get("playable"), bool):
+        return jouabilite["playable"]
+    return None
+
+
 def _artistes(groupe: object) -> list[tuple[str, str | None]]:
     if not isinstance(groupe, Mapping):
         return []
@@ -161,6 +177,7 @@ def lire_piste(data: object) -> PisteSpotify | None:
         place=_entier(piste.get("trackNumber")),
         disque=_entier(piste.get("discNumber")),
         artistes=tuple(artistes),
+        jouable=_jouable(piste),
     )
 
 
@@ -191,6 +208,7 @@ def lire_page_album(data: object, album_id: str) -> tuple[list[PisteSpotify], in
                 place=_entier(piste.get("trackNumber")),
                 disque=_entier(piste.get("discNumber")),
                 artistes=tuple(_artistes(piste.get("artists"))),
+                jouable=_jouable(piste),
             )
         )
     return pistes, _entier(pistes_v2.get("totalCount"))
@@ -208,12 +226,54 @@ def lire_artiste(data: object) -> ArtisteSpotify | None:
         raise StructureInattendue("artiste sans id ni nom")
     stats = artiste.get("stats")
     stats = stats if isinstance(stats, Mapping) else {}
+    discographie = artiste.get("discography")
+    discographie = discographie if isinstance(discographie, Mapping) else {}
     return ArtisteSpotify(
         id=id_,
         nom=nom,
         auditeurs_mensuels=_entier(stats.get("monthlyListeners")),
         abonnes=_entier(stats.get("followers")),
+        top_titres=tuple(_top_titres(discographie.get("topTracks"))),
+        disques=tuple(_disques(discographie)),
     )
+
+
+def _items(rayon: object) -> list[Mapping[str, Any]]:
+    if not isinstance(rayon, Mapping):
+        return []
+    return [item for item in rayon.get("items") or () if isinstance(item, Mapping)]
+
+
+def _top_titres(rayon: object) -> list[tuple[str, int]]:
+    titres = []
+    for item in _items(rayon):
+        piste = item.get("track")
+        if not isinstance(piste, Mapping):
+            continue
+        id_ = _id_de_l_uri(piste.get("uri")) or piste.get("id")
+        compteur = _entier(piste.get("playcount"))
+        if isinstance(id_, str) and compteur is not None:
+            titres.append((id_, compteur))
+    return titres
+
+
+#: Rayons de disques de la page artiste, dans l'ordre où la page les montre.
+_RAYONS = ("popularReleasesAlbums", "albums", "singles", "compilations")
+
+
+def _disques(discographie: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """(ID, titre) des disques cités. Un rayon groupe les éditions d'un disque
+    (`releases.items`) ; `popularReleasesAlbums` les donne à plat."""
+    vus: dict[str, str] = {}
+    for rayon in _RAYONS:
+        for item in _items(discographie.get(rayon)):
+            editions = _items(item.get("releases")) or [item]
+            for edition in editions:
+                id_ = edition.get("id") or _id_de_l_uri(edition.get("uri"))
+                titre = edition.get("name")
+                if isinstance(id_, str) and isinstance(titre, str):
+                    vus.setdefault(id_, titre)
+    return list(vus.items())
 
 
 # ── Transport (spotapi) ───────────────────────────────────────────────────────

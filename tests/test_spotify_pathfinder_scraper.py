@@ -1,0 +1,254 @@
+"""La passe Spotify des streams par les requêtes internes, avec repli sur les pages
+(`src/scrapers/spotify_pathfinder_scraper.py`). Sans réseau : faux client et faux
+scraper de pages."""
+
+import asyncio
+import json
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+from src.api import spotify_pathfinder as sp
+from src.observability.issues import IssueKind, SansReponse
+from src.scrapers import spotify_pathfinder_scraper as sps
+from tests.test_update_spotify_streams import (
+    _ID_A,
+    _ID_B,
+    _DataManager,
+    _page_artiste,
+    _run,
+    _Scraper,
+)
+
+FIXTURES = Path(__file__).parent / "fixtures" / "spotify_pathfinder"
+
+
+def _fixture(nom: str) -> dict:
+    return json.loads((FIXTURES / f"{nom}.json").read_text(encoding="utf-8"))
+
+
+def _piste(id_, compteur=1000, duree_s=213.573, jouable=True, titre="T", place=1):
+    return sp.PisteSpotify(
+        id=id_,
+        titre=titre,
+        compteur=compteur,
+        duree_s=duree_s,
+        album_id="alb",
+        place=place,
+        disque=1,
+        artistes=(),
+        jouable=jouable,
+    )
+
+
+class _FauxClient:
+    """Imite `SpotifyPathfinder` : rend ou lève ce qu'on lui a préparé."""
+
+    def __init__(self, pistes=None, albums=None, artiste=None, erreurs=()):
+        self.pistes = pistes or {}
+        self.albums = albums or {}
+        self._artiste = artiste
+        self.erreurs = list(erreurs)
+        self.appels: list[str] = []
+
+    def _peut_echouer(self):
+        if self.erreurs:
+            erreur = self.erreurs.pop(0)
+            if erreur is not None:
+                raise erreur
+
+    async def piste(self, id_):
+        self.appels.append(f"piste:{id_}")
+        self._peut_echouer()
+        return self.pistes.get(id_)
+
+    async def pistes_album(self, id_):
+        self.appels.append(f"album:{id_}")
+        self._peut_echouer()
+        return self.albums.get(id_)
+
+    async def artiste(self, id_):
+        self.appels.append(f"artiste:{id_}")
+        self._peut_echouer()
+        return self._artiste
+
+
+def _scraper(client):
+    return sps.SpotifyPathfinderScraper(client)
+
+
+def _lire(coro):
+    return asyncio.run(coro)
+
+
+# ── L'interface de SpotifyWebScraper ──────────────────────────────────────────
+class TestMemeInterfaceQueLesPages:
+    def test_artiste(self):
+        artiste = sp.lire_artiste(_fixture("artiste"))
+        page = _lire(_scraper(_FauxClient()).afetch_artist(_FauxClient(artiste=artiste), "x"))
+        assert page["name"] == "Weezer"
+        assert page["monthly_listeners"] == 20280373
+        assert page["playcounts"]["2MLHyLy5z5l5YRp7momlgw"] == 1230018324
+        # Sorties populaires, puis albums (éditions à plat), puis singles.
+        assert list(page["albums"].items())[:3] == [
+            ("2OBSz5Nlto0Q5CtYPzPY7c", "Weezer"),
+            ("5bwoCpDhski3iIxwsdgPTM", "Everything Will Be Alright In The End"),
+            ("4X3LhfPfmdcMQblc5k11WC", "Weezer"),
+        ]
+        assert page["albums"]["02x4x22HOnv0j9Zk1FJpeY"] == "C.E.O."
+
+    def test_piste_duree_tronquee_comme_l_affichage(self):
+        client = _FauxClient(pistes={"p": _piste("p", compteur=42, duree_s=213.573)})
+        page = _lire(_scraper(client).afetch_track(client, "p"))
+        assert page == {"playcounts": {"p": 42}, "durations": {"p": 213}, "sans_compteur": False}
+
+    def test_piste_sans_compteur_est_un_constat(self):
+        client = _FauxClient(pistes={"p": _piste("p", compteur=None)})
+        page = _lire(_scraper(client).afetch_track(client, "p"))
+        assert page["playcounts"] == {} and page["sans_compteur"] is True
+
+    def test_piste_inconnue(self):
+        client = _FauxClient()
+        assert _lire(_scraper(client).afetch_track(client, "p")) is None
+
+    def test_album_avec_ses_compteurs_et_sans_les_pistes_indisponibles(self):
+        pistes = [
+            _piste("a", compteur=10, titre="Un", place=1),
+            _piste("b", compteur=None, jouable=False, titre="Grisée", place=2),
+            _piste("c", compteur=30, titre="Trois", place=3),
+        ]
+        client = _FauxClient(albums={"alb": pistes})
+        album = _lire(_scraper(client).afetch_album(client, "alb"))
+        assert album["tracks"] == [("a", "Un"), ("c", "Trois")]
+        assert album["track_ids"] == ["a", "c"]
+        assert album["announced"] == 3 and album["indisponibles"] == 1
+        assert album["playcounts"] == {"a": 10, "c": 30}
+        assert album["durations"] == {"a": 213, "c": 213}
+
+    def test_album_reel_de_la_fixture(self):
+        lu, _total = sp.lire_page_album(_fixture("pistes_album"), "4eEGkGVU2YOsdieBcwKZ9p")
+        client = _FauxClient(albums={"4eEGkGVU2YOsdieBcwKZ9p": lu})
+        album = _lire(_scraper(client).afetch_album(client, "4eEGkGVU2YOsdieBcwKZ9p"))
+        assert album["announced"] == 5 and album["indisponibles"] == 0
+        assert sum(album["playcounts"].values()) == 15141 + 41397 + 17136 + 39375 + 21689
+
+
+# ── Le total d'album sans une page par piste ──────────────────────────────────
+def test_le_total_d_album_ne_rouvre_aucune_piste():
+    """Avec les compteurs servis par la requête d'album, `_totaliser_albums`
+    n'a plus de pistes manquantes : zéro page titre pour le total."""
+    dm = _DataManager()
+    album = {
+        "title": None,
+        "tracks": [(_ID_A, "Un"), (_ID_B, "Deux"), ("zzzzzzzzzzzzzzzzzzzzzz", "Trois")],
+        "track_ids": [_ID_A, _ID_B, "zzzzzzzzzzzzzzzzzzzzzz"],
+        "announced": 3,
+        "indisponibles": 0,
+        "durations": {},
+        "playcounts": {_ID_A: 100, _ID_B: 200, "zzzzzzzzzzzzzzzzzzzzzz": 300},
+    }
+    scraper = _Scraper(
+        _page_artiste(albums={"album00000000000000000x": "Mon Album"}),
+        album_pages={"album00000000000000000x": album},
+    )
+    result = _run(dm, scraper)
+    # La piste hors base n'a pas été ouverte : son compteur vient de l'album.
+    assert "zzzzzzzzzzzzzzzzzzzzzz" not in scraper.visited
+    assert dm.album_calls and dm.album_calls[0]["streams"] == 600
+    assert result["albums_totalises"] == 1
+
+
+# ── Le repli sur les pages ────────────────────────────────────────────────────
+class _Pages:
+    """Faux `SpotifyWebScraper` : compte les sessions ouvertes et les lectures."""
+
+    def __init__(self):
+        self.sessions = 0
+        self.lus: list[str] = []
+        self.ferme = False
+
+    @asynccontextmanager
+    async def session(self):
+        self.sessions += 1
+        yield "navigateur"
+
+    def close(self):
+        self.ferme = True
+
+    async def afetch_track(self, sess, track_id):
+        assert sess == "navigateur"
+        self.lus.append(track_id)
+        return {"playcounts": {track_id: 7}, "durations": {}, "sans_compteur": False}
+
+    async def afetch_artist(self, sess, artist_id):
+        self.lus.append(artist_id)
+        return _page_artiste()
+
+    async def afetch_album(self, sess, album_id):
+        self.lus.append(album_id)
+        return None
+
+
+def _avec_repli(client, pages):
+    return sps.SpotifyAvecRepli(sps.SpotifyPathfinderScraper(client), pages)
+
+
+async def _lire_pistes(scraper, ids):
+    async with scraper.session() as sess:
+        return [await scraper.afetch_track(sess, i) for i in ids]
+
+
+def _bride():
+    return SansReponse("spotify_pathfinder", IssueKind.THROTTLED)
+
+
+class TestRepli:
+    def test_sans_echec_le_navigateur_ne_s_ouvre_pas(self):
+        client = _FauxClient(pistes={"p": _piste("p", compteur=5)})
+        pages = _Pages()
+        rendus = asyncio.run(_lire_pistes(_avec_repli(client, pages), ["p"]))
+        assert rendus[0]["playcounts"] == {"p": 5}
+        assert pages.sessions == 0 and pages.lus == []
+
+    def test_un_echec_passe_par_la_page(self):
+        client = _FauxClient(pistes={"q": _piste("q", compteur=9)}, erreurs=[_bride()])
+        pages = _Pages()
+        scraper = _avec_repli(client, pages)
+        rendus = asyncio.run(_lire_pistes(scraper, ["p", "q"]))
+        assert rendus[0]["playcounts"] == {"p": 7}  # la page
+        assert rendus[1]["playcounts"] == {"q": 9}  # de nouveau les requêtes
+        assert pages.lus == ["p"] and pages.sessions == 1
+        assert scraper.replis == 1 and not scraper.bascule
+
+    def test_la_session_navigateur_ne_s_ouvre_qu_une_fois(self):
+        client = _FauxClient(erreurs=[_bride(), None, _bride()])
+        pages = _Pages()
+        asyncio.run(_lire_pistes(_avec_repli(client, pages), ["a", "b", "c"]))
+        assert pages.lus == ["a", "c"] and pages.sessions == 1
+
+    def test_echecs_de_suite_basculent_sur_les_pages(self):
+        n = sps.ECHECS_AVANT_BASCULE
+        client = _FauxClient(erreurs=[_bride()] * n)
+        pages = _Pages()
+        scraper = _avec_repli(client, pages)
+        ids = [f"p{i}" for i in range(n + 2)]
+        asyncio.run(_lire_pistes(scraper, ids))
+        assert scraper.bascule
+        assert pages.lus == ids
+        # Après la bascule, plus une requête interne.
+        assert len(client.appels) == n
+
+    def test_close_ferme_les_pages(self):
+        pages = _Pages()
+        _avec_repli(_FauxClient(), pages).close()
+        assert pages.ferme
+
+
+def test_reglage_choisit_le_scraper(monkeypatch):
+    from src.scrapers.spotify_web_scraper import SpotifyWebScraper
+
+    monkeypatch.setattr("src.config.SPOTIFY_STREAMS_PAR_PATHFINDER", False)
+    assert isinstance(sps.scraper_des_streams(), SpotifyWebScraper)
+    monkeypatch.setattr("src.config.SPOTIFY_STREAMS_PAR_PATHFINDER", True)
+    scraper = sps.scraper_des_streams()
+    assert isinstance(scraper, sps.SpotifyAvecRepli)
+    assert isinstance(scraper.repli, SpotifyWebScraper)

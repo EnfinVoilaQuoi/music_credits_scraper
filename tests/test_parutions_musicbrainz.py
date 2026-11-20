@@ -7,7 +7,7 @@ tentatives comme les vrais clients, sinon l'observation conclurait
 """
 
 from src.api.musicbrainz_api import MusicBrainzSature
-from src.models import Artist, Track
+from src.models import Artist, ReleaseObservation, Track
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.services import parutions_musicbrainz as service
@@ -46,8 +46,10 @@ def _base(dm, *, upc=None):
     studio = Track(title="Les temps changent", artist=a)
     studio.album, studio.genius_id = "Paradisiaque", 1
     dm.save_track(studio)
-    rid = dm.ensure_release(a.id, TOUR, deezer_album_id=43852)
-    dm.link_track_to_release(rid, studio.id, source="deezer", matched_by="identified")
+    dm.record_release_observations(
+        studio.id, [ReleaseObservation(title=TOUR, source="deezer", external_release_id=43852)]
+    )
+    (rid,) = [r["id"] for r in dm.get_track_releases(studio.id)]
     if upc:
         dm.poser_upc_parution(rid, upc)
     return studio, rid
@@ -92,8 +94,14 @@ def test_reprend_la_ou_il_s_est_arrete(data_manager):
     _lancer(data_manager, FauxDeezer({43852: UPC}), FauxMB({UPC: LIVE}))
     assert data_manager.parutions_sans_musicbrainz() == []
     # Une parution déjà marquée par le brut (`mb_live` sans date) est vue aussi.
-    a = data_manager.get_artist_by_name("MC Solaar")
-    autre = data_manager.ensure_release(a.id, "Paradisiaque", deezer_album_id=1)
+    studio = data_manager.get_artist_tracks(data_manager.get_artist_by_name("MC Solaar").id)[0]
+    data_manager.record_release_observations(
+        studio.id,
+        [ReleaseObservation(title="Paradisiaque", source="deezer", external_release_id=1)],
+    )
+    (autre,) = [
+        r["id"] for r in data_manager.get_track_releases(studio.id) if r["deezer_album_id"] == 1
+    ]
     data_manager.marquer_parutions_live({autre: False})
     assert data_manager.parutions_sans_musicbrainz() == []
 

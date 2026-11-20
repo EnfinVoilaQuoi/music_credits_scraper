@@ -140,26 +140,6 @@ def ecart_spotify_principal(colonne: str | None, lignes: dict[str, bool]) -> str
     return motif + (f" (principale : {', '.join(autres)})" if autres else "")
 
 
-def release_identity_key(
-    title: str,
-    scope: str,
-    deezer_album_id: int | None = None,
-    credited_artist_name: str | None = None,
-) -> str:
-    """Clé stable d'une parution dans le catalogue d'un artiste.
-
-    Un identifiant Deezer désigne une parution précise, là où son titre ne le
-    fait pas (deluxe, homonymes, compilations). Sans ID, la clé manuelle reste
-    volontairement étroite : elle ne rapproche jamais deux auteurs crédités
-    différents sous un même titre.
-    """
-    if deezer_album_id:
-        return f"deezer:{int(deezer_album_id)}"
-    return ":".join(
-        ("manual", scope, normalize_title(title), normalize_title(credited_artist_name or ""))
-    )
-
-
 def source_lien_retenue(ancienne: str | None, nouvelle: str | None) -> str | None:
     """Provenance à conserver quand deux passes désignent la MÊME vidéo.
 
@@ -6087,91 +6067,6 @@ class TrackRepository:
             },
         )
 
-    def ensure_release(
-        self,
-        artist_id: int,
-        title: str,
-        *,
-        credited_artist_name: str | None = None,
-        release_date=None,
-        record_type: str | None = None,
-        deezer_album_id: int | None = None,
-        scope: str = "own",
-    ) -> int:
-        """Crée ou retrouve une parution sans déduire son identité du titre.
-
-        `scope` vaut `own` pour la discographie et `appearance` pour un disque
-        tiers. La clé Deezer prévaut toujours ; le chemin manuel ne fusionne que
-        la même saisie normalisée dans le même périmètre.
-        """
-        if scope not in ("own", "appearance"):
-            raise ValueError(f"scope de parution inconnu: {scope!r}")
-        title = clean_stored_title(title)
-        if not title:
-            raise ValueError("Une parution doit avoir un titre")
-        identity = release_identity_key(title, scope, deezer_album_id, credited_artist_name)
-        params = {
-            "artist_id": artist_id,
-            "title": title,
-            "credited_artist_name": credited_artist_name,
-            "release_date": release_date,
-            "record_type": record_type,
-            "deezer_album_id": deezer_album_id,
-            "scope": scope,
-            "identity_key": identity,
-            "now": datetime.now(),
-        }
-        try:
-            with self.engine.begin() as conn:
-                row = (
-                    conn.execute(
-                        text(
-                            "SELECT id FROM releases WHERE artist_id = :artist_id "
-                            "AND identity_key = :identity_key"
-                        ),
-                        params,
-                    )
-                    .mappings()
-                    .first()
-                )
-                if row is None and deezer_album_id is None:
-                    row = (
-                        conn.execute(
-                            text(
-                                "SELECT id FROM releases WHERE artist_id = :artist_id AND title = :title "
-                                "AND scope = :scope AND COALESCE(credited_artist_name, '') "
-                                "= COALESCE(:credited_artist_name, '')"
-                            ),
-                            params,
-                        )
-                        .mappings()
-                        .first()
-                    )
-                if row:
-                    conn.execute(
-                        text(
-                            "UPDATE releases SET credited_artist_name = COALESCE(:credited_artist_name, credited_artist_name), "
-                            "release_date = COALESCE(:release_date, release_date), "
-                            "record_type = COALESCE(:record_type, record_type), updated_at = :now "
-                            "WHERE id = :id"
-                        ),
-                        {**params, "id": row["id"]},
-                    )
-                    return int(row["id"])
-                result = conn.execute(
-                    text(
-                        "INSERT INTO releases (artist_id, title, credited_artist_name, release_date, "
-                        "record_type, deezer_album_id, scope, identity_key, created_at, updated_at) "
-                        "VALUES (:artist_id, :title, :credited_artist_name, :release_date, :record_type, "
-                        ":deezer_album_id, :scope, :identity_key, :now, :now)"
-                    ),
-                    params,
-                )
-                return int(result.lastrowid)
-        except SQLAlchemyError as e:
-            logger.error(f"Erreur ensure_release({artist_id}, {title!r}): {e}")
-            raise
-
     def record_release_observations(
         self, track_id: int, observations: list[ReleaseObservation]
     ) -> None:
@@ -6241,58 +6136,6 @@ class TrackRepository:
                 return result.rowcount == 1
         except SQLAlchemyError as e:
             logger.error(f"Erreur confirm_release_suggestion({release_id}): {e}")
-            return False
-
-    def link_track_to_release(
-        self,
-        release_id: int,
-        track_id: int,
-        *,
-        disc_number: int | None = None,
-        track_number: int | None = None,
-        source_track_id: int | None = None,
-        source: str = "manual",
-        matched_by: str = "manual",
-    ) -> bool:
-        """Ajoute une appartenance, idempotente et sans écraser un choix manuel."""
-        try:
-            with self.engine.begin() as conn:
-                numero_observe = track_number
-                disc_number, track_number, position_source = self._position_du_lien(
-                    conn, release_id, track_id, (disc_number, track_number, source)
-                )
-                conn.execute(
-                    text(
-                        "INSERT INTO release_tracks (release_id, track_id, disc_number, track_number, "
-                        "source_track_id, source, matched_by, position_source, created_at, updated_at) "
-                        "VALUES (:release_id, :track_id, :disc_number, :track_number, :source_track_id, "
-                        ":source, :matched_by, :position_source, :now, :now) "
-                        "ON CONFLICT(release_id, track_id) DO UPDATE SET "
-                        "disc_number = excluded.disc_number, track_number = excluded.track_number, "
-                        "position_source = excluded.position_source, "
-                        "position_brute = CASE WHEN :remplace THEN NULL "
-                        "ELSE release_tracks.position_brute END, "
-                        "source_track_id = COALESCE(excluded.source_track_id, release_tracks.source_track_id), "
-                        "source = CASE WHEN release_tracks.source = 'manual' THEN 'manual' ELSE excluded.source END, "
-                        "matched_by = CASE WHEN release_tracks.matched_by = 'manual' THEN 'manual' ELSE excluded.matched_by END, "
-                        "updated_at = excluded.updated_at"
-                    ),
-                    {
-                        "release_id": release_id,
-                        "track_id": track_id,
-                        "disc_number": disc_number,
-                        "track_number": track_number,
-                        "position_source": position_source,
-                        "remplace": int(numero_observe is not None and position_source == source),
-                        "source_track_id": source_track_id,
-                        "source": source,
-                        "matched_by": matched_by,
-                        "now": datetime.now(),
-                    },
-                )
-            return True
-        except SQLAlchemyError as e:
-            logger.error(f"Erreur link_track_to_release({release_id}, {track_id}): {e}")
             return False
 
     def get_track_releases(self, track_id: int) -> list[dict[str, Any]]:

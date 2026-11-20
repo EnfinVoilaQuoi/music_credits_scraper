@@ -39,9 +39,7 @@ EXCEPTIONS: dict[str, str] = {
     "_ecrire": "le mécanisme lui-même",
     # ── Parutions ──
     "confirm_release_suggestion": _PARUTIONS,
-    "ensure_release": _PARUTIONS,
     "fusionner_parutions_meme_upc": _PARUTIONS + " (réparation par lots, passage à blanc)",
-    "link_track_to_release": _PARUTIONS,
     "marquer_parutions_live": _PARUTIONS,
     "singles_fondus": _PARUTIONS + " (réparation par lots, passage à blanc)",
     "noter_parution_apple": _PARUTIONS,

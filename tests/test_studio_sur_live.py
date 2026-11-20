@@ -12,7 +12,7 @@ Spotify et Apple par la place — et la famille d'audit `studio_sur_live`.
 import pytest
 
 from src.api.musicbrainz_api import est_live
-from src.models import Artist, Track
+from src.models import Artist, ReleaseObservation, Track
 from src.services import audit as au
 from src.services.apple_parutions import propositions_par_place
 from src.utils import deezer_identity, parutions_live
@@ -148,9 +148,11 @@ class TestAudit:
         live.album, live.genius_id = TOUR, 2
         for t in (studio, live):
             data_manager.save_track(t)
-        rid = data_manager.ensure_release(a.id, TOUR, deezer_album_id=43852)
         for t in (studio, live):
-            data_manager.link_track_to_release(rid, t.id, source="deezer", matched_by="identified")
+            data_manager.record_release_observations(
+                t.id, [ReleaseObservation(title=TOUR, source="deezer", external_release_id=43852)]
+            )
+        (rid,) = [r["id"] for r in data_manager.get_track_releases(live.id)]
         return studio, rid
 
     def _cas(self, dm):

@@ -20,7 +20,7 @@ from src.enrichment.observation import Observation
 from src.models import Credit, ReleaseObservation, Track, TrackSpotifyId, TrackVideo
 from src.models.track import SOURCE_NON_TRANSCRITES, CreditRole
 from src.persistence.binding import date_bind
-from src.persistence.schema import albums, artists, credits, tracks
+from src.persistence.schema import artists, credits, tracks
 from src.utils.codes_barres import cle_upc
 from src.utils.corrections_fiches import (
     comptes_ailleurs,
@@ -6584,134 +6584,39 @@ class TrackRepository:
         source: str = "kworb",
         editions_json: str = None,
     ) -> bool:
-        """Insère ou met à jour le total de streams d'un album.
-
-        spotify_album_ids : IDs Spotify des éditions agrégées, séparés par des
-        virgules (un même titre peut couvrir plusieurs éditions — streams sommés
-        par l'appelant).
+        """Le total Spotify d'un album, posé sur son PROJET (e68) — celui que
+        désignent ses ID d'album Spotify, sinon son titre (`projet_de`). Rend
+        False si aucun projet n'est désigné : un total sans disque n'a pas de
+        lecteur (la table `albums`, clé : le titre, est retirée en e69).
 
         `source` dit QUI a calculé le total, et les deux ne mesurent pas la même
-        chose : Kworb ne somme que les morceaux DE L'ARTISTE, Spotify somme
-        **toutes** les pistes du disque. Sur un album commun ou de groupe — la
-        majorité des cas ici — le total de Kworb est donc incomplet.
-
-        D'où la seule règle d'arbitrage de cette table : **un total Kworb
-        n'écrase jamais un total Spotify**. L'inverse est permis (Spotify est
-        complet par construction : l'appelant ne l'écrit que s'il a TOUTES les
-        pistes). Sans ce garde, un run Kworb postérieur ramènerait silencieusement
-        la valeur à la somme partielle.
-        """
+        chose : Kworb ne somme que les morceaux DE L'ARTISTE, Spotify **toutes**
+        les pistes du disque. D'où la seule règle d'arbitrage : **un total Kworb
+        n'écrase jamais un total Spotify** ; les ID d'édition fusionnent
+        toujours ; le total de chaque édition (`editions_json`) va sur
+        l'édition (`projets_en_base.poser_streams_spotify`)."""
         try:
             with self.engine.begin() as conn:
-                existant = (
-                    conn.execute(
-                        text(
-                            "SELECT spotify_streams, spotify_daily_streams, spotify_album_ids, "
-                            "spotify_streams_source, spotify_editions_json, "
-                            "spotify_streams_updated FROM albums "
-                            "WHERE title = :t AND artist_id = :a"
-                        ),
-                        {"t": title, "a": artist_id},
-                    )
-                    .mappings()
-                    .first()
-                )
-                valeurs = self._valeurs_album(
-                    existant,
-                    streams,
-                    daily_streams,
-                    spotify_album_ids,
-                    updated_at,
-                    source,
-                    editions_json,
-                )
-                if existant:
-                    conn.execute(
-                        update(albums)
-                        .where(albums.c.title == title, albums.c.artist_id == artist_id)
-                        .values(**valeurs)
-                    )
-                else:
-                    conn.execute(
-                        albums.insert().values(title=title, artist_id=artist_id, **valeurs)
-                    )
-                # Le même total au PROJET (e68), que désignent les ID d'album
-                # Spotify ou le titre ; aucun projet désigné : `albums` seul.
                 projet = projet_de(
                     conn, artist_id, spotify_album_ids=spotify_album_ids, titre=title
                 )
-                if projet is not None:
-                    poser_streams_spotify(
-                        conn,
-                        projet,
-                        streams=streams,
-                        daily_streams=daily_streams,
-                        spotify_album_ids=spotify_album_ids,
-                        updated_at=date_bind(updated_at or datetime.now()),
-                        source=source,
-                        editions_json=editions_json,
-                    )
+                if projet is None:
+                    logger.info(f"💿 « {title} » : aucun disque en base, total Spotify non posé")
+                    return False
+                poser_streams_spotify(
+                    conn,
+                    projet,
+                    streams=streams,
+                    daily_streams=daily_streams,
+                    spotify_album_ids=spotify_album_ids,
+                    updated_at=date_bind(updated_at or datetime.now()),
+                    source=source,
+                    editions_json=editions_json,
+                )
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur upsert_album (artist_id={artist_id}, title={title!r}): {e}")
             return False
-
-    @staticmethod
-    def _fusion_ids(ancien: str | None, nouveau: str | None) -> str | None:
-        """Union des IDs d'édition, ordre d'apparition conservé.
-
-        Une FUSION, pas un remplacement : chaque source ne connaît que les
-        éditions qu'elle a vues — la page artiste Spotify n'en liste qu'une là où
-        Kworb en a deux. Remplacer perdrait silencieusement l'autre, alors que
-        c'est précisément la donnée qu'on veut garder pour plus tard.
-        """
-        vus: dict[str, None] = {}
-        for source_ids in (ancien, nouveau):
-            for identifiant in (source_ids or "").split(","):
-                if identifiant.strip():
-                    vus.setdefault(identifiant.strip(), None)
-        return ",".join(vus) or None
-
-    def _valeurs_album(
-        self,
-        existant,
-        streams,
-        daily_streams,
-        spotify_album_ids,
-        updated_at,
-        source,
-        editions_json,
-    ) -> dict:
-        """Colonnes à écrire pour un album, provenance arbitrée.
-
-        Le total de Kworb n'écrase JAMAIS celui de Spotify : Kworb ne somme que
-        les morceaux de l'artiste, Spotify toutes les pistes du disque. Mais ce
-        garde ne porte QUE sur le total — les IDs d'édition, eux, fusionnent
-        toujours, quelle que soit la source qui écrit.
-        """
-        valeurs = {
-            "spotify_album_ids": self._fusion_ids(
-                existant["spotify_album_ids"] if existant else None, spotify_album_ids
-            ),
-        }
-        garde = (
-            existant is not None
-            and existant["spotify_streams_source"] == "spotify_web"
-            and source != "spotify_web"
-        )
-        if garde:
-            return valeurs
-
-        valeurs["spotify_streams"] = streams
-        valeurs["spotify_streams_updated"] = date_bind(updated_at or datetime.now())
-        valeurs["spotify_streams_source"] = source
-        # Spotify ne publie aucun chiffre quotidien et passe None : sans ce
-        # garde, il effacerait celui de Kworb, seule source à en donner.
-        if daily_streams is not None:
-            valeurs["spotify_daily_streams"] = daily_streams
-        if editions_json is not None:
-            valeurs["spotify_editions_json"] = editions_json
-        return valeurs
 
     RECORD_TYPES = ("album", "ep", "single", "compile")
 
@@ -6726,12 +6631,9 @@ class TrackRepository:
     ) -> bool:
         """Pose la nature du disque (e26), SOURCÉE : `deezer` ou `manual`.
 
-        La ligne d'album est créée si elle manque — avec la nature SEULEMENT,
-        jamais une colonne de streams (l'arbitrage Kworb/Spotify d'`upsert_album`
-        reste seul maître). Clé = `(title, artist_id)` BRUT, comme le reste de
-        la table : la ligne créée depuis `track.album` (Genius) peut donc
-        cohabiter avec celle de Kworb si les graphies diffèrent — les lecteurs
-        rapprochent par titre normalisé, on ne fusionne pas ici.
+        Depuis e68 la nature vit sur l'ÉDITION (Deezer, par son ID d'album) et
+        son verdict sur le PROJET (`projets_en_base`) ; un titre que ne porte
+        aucune parution n'a nulle part où la ranger (rend False).
 
         **Une valeur `manual` n'est jamais écrasée par `deezer`** (même règle
         que Kworb face à Spotify) ; `record_type=None` avec `source="manual"`
@@ -6747,93 +6649,35 @@ class TrackRepository:
         title = (title or "").strip()
         if not title:
             return False
-        params = {
-            "aid": artist_id,
-            "title": title,
-            "rt": record_type,
-            "src": source if record_type is not None else None,
-            "quand": date_bind(datetime.now()),
-            "did": deezer_album_id,
-        }
         try:
             with self.engine.begin() as conn:
                 # (e68) Deezer décrit UNE édition : sa nature va sur les
-                # parutions de cet ID, et leur projet se recalcule ; une saisie
-                # à la main va au projet que désigne le titre.
+                # parutions de cet ID, et leur projet se recalcule (une nature
+                # `manual` du projet ne bouge pas) ; une saisie à la main va au
+                # projet que désigne le titre.
                 if source == "deezer" and deezer_album_id is not None:
-                    poser_nature_edition(conn, artist_id, deezer_album_id, record_type)
-                elif source == "manual":
-                    projet = projet_de(
-                        conn, artist_id, deezer_album_id=deezer_album_id, titre=title
-                    )
-                    if projet is not None:
-                        poser_nature_manuelle(conn, projet, record_type)
-                deja = conn.execute(
-                    text(
-                        "SELECT record_type_source FROM albums "
-                        "WHERE artist_id = :aid AND title = :title"
-                    ),
-                    params,
-                ).first()
-                if deja is None:
-                    conn.execute(
-                        text(
-                            "INSERT INTO albums (title, artist_id, record_type, "
-                            "record_type_source, record_type_updated, deezer_album_id) "
-                            "VALUES (:title, :aid, :rt, :src, :quand, :did)"
-                        ),
-                        params,
-                    )
-                    return True
-                if deja[0] == "manual" and source == "deezer":
-                    # La main a tranché : Deezer ne retient que sa fiche.
-                    conn.execute(
-                        text(
-                            "UPDATE albums SET deezer_album_id = COALESCE(:did, deezer_album_id) "
-                            "WHERE artist_id = :aid AND title = :title"
-                        ),
-                        params,
-                    )
+                    return poser_nature_edition(conn, artist_id, deezer_album_id, record_type) > 0
+                projet = projet_de(conn, artist_id, deezer_album_id=deezer_album_id, titre=title)
+                if projet is None:
                     return False
-                conn.execute(
-                    text(
-                        "UPDATE albums SET record_type = :rt, record_type_source = :src, "
-                        "record_type_updated = :quand, "
-                        "deezer_album_id = COALESCE(:did, deezer_album_id) "
-                        "WHERE artist_id = :aid AND title = :title"
-                    ),
-                    params,
+                if source == "manual":
+                    poser_nature_manuelle(conn, projet, record_type)
+                    return True
+                # Deezer sans ID d'album : la nature au projet du titre, sauf
+                # saisie manuelle.
+                return bool(
+                    conn.execute(
+                        text(
+                            "UPDATE projets SET nature = :n, nature_source = 'deezer', "
+                            "nature_maj = :q WHERE id = :p AND nature_source IS NOT 'manual' "
+                            "AND nature IS NOT :n"
+                        ),
+                        {"n": record_type, "q": datetime.now(), "p": projet},
+                    ).rowcount
                 )
-                return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur set_album_record_type({artist_id}, {title!r}): {e}")
             return False
-
-    def retirer_albums_de_disques(self, artist_id: int, deezer_album_ids: set[int]) -> int:
-        """Retire les lignes `albums` de l'artiste posées pour ces disques Deezer
-        (refusés : un homonyme sur le même profil) quand plus aucune de ses
-        fiches ne porte leur titre. Restées après le retrait des fiches, elles
-        faisaient « connaître » le disque à l'oracle d'identité Deezer
-        (`deezer_identite`, vote ①) et au classement des écarts (WZRD, CFR,
-        The Graduates : 43 lignes le 2026-11-13). Rend le nombre retiré."""
-        if not deezer_album_ids:
-            return 0
-        retirees = 0
-        try:
-            with self.engine.begin() as conn:
-                for did in sorted(int(i) for i in deezer_album_ids):
-                    retirees += conn.execute(
-                        text(
-                            "DELETE FROM albums WHERE artist_id = :a AND deezer_album_id = :d "
-                            "AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id = :a "
-                            "AND t.album = albums.title)"
-                        ),
-                        {"a": artist_id, "d": did},
-                    ).rowcount
-        except SQLAlchemyError as e:
-            logger.error(f"Erreur retirer_albums_de_disques({artist_id}): {e}")
-            return 0
-        return retirees
 
     def get_albums_for_artist(self, artist_id: int) -> list[dict[str, Any]]:
         """Les disques de l'artiste, lus dans les PROJETS (e68) : une ligne par
@@ -7180,10 +7024,10 @@ class TrackRepository:
     def renommer_album(self, artist_id: int, ancien: str, nouveau: str) -> tuple[int, int]:
         """Renomme un disque partout où son TITRE est stocké, pour un artiste.
 
-        Trois magasins portent ce titre en clair — `tracks.album` (l'album
-        REPÈRE), `releases.title` (le catalogue des parutions) et `albums.title`
-        (le magasin des streams d'album) — et les laisser diverger ferait deux
-        disques là où il y en a un. Rend (morceaux, parutions) touchés.
+        Deux magasins portent ce titre en clair — `tracks.album` (l'album
+        REPÈRE) et `releases.title` (le catalogue des parutions) — et les
+        laisser diverger ferait deux disques là où il y en a un (le titre du
+        projet suit son édition de référence au prochain regroupement). Rend (morceaux, parutions) touchés.
 
         `album_override` n'est PAS posé : ce n'est pas une saisie humaine mais
         le nettoyage d'une convention de Genius, et le marquer en manuel
@@ -7223,13 +7067,6 @@ class TrackRepository:
                     ),
                     {"nouveau": nouveau, "ancien": ancien, "aid": artist_id, "now": datetime.now()},
                 ).rowcount
-                conn.execute(
-                    text(
-                        "UPDATE albums SET title = :nouveau "
-                        "WHERE artist_id = :aid AND title = :ancien"
-                    ),
-                    {"nouveau": nouveau, "ancien": ancien, "aid": artist_id},
-                )
             logger.info(f"💿 Album renommé : {ancien!r} → {nouveau!r} ({morceaux} morceau(x))")
             return int(morceaux or 0), int(parutions or 0)
         except SQLAlchemyError as e:
@@ -9241,19 +9078,14 @@ class TrackRepository:
             return False
 
     def update_album_ytm_streams(self, artist_id: int, title: str, streams: int) -> bool:
-        """Met à jour les streams YouTube Music d'un album."""
+        """Le total YouTube Music d'un album, posé sur l'édition que nomme le
+        titre et sur son PROJET (e68, `poser_streams_ytm`). False sans disque."""
         try:
-            stmt = (
-                update(albums)
-                .where(albums.c.title == title, albums.c.artist_id == artist_id)
-                .values(ytm_streams=streams, ytm_streams_updated=datetime.now())
-            )
             with self.engine.begin() as conn:
-                conn.execute(stmt)
-                # Le même total au projet que désigne le titre (e68).
                 projet = projet_de(conn, artist_id, titre=title)
-                if projet is not None:
-                    poser_streams_ytm(conn, projet, streams, titre=title)
+                if projet is None:
+                    return False
+                poser_streams_ytm(conn, projet, streams, titre=title)
             return True
         except SQLAlchemyError as e:
             logger.error(

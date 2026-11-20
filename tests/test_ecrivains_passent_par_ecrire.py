@@ -27,7 +27,7 @@ _PARUTIONS = (
     "tables de parutions (`releases*`, `release_tracks`) : aucune colonne de fiche, "
     "aucun verdict n'en dépend"
 )
-_ALBUMS = "table `albums` (streams et nature du disque) : aucune colonne de fiche"
+_ALBUMS = "projets (e68 : streams et nature du disque) : aucune colonne de fiche"
 _CREDITS = "table `credits` : aucune colonne dérivée n'en dépend"
 _LIGNE = "donnée PROPRE à la ligne d'un artiste (hors `COLONNES_PARTAGEES`), sans verdict dérivé"
 _RECALCUL = "c'est lui-même un RECALCUL (écrit des verdicts depuis les faits, n'en déplace aucun)"
@@ -54,7 +54,6 @@ EXCEPTIONS: dict[str, str] = {
     "poser_upc_parution": _PARUTIONS,
     "record_release_observations": _PARUTIONS,
     # ── Albums ──
-    "retirer_albums_de_disques": _ALBUMS + " (lignes de disques refusés, sans fiche)",
     "set_album_record_type": _ALBUMS,
     "update_album_ytm_streams": _ALBUMS,
     "upsert_album": _ALBUMS,

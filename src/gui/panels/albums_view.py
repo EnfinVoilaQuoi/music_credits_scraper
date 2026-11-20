@@ -148,7 +148,7 @@ def populate_albums_table(app):
     if not app.current_artist or not app.current_artist.tracks:
         return
 
-    # Stats streams par album (table albums : Kworb Spotify + YTMusic)
+    # Stats streams par album : celles du PROJET (e68 : Kworb, Spotify, YTMusic)
     albums_db = {}
     try:
         for a in app.data_manager.get_albums_for_artist(app.current_artist.id):

@@ -164,16 +164,14 @@ class TestRecordType:
         poser_disque(data_manager, a.id, "Labrador bleu", deezer_album_id=7)
         data_manager.upsert_album(a.id, "Labrador bleu", 1000, 10)
         assert data_manager.set_album_record_type(a.id, "Labrador bleu", "album", source="manual")
-        assert not data_manager.set_album_record_type(
-            a.id, "Labrador bleu", "ep", deezer_album_id=7
-        )
+        # Deezer écrit la nature de SON édition (e68) ; le projet garde la saisie.
+        data_manager.set_album_record_type(a.id, "Labrador bleu", "ep", deezer_album_id=7)
         [alb] = data_manager.get_albums_for_artist(a.id)
         assert (alb["record_type"], alb["record_type_source"]) == ("album", "manual")
         assert alb["deezer_album_id"] == 7  # la fiche est retenue quand même
         assert alb["spotify_streams"] == 1000  # les streams n'ont pas bougé
         # Effacer la saisie manuelle → Deezer reprend la main.
         assert data_manager.set_album_record_type(a.id, "Labrador bleu", None, source="manual")
-        assert data_manager.set_album_record_type(a.id, "Labrador bleu", "ep", deezer_album_id=7)
         assert data_manager.get_albums_for_artist(a.id)[0]["record_type"] == "ep"
 
     def test_vocabulary_guard(self, data_manager):

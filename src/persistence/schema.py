@@ -215,48 +215,14 @@ scraping_errors = Table(
 )
 
 
-albums = Table(
-    "albums",
-    metadata,
-    Column("id", Integer, primary_key=True),
-    Column("title", Text, nullable=False),
-    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
-    Column("spotify_streams", Integer),
-    Column("spotify_daily_streams", Integer),
-    Column("spotify_streams_updated", TIMESTAMP),
-    # Migrations user_version 43-45
-    Column("ytm_streams", Integer),
-    Column("ytm_streams_updated", TIMESTAMP),
-    Column("spotify_album_ids", Text),
-    # Migration e14 : QUI a calculé `spotify_streams`. Kworb ne somme que les
-    # morceaux de l'artiste (total INCOMPLET sur un album commun ou de groupe),
-    # Spotify somme toutes les pistes du disque. Sans cette colonne, les deux
-    # sémantiques se mélangeraient en silence.
-    Column("spotify_streams_source", Text),
-    # Migration e15 : total de CHAQUE édition ({album_id: streams}). Le total
-    # du disque est la somme des enregistrements DISTINCTS — Spotify compte par
-    # enregistrement, pas par track_id, donc additionner les éditions
-    # compterait deux fois les titres partagés.
-    Column("spotify_editions_json", Text),
-    # Migration e26 : nature du disque telle que le DISTRIBUTEUR la déclare
-    # (album | ep | single | compile — `record_type` de Deezer). Mesuré sur
-    # Isha : ni le nombre de titres ni la durée ne la déduisent (des EP de
-    # 10 titres et 26 min, un EP de 8 titres à côté d'un album de 12 à 32 min).
-    # La donnée est SOURCÉE (`deezer` | `manual`), comme les streams : une
-    # saisie manuelle n'est jamais écrasée par un run Deezer.
-    Column("record_type", Text),
-    Column("record_type_source", Text),
-    Column("record_type_updated", TIMESTAMP),
-    Column("deezer_album_id", Integer),
-    UniqueConstraint("title", "artist_id"),
-    sqlite_autoincrement=True,
-)
+# `albums` (streams et nature d'album sous le TITRE du disque) : retirée en e69,
+# remplacée par les PROJETS (`projets`, e67-e68) plus bas.
 
 
-# Catalogue des parutions (e31). `albums` reste le magasin des agrégats de
-# streams : sa clé `(artist_id, title)` ne peut pas représenter proprement une
-# compilation extérieure ni deux éditions homonymes. Une parution est donc une
-# entité de catalogue séparée, reliée aux fiches `tracks` ci-dessous.
+# Catalogue des parutions (e31). L'ancienne table `albums` (clé `(artist_id,
+# title)`) ne pouvait représenter ni une compilation extérieure ni deux éditions
+# homonymes : une parution est une entité de catalogue séparée, reliée aux
+# fiches `tracks` ci-dessous ; les éditions d'un même disque forment un projet.
 #
 # `artist_id` est l'artiste dont on consulte le catalogue, pas nécessairement
 # l'auteur crédité du disque : une compilation Booska-P dans la base de Diam's

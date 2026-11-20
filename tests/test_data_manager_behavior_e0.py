@@ -303,13 +303,14 @@ class TestAlbums:
     def test_upsert_spotify_ids_coalesce(self, data_manager):
         # Un 2e upsert sans spotify_album_ids ne doit pas effacer les IDs existants.
         artist = _artiste(data_manager)
+        poser_disque(data_manager, artist.id, "Album A")
         data_manager.upsert_album(artist.id, "Album A", 1000, 50, spotify_album_ids="id1,id2")
         data_manager.upsert_album(artist.id, "Album A", 2000, 80, spotify_album_ids=None)
 
         (ids,) = _scalar(
             data_manager,
-            "SELECT spotify_album_ids FROM albums WHERE title = ? AND artist_id = ?",
-            ("Album A", artist.id),
+            "SELECT spotify_album_ids FROM projets WHERE artist_id = ?",
+            (artist.id,),
         )
         assert ids == "id1,id2"
 

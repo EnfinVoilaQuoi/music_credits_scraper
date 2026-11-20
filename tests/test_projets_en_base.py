@@ -298,9 +298,10 @@ def test_un_projet_qui_disparait_legue_ses_streams(data_manager):
         )
 
 
-def test_le_total_ytm_du_projet_est_le_plus_grand_de_ses_editions(data_manager):
-    # Deux albums YTM (une édition chacun) : ni la somme (titres comptés deux
-    # fois), ni le dernier écrit (le total oscillerait).
+def test_le_total_ytm_du_projet_somme_ses_titres(data_manager):
+    # Le total YTM d'un titre est celui des fiches dont l'album porte ce titre :
+    # deux titres = deux ensembles de fiches, le projet les somme (une fois par
+    # titre, jamais le dernier écrit).
     _base(data_manager)
     data_manager.regrouper_projets(1)
     for titre in (
@@ -310,8 +311,24 @@ def test_le_total_ytm_du_projet_est_le_plus_grand_de_ses_editions(data_manager):
         data_manager.upsert_album(1, titre, 1, None, source="kworb")
     data_manager.update_album_ytm_streams(1, "M.A.N (Black Roses & Lost Feelings)", 61)
     data_manager.update_album_ytm_streams(1, "M.A.N (Black Roses & Lost Feelings) (Bonus)", 20)
-    assert _projet_de_man(data_manager)[5] == 61
+    assert _projet_de_man(data_manager)[5] == 81
+    data_manager.update_album_ytm_streams(1, "M.A.N (Black Roses & Lost Feelings)", 61)
+    assert _projet_de_man(data_manager)[5] == 81
     with data_manager.engine.connect() as conn:
         assert conn.exec_driver_sql(
             "SELECT id, ytm_streams FROM releases WHERE id IN (10, 11) ORDER BY id"
         ).fetchall() == [(10, 61), (11, 20)]
+
+
+def test_un_titre_partage_avec_une_page_d_une_piste_va_au_disque(data_manager):
+    # Isha : l'album « Drôle d'oiseau » et le single éponyme (une piste).
+    _base(data_manager)
+    _sql(
+        data_manager,
+        "INSERT INTO releases (id, artist_id, title, identity_key, scope, record_type) "
+        "VALUES (14, 1, 'M.A.N (Black Roses & Lost Feelings)', 'genius:1', 'own', 'single')",
+    )
+    _sql(data_manager, "INSERT INTO release_tracks (release_id, track_id) VALUES (14, 20)")
+    data_manager.regrouper_projets(1)
+    data_manager.update_album_ytm_streams(1, "M.A.N (Black Roses & Lost Feelings)", 61)
+    assert _projet_de_man(data_manager)[5] == 61

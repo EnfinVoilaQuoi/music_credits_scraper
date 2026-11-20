@@ -336,9 +336,27 @@ def projet_de(
             )
             if cle_album(t) == cle
         }
+        if len(p) > 1:
+            # Un disque face à une parution d'UNE piste au même titre : le
+            # single éponyme (*Drôle d'oiseau* d'Isha) ou une page parasite
+            # (« “Watch The Throne.” » chez Kanye) — un total d'album est celui
+            # du disque (2026-11-20 : 13 lignes `albums` ambiguës sinon).
+            disques = {pid for pid in p if _fiches_du_projet(conn, pid) > 1}
+            if len(disques) == 1:
+                return disques.pop()
         if len(p) == 1:
             return p.pop()
     return None
+
+
+def _fiches_du_projet(conn, projet_id: int) -> int:
+    return conn.execute(
+        text(
+            "SELECT COUNT(DISTINCT rt.track_id) FROM release_tracks rt "
+            "JOIN releases r ON r.id = rt.release_id WHERE r.projet_id = :p"
+        ),
+        {"p": projet_id},
+    ).scalar()
 
 
 # ── Streams (e68) ─────────────────────────────────────────────────────────────
@@ -408,10 +426,13 @@ def poser_streams_ytm(
     conn, projet_id: int, streams: int | None, updated_at=None, *, titre: str | None = None
 ) -> None:
     """Le total YouTube Music d'un album, rangé sur l'ÉDITION que nomme le titre
-    (`cle_album`) ; le projet prend le PLUS GRAND de ses éditions. YTM compte
-    chaque album à part : additionner deux éditions compterait deux fois leurs
-    titres communs, et garder le dernier écrit faisait osciller le total (163
-    projets à plusieurs totaux YTM, mesuré le 2026-11-20)."""
+    (`cle_album`) ; le projet SOMME ses éditions, une fois par titre. Ce total
+    est celui des FICHES dont l'album Genius porte ce titre
+    (`streams_calculator.totaux_albums_ytm` : chaque fiche, ses vidéos
+    dédoublonnées, n'a qu'un album) : deux titres d'un même projet sont deux
+    ensembles de fiches disjoints, leur somme ne compte rien deux fois — et
+    garder le dernier écrit faisait osciller le total (163 projets à plusieurs
+    totaux, mesuré le 2026-11-20)."""
     quand = updated_at or datetime.now()
     if titre:
         cle = cle_album(titre)
@@ -426,15 +447,18 @@ def poser_streams_ytm(
                     ),
                     {"s": streams, "q": quand, "r": rid},
                 )
-    plus_grand = conn.execute(
+    par_titre: dict[str, tuple[int, object]] = {}
+    for t, n, q in conn.execute(
         text(
-            "SELECT ytm_streams, ytm_streams_updated FROM releases WHERE projet_id = :p "
-            "AND ytm_streams IS NOT NULL ORDER BY ytm_streams DESC LIMIT 1"
+            "SELECT title, ytm_streams, ytm_streams_updated FROM releases WHERE projet_id = :p "
+            "AND ytm_streams IS NOT NULL ORDER BY ytm_streams_updated, id"
         ),
         {"p": projet_id},
-    ).first()
-    if plus_grand is not None:
-        streams, quand = plus_grand
+    ).all():
+        par_titre[cle_album(t)] = (n, q)  # le plus récent par titre
+    if par_titre:
+        streams = sum(n for n, _ in par_titre.values())
+        quand = max((q for _, q in par_titre.values() if q), default=quand)
     conn.execute(
         text("UPDATE projets SET ytm_streams = :s, ytm_streams_updated = :q WHERE id = :p"),
         {"s": streams, "q": quand, "p": projet_id},

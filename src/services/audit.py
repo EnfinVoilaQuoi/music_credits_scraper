@@ -1562,6 +1562,29 @@ def orphelins(c) -> list[Cas]:
             if col != "track_id":
                 libelle = f"{table}.{col} : {n} ligne(s) sans {quoi}"
             cas.append(Cas("orphelin", "—", [], libelle))
+    cas += _credits_album_orphelins(c)
+    return cas
+
+
+def _credits_album_orphelins(c) -> list[Cas]:
+    """Crédits d'album Genius (e66) dont plus aucune parution ne porte l'ID
+    d'album : leur clé est un ID de SOURCE, que `colonnes_liees` ne voit pas.
+    `delete_artist` les purge (`_purger_credits_album_sans_parution`)."""
+    cas = []
+    for table in ("genius_album_credits", "genius_album_lectures"):
+        existe = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+        ).fetchone()
+        if not existe:
+            continue
+        n = c.execute(
+            # IN non corrélé : l'ensemble des ID Genius n'est lu qu'une fois.
+            f"SELECT COUNT(*) FROM {table} WHERE genius_album_id NOT IN ("  # noqa: S608 — liste fermée
+            "SELECT CAST(external_id AS INTEGER) FROM release_identifiers "
+            "WHERE source = 'genius')"
+        ).fetchone()[0]
+        if n:
+            cas.append(Cas("orphelin", "—", [], f"{table} : {n} ligne(s) sans parution"))
     return cas
 
 

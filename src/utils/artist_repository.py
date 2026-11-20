@@ -457,6 +457,11 @@ class ArtistRepository:
                         text(sql.format(morceaux="(SELECT id FROM tracks WHERE artist_id = :aid)")),
                         {"aid": artist_id},
                     )
+                # Crédits d'album Genius (e66), clé = ID d'album : partent ceux
+                # dont plus aucune parution (d'aucun artiste) ne porte l'ID.
+                from src.utils.track_repository import TrackRepository
+
+                TrackRepository._purger_credits_album_sans_parution(conn)
 
                 # 3. Supprimer les morceaux
                 deleted_tracks = conn.execute(

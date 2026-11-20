@@ -917,3 +917,42 @@ revue_corrections = Table(
     Column("retablie_at", TIMESTAMP),
     sqlite_autoincrement=True,
 )
+
+
+# Les crédits d'ALBUM de Genius (e66, 2026-11-20) : le bloc « Album Credits »
+# de la page album (Artwork, Photography, Graphic Design, Executive Producer,
+# Label…), lu par `GET /albums/{id}` de l'API (`performance_groups` ; jamais
+# `song_performances`, l'union des crédits des morceaux, déjà en base fiche par
+# fiche). Clé = l'ID d'album Genius, comme `lectures_compteurs` est indexée par
+# l'ID Spotify : l'album se relie à ses parutions par `release_identifiers`
+# (source `genius`), une fusion de parutions n'a donc rien à déplacer. Écrivain
+# dédié : `TrackRepository.enregistrer_credits_album`. `libelle` = le libellé
+# Genius tel quel (le rôle en est la traduction par `credit_roles.map_role`).
+genius_album_credits = Table(
+    "genius_album_credits",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("genius_album_id", Integer, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("role", Text, nullable=False),
+    Column("role_detail", Text),
+    Column("libelle", Text, nullable=False),
+    Column("genius_artist_id", Integer),
+    UniqueConstraint("genius_album_id", "name", "role", "role_detail"),
+    sqlite_autoincrement=True,
+)
+
+
+# La DERNIÈRE lecture des crédits d'album d'un ID Genius (e66) : `issue` =
+# « lu » (des crédits), « absent » (Genius a répondu, aucun crédit d'album) ou
+# « echec » (pas de réponse : les crédits d'avant restent). Sert à la sélection
+# de l'étape crédits : un album lu ne se relit pas sans forcer.
+genius_album_lectures = Table(
+    "genius_album_lectures",
+    metadata,
+    Column("genius_album_id", Integer, primary_key=True),
+    Column("issue", Text, nullable=False),
+    Column("nb_credits", Integer, nullable=False),
+    Column("detail", Text),
+    Column("lu_le", TIMESTAMP, nullable=False),
+)

@@ -118,3 +118,45 @@ def test_une_apparition_ne_rejoint_jamais_un_disque_de_l_artiste():
     a = _ed(1, "Bitume Caviar (vol.1)", range(15))
     b = _ed(2, "Bitume Caviar (vol.1)", range(15), scope="appearance")
     assert _projets(a, b) == [[1], [2]]
+
+
+class TestCasATrancher:
+    def test_titres_differents_aux_memes_fiches_vont_au_panneau(self):
+        # Josman : HHHH (EP de 5) contenu dans HHHH² (11) — deux projets
+        # (décision utilisateur), mais rien ne le dit sans l'humain.
+        a = _ed(1, "HHHH", range(5), record_type="ep")
+        b = _ed(2, "HHHH²", range(11), record_type="album")
+        from src.utils.projets_disques import cas_a_trancher
+
+        (cas,) = cas_a_trancher([a, b], regrouper([a, b]))
+        assert cas.editions == (1, 2) and "titres différents" in cas.motif
+
+    def test_une_edition_cumulee_va_au_panneau(self):
+        from src.utils.projets_disques import cas_a_trancher
+
+        eds = [
+            _ed(1, "Abysses", range(15)),
+            _ed(2, "Ivresse des profondeurs", range(100, 107)),
+            _ed(3, "Abysses & Ivresse des profondeurs", list(range(15)) + list(range(100, 107))),
+        ]
+        cas = cas_a_trancher(eds, regrouper(eds))
+        assert [c.editions for c in cas] == [(1, 2, 3)]
+
+    def test_une_suite_ou_un_single_n_y_vont_pas(self):
+        from src.utils.projets_disques import cas_a_trancher
+
+        eds = [
+            _ed(1, "Chambre 140 (Part. 2)", range(22)),
+            _ed(2, "Chambre 140 (Part. 3)", range(32)),
+            _ed(3, "Bloody Sunday", [0, 1], record_type="single"),
+        ]
+        assert cas_a_trancher(eds, regrouper(eds)) == []
+
+    def test_la_decision_humaine_reunit_et_desarme_la_garde(self):
+        eds = [
+            _ed(1, "Abysses", range(15)),
+            _ed(2, "Ivresse des profondeurs", range(100, 107)),
+            _ed(3, "Abysses & Ivresse des profondeurs", list(range(15)) + list(range(100, 107))),
+        ]
+        r = regrouper(eds, frozenset({frozenset((1, 3)), frozenset((2, 3))}))
+        assert r.projets == [[1, 2, 3]] and r.a_trancher == []

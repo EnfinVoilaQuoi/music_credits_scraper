@@ -16,7 +16,12 @@ from functools import lru_cache
 
 from sqlalchemy import text
 
-from src.utils.projets_disques import Edition, edition_de_reference, regrouper
+from src.utils.projets_disques import (
+    Edition,
+    cas_a_trancher,
+    edition_de_reference,
+    regrouper,
+)
 from src.utils.title_matching import cle_album as _cle_album
 
 #: `cle_album` relu pour chaque titre d'édition à chaque recherche par titre :
@@ -82,7 +87,7 @@ def regrouper_en_base(
     maintenant = maintenant or datetime.now()
     editions = _editions(conn, artist_id)
     par_id = {e.id: e for e in editions}
-    regroupement = regrouper(editions)
+    regroupement = regrouper(editions, reunies_a_la_main(conn, artist_id))
     actuel = dict(
         conn.execute(
             text(
@@ -463,3 +468,122 @@ def poser_streams_ytm(
         text("UPDATE projets SET ytm_streams = :s, ytm_streams_updated = :q WHERE id = :p"),
         {"s": streams, "q": quand, "p": projet_id},
     )
+
+
+# ── Décisions humaines : « même projet ? » (panneau, 2026-11-20) ─────────────
+
+#: Nature de la décision dans `acceptations` : deux éditions dites du même
+#: projet par l'humain. Valeur : les `identity_key` des deux éditions, triées et
+#: jointes par « | » (stables d'une base à l'autre, contrairement aux ID).
+NATURE_MEME_PROJET = "projet"
+
+
+def _nom_artiste(conn, artist_id: int) -> str | None:
+    return conn.execute(text("SELECT name FROM artists WHERE id = :a"), {"a": artist_id}).scalar()
+
+
+def _cles_editions(conn, artist_id: int) -> dict[str, int]:
+    return {
+        k: rid
+        for rid, k in conn.execute(
+            text("SELECT id, identity_key FROM releases WHERE artist_id = :a"), {"a": artist_id}
+        )
+    }
+
+
+def reunies_a_la_main(conn, artist_id: int) -> frozenset[frozenset[int]]:
+    """Les paires d'éditions que l'humain a dites du même projet."""
+    nom = _nom_artiste(conn, artist_id)
+    if not nom:
+        return frozenset()
+    cles = _cles_editions(conn, artist_id)
+    paires = set()
+    for (valeur,) in conn.execute(
+        text("SELECT valeur FROM acceptations WHERE nature = :n AND artiste = :a"),
+        {"n": NATURE_MEME_PROJET, "a": nom},
+    ):
+        a, _, b = (valeur or "").partition("|")
+        if a in cles and b in cles:
+            paires.add(frozenset((cles[a], cles[b])))
+    return frozenset(paires)
+
+
+def _valeurs_de_paires(conn, release_ids) -> list[tuple[str, str]]:
+    ids = sorted(set(release_ids))
+    cles = dict(
+        conn.execute(
+            text(
+                "SELECT id, identity_key FROM releases WHERE id IN ("
+                + ",".join(str(int(i)) for i in ids)
+                + ")"
+            )
+        ).all()
+    )
+    # Une chaîne suffit à tout réunir : la première édition avec chacune des autres.
+    return [
+        (f"{min(cles[ids[0]], cles[i])}|{max(cles[ids[0]], cles[i])}", cles[i]) for i in ids[1:]
+    ]
+
+
+def memoriser_meme_projet(conn, artist_id: int, release_ids) -> BilanProjets:
+    """L'humain dit ces éditions du même projet : la décision est gardée
+    (`acceptations`, nature `projet`) puis les projets se refont."""
+    nom = _nom_artiste(conn, artist_id)
+    for valeur, cle in _valeurs_de_paires(conn, release_ids):
+        conn.execute(
+            text(
+                "INSERT OR IGNORE INTO acceptations (cle_fiche, artiste, titre, nature, valeur, "
+                "decide_le) VALUES (:cf, :a, :t, :n, :v, :q)"
+            ),
+            {
+                "cf": f"projet:{valeur}",
+                "a": nom,
+                "t": cle,
+                "n": NATURE_MEME_PROJET,
+                "v": valeur,
+                "q": datetime.now().isoformat(timespec="seconds"),
+            },
+        )
+    return regrouper_en_base(conn, artist_id)
+
+
+def oublier_meme_projet(conn, artist_id: int, release_ids) -> BilanProjets:
+    """Rétablit : la décision « même projet » est retirée, les règles reprennent."""
+    nom = _nom_artiste(conn, artist_id)
+    for valeur, _ in _valeurs_de_paires(conn, release_ids):
+        conn.execute(
+            text("DELETE FROM acceptations WHERE nature = :n AND artiste = :a AND valeur = :v"),
+            {"n": NATURE_MEME_PROJET, "a": nom, "v": valeur},
+        )
+    return regrouper_en_base(conn, artist_id)
+
+
+def cas_de_projets(conn, artist_id: int) -> list[dict]:
+    """Les cas « même projet ? » de l'artiste, lisibles par le panneau :
+    `[{editions: [{release_id, titre, cle, fiches, date}], motif}]`."""
+    editions = _editions(conn, artist_id)
+    regroupement = regrouper(editions, reunies_a_la_main(conn, artist_id))
+    infos = {
+        rid: (titre, cle, str(date)[:10] if date else None)
+        for rid, titre, cle, date in conn.execute(
+            text("SELECT id, title, identity_key, release_date FROM releases WHERE artist_id = :a"),
+            {"a": artist_id},
+        )
+    }
+    par_id = {e.id: e for e in editions}
+    return [
+        {
+            "editions": [
+                {
+                    "release_id": i,
+                    "titre": infos[i][0],
+                    "cle": infos[i][1],
+                    "date": infos[i][2],
+                    "fiches": len(par_id[i].pistes),
+                }
+                for i in c.editions
+            ],
+            "motif": c.motif,
+        }
+        for c in cas_a_trancher(editions, regroupement)
+    ]

@@ -226,6 +226,9 @@ class Contexte:
     #: leur piste Deezer sur un autre disque (`appartenance_disque.a_decider`),
     #: lues par `charger_contexte` : le détecteur reste pur.
     hors_disque: dict = field(default_factory=dict)
+    #: Regroupements d'éditions que les règles des projets ne tranchent pas
+    #: (`projets_en_base.cas_de_projets`, e67), lus par `charger_contexte`.
+    projets_a_trancher: list = field(default_factory=list)
     #: Pages « Non-Music » sans identifiant que la liste Deezer de leur album
     #: contient (`sortie_officielle.sorties_par_leur_disque`), lues par
     #: `charger_contexte` : le détecteur `annotee` reste pur.
@@ -2865,6 +2868,35 @@ def proprietaire_de_la_video(fiches, v):
     return proprietaire_et_temoin(fiches, v)[0]
 
 
+def meme_projet(ctx):
+    """Deux éditions (ou plus) que les règles des projets (`utils/projets_disques`,
+    e67) ne réunissent ni ne séparent avec assurance : une édition qui en
+    cumule d'autres (« Abysses & Ivresse des profondeurs »), un même nom de
+    disque à moins de 80 % de fiches communes, deux noms différents à 80 % et
+    plus (doublons d'édition, « HHHH » / « HHHH² »). Décision utilisateur
+    2026-11-20 : au panneau. « 💽 Même projet » réunit et retient la décision
+    (`acceptations`, nature `projet`) ; « ✓ Normal » les laisse séparées. Une
+    SUITE qui reprend les précédentes est un autre projet et n'arrive pas ici."""
+    cas = []
+    for c in ctx.projets_a_trancher:
+        eds = c["editions"]
+        noms = " / ".join(
+            f"« {e['titre']} » ({e['fiches']} fiches, {e['date'] or '?'})" for e in eds
+        )
+        cas.append(
+            (
+                " / ".join(e["titre"] for e in eds),
+                f"{noms} — {c['motif']}",
+                {
+                    "release_ids": [e["release_id"] for e in eds],
+                    "titres": [e["titre"] for e in eds],
+                    "empreinte": "p" + "|".join(sorted(e["cle"] for e in eds)),
+                },
+            )
+        )
+    return cas
+
+
 def video_partagee(ctx):
     """Une vidéo portée par PLUSIEURS fiches qui n'en nomme pas au moins une
     (album entier, EP complet, film, freestyle collectif mal rattaché) : UN
@@ -3832,6 +3864,7 @@ DETECTEURS_ARTISTE: tuple[DetecteurArtiste, ...] = (
     DetecteurArtiste(
         "soeurs_identite", "Lignes sœurs : identité divergente", "🧬", soeurs_identite_divergente
     ),
+    DetecteurArtiste("meme_projet", "Éditions : un même projet ?", "💽", meme_projet),
 )
 
 
@@ -4208,6 +4241,7 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
     ctx.fusions = data_manager.fusions_a_decider([t.id for t in tracks if t.id])
     ctx.hors_disque = data_manager.hors_du_disque_a_decider([t.id for t in tracks if t.id])
+    ctx.projets_a_trancher = data_manager.cas_de_projets(artiste.id)
     ctx.non_music_sortis = data_manager.non_music_sortis(tracks)
     ctx.natures_formations = natures_des_formations(data_manager, ctx.relations_proposees)
     ctx.formations_prouvees = formations_prouvees_par_genius(

@@ -43,6 +43,8 @@ EXCEPTIONS: dict[str, str] = {
     "fusionner_parutions_meme_upc": _PARUTIONS + " (réparation par lots, passage à blanc)",
     "link_track_to_release": _PARUTIONS,
     "marquer_parutions_live": _PARUTIONS,
+    "memoriser_meme_projet": _PARUTIONS + " (décision « même projet » + projets refaits)",
+    "oublier_meme_projet": _PARUTIONS + " (rétablit la décision « même projet »)",
     "regrouper_projets": _PARUTIONS
     + " (projets e67 : `releases.projet_id` et `projets` seulement)",
     "singles_fondus": _PARUTIONS + " (réparation par lots, passage à blanc)",

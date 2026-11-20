@@ -111,8 +111,14 @@ def meme_projet(a: Edition, b: Edition) -> str | None:
     return None
 
 
-def regrouper(editions: list[Edition]) -> Regroupement:
-    """PUR. Les projets d'un artiste à partir de ses éditions confirmées."""
+def regrouper(
+    editions: list[Edition], reunies: frozenset[frozenset[int]] = frozenset()
+) -> Regroupement:
+    """PUR. Les projets d'un artiste à partir de ses éditions confirmées.
+    `reunies` : les paires d'éditions qu'un HUMAIN a dites du même projet
+    (panneau « même projet ? ») — réunies quoi que disent les règles, et un
+    groupe qui en contient une n'est jamais défait par la garde « édition
+    cumulée »."""
     par_id = {e.id: e for e in editions}
     parent = {e.id: e.id for e in editions}
 
@@ -149,6 +155,10 @@ def regrouper(editions: list[Edition]) -> Regroupement:
             out.suites.append((x, y))
         elif verdict:
             parent[racine(x)] = racine(y)
+    for paire in reunies:
+        x, y = sorted(paire)
+        if x in parent and y in parent:
+            parent[racine(x)] = racine(y)
 
     groupes: dict[int, list[int]] = defaultdict(list)
     for e in editions:
@@ -156,7 +166,8 @@ def regrouper(editions: list[Edition]) -> Regroupement:
     for ids in groupes.values():
         ids.sort()
         gros = [i for i in ids if len(par_id[i].pistes) >= 3]
-        cumule = any(
+        decide = any(frozenset((a, b)) in reunies for k, a in enumerate(ids) for b in ids[k + 1 :])
+        cumule = not decide and any(
             not (par_id[a].pistes & par_id[b].pistes)
             for k, a in enumerate(gros)
             for b in gros[k + 1 :]
@@ -168,6 +179,69 @@ def regrouper(editions: list[Edition]) -> Regroupement:
             out.projets.append(ids)
     out.projets.sort()
     return out
+
+
+@dataclass(frozen=True)
+class CasDeProjet:
+    """Un regroupement que les règles ne tranchent pas : au panneau « même
+    projet ? » (décision utilisateur 2026-11-20)."""
+
+    editions: tuple[int, ...]
+    motif: str
+
+
+def cas_a_trancher(editions: list[Edition], regroupement: Regroupement) -> list[CasDeProjet]:
+    """PUR. Ce qui reste à l'humain après `regrouper` (mesuré sur la base le
+    2026-11-20 : ~13 groupes, ~22 + ~69 paires) :
+
+    - un groupe recollé par une édition CUMULÉE (« Abysses & Ivresse ») ;
+    - deux éditions au même nom de disque, ≥ 2 fiches communes, mais moins de
+      80 % de la plus petite (« Chambre 140 » hors suites, éditions
+      internationales) ;
+    - deux éditions aux noms différents qui partagent ≥ 3 fiches et ≥ 80 % de
+      la plus petite (doublons d'édition legacy / Deezer, « HHHH » / « HHHH² »).
+
+    Jamais : deux éditions déjà du même projet, un single, un live contre un
+    studio, une compilation, une apparition contre un disque de l'artiste, une
+    suite."""
+    par_id = {e.id: e for e in editions}
+    projet_de = {i: k for k, ids in enumerate(regroupement.projets) for i in ids}
+    cas = [
+        CasDeProjet(tuple(ids), "plusieurs disques recollés par une édition qui les cumule")
+        for ids in regroupement.a_trancher
+    ]
+    suites = {frozenset(p) for p in regroupement.suites}
+    par_piste: dict[int, list[int]] = defaultdict(list)
+    for e in editions:
+        for t in e.pistes:
+            par_piste[t].append(e.id)
+    communes: dict[tuple[int, int], int] = defaultdict(int)
+    for ids in par_piste.values():
+        ids = sorted(ids)
+        for i, x in enumerate(ids):
+            for y in ids[i + 1 :]:
+                communes[(x, y)] += 1
+    deja = {i for c in cas for i in c.editions}
+    for (x, y), n in sorted(communes.items()):
+        a, b = par_id[x], par_id[y]
+        if projet_de.get(x) == projet_de.get(y) or frozenset((x, y)) in suites:
+            continue
+        if x in deja and y in deja or a.scope != b.scope or _jamais_ensemble(a, b):
+            continue
+        petite = min(len(a.pistes), len(b.pistes))
+        if n >= 2 and meme_disque(a.titre, b.titre) and memes_parties_de_disque(a.titre, b.titre):
+            cas.append(
+                CasDeProjet(
+                    (x, y), f"même disque, {n} fiches communes sur {petite} : même projet ?"
+                )
+            )
+        elif n >= 3 and n >= PART_COMMUNE * petite and not meme_disque(a.titre, b.titre):
+            cas.append(
+                CasDeProjet(
+                    (x, y), f"titres différents, {n} fiches communes sur {petite} : même projet ?"
+                )
+            )
+    return cas
 
 
 def edition_de_reference(editions: list[Edition]) -> int:

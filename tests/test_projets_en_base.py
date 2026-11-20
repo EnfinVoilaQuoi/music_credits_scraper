@@ -353,3 +353,28 @@ def test_les_projets_pour_la_timeline(data_manager):
     assert [e["release_id"] for e in man["editions"]] == [10, 11]  # plus ancienne d'abord
     assert sorted(man["track_ids"]) == list(range(1, 20))
     assert projets["Booska Pefra Vol.4"]["scope"] == "appearance"
+
+
+def test_meme_projet_au_panneau_puis_reuni_et_retabli(data_manager):
+    from src.services import revue
+    from src.services.revue_actions import ContexteAction, actions_pour
+
+    _deux_editions(data_manager, [1, 2, 3], [1, 2, 3, 4])
+    _sql(data_manager, "UPDATE releases SET title = 'HHHH²' WHERE id = 11")
+    _sql(data_manager, "UPDATE releases SET title = 'HHHH' WHERE id = 10")
+    data_manager.regrouper_projets(1)
+    assert _projets(data_manager)[10] != _projets(data_manager)[11]
+    ctx = revue.Contexte(disco=[])
+    ctx.projets_a_trancher = data_manager.cas_de_projets(1)
+    ((libelle, motif, preuves),) = revue.meme_projet(ctx)
+    assert preuves["release_ids"] == [10, 11] and "même projet" in motif
+    cas = revue.Cas("meme_projet", None, libelle, motif, preuves=preuves)
+    (action,) = actions_pour(cas)
+    artiste = type("A", (), {"id": 1, "name": "Isha"})()
+    action.executer(ContexteAction(data_manager, artiste, {}), cas)
+    p = _projets(data_manager)
+    assert p[10] == p[11]
+    assert data_manager.cas_de_projets(1) == []
+    data_manager.oublier_meme_projet(1, [10, 11])
+    p = _projets(data_manager)
+    assert p[10] != p[11]

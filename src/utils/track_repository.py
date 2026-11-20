@@ -45,6 +45,9 @@ from src.utils.participation import SQL_SIGNATURES_DE_DISQUES
 from src.utils.positions_disque import position_retenue
 from src.utils.projets_en_base import (
     BilanProjets,
+    cas_de_projets,
+    memoriser_meme_projet,
+    oublier_meme_projet,
     poser_nature_edition,
     poser_nature_manuelle,
     poser_streams_spotify,
@@ -5649,6 +5652,21 @@ class TrackRepository:
         # L'édition absorbée pouvait être la référence d'un projet (e67).
         if artiste is not None:
             regrouper_en_base(conn, artiste)
+
+    def cas_de_projets(self, artist_id: int) -> list[dict]:
+        """Les cas du panneau « même projet ? » (`projets_en_base.cas_de_projets`)."""
+        with self.engine.connect() as conn:
+            return cas_de_projets(conn, artist_id)
+
+    def memoriser_meme_projet(self, artist_id: int, release_ids) -> BilanProjets:
+        """Geste du panneau : ces éditions sont du même projet (décision gardée)."""
+        with self.engine.begin() as conn:
+            return memoriser_meme_projet(conn, artist_id, release_ids)
+
+    def oublier_meme_projet(self, artist_id: int, release_ids) -> BilanProjets:
+        """« ↩ Rétablir » du geste : les règles reprennent la main."""
+        with self.engine.begin() as conn:
+            return oublier_meme_projet(conn, artist_id, release_ids)
 
     @staticmethod
     def _artistes_des_parutions(conn, track_id: int) -> list[int]:

@@ -143,6 +143,14 @@ def _delier_deezer(ctx: ContexteAction, cas: Cas) -> str:
     )
 
 
+def _reunir_le_projet(ctx: ContexteAction, cas: Cas) -> str:
+    """💽 `meme_projet` : les éditions sont du même projet — la décision est
+    gardée (`acceptations`, nature `projet`) et les projets se refont."""
+    ids = cas.preuves["release_ids"]
+    ctx.data_manager.memoriser_meme_projet(ctx.artiste.id, ids)
+    return "réunies en un projet : " + " / ".join(f"« {t} »" for t in cas.preuves["titres"])
+
+
 def _sortir_du_disque(ctx: ContexteAction, cas: Cas) -> str:
     """La fiche quitte le disque où sa page Genius la range (💿
     `hors_du_disque`) : l'écrivain du geste de la vue Albums
@@ -598,6 +606,16 @@ def actions_pour(cas: Cas) -> list[Action]:
             # Pas le même morceau après examen : c'est alors le LRC qui est faux.
             return [fusion, _action_retirer_lrc()]
         return [fusion]
+    if d == "meme_projet":
+        return [
+            Action(
+                "meme_projet",
+                "💽 Même projet",
+                _reunir_le_projet,
+                "Réunir ces éditions en un seul projet ? Leurs streams d'album et leur "
+                "nature seront ceux d'un même disque.",
+            )
+        ]
     if d == "hors_du_disque":
         return [
             Action(

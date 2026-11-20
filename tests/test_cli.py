@@ -225,9 +225,33 @@ class TestAuditDeFin:
         assert cli.main(["enrich", "S", "--sans-audit"]) == cli.COMPLET
         assert sans_effets.audits == []
 
+    def _revue(self, monkeypatch):
+        from src.services import revue, revue_auto
+
+        art = SimpleNamespace(name="S", id=1, tracks=[])
+        monkeypatch.setattr(cli.artiste, "charger", lambda rt, nom: art)
+        monkeypatch.setattr(
+            revue_auto, "corriger", lambda dm, a: SimpleNamespace(appliquees=["x"], echecs=[])
+        )
+        monkeypatch.setattr(revue, "analyser", lambda dm, a: SimpleNamespace(actifs=[], masques=[]))
+
     def test_les_commandes_de_lecture_ne_s_auditent_pas(self, sans_effets, monkeypatch):
-        monkeypatch.setattr(cli, "_executer_revue", lambda a, rt: cli.COMPLET)
+        self._revue(monkeypatch)
         assert cli.main(["revue", "S"]) == cli.COMPLET
+        assert sans_effets.audits == []
+
+    def test_revue_corriger_s_audite(self, sans_effets, monkeypatch, capsys):
+        """`revue --corriger` écrit : il se termine par l'audit de l'artiste, et
+        une hausse rend 4 (2026-11-20, règle C appliquée sans audit de fin)."""
+        self._revue(monkeypatch)
+        sans_effets.hausse, sans_effets.avait_reference = {"disque_homonyme": (0, 2)}, True
+        assert cli.main(["revue", "S", "--corriger"]) == cli.EN_HAUSSE
+        assert sans_effets.audits == ["S"]
+        assert "disque_homonyme : 0 → 2" in capsys.readouterr().out
+
+    def test_revue_corriger_sans_audit(self, sans_effets, monkeypatch):
+        self._revue(monkeypatch)
+        assert cli.main(["revue", "S", "--corriger", "--sans-audit"]) == cli.COMPLET
         assert sans_effets.audits == []
 
 

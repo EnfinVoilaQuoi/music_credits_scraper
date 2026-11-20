@@ -629,7 +629,11 @@ def _executer_commande(a: argparse.Namespace, runtime: Runtime) -> tuple[int, ob
         return _rejouer_kworb(a, runtime), None
 
     if a.commande == "revue":
-        return _executer_revue(a, runtime), None
+        # `--corriger` ÉCRIT : il se termine par l'audit de l'artiste, comme une
+        # étape (2026-11-20 : la règle C appliquée par `revue` ne l'avait pas) ;
+        # le simple compte du panneau ne s'audite pas.
+        code, art = _executer_revue(a, runtime)
+        return code, (art if a.corriger else None)
 
     if a.commande == "echecs":
         return _executer_echecs(a, runtime), None
@@ -668,9 +672,9 @@ def _deezer_ambigu(b) -> bool:
     return True
 
 
-def _executer_revue(a: argparse.Namespace, runtime: Runtime) -> int:
+def _executer_revue(a: argparse.Namespace, runtime: Runtime) -> tuple[int, object]:
     """Le compte du panneau « À trancher » (zéro réseau) ; `--corriger` applique
-    les corrections à preuve formelle, comme en fin de run."""
+    les corrections à preuve formelle, comme en fin de run. Rend (code, artiste)."""
     from src.services import revue, revue_auto
 
     art = _charger(runtime, a, creer=False)
@@ -695,7 +699,7 @@ def _executer_revue(a: argparse.Namespace, runtime: Runtime) -> int:
         f"{compte[revue.INFORMATION]} pour information), {len(r.masques)} marqué(s) normal(aux)"
     )
     _imprimer_bilan(f"À trancher — {art.name}", "\n".join(lignes))
-    return COMPLET
+    return COMPLET, art
 
 
 def _executer_echecs(a: argparse.Namespace, runtime: Runtime) -> int:

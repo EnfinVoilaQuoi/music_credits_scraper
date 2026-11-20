@@ -8,6 +8,7 @@ constant vs l'ancien `data_manager.py` (refonte 1.5 puis bascule Core phase E2).
 
 import json
 import time
+from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any
@@ -4481,6 +4482,153 @@ class TrackRepository:
                 f"Erreur get_release_id_for_deezer_album({artist_id}, {deezer_album_id}): {e}"
             )
             return None
+
+    # ── Crédits d'ALBUM Genius (e66) ─────────────────────────────────────────
+    # Clé = l'ID d'album Genius ; l'album se relie à ses parutions par
+    # `release_identifiers` (source `genius`). Aucune colonne de fiche n'en
+    # dépend : écrivain hors `_ecrire`.
+
+    def albums_genius_de_l_artiste(
+        self, artist_id: int, track_ids: Iterable[int] | None = None
+    ) -> list[int]:
+        """Les ID d'album Genius des parutions À l'artiste (`scope='own'`),
+        restreintes à celles qui portent l'une des `track_ids` si elles sont
+        données. Triés, sans doublon."""
+        sql = (
+            "SELECT DISTINCT CAST(ri.external_id AS INTEGER) FROM release_identifiers ri "
+            "JOIN releases r ON r.id = ri.release_id "
+            "WHERE ri.source = 'genius' AND r.artist_id = :aid AND r.scope = 'own'"
+        )
+        params: dict[str, Any] = {"aid": artist_id}
+        if track_ids is not None:
+            ids = sorted({int(t) for t in track_ids})
+            if not ids:
+                return []
+            sql += (
+                " AND EXISTS (SELECT 1 FROM release_tracks rt WHERE rt.release_id = r.id "
+                "AND rt.track_id IN :tids)"
+            )
+            params["tids"] = ids
+        stmt = text(sql)
+        if track_ids is not None:
+            stmt = stmt.bindparams(bindparam("tids", expanding=True))
+        with self.engine.connect() as conn:
+            return sorted(int(r[0]) for r in conn.execute(stmt, params) if r[0])
+
+    def lectures_credits_album(self, genius_album_ids: Iterable[int]) -> dict[int, dict]:
+        """`{id: {issue, nb_credits, detail, lu_le}}` — la dernière lecture des
+        crédits d'album de chaque ID connu."""
+        ids = sorted({int(i) for i in genius_album_ids})
+        if not ids:
+            return {}
+        stmt = text(
+            "SELECT genius_album_id, issue, nb_credits, detail, lu_le "
+            "FROM genius_album_lectures WHERE genius_album_id IN :ids"
+        ).bindparams(bindparam("ids", expanding=True))
+        with self.engine.connect() as conn:
+            return {
+                int(r["genius_album_id"]): {
+                    "issue": r["issue"],
+                    "nb_credits": r["nb_credits"],
+                    "detail": r["detail"],
+                    "lu_le": r["lu_le"],
+                }
+                for r in conn.execute(stmt, {"ids": ids}).mappings()
+            }
+
+    def enregistrer_credits_album(
+        self,
+        genius_album_id: int,
+        issue: str,
+        credits_album: list | None = None,
+        *,
+        detail: str | None = None,
+        lu_le: datetime | None = None,
+    ) -> None:
+        """Écrivain DÉDIÉ des crédits d'album (une transaction par album).
+
+        `issue` « lu » ou « absent » : Genius a répondu, ses crédits REMPLACENT
+        ceux de l'album (aucun pour « absent »). « echec » : pas de réponse,
+        les crédits d'avant restent, seule la lecture est notée."""
+        from src.utils.credits_album_genius import ABSENT, ECHEC, LU
+
+        if issue not in (LU, ABSENT, ECHEC):
+            raise ValueError(f"issue de lecture inconnue : {issue!r}")
+        aid = int(genius_album_id)
+        credits_album = list(credits_album or []) if issue == LU else []
+        lu_le = (lu_le or datetime.now()).replace(microsecond=0)
+        with self.engine.begin() as conn:
+            if issue != ECHEC:
+                conn.execute(
+                    text("DELETE FROM genius_album_credits WHERE genius_album_id = :a"),
+                    {"a": aid},
+                )
+                for c in credits_album:
+                    conn.execute(
+                        text(
+                            "INSERT OR IGNORE INTO genius_album_credits "
+                            "(genius_album_id, name, role, role_detail, libelle, "
+                            "genius_artist_id) VALUES (:a, :n, :r, :d, :l, :g)"
+                        ),
+                        {
+                            "a": aid,
+                            "n": c.name,
+                            "r": c.role,
+                            "d": c.role_detail,
+                            "l": c.libelle,
+                            "g": c.genius_artist_id,
+                        },
+                    )
+            nb = conn.execute(
+                text("SELECT COUNT(*) FROM genius_album_credits WHERE genius_album_id = :a"),
+                {"a": aid},
+            ).scalar()
+            conn.execute(
+                text(
+                    "INSERT INTO genius_album_lectures "
+                    "(genius_album_id, issue, nb_credits, detail, lu_le) "
+                    "VALUES (:a, :i, :n, :d, :lu) ON CONFLICT(genius_album_id) DO UPDATE SET "
+                    "issue = excluded.issue, nb_credits = excluded.nb_credits, "
+                    "detail = excluded.detail, lu_le = excluded.lu_le"
+                ),
+                {"a": aid, "i": issue, "n": int(nb or 0), "d": detail, "lu": lu_le},
+            )
+
+    def credits_album(self, release_id: int) -> list[dict[str, Any]]:
+        """Les crédits d'album d'une parution, par son ID d'album Genius :
+        `[{name, role, role_detail, libelle, genius_artist_id, genius_album_id}]`,
+        dans l'ordre de Genius. Vide si la parution n'a pas d'ID Genius ou si
+        l'album n'a pas encore été lu (voir `lectures_credits_album`)."""
+        with self.engine.connect() as conn:
+            return [
+                dict(r)
+                for r in conn.execute(
+                    text(
+                        "SELECT c.name, c.role, c.role_detail, c.libelle, "
+                        "c.genius_artist_id, c.genius_album_id "
+                        "FROM genius_album_credits c "
+                        "WHERE c.genius_album_id IN (SELECT CAST(ri.external_id AS INTEGER) "
+                        "FROM release_identifiers ri WHERE ri.release_id = :r "
+                        "AND ri.source = 'genius') ORDER BY c.genius_album_id, c.id"
+                    ),
+                    {"r": release_id},
+                ).mappings()
+            ]
+
+    @staticmethod
+    def _purger_credits_album_sans_parution(conn) -> int:
+        """Retire les crédits et lectures d'album dont plus AUCUNE parution ne
+        porte l'ID Genius (dernière parution supprimée avec son artiste).
+        Dans la transaction de l'appelant."""
+        sans = (
+            "genius_album_id NOT IN (SELECT CAST(external_id AS INTEGER) "
+            "FROM release_identifiers WHERE source = 'genius')"
+        )
+        n = conn.execute(
+            text(f"DELETE FROM genius_album_credits WHERE {sans}")
+        ).rowcount  # noqa: S608
+        conn.execute(text(f"DELETE FROM genius_album_lectures WHERE {sans}"))  # noqa: S608
+        return n or 0
 
     def _retirer_mesures_par_isrc(self, conn, track_id: int) -> list[tuple[str, str]]:
         """Troisième geste, une fois l'ISRC retiré : ce que ReccoBeats en a

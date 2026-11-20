@@ -833,6 +833,45 @@ class GeniusAPI:
             "release_date_for_display": album.get("release_date_for_display"),
         }
 
+    def fiche_album(self, album_id: int) -> dict | None:
+        """La fiche `GET /albums/{id}` (clé `album`), qui porte les crédits
+        d'ALBUM (`performance_groups` : Artwork, Photography…) — une lecture par
+        album, jamais par morceau. Mesuré le 2026-11-20 sur 9 albums : l'API les
+        rend tous, la page album n'est pas nécessaire (crawl évité).
+
+        None = Genius a RÉPONDU que l'album n'existe pas (404). Sans réponse
+        (réseau, 5xx, réponse illisible) : `SansReponse` — un échec n'est jamais
+        un album sans crédits (`exiger_reponse`). 429 : `QuotaGeniusAtteint`."""
+        album = None
+        with source_usage.observe(
+            _SOURCE, label=f"album {album_id}", absent_statuses=(404,), hors_morceau=True
+        ) as obs:
+            try:
+                resp = source_usage.requests_get(
+                    _SOURCE,
+                    f"https://api.genius.com/albums/{int(album_id)}",
+                    headers={"Authorization": f"Bearer {GENIUS_API_KEY}"},
+                    timeout=20,
+                )
+                if resp.status_code == 429:
+                    raise QuotaGeniusAtteint(resp.text[:200])
+                if resp.status_code == 404:
+                    obs.absent(f"album Genius {album_id} introuvable")
+                else:
+                    resp.raise_for_status()
+                    lu = (resp.json().get("response") or {}).get("album")
+                    if isinstance(lu, dict) and lu.get("id"):
+                        album = lu
+                    else:
+                        obs.parse_error("réponse sans fiche d'album")
+            except requests.RequestException as e:
+                logger.warning(f"Fiche d'album Genius {album_id} : {e}")
+            except (ValueError, AttributeError) as e:
+                obs.parse_error(f"réponse inexploitable : {e}")
+        if album is None:
+            source_usage.exiger_reponse(obs)
+        return album
+
     def tracklist_album(self, album_id: int) -> list[dict] | None:
         """Tracklist COMPLÈTE d'un album Genius : `[{number, disc_number, song}]`
         (song = payload morceau abrégé, crédités compris). Paginée par

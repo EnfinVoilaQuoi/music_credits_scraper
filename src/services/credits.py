@@ -137,6 +137,8 @@ class BilanCredits(Bilan):
     genius_sans_credit: int = 0
     #: Morceaux non redemandés à Discogs : crédits déjà là, ou « rien » récent.
     discogs_ignores: int = 0
+    #: Phase des crédits d'ALBUM Genius (`credits_album.BilanAlbums`).
+    albums: object | None = None
 
 
 #: Une page Genius lue depuis moins longtemps n'est pas relue, sauf crédits
@@ -267,6 +269,9 @@ class Clients:
     discogs: Callable[[], object] = _discogs_client
     lyrics: Callable[[OptionsCredits], object] = _lyrics_provider
     ytmusic_meta: Callable[[], object] = _ytmusic_api
+    #: Client de l'API Genius (`fiche_album`) : phase des crédits d'album.
+    #: None = celui du runtime, sinon un neuf.
+    genius_api: Callable[[], object] | None = None
 
 
 def _manque_production(track: Track) -> bool:
@@ -544,6 +549,9 @@ def run(
     bilan = BilanCredits(morceaux=len(tracks))
     if not tracks:
         conclure_sans_morceau(bilan, artist, options.track_ids)
+        # Les crédits d'ALBUM ne dépendent pas des fiches à relire : un album
+        # aux fiches complètes peut n'avoir jamais été lu (*M.A.N*, 2026-11-20).
+        _phase_albums(runtime, artist, options, hooks, bilan, clients)
         # Rien à lire, mais l'héritage se recalcule quand même : un original
         # désigné à la main (`version_de`) change sans qu'aucune page ne soit
         # relue (live « Come Again (feat. Big Red) », fiche sans page, 2026-11-19).
@@ -582,6 +590,7 @@ def run(
             # crédit : une RÉPONSE de Genius, datée — sans ce constat, la
             # sélection les comptait « manquantes » pour toujours (2026-10-29).
             bilan.genius_sans_credit = constater_pages_sans_credits(runtime, avec_page)
+            _phase_albums(runtime, artist, options, hooks, bilan, clients)
         if hooks.should_stop():
             bilan.interrompu("arrêt demandé après les crédits Genius")
             return _sauver(runtime, artist, tracks, bilan)
@@ -766,6 +775,44 @@ def run(
                 logger.warning("Fermeture scraper Genius échouée", exc_info=True)
 
 
+def _phase_albums(
+    runtime: Runtime,
+    artist: Artist,
+    options: OptionsCredits,
+    hooks: Hooks,
+    bilan: BilanCredits,
+    clients: Clients,
+) -> None:
+    """Crédits d'ALBUM Genius (`services.credits_album`) : une lecture par
+    album de l'artiste, pas par morceau ; avec `--fiches`, les albums de ces
+    seules fiches. Une panne ici n'arrête pas l'étape."""
+    if not options.genius or not artist.id or hooks.should_stop():
+        return
+    from src.services import credits_album
+
+    try:
+        bilan.albums = credits_album.lire_credits_albums(
+            runtime.data_manager,
+            artist.id,
+            force=options.force_credits,
+            track_ids=options.track_ids,
+            should_stop=hooks.should_stop,
+            progress=lambda c, tot, nom: hooks.progress(c, tot, nom, "Crédits d'album"),
+            client_factory=clients.genius_api or (lambda: _client_genius_api(runtime)),
+        )
+    except Exception:
+        logger.exception("Phase des crédits d'album Genius échouée")
+        bilan.erreurs.append("crédits d'album")
+
+
+def _client_genius_api(runtime: Runtime):
+    if getattr(runtime, "genius_api", None) is not None:
+        return runtime.genius_api
+    from src.api.genius_api import GeniusAPI
+
+    return GeniusAPI()
+
+
 def _sauver(
     runtime: Runtime, artist: Artist, tracks: list[Track], bilan: BilanCredits
 ) -> BilanCredits:
@@ -814,6 +861,17 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
                 f"  - 🎫 Crédits que seule l'API donne, gardés, sur "
                 f"{len(bilan.genius['api_ecarts'])} morceau(x) (détail au log) : {titres}\n"
             )
+        msg += "\n"
+    if bilan.albums is not None and bilan.albums.albums:
+        a = bilan.albums
+        msg += "🖼️ Crédits d'album Genius:\n"
+        msg += (
+            f"  - Albums lus : {a.lus} ({a.credits} crédit(s)) • sans crédit d'album : "
+            f"{a.absents} • échecs : {a.echecs}\n"
+            f"  - Déjà lus, non relus : {a.albums - a.a_lire}\n"
+        )
+        if a.quota:
+            msg += "  - ⚠️ Quota de l'API Genius épuisé : le reste au prochain run\n"
         msg += "\n"
     if bilan.discogs:
         msg += "💿 Crédits Discogs:\n"

@@ -112,6 +112,7 @@ scripts/*
 !scripts/cassette_deezer.py
 !scripts/cassette_kworb.py
 !scripts/cassette_songbpm.py
+!scripts/cassette_genius_albums.py
 !scripts/invariants_apres_rejeu.py
 !scripts/simuler_priorites.py
 !scripts/simuler_regles_audit.py

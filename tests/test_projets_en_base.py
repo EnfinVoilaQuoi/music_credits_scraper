@@ -332,3 +332,24 @@ def test_un_titre_partage_avec_une_page_d_une_piste_va_au_disque(data_manager):
     data_manager.regrouper_projets(1)
     data_manager.update_album_ytm_streams(1, "M.A.N (Black Roses & Lost Feelings)", 61)
     assert _projet_de_man(data_manager)[5] == 61
+
+
+def test_la_vue_albums_recoit_le_projet_de_chaque_edition(data_manager):
+    # La vue Albums groupe par projet : M.A.N et son Bonus font une ligne.
+    _base(data_manager)
+    data_manager.regrouper_projets(1)
+    lignes = data_manager.get_release_tracks_for_artist(1, scope="own")
+    projets = {(r["release_id"], r["projet_id"], r["projet_titre"]) for r in lignes}
+    (pid,) = {p for r, p, _ in projets if r in (10, 11)}
+    assert {t for r, p, t in projets if p == pid} == {"M.A.N (Black Roses & Lost Feelings)"}
+
+
+def test_les_projets_pour_la_timeline(data_manager):
+    _base(data_manager)
+    data_manager.regrouper_projets(1)
+    projets = {p["titre"]: p for p in data_manager.get_projets_for_artist(1)}
+    man = projets["M.A.N (Black Roses & Lost Feelings)"]
+    assert man["scope"] == "own" and man["nature"] == "album"
+    assert [e["release_id"] for e in man["editions"]] == [10, 11]  # plus ancienne d'abord
+    assert sorted(man["track_ids"]) == list(range(1, 20))
+    assert projets["Booska Pefra Vol.4"]["scope"] == "appearance"

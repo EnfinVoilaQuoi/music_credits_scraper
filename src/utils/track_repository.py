@@ -6456,8 +6456,12 @@ class TrackRepository:
                     conn.execute(
                         text(
                             "SELECT r.id AS release_id, r.title, r.credited_artist_name, r.release_date, "
-                            "r.record_type, r.deezer_album_id, r.scope, r.status, rt.track_id, rt.disc_number, rt.track_number "
+                            "r.record_type, r.deezer_album_id, r.scope, r.status, rt.track_id, rt.disc_number, rt.track_number, "
+                            # (e67) Le projet de l'édition : la vue Albums montre
+                            # un disque, pas chacune de ses éditions.
+                            "r.projet_id, p.titre AS projet_titre "
                             "FROM releases r JOIN release_tracks rt ON rt.release_id = r.id "
+                            "LEFT JOIN projets p ON p.id = r.projet_id "
                             "WHERE r.artist_id = :artist_id AND r.scope = :scope AND r.status = 'confirmed' "
                             "ORDER BY r.release_date, r.title, rt.disc_number, rt.track_number"
                         ),
@@ -6890,6 +6894,73 @@ class TrackRepository:
             return albums_lus
         except SQLAlchemyError as e:
             logger.error(f"Erreur get_albums_for_artist (artist_id={artist_id}): {e}")
+            return []
+
+    def get_projets_for_artist(self, artist_id: int) -> list[dict[str, Any]]:
+        """Les PROJETS de l'artiste (e67/e68), chacun avec ses éditions — ce que
+        lit la Timeline du studio (voie (b), décision utilisateur 2026-11-20 :
+        « autant être cohérent partout ») : un disque et sa réédition sont un
+        projet à deux éditions, au lieu d'une réédition devinée sur les dates.
+
+        `[{projet_id, titre, scope, nature, nature_source, spotify_streams,
+        spotify_streams_source, ytm_streams, edition_reference_id,
+        track_ids: [...], editions: [{release_id, titre, date, track_ids}]}]`,
+        éditions de la plus ancienne à la plus récente ; seuls les projets qui
+        ont au moins une fiche."""
+        try:
+            with self.engine.connect() as conn:
+                projets = {
+                    r["id"]: {
+                        "projet_id": r["id"],
+                        "titre": r["titre"],
+                        "scope": None,
+                        "nature": r["nature"],
+                        "nature_source": r["nature_source"],
+                        "spotify_streams": r["spotify_streams"],
+                        "spotify_streams_source": r["spotify_streams_source"],
+                        "ytm_streams": r["ytm_streams"],
+                        "edition_reference_id": r["edition_reference_id"],
+                        "track_ids": [],
+                        "editions": [],
+                    }
+                    for r in conn.execute(
+                        text(
+                            "SELECT id, titre, nature, nature_source, spotify_streams, "
+                            "spotify_streams_source, ytm_streams, edition_reference_id "
+                            "FROM projets WHERE artist_id = :a ORDER BY id"
+                        ),
+                        {"a": artist_id},
+                    ).mappings()
+                }
+                editions: dict[int, dict[str, Any]] = {}
+                for r in conn.execute(
+                    text(
+                        "SELECT r.id, r.projet_id, r.title, r.release_date, r.scope, rt.track_id "
+                        "FROM releases r JOIN release_tracks rt ON rt.release_id = r.id "
+                        "WHERE r.artist_id = :a AND r.projet_id IS NOT NULL "
+                        "ORDER BY r.release_date IS NULL, r.release_date, r.id, rt.track_id"
+                    ),
+                    {"a": artist_id},
+                ).mappings():
+                    projet = projets.get(r["projet_id"])
+                    if projet is None:
+                        continue
+                    projet["scope"] = r["scope"]
+                    ed = editions.get(r["id"])
+                    if ed is None:
+                        ed = editions[r["id"]] = {
+                            "release_id": r["id"],
+                            "titre": r["title"],
+                            "date": str(r["release_date"])[:10] if r["release_date"] else None,
+                            "track_ids": [],
+                        }
+                        projet["editions"].append(ed)
+                    ed["track_ids"].append(r["track_id"])
+                    if r["track_id"] not in projet["track_ids"]:
+                        projet["track_ids"].append(r["track_id"])
+            return [p for p in projets.values() if p["track_ids"]]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_projets_for_artist({artist_id}): {e}")
             return []
 
     @staticmethod

@@ -680,10 +680,21 @@ async def _totaliser_albums(
     connus: dict[str, str] = {}
     groupes: dict[str, list[str]] = {}
     totaux: dict[str, tuple] = {}
+    # Un disque = un PROJET (e68), rendu sous chacun de ses titres d'édition :
+    # le premier titre le représente, les autres y renvoient — sinon le même
+    # disque était lu et totalisé une fois par titre.
+    representant: dict[int, str] = {}
+    vers: dict[str, str] = {}
     for album in data_manager.get_albums_for_artist(artist.id):
         if not album.get("title"):
             continue
         cle = normalize_title(album["title"])
+        projet = album.get("projet_id")
+        if projet is not None:
+            rep = representant.setdefault(projet, cle)
+            if rep != cle:
+                vers[cle] = rep
+                continue
         connus[cle] = album["title"]
         totaux[cle] = (album.get("spotify_streams_source"), album.get("spotify_streams_updated"))
         # Éditions DÉJÀ connues de la base — Kworb en voit que la page artiste
@@ -699,7 +710,8 @@ async def _totaliser_albums(
 
     # Puis les entrées de la page artiste, qui peuvent en révéler d'autres.
     for album_id, titre in albums_spotify.items():
-        cle = base_album_key(normalize_title(titre or ""), connus)
+        cle = base_album_key(normalize_title(titre or ""), set(connus) | set(vers))
+        cle = vers.get(cle, cle)
         if cle and album_id not in groupes.setdefault(cle, []):
             groupes[cle].append(album_id)
 
@@ -708,7 +720,8 @@ async def _totaliser_albums(
     if id_map is not None:
         for t in data_manager.get_artist_tracks(artist.id):
             if t.album and not t.spotify_id and not t.secondary_role:
-                sans_id.setdefault(normalize_title(t.album), []).append(t)
+                cle_t = normalize_title(t.album)
+                sans_id.setdefault(vers.get(cle_t, cle_t), []).append(t)
     resolus: list[str] = []
     refus_de_suite = 0
 

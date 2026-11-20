@@ -137,7 +137,11 @@ def compter_ids(tracks: Iterable[Track], albums: Iterable[dict] = ()) -> dict[st
         "isrc": sum(1 for t in tracks if t.isrc),
         "spotify_id": sum(1 for t in tracks if t.spotify_id),
         "duration": sum(1 for t in tracks if t.duration),
-        "record_type": sum(1 for a in albums if a.get("record_type")),
+        # Un disque par PROJET : `get_albums_for_artist` le rend sous chacun
+        # de ses titres d'édition (e68).
+        "record_type": len(
+            {a.get("projet_id") or a.get("title") for a in albums if a.get("record_type")}
+        ),
     }
 
 

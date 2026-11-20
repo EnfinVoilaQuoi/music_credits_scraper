@@ -26,10 +26,32 @@ class TestRegles:
         assert meme_projet(a, b) == "contenue"
 
     def test_regle_des_80_pour_cent_au_meme_nom(self):
-        # PLK, Enna (20) / Enna Boost (29) : 18 communes.
-        a = _ed(1, "Enna", range(20))
-        b = _ed(2, "Enna Boost", list(range(18)) + list(range(100, 111)))
+        # Kid Cudi, Man On The Moon (18) / (Int'l Version) (16) : 13 communes.
+        a = _ed(1, "Man On The Moon: The End of Day", range(18))
+        b = _ed(
+            2, "Man On The Moon: The End Of Day (Int'l Version)", list(range(13)) + [100, 101, 102]
+        )
         assert meme_projet(a, b) == "commune"
+
+    def test_dans_le_doute_un_nom_contenu_reste_separe(self):
+        # Décision utilisateur 2026-11-20 : « dans le doute je préfère séparer
+        # qu'assembler » — au panneau, pas réunies d'office.
+        cas = [
+            # Swift Guad : un tome contenu dans son double album.
+            (_ed(1, "Vice & Vertu Vol.3", range(24)), _ed(2, "Vertu, vol. 3", range(11))),
+            # Fababy : une partie d'un tome.
+            (
+                _ed(1, "La symphonie des chargeurs, Vol. 2", range(28)),
+                _ed(2, "La Symphonie des chargeurs 2 (Partie 2)", range(14)),
+            ),
+            # Un mot hors du vocabulaire d'édition (« Boost », « Refill »).
+            (_ed(1, "Enna", range(20)), _ed(2, "Enna Boost", list(range(18)) + [100])),
+        ]
+        from src.utils.projets_disques import cas_a_trancher
+
+        for a, b in cas:
+            assert meme_projet(a, b) is None, (a.titre, b.titre)
+            assert [c.editions for c in cas_a_trancher([a, b], regrouper([a, b]))] == [(1, 2)]
 
     def test_meme_code_barres(self):
         a = _ed(1, "A V L D", [1], upc="0859733291991")
@@ -84,10 +106,13 @@ class TestSuites:
         assert meme_projet(a, b) == "contenue"
 
     def test_memes_fiches_ne_font_jamais_une_suite(self):
-        # Dosseh : Deezer omet le volume (17 fiches, 15 communes).
+        # Dosseh : Deezer omet le volume (17 fiches, 15 communes). Pas une
+        # suite ; mais pas réunies d'office non plus (« Bolide » / « Bolide 2 »,
+        # dans le doute on sépare) : le panneau tranche.
         a = _ed(1, "Bolide", range(17))
         b = _ed(2, "Bolide Vol. 2", list(range(15)) + [100, 101])
-        assert meme_projet(a, b) == "commune"
+        assert meme_projet(a, b) is None
+        assert regrouper([a, b]).suites == []
 
 
 class TestEditionCumulee:
@@ -101,7 +126,8 @@ class TestEditionCumulee:
         )
         r = regrouper([abysses, ivresse, coffret])
         assert r.projets == [[1], [2], [3]]
-        assert r.a_trancher == [[1, 2, 3]]
+        # Le coffret n'est plus réuni à aucun des deux (nom contenu : doute).
+        assert r.a_trancher == []
 
 
 def test_edition_de_reference_la_plus_ancienne_hors_live():
@@ -140,7 +166,8 @@ class TestCasATrancher:
             _ed(3, "Abysses & Ivresse des profondeurs", list(range(15)) + list(range(100, 107))),
         ]
         cas = cas_a_trancher(eds, regrouper(eds))
-        assert [c.editions for c in cas] == [(1, 2, 3)]
+        # Chaque disque face au coffret : deux cas « titres différents ».
+        assert [c.editions for c in cas] == [(1, 3), (2, 3)]
 
     def test_une_suite_ou_un_single_n_y_vont_pas(self):
         from src.utils.projets_disques import cas_a_trancher

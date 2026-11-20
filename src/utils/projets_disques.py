@@ -40,7 +40,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from src.utils.codes_barres import cle_upc
-from src.utils.version_descriptors import meme_disque, memes_parties_de_disque
+from src.utils.version_descriptors import (
+    meme_disque,
+    meme_disque_edition,
+    memes_parties_de_disque,
+)
 
 #: Une compilation de l'artiste n'est pas une édition d'un de ses disques
 #: (« Immortel (Mini Best Of) » de Sinik, fondu dans *Immortel* à la première
@@ -103,6 +107,11 @@ def meme_projet(a: Edition, b: Edition) -> str | None:
         a.titre, b.titre
     ):
         return "suite"
+    # Dans le doute, séparer (décision utilisateur 2026-11-20) : réunir sans
+    # l'humain exige le même nom à un marqueur d'édition près ; un nom contenu
+    # dans l'autre (tome d'un double album) va au panneau « même projet ? ».
+    if not meme_disque_edition(a.titre, b.titre):
+        return None
     petite = min(len(a.pistes), len(b.pistes))
     if commun == petite:
         return "contenue"

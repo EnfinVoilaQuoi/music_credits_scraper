@@ -1631,6 +1631,132 @@ def memes_parties_de_disque(a: str | None, b: str | None) -> bool:
     return memes_parties(*nom) or memes_parties(*tome)
 
 
+def meme_disque_edition(a: str | None, b: str | None) -> bool:
+    """PUR. Deux noms désignent-ils le même disque À UN MARQUEUR D'ÉDITION PRÈS
+    (« Temps mort » / « Temps mort (Réédition) », « Kushtape, Vol. 2 » /
+    « Kushtape Volume 2 ») et la même partie ? Plus strict que `meme_disque`,
+    qui accepte un nom CONTENU dans l'autre : c'est le juge qui RÉUNIT deux
+    éditions en un projet sans l'humain. Décision utilisateur 2026-11-20 :
+    « dans le doute je préfère séparer qu'assembler » — un tome contenu dans
+    son double album (« Vertu, vol. 3 » / « Vice & Vertu Vol.3 »), une partie
+    d'un tome (« … 2 (Partie 2) » / « …, Vol. 2 ») restent séparés et vont au
+    panneau « même projet ? »."""
+    from src.utils.title_matching import meme_album
+
+    if not a or not b or not memes_parties_de_disque(a, b):
+        return False
+    if meme_album(a, b) or meme_album(_volume_nu(a), _volume_nu(b)):
+        return True
+    ca, cb = _coeur_de_disque(a), _coeur_de_disque(b)
+    return bool(ca) and ca == cb
+
+
+#: Mots sans poids dans un nom de disque : liaisons et articles (« Vice et
+#: vertu » / « Vice & vertu », « Le pont de la reine » / « Pont de la reine »).
+_MOTS_VIDES_DU_NOM = frozenset(["et", "and", "le", "la", "les", "l", "the", "a", "an", "un", "une"])
+#: Suffixes d'ordinal, séparés du nombre par le découpage (« 20 eme », « 10 th »).
+_ORDINAUX = frozenset(["st", "nd", "rd", "th", "e", "eme", "er"])
+
+
+def _mot_d_edition(mot: str) -> bool:
+    return mot in _MOTS_D_EDITION or mot in _ORDINAUX or mot.isdigit()
+
+
+def _coeur_de_disque(titre: str) -> str:
+    """Le CŒUR d'un nom de disque : sans ses groupes d'édition, sans « Vol. »,
+    sans une fin faite de mots d'édition (« Infinite EP », « Sol Invictus
+    Version 2002 », « Inglourious Bastardz CD1 » — jamais un numéro seul :
+    « Summer Crack 2 » garde son 2), sans liaisons ni articles, lettres et
+    chiffres collés (« Shady XV » = « SHADYXV », « Take ’Em » = « Take'Em »).
+    Deux cœurs égaux : la même graphie d'un même disque ; un mot de titre en
+    plus (« Vice & Vertu » / « Vertu », « (Partie 2) », « Refill ») : non."""
+    mots = re.findall(r"[a-z]+|\d+", normalize_title(_volume_nu(_sans_groupes_d_edition(titre))))
+    fin = len(mots)
+    while fin > 0 and _mot_d_edition(mots[fin - 1]):
+        fin -= 1
+    if fin > 0 and any(m in _MOTS_D_EDITION for m in mots[fin:]):
+        mots = mots[:fin]
+    return "".join(m for m in mots if m not in _MOTS_VIDES_DU_NOM)
+
+
+#: Mots d'un groupe d'ÉDITION de disque (« (Expanded Edition) », « (10th
+#: Anniversary) », « [Deluxe] », « - Int'l Version ») : liste FERMÉE, comparée
+#: après `normalize_title`. Un groupe qui contient un autre mot (« Refill »,
+#: « Boost », « les inachevés ») n'est pas une édition sûre : panneau.
+_MOTS_D_EDITION = frozenset(
+    [
+        "deluxe",
+        "luxe",
+        "de",
+        "edition",
+        "version",
+        "bonus",
+        "track",
+        "tracks",
+        "expanded",
+        "anniversary",
+        "anniversaire",
+        "remaster",
+        "remastered",
+        "remasterise",
+        "remasterisee",
+        "reissue",
+        "reedition",
+        "collector",
+        "collectors",
+        "special",
+        "speciale",
+        "limited",
+        "platinum",
+        "gold",
+        "explicit",
+        "clean",
+        "intl",
+        "int",
+        "l",
+        "international",
+        "digital",
+        "ans",
+        "years",
+        "the",
+        "super",
+        "ultimate",
+        "complete",
+        "integrale",
+        "tour",
+        # Graphies de plateforme (Apple, iTunes, support) — 2026-11-20.
+        "ep",
+        "single",
+        "itunes",
+        "edited",
+        "extended",
+        "preluxe",
+        "re",
+        "us",
+        "u",
+        "s",
+        "release",
+        "cd",
+        "disc",
+    ]
+)
+_GROUPE_D_EDITION = re.compile(r"\s*(?:[\(\[]([^\)\]]*)[\)\]]|\s[-–]\s(.*)$)")
+
+
+def _sans_groupes_d_edition(titre: str) -> str:
+    """Le nom du disque sans ses groupes d'édition (parenthèses, crochets ou
+    « - … » final faits des seuls `_MOTS_D_EDITION` et de nombres)."""
+
+    def retirer(m: re.Match) -> str:
+        # Lettres et chiffres séparés : `normalize_title` colle l'espace avant
+        # un chiffre (« Édition 20ème » → « edition20eme »).
+        mots = re.findall(r"[a-z]+|\d+", normalize_title(m.group(1) or m.group(2) or ""))
+        sur = all(_mot_d_edition(w) for w in mots)
+        return "" if mots and sur else m.group(0)
+
+    return _GROUPE_D_EDITION.sub(retirer, titre)
+
+
 #: Marqueur de tome d'un nom de DISQUE : « Vol. 2 », « Volume 2 », « Vol.2 ».
 _MARQUEUR_DE_VOLUME = re.compile(r"[,\s]*\b(?:volume|vol)\b\.?\s*(?=\d)", re.IGNORECASE)
 

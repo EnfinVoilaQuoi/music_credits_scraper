@@ -2267,7 +2267,9 @@ class TrackRepository:
             ).mappings()
             return [dict(ligne) for ligne in lignes]
 
-    def reclasser_credits(self, roles: dict, suppressions=()) -> tuple[int, int]:
+    def reclasser_credits(
+        self, roles: dict, suppressions=(), details: dict | None = None
+    ) -> tuple[int, int]:
         """Change le rôle de crédits existants et en retire d'autres.
 
         Écrivain dédié, comme `purger_credits_relations_deguisees` : un script
@@ -2279,6 +2281,10 @@ class TrackRepository:
 
         `suppressions` sert les doublons intra-source (Genius nomme la même
         personne sous « Writer » ET sous « Writers » resté en `Other`).
+
+        `details` ({id: libellé}) pose AUSSI le `role_detail` des crédits qui y
+        figurent : un crédit qui DEVIENT `Other` doit porter son libellé, sans
+        quoi rien ne dirait plus ce qu'il est (« Sample Clearance », 2026-11-20).
 
         Rend (rôles changés, lignes retirées).
         """
@@ -2296,11 +2302,21 @@ class TrackRepository:
                     )
                     retires += int(res.rowcount or 0)
                 changes = 0
+                details = details or {}
                 for credit_id, role in roles.items():
-                    res = conn.execute(
-                        text("UPDATE credits SET role = :role WHERE id = :id"),
-                        {"role": role, "id": int(credit_id)},
-                    )
+                    if credit_id in details:
+                        res = conn.execute(
+                            text(
+                                "UPDATE credits SET role = :role, role_detail = :detail "
+                                "WHERE id = :id"
+                            ),
+                            {"role": role, "detail": details[credit_id], "id": int(credit_id)},
+                        )
+                    else:
+                        res = conn.execute(
+                            text("UPDATE credits SET role = :role WHERE id = :id"),
+                            {"role": role, "id": int(credit_id)},
+                        )
                     changes += int(res.rowcount or 0)
             logger.info(f"🔁 {changes} crédit(s) reclassé(s), {retires} doublon(s) retiré(s)")
             return changes, retires

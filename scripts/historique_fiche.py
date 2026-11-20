@@ -119,21 +119,29 @@ def main() -> int:
             for ligne in historique.mentions(notes, membres, tid):
                 print(f"   {ligne}")
     if args.panneau:
-        from src.services import revue
-
         for tid in ids:
-            artiste_id = (
-                dm.engine.connect()
-                .execute(text("SELECT artist_id FROM tracks WHERE id = :t"), {"t": tid})
-                .scalar()
-            )
-            artiste = next(a for a in dm.get_all_artists() if a.id == artiste_id)
-            artiste.tracks = dm.discographie_reunie(artiste)
             print("══ PANNEAU")
-            for c in revue.analyser(dm, artiste).actifs:
-                if c.track_id == tid:
-                    print(f"   {c.detecteur} : {c.motif}")
+            for ligne in cas_du_panneau(dm, tid):
+                print(f"   {ligne}")
     return 0
+
+
+def cas_du_panneau(dm, tid: int) -> list[str]:
+    """Les cas actifs du panneau pour la fiche, sur la discographie réunie de
+    son artiste (2026-11-20 : appelait `get_all_artists`, qui n'existe pas)."""
+    from src.services import revue
+
+    with dm.engine.connect() as conn:
+        artiste_id = conn.execute(
+            text("SELECT artist_id FROM tracks WHERE id = :t"), {"t": tid}
+        ).scalar()
+    artiste = next(a for a in dm.artistes_de_la_base() if a.id == artiste_id)
+    artiste.tracks = dm.discographie_reunie(artiste)
+    return [
+        f"{c.detecteur} : {c.motif}"
+        for c in revue.analyser(dm, artiste).actifs
+        if c.track_id == tid
+    ]
 
 
 if __name__ == "__main__":

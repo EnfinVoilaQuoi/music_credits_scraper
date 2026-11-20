@@ -682,11 +682,19 @@ def _deezer_rattacher_isrc(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]
     isrc = str(cas.preuves["ecart"]["piste"].get("isrc") or "").upper()
     fiche = next((t for t in ctx.tracks.values() if t.isrc and str(t.isrc).upper() == isrc), None)
     compte_rendu = revue_actions._deezer_rattacher_isrc(ctx, cas)
-    return compte_rendu, {
+    annulation = {
         "type": "lien_deezer",
         "track_id": fiche.id if fiche else None,
         "ecart": cas.preuves["ecart"],
     }
+    if fiche is None:
+        # Rattachée aux fiches des MEMBRES (réédition de leurs albums solo
+        # créditée à la formation) : chaque lien se défait chez son membre.
+        annulation["membres"] = [
+            {"artist_id": membre.id, "track_id": t.id}
+            for membre, t in revue_actions.fiches_des_membres_a_l_isrc(dm, artiste, isrc)
+        ]
+    return compte_rendu, annulation
 
 
 def _deezer_rattacher_fiche(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
@@ -1186,6 +1194,38 @@ def rouvrir_normal_de_regle(dm, correction: dict) -> str:
     return f"« {correction['morceau']} » rouvert"
 
 
+def _delier_lien_deezer(dm, artiste, fiche, preuve: dict) -> str:
+    """Défait le lien de la piste Deezer à `fiche` (`delier`), chez `artiste`,
+    l'artiste de la fiche."""
+    from src.services import ecarts_deezer
+
+    e = ecarts_deezer.ecart_depuis(preuve, {fiche.id: fiche})
+    e.nature, e.existing_track = "link_review", fiche
+    notee = any(
+        ed.get("deezer_id") is not None and int(ed["deezer_id"]) == int(e.piste.id)
+        for ed in dm.get_track_editions(fiche.id)
+    )
+    compte_rendu = ecarts_deezer.delier(dm, artiste, e, oublier_la_duree=not notee)
+    # Le rattachement a pu noter la page en « autre édition Deezer »
+    # (`_renseigner_fiche`) : elle n'est pas plus une édition de la fiche
+    # que sa parution — #8199, 2026-10-27, l'édition restait.
+    retirees = ecarts_deezer.retirer_editions_de_la_page(dm, fiche.id, e.piste.id)
+    if retirees:
+        compte_rendu += f" — édition(s) retirée(s) : {', '.join(retirees)}"
+    return compte_rendu
+
+
+def _fiche_du_membre(dm, lien: dict) -> tuple[object, object]:
+    """`(membre, fiche)` d'un lien posé chez un membre de la formation."""
+    membre = next((a for a in dm.artistes_de_la_base() if a.id == lien["artist_id"]), None)
+    fiche = next(
+        (t for t in dm.get_artist_tracks(lien["artist_id"]) if t.id == lien["track_id"]), None
+    )
+    if membre is None or fiche is None:
+        raise LookupError(f"la fiche #{lien['track_id']} du membre n'est plus en base")
+    return membre, fiche
+
+
 def retablir(dm, artiste, correction: dict) -> str:
     """Défait une correction du journal et marque son cas « normal » (sinon la
     passe suivante la referait). Lève si la fiche n'est plus là."""
@@ -1300,25 +1340,16 @@ def retablir(dm, artiste, correction: dict) -> str:
         retirer_lignes_donnees(dm, creee, artiste)
         dm.delete_track(creee.id)
         compte_rendu = f"fiche « {creee.title} » (créée par règle) supprimée"
+    elif annulation.get("type") == "lien_deezer" and annulation.get("membres"):
+        compte_rendu = " ; ".join(
+            _delier_lien_deezer(dm, *_fiche_du_membre(dm, m), annulation["ecart"])
+            for m in annulation["membres"]
+        )
     elif annulation.get("type") == "lien_deezer":
-        from src.services import ecarts_deezer
-
         fiche = next((t for t in artiste.tracks or [] if t.id == annulation.get("track_id")), None)
         if fiche is None:
             raise LookupError("la fiche rattachée n'est plus dans la discographie")
-        e = ecarts_deezer.ecart_depuis(annulation["ecart"], {fiche.id: fiche})
-        e.nature, e.existing_track = "link_review", fiche
-        notee = any(
-            ed.get("deezer_id") is not None and int(ed["deezer_id"]) == int(e.piste.id)
-            for ed in dm.get_track_editions(fiche.id)
-        )
-        compte_rendu = ecarts_deezer.delier(dm, artiste, e, oublier_la_duree=not notee)
-        # Le rattachement a pu noter la page en « autre édition Deezer »
-        # (`_renseigner_fiche`) : elle n'est pas plus une édition de la fiche
-        # que sa parution — #8199, 2026-10-27, l'édition restait.
-        retirees = ecarts_deezer.retirer_editions_de_la_page(dm, fiche.id, e.piste.id)
-        if retirees:
-            compte_rendu += f" — édition(s) retirée(s) : {', '.join(retirees)}"
+        compte_rendu = _delier_lien_deezer(dm, artiste, fiche, annulation["ecart"])
     elif annulation.get("type") == "edition_deezer":
         if not dm.retirer_edition(annulation["track_id"], annulation["label"]):
             raise LookupError(f"édition « {annulation['label']} » introuvable")

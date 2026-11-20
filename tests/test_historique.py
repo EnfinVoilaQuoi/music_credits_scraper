@@ -76,3 +76,20 @@ def test_les_notes_qui_en_parlent(data_manager, tmp_path):
         "CORRECTIFS.md:3",
         "journal/2026-09.md:1",
     ]
+
+
+def test_le_bloc_panneau_du_script_tourne(data_manager, monkeypatch):
+    """`historique_fiche.py --panneau` appelait `dm.get_all_artists`, qui
+    n'existe pas (2026-11-20) : le bloc se lit sur la vraie façade."""
+    from scripts import historique_fiche
+
+    diams, vive, _ = _deux_lives(data_manager)
+    vus = []
+
+    def analyser(dm, artiste):
+        vus.append((artiste.id, len(artiste.tracks)))
+        return SimpleNamespace(actifs=[revue.Cas("lrc_trop_long", vive.id, "Écorchée Vive", "m")])
+
+    monkeypatch.setattr(revue, "analyser", analyser)
+    assert historique_fiche.cas_du_panneau(data_manager, vive.id) == ["lrc_trop_long : m"]
+    assert vus == [(diams.id, 2)]

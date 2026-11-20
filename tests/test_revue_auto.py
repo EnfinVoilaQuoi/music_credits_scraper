@@ -1152,3 +1152,36 @@ def test_l_edition_a_l_isrc_de_l_autre_page_lui_est_rendue(data_manager, artiste
     revue_auto.retablir(data_manager, artiste, correction)
     assert [e["label"] for e in data_manager.get_track_editions(ids[2])] == [label]
     assert data_manager.get_track_editions(ids[1]) == []
+
+
+def test_deezer_isrc_d_un_membre_rattache_chez_le_membre_puis_retabli(
+    data_manager, artiste, monkeypatch
+):
+    """*OSO / Hat Trick* (2026-11-20) : la réédition créditée à Caballero &
+    JeanJass réunit les albums SOLO des deux membres ; l'ISRC est celui d'une
+    fiche de Caballero. La parution va à SA fiche, chez lui ; rien n'est créé
+    chez le duo. Rétablie, le lien part de chez le membre."""
+    from src.models.artist import ArtistRelation
+    from src.services import ecarts_deezer as ed
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    membre = Artist(name="Caballero")
+    membre.id = data_manager.save_artist(membre)
+    data_manager.save_track(Track(title="Ya no sé", artist=membre, genius_id=6662568, isrc="BEEO1"))
+    data_manager.record_artist_relations(
+        artiste.id, [ArtistRelation(related_name="Caballero", kind="has_member")]
+    )
+    _ecarts_deezer(
+        data_manager, artiste, ed.PisteDeezer(id=9, title="Ya no se", duration=180, isrc="BEEO1")
+    )
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert len(bilan.appliquees) == 1 and not bilan.echecs, bilan
+    assert _charger(data_manager, artiste) == {}  # rien créé chez la formation
+    (fiche,) = data_manager.get_artist_tracks(membre.id)
+    assert "Hourvari" in {r["title"] for r in data_manager.get_track_releases(fiche.id)}
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert "Hourvari" not in {r["title"] for r in data_manager.get_track_releases(fiche.id)}

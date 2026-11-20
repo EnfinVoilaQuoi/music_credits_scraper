@@ -1163,6 +1163,29 @@ class ArtistRepository:
                     membres[ligne["name"]] = int(ligne["membre_id"])
         return formation_id, sorted(membres.items())
 
+    def membres_portant_isrc(self, artist_id: int, isrc: str) -> list[int]:
+        """Les membres de la formation `artist_id` (liens `has_member`
+        confirmés, membre en base) qui ont une fiche à cet ISRC. Une réédition
+        créditée à la formation réunit parfois les albums SOLO de ses membres
+        (*OSO / Hat Trick* de Caballero & JeanJass, 2026-11-20)."""
+        membres = [
+            r.related_artist_id
+            for r in self.get_artist_relations(artist_id)
+            if r.kind == "has_member" and r.related_artist_id is not None
+        ]
+        if not membres or not isrc:
+            return []
+        with self.engine.connect() as conn:
+            lignes = conn.execute(
+                text(
+                    "SELECT DISTINCT artist_id FROM tracks WHERE artist_id IN "
+                    f"({', '.join(str(int(m)) for m in membres)}) "
+                    "AND isrc IS NOT NULL AND UPPER(isrc) = :isrc"
+                ),
+                {"isrc": isrc.upper()},
+            ).scalars()
+            return sorted(int(x) for x in lignes)
+
     def liens_de_formation(self, related_name: str) -> list[dict]:
         """Les liens `member_of` confirmés de TOUS nos membres vers cette
         formation (nom normalisé égal) : `{artist_id, related_name, formation,

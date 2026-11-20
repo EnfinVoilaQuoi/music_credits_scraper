@@ -310,12 +310,54 @@ def _deezer_rattacher_isrc(ctx: ContexteAction, cas: Cas) -> str:
     ecart = ecarts_deezer.ecart_depuis(cas.preuves["ecart"], ctx.tracks)
     isrc = (ecart.piste.isrc or "").upper()
     fiches = [t for t in ctx.tracks.values() if t.isrc and str(t.isrc).upper() == isrc]
+    if not fiches:
+        return _rattacher_aux_fiches_des_membres(ctx, cas, isrc)
     if len(fiches) != 1:
         raise LookupError(
             f"{len(fiches)} fiche(s) portent l'ISRC {isrc or '—'} — rattachement à faire à la main"
         )
     ecart.nature, ecart.existing_track, ecart.matched_by = "link", fiches[0], "isrc_autre_titre"
     return ecarts_deezer.creer_une_ligne(ctx.data_manager, ctx.artiste, ecart)
+
+
+def _rattacher_aux_fiches_des_membres(ctx: ContexteAction, cas: Cas, isrc: str) -> str:
+    """L'ISRC n'est sur aucune fiche de la formation mais sur celle d'un de ses
+    MEMBRES : la réédition créditée à la formation réunit leurs albums solo
+    (*OSO / Hat Trick*, 33 pistes de Caballero & JeanJass, 2026-11-20). Le même
+    enregistrement — une page Genius, lignes sœurs comprises — reçoit la
+    parution chez chaque membre qui le porte ; aucune fiche n'est créée chez la
+    formation. Deux enregistrements à cet ISRC : l'humain."""
+    from src.services import ecarts_deezer
+
+    dm = ctx.data_manager
+    comptes = []
+    for membre, fiche in fiches_des_membres_a_l_isrc(dm, ctx.artiste, isrc):
+        ecart = ecarts_deezer.ecart_depuis(cas.preuves["ecart"], ctx.tracks)
+        ecart.nature, ecart.existing_track, ecart.matched_by = "link", fiche, "isrc"
+        # Au nom du MEMBRE : la parution se range chez l'artiste de la fiche
+        # (`record_release_observations`), et c'est là que `delier` la cherche.
+        comptes.append(f"{membre.name} : " + ecarts_deezer.creer_une_ligne(dm, membre, ecart))
+    return " ; ".join(comptes)
+
+
+def fiches_des_membres_a_l_isrc(dm, artiste, isrc: str) -> list[tuple[object, object]]:
+    """`[(membre, fiche)]` : les fiches des membres de la formation à cet ISRC,
+    d'UN seul enregistrement (une page Genius, lignes sœurs comprises) ; sinon
+    `LookupError` (rien, ou deux enregistrements : l'humain)."""
+    ids = dm.membres_portant_isrc(artiste.id, isrc)
+    membres = {a.id: a for a in dm.artistes_de_la_base() if a.id in ids}
+    paires = [
+        (membres[m], t)
+        for m in ids
+        if m in membres
+        for t in dm.get_artist_tracks(m)
+        if t.isrc and str(t.isrc).upper() == isrc
+    ]
+    if len({t.genius_id or f"#{t.id}" for _, t in paires}) != 1:
+        raise LookupError(
+            f"{len(paires)} fiche(s) portent l'ISRC {isrc or '—'} — rattachement à faire à la main"
+        )
+    return paires
 
 
 def _deezer_edition(ctx: ContexteAction, cas: Cas) -> str:

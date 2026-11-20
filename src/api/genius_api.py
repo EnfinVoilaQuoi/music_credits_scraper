@@ -20,6 +20,7 @@ from src.models import Artist, ReleaseObservation, Track
 from src.models.track import _PRODUCER_ROLES
 from src.observability import source_usage
 from src.utils import credits_genius_api
+from src.utils.annees_relations import annee_de, dater_relations
 from src.utils.apple_identity import CHAMP_APPLE_PROPOSE
 from src.utils.credit_roles import map_role
 from src.utils.encodage import reparer_c1
@@ -723,14 +724,16 @@ class GeniusAPI:
                     continue
                 if keep_fr and (s.get("language") or "").lower() != "fr":
                     continue
-                out.append(
-                    {
-                        "type": "translation_fr" if keep_fr else rtype,
-                        "title": s.get("title") or s.get("full_title"),
-                        "artist": (s.get("primary_artist") or {}).get("name"),
-                        "url": s.get("url"),
-                    }
-                )
+                relation = {
+                    "type": "translation_fr" if keep_fr else rtype,
+                    "title": s.get("title") or s.get("full_title"),
+                    "artist": (s.get("primary_artist") or {}).get("name"),
+                    "url": s.get("url"),
+                }
+                annee = annee_de(s)
+                if annee:  # absente : la clé n'est pas posée (forme stockée inchangée)
+                    relation["year"] = annee
+                out.append(relation)
         return out
 
     def get_album_track_numbers(self, song_id: int) -> dict[int, int] | None:
@@ -939,6 +942,13 @@ class GeniusAPI:
             # `DataManager.record_pending` qui l'enregistre après le save.
             track._relationships_pending = True
             changed = True
+        elif rels:
+            # Relations déjà posées : seule l'année manquante s'ajoute (2026-11-20).
+            datees = dater_relations(track.relationships, rels)
+            if datees is not None:
+                track.relationships = datees
+                track._relationships_pending = True
+                changed = True
 
         # Version d'un TIERS d'un morceau de l'artiste (cover / remix) : Genius
         # le dit par la relation, la fiche restait en « Writer ».

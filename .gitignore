@@ -227,6 +227,7 @@ scripts/*
 !scripts/retirer_paroles_factices.py
 # Titre de la page Spotify relu dans le brut (2026-10-31).
 !scripts/rafraichir_titres_spotify.py
+!scripts/dater_relations_genius.py
 !scripts/marquer_parutions_live.py
 !scripts/separer_singles_fondus.py
 !scripts/poser_ids_genius_formations.py

@@ -716,7 +716,8 @@ class Track:
     credits: list[Credit] = field(default_factory=list)
 
     # Relations « inspiré de » (amont) : samples/interpolations/cover_of/remix_of + trad FR
-    # Chaque entrée : {type, title, artist, url}. Source : API Genius song_relationships.
+    # Chaque entrée : {type, title, artist, url[, year]}. Source : API Genius song_relationships
+    # (`year` : sortie du morceau visé, depuis le 2026-11-20 ; `annees_relations`).
     relationships: list[dict[str, Any]] = field(default_factory=list)
 
     # URLs

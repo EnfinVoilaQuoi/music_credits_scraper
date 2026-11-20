@@ -296,7 +296,29 @@ releases = Table(
     # « Live » du release-group), lu à la même recherche : 1 / 0, NULL =
     # inconnu. Une fiche studio n'en reçoit aucune piste (`studio_sur_live`).
     Column("mb_live", _BOOL),
+    # (e67) Le PROJET de l'édition (`projets`) : NULL pour une parution qui
+    # n'est pas à l'artiste (`appearance`) ou pas confirmée. Posé par
+    # `regrouper_projets` (`utils/projets_disques`), jamais à la main.
+    Column("projet_id", Integer, ForeignKey("projets.id")),
     UniqueConstraint("artist_id", "identity_key"),
+    sqlite_autoincrement=True,
+)
+
+
+# Projets (e67) : les ÉDITIONS d'un même disque réunies (*M.A.N* + *M.A.N
+# (Bonus)*), par artiste comme `releases`. Le titre est celui de l'édition de
+# référence (la plus ancienne hors live). Règles : `utils/projets_disques`.
+# `edition_reference_id` n'a pas de clé étrangère déclarée (`releases` désigne
+# déjà `projets`) ; l'audit `orphelin` la vérifie par son nom.
+projets = Table(
+    "projets",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
+    Column("titre", Text, nullable=False),
+    Column("edition_reference_id", Integer),
+    Column("created_at", TIMESTAMP),
+    Column("updated_at", TIMESTAMP),
     sqlite_autoincrement=True,
 )
 

@@ -1596,6 +1596,26 @@ def meme_disque(a: str | None, b: str | None) -> bool:
     return either_contains_as_words(nus[0], nus[1])
 
 
+#: Un nombre DÉTACHÉ du mot qui le précède fait partie du NOM du disque (« The
+#: Marshall Mathers LP 2 » = « … LP2 ») — sauf après un mot de partie ou de
+#: volume, où il numérote la suite (« Or Noir Part 2 », « Untold Story Vol 2 »).
+_NOMBRE_DU_NOM = re.compile(
+    r"\b(?!(?:part|pt|partie|vol|volume|tome|chapitre|chapter|saison|season|episode)\b)"
+    r"([^\W\d_]{2,}) (?=\d+\b)",
+    re.IGNORECASE,
+)
+
+
+def memes_parties_de_disque(a: str | None, b: str | None) -> bool:
+    """PUR. Deux titres de DISQUE désignent-ils la même partie (ou aucune) ?
+    `memes_parties` lu sur des noms d'album, où un nombre détaché peut
+    appartenir au nom (« LP 2 » / « LP2 » : 8 paires d'éditions de *The Marshall
+    Mathers LP 2* tenues pour des suites, simulé le 2026-11-20). Sert à séparer
+    une SUITE qui reprend les précédentes (« Chambre 140 (Part. 3) »,
+    « HHHH² ») d'une réédition (décision utilisateur 2026-11-20)."""
+    return memes_parties(_NOMBRE_DU_NOM.sub(r"\1", a or ""), _NOMBRE_DU_NOM.sub(r"\1", b or ""))
+
+
 def edition_de_diffusion(titre: str | None) -> str | None:
     """PUR. Le libellé de l'ÉDITION de diffusion que porte le titre (« Radio
     Edit », « 2011 Remaster » : même fiche que l'original), ou None."""

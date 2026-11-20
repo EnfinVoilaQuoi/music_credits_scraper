@@ -539,6 +539,11 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
     if options.nature_disques and options.deezer and not arret("nature des disques"):
         _nature_des_disques(runtime, artist, options, bilan, hits_albums)
 
+    # Les parutions posées par l'identité (Apple, Spotify, codes-barres)
+    # rejoignent leur projet (e67).
+    from src.services.discographie import regrouper_projets
+
+    regrouper_projets(dm, artist)
     _recharger(runtime, artist)
     bilan.apres = compter_ids(artist.tracks, dm.get_albums_for_artist(artist.id))
     return bilan

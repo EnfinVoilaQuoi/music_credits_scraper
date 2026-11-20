@@ -441,6 +441,7 @@ class ArtistRepository:
                     "DELETE FROM release_identifiers WHERE artist_id = :aid "
                     "OR release_id IN (SELECT id FROM releases WHERE artist_id = :aid)",
                     "DELETE FROM releases WHERE artist_id = :aid",
+                    "DELETE FROM projets WHERE artist_id = :aid",
                     "DELETE FROM albums WHERE artist_id = :aid",
                     "DELETE FROM monthly_listeners_history WHERE artist_id = :aid",
                     "DELETE FROM artist_spotify_ids WHERE artist_id = :aid",

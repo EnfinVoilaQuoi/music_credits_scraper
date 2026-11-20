@@ -43,6 +43,7 @@ from src.utils.logger import get_logger
 from src.utils.paroles_genius import a_des_paroles, paroles_factices
 from src.utils.participation import SQL_SIGNATURES_DE_DISQUES
 from src.utils.positions_disque import position_retenue
+from src.utils.projets_en_base import BilanProjets, regrouper_en_base
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
 from src.utils.track_mapper import (
     _clean_duration,
@@ -5609,7 +5610,21 @@ class TrackRepository:
                 upc=a["upc"],
             ),
         )
+        artiste = conn.execute(
+            text("SELECT artist_id FROM releases WHERE id = :a"), {"a": absorbee}
+        ).scalar()
         conn.execute(text("DELETE FROM releases WHERE id = :a"), {"a": absorbee})
+        # L'édition absorbée pouvait être la référence d'un projet (e67).
+        if artiste is not None:
+            regrouper_en_base(conn, artiste)
+
+    def regrouper_projets(self, artist_id: int) -> BilanProjets:
+        """Réunit les éditions de l'artiste en projets (e67, `utils/projets_disques`).
+        Idempotent ; appelé en fin des étapes qui écrivent des parutions
+        (discographie, identité) et par les gestes qui en créent ou en
+        suppriment. Écrivain par lots, hors `_ecrire` (aucune fiche touchée)."""
+        with self.engine.begin() as conn:
+            return regrouper_en_base(conn, artist_id)
 
     def singles_fondus(self, *, appliquer: bool = False) -> list[dict[str, Any]]:
         """Sépare les parutions d'album fondues avec le single de leur titre.
@@ -5810,6 +5825,9 @@ class TrackRepository:
         )
         if cas["album_deezer"] is not None:
             self._absorber_parution(conn, cas["album_deezer"], rid)
+        else:
+            # La parution du single est née ou a changé de nature (e67).
+            regrouper_en_base(conn, r["artist_id"])
 
     @staticmethod
     def _rendre_la_piste_au_single(

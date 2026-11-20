@@ -296,10 +296,19 @@ releases = Table(
     # « Live » du release-group), lu à la même recherche : 1 / 0, NULL =
     # inconnu. Une fiche studio n'en reçoit aucune piste (`studio_sur_live`).
     Column("mb_live", _BOOL),
-    # (e67) Le PROJET de l'édition (`projets`) : NULL pour une parution qui
-    # n'est pas à l'artiste (`appearance`) ou pas confirmée. Posé par
+    # (e67) Le PROJET de l'édition (`projets`) : NULL pour une parution pas
+    # confirmée ; une apparition (`appearance`) a le sien, jamais mêlé à un
+    # disque de l'artiste (ses streams d'album en dépendent aussi). Posé par
     # `regrouper_projets` (`utils/projets_disques`), jamais à la main.
     Column("projet_id", Integer, ForeignKey("projets.id")),
+    # (e68) Total Spotify de CETTE édition (page album `spotify_web`) ; le
+    # total du disque, enregistrements distincts, est celui du projet.
+    Column("spotify_streams", Integer),
+    Column("spotify_streams_updated", TIMESTAMP),
+    # (e68) Total YouTube Music de CETTE édition (album YTM au même titre) ;
+    # le projet prend le plus grand (YTM ne dédoublonne pas les éditions).
+    Column("ytm_streams", Integer),
+    Column("ytm_streams_updated", TIMESTAMP),
     UniqueConstraint("artist_id", "identity_key"),
     sqlite_autoincrement=True,
 )
@@ -319,6 +328,21 @@ projets = Table(
     Column("edition_reference_id", Integer),
     Column("created_at", TIMESTAMP),
     Column("updated_at", TIMESTAMP),
+    # (e68) Nature du disque, VERDICT du projet : `manual` d'abord, sinon la
+    # nature que Deezer déclare pour l'édition de référence, puis pour une
+    # autre édition (`releases.record_type`, observation par édition).
+    Column("nature", Text),
+    Column("nature_source", Text),
+    Column("nature_maj", TIMESTAMP),
+    # (e68) Streams d'album, au disque et non plus au TITRE (`albums`) :
+    # mêmes arbitrages (un total Kworb n'écrase jamais un total Spotify).
+    Column("spotify_streams", Integer),
+    Column("spotify_daily_streams", Integer),
+    Column("spotify_streams_updated", TIMESTAMP),
+    Column("spotify_streams_source", Text),
+    Column("spotify_album_ids", Text),
+    Column("ytm_streams", Integer),
+    Column("ytm_streams_updated", TIMESTAMP),
     sqlite_autoincrement=True,
 )
 

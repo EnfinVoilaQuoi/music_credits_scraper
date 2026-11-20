@@ -49,7 +49,7 @@ def upgrade() -> None:
         batch_op.add_column(sa.Column("projet_id", sa.Integer(), nullable=True))
     conn = op.get_bind()
     for artist_id in artistes_a_parutions(conn):
-        regrouper_en_base(conn, artist_id)
+        regrouper_en_base(conn, artist_id, donnees=False)
 
 
 def downgrade() -> None:

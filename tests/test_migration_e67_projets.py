@@ -1,5 +1,5 @@
 """e67 — `projets` : la migration réunit les éditions en place (M.A.N et son
-Bonus), laisse les autres parutions sans projet, et le retour en arrière retire
+Bonus), donne son propre projet à une apparition, et le retour en arrière retire
 table et colonne."""
 
 import sqlite3
@@ -66,13 +66,13 @@ def test_les_editions_en_place_sont_reunies(tmp_path):
         projets = conn.execute(
             "SELECT id, artist_id, titre, edition_reference_id FROM projets"
         ).fetchall()
-        assert len(projets) == 1
+        assert len(projets) == 2  # M.A.N et la compilation, chacune le sien
         pid, artiste, titre, ref = projets[0]
         assert (artiste, titre, ref) == (1, "M.A.N (Black Roses & Lost Feelings)", 10)
         assert dict(conn.execute("SELECT id, projet_id FROM releases").fetchall()) == {
             10: pid,
             11: pid,
-            12: None,
+            12: projets[1][0],
         }
 
 

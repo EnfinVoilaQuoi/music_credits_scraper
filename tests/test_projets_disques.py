@@ -112,3 +112,9 @@ def test_edition_de_reference_la_plus_ancienne_hors_live():
         _ed(1, "X sans date", [1]),
     ]
     assert edition_de_reference(eds) == 3
+
+
+def test_une_apparition_ne_rejoint_jamais_un_disque_de_l_artiste():
+    a = _ed(1, "Bitume Caviar (vol.1)", range(15))
+    b = _ed(2, "Bitume Caviar (vol.1)", range(15), scope="appearance")
+    assert _projets(a, b) == [[1], [2]]

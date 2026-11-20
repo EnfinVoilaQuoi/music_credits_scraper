@@ -43,7 +43,15 @@ from src.utils.logger import get_logger
 from src.utils.paroles_genius import a_des_paroles, paroles_factices
 from src.utils.participation import SQL_SIGNATURES_DE_DISQUES
 from src.utils.positions_disque import position_retenue
-from src.utils.projets_en_base import BilanProjets, regrouper_en_base
+from src.utils.projets_en_base import (
+    BilanProjets,
+    poser_nature_edition,
+    poser_nature_manuelle,
+    poser_streams_spotify,
+    poser_streams_ytm,
+    projet_de,
+    regrouper_en_base,
+)
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
 from src.utils.track_mapper import (
     _clean_duration,
@@ -1464,6 +1472,7 @@ class TrackRepository:
                 )
                 # Parutions (e31/e32) : pas de cascade SQLite, les preuves
                 # (`release_track_sources`) partent AVANT le lien qu'elles portent.
+                artistes_des_parutions = self._artistes_des_parutions(conn, track_id)
                 conn.execute(
                     text(
                         "DELETE FROM release_track_sources WHERE release_track_id IN "
@@ -1474,6 +1483,9 @@ class TrackRepository:
                 conn.execute(
                     text("DELETE FROM release_tracks WHERE track_id = :tid"), {"tid": track_id}
                 )
+                # Les éditions ont perdu une fiche : leurs projets se refont (e67).
+                for artiste in artistes_des_parutions:
+                    regrouper_en_base(conn, artiste)
                 # Une variante pointée vers ce morceau (e29) n'a plus de fiche ;
                 # les cas et le journal de la revue ne désignent plus rien
                 # (2026-10-11 : 16 signalements pointaient des fiches supprimées).
@@ -1753,6 +1765,10 @@ class TrackRepository:
                     ),
                     {"keep_id": keep_id, "delete_id": delete_id},
                 )
+                # Deux éditions peuvent désormais partager la fiche gardée :
+                # leurs projets se refont (e67).
+                for artiste in self._artistes_des_parutions(conn, keep_id):
+                    regrouper_en_base(conn, artiste)
                 # Les colonnes ARBITRÉES doivent suivre les observations qu'on
                 # vient de déplacer. Sans ça, le morceau conservé porte les
                 # observations du doublon et une colonne restée VIDE — constaté
@@ -5618,6 +5634,20 @@ class TrackRepository:
         if artiste is not None:
             regrouper_en_base(conn, artiste)
 
+    @staticmethod
+    def _artistes_des_parutions(conn, track_id: int) -> list[int]:
+        """Les artistes dont une parution porte la fiche (projets à refaire)."""
+        return [
+            a
+            for (a,) in conn.execute(
+                text(
+                    "SELECT DISTINCT r.artist_id FROM release_tracks rt "
+                    "JOIN releases r ON r.id = rt.release_id WHERE rt.track_id = :t ORDER BY 1"
+                ),
+                {"t": track_id},
+            )
+        ]
+
     def regrouper_projets(self, artist_id: int) -> BilanProjets:
         """Réunit les éditions de l'artiste en projets (e67, `utils/projets_disques`).
         Idempotent ; appelé en fin des étapes qui écrivent des parutions
@@ -6567,6 +6597,22 @@ class TrackRepository:
                     conn.execute(
                         albums.insert().values(title=title, artist_id=artist_id, **valeurs)
                     )
+                # Le même total au PROJET (e68), que désignent les ID d'album
+                # Spotify ou le titre ; aucun projet désigné : `albums` seul.
+                projet = projet_de(
+                    conn, artist_id, spotify_album_ids=spotify_album_ids, titre=title
+                )
+                if projet is not None:
+                    poser_streams_spotify(
+                        conn,
+                        projet,
+                        streams=streams,
+                        daily_streams=daily_streams,
+                        spotify_album_ids=spotify_album_ids,
+                        updated_at=date_bind(updated_at or datetime.now()),
+                        source=source,
+                        editions_json=editions_json,
+                    )
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur upsert_album (artist_id={artist_id}, title={title!r}): {e}")
@@ -6673,6 +6719,17 @@ class TrackRepository:
         }
         try:
             with self.engine.begin() as conn:
+                # (e68) Deezer décrit UNE édition : sa nature va sur les
+                # parutions de cet ID, et leur projet se recalcule ; une saisie
+                # à la main va au projet que désigne le titre.
+                if source == "deezer" and deezer_album_id is not None:
+                    poser_nature_edition(conn, artist_id, deezer_album_id, record_type)
+                elif source == "manual":
+                    projet = projet_de(
+                        conn, artist_id, deezer_album_id=deezer_album_id, titre=title
+                    )
+                    if projet is not None:
+                        poser_nature_manuelle(conn, projet, record_type)
                 deja = conn.execute(
                     text(
                         "SELECT record_type_source FROM albums "
@@ -9047,6 +9104,10 @@ class TrackRepository:
             )
             with self.engine.begin() as conn:
                 conn.execute(stmt)
+                # Le même total au projet que désigne le titre (e68).
+                projet = projet_de(conn, artist_id, titre=title)
+                if projet is not None:
+                    poser_streams_ytm(conn, projet, streams, titre=title)
             return True
         except SQLAlchemyError as e:
             logger.error(

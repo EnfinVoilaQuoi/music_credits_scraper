@@ -55,7 +55,7 @@ PART_COMMUNE = 0.8
 
 @dataclass(frozen=True)
 class Edition:
-    """Une parution `own` confirmée, vue par le regroupement."""
+    """Une parution confirmée, vue par le regroupement."""
 
     id: int
     titre: str
@@ -64,6 +64,9 @@ class Edition:
     live: bool | None = None
     date: str | None = None
     pistes: frozenset[int] = frozenset()
+    #: `own` (disque de l'artiste) ou `appearance` (disque d'un autre où il
+    #: figure : ses streams d'album en dépendent aussi). Jamais mêlés.
+    scope: str = "own"
 
 
 @dataclass
@@ -87,6 +90,8 @@ def _jamais_ensemble(a: Edition, b: Edition) -> bool:
 def meme_projet(a: Edition, b: Edition) -> str | None:
     """PUR. La règle qui réunit ces deux éditions, ou None. « suite » quand
     elles sont deux parties d'une suite (jamais réunies)."""
+    if a.scope != b.scope:
+        return None
     if a.upc and b.upc and cle_upc(a.upc) == cle_upc(b.upc):
         return "upc"
     if _jamais_ensemble(a, b):
@@ -107,7 +112,7 @@ def meme_projet(a: Edition, b: Edition) -> str | None:
 
 
 def regrouper(editions: list[Edition]) -> Regroupement:
-    """PUR. Les projets d'un artiste à partir de ses éditions `own` confirmées."""
+    """PUR. Les projets d'un artiste à partir de ses éditions confirmées."""
     par_id = {e.id: e for e in editions}
     parent = {e.id: e.id for e in editions}
 

@@ -160,3 +160,33 @@ class TestCasATrancher:
         ]
         r = regrouper(eds, frozenset({frozenset((1, 3)), frozenset((2, 3))}))
         assert r.projets == [[1, 2, 3]] and r.a_trancher == []
+
+
+class TestVolumesDuDisque:
+    """« Vol. N », « Volume N », « Vol.N » et « N » numérotent le même tome
+    (11 doublons d'édition au panneau le 2026-11-20) ; deux numéros, jamais."""
+
+    def test_graphies_du_meme_tome(self):
+        from src.utils.version_descriptors import meme_disque
+
+        for a, b in [
+            ("Summer Stories Kushtape Volume 2", "Summer Stories Kushtape, Vol. 2"),
+            ("ASADACHI TAPE Vol. 3", "ASADACHI TAPE 3"),
+            ("Volume 10", "Vol. 10"),
+        ]:
+            assert meme_disque(a, b) and memes_parties_de_disque(a, b), (a, b)
+
+    def test_deux_tomes_restent_deux(self):
+        for a, b in [
+            ("Summer Crack, Vol. 1", "Summer Crack, Vol. 2"),
+            ("Untold Story", "Untold Story Vol 2"),
+            ("Summer Crack, Vol. 1", "Summer Crack"),
+        ]:
+            assert not memes_parties_de_disque(a, b), (a, b)
+        # « LP 2 » reste le nom du disque.
+        assert memes_parties_de_disque("The Marshall Mathers LP 2", "The Marshall Mathers LP2")
+
+    def test_le_doublon_d_edition_est_reuni_d_office(self):
+        a = _ed(1, "Summer Stories Kushtape Volume 2", range(11))
+        b = _ed(2, "Summer Stories Kushtape, Vol. 2", range(11))
+        assert _projets(a, b) == [[1, 2]]

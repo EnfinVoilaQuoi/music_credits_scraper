@@ -198,16 +198,9 @@ def populate_albums_table(app):
     # Classement VISUEL (clic droit → 👁) : albums entiers déplacés dans
     # Featurings/Singles sans toucher à la base (ex. album hôte avec 2
     # feats, compilation). Réversible via clic droit sur la ligne cible.
-    view_prefs = load_album_view_prefs(app)
-    visual_feats, visual_singles = [], []
-    for key in list(groups.keys()):
-        pref = view_prefs.get(key)
-        if not pref:
-            continue
-        if pref.get("target") == "feat":
-            visual_feats.extend(groups.pop(key)[1])
-        elif pref.get("target") == "single":
-            visual_singles.extend(groups.pop(key)[1])
+    groups, visual_feats, visual_singles = albums_grouping.classer_visuellement(
+        groups, load_album_view_prefs(app), helpers.normalize_album_title
+    )
 
     # Les apparitions isolées (1 seul morceau, en feat, sur un album hôte)
     # sont regroupées dans la ligne Featurings au lieu d'une ligne par

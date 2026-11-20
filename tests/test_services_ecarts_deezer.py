@@ -510,6 +510,9 @@ class TestCreerLignes:
 
     def test_une_ligne_complete_depuis_deezer(self, data_manager):
         artist = self._artiste(data_manager)
+        # Son profil Deezer : le disque est le SIEN (`own`), donc un de ses
+        # albums — depuis e68, la nature vit sur le projet de cette parution.
+        artist.deezer_id = NOUS
         piste = _piste(
             70,
             "Coal lla",

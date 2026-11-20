@@ -21,6 +21,7 @@ from contextlib import closing
 from src.models import Artist, Credit, CreditRole, Track
 
 # ── Helpers ────────────────────────────────────────────────────────────────
+from tests.aide_disques import poser_disque
 
 
 def _artiste(data_manager, name="Artiste Test", **kwargs) -> Artist:
@@ -280,6 +281,7 @@ class TestDeleteArtist:
 class TestAlbums:
     def test_upsert_insert_puis_lecture(self, data_manager):
         artist = _artiste(data_manager)
+        poser_disque(data_manager, artist.id, "Album A")  # e68 : le total va au projet
         assert data_manager.upsert_album(artist.id, "Album A", 1000, 50) is True
 
         (album,) = data_manager.get_albums_for_artist(artist.id)
@@ -289,6 +291,7 @@ class TestAlbums:
 
     def test_upsert_conflict_met_a_jour_les_streams(self, data_manager):
         artist = _artiste(data_manager)
+        poser_disque(data_manager, artist.id, "Album A")
         data_manager.upsert_album(artist.id, "Album A", 1000, 50)
         data_manager.upsert_album(artist.id, "Album A", 2000, 80)
 
@@ -312,6 +315,8 @@ class TestAlbums:
 
     def test_get_albums_tries_par_streams_desc(self, data_manager):
         artist = _artiste(data_manager)
+        poser_disque(data_manager, artist.id, "Petit")
+        poser_disque(data_manager, artist.id, "Gros")
         data_manager.upsert_album(artist.id, "Petit", 100, 5)
         data_manager.upsert_album(artist.id, "Gros", 5000, 200)
 
@@ -324,6 +329,7 @@ class TestAlbums:
 
     def test_update_album_ytm_streams(self, data_manager):
         artist = _artiste(data_manager)
+        poser_disque(data_manager, artist.id, "Album A")
         data_manager.upsert_album(artist.id, "Album A", 1000, 50)
 
         assert data_manager.update_album_ytm_streams(artist.id, "Album A", 3333) is True

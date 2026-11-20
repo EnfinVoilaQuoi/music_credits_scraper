@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 
 from src.models import Artist, Track
+from tests.aide_disques import poser_disque
 
 
 @pytest.fixture
@@ -162,13 +163,18 @@ class TestStreamsEtVues:
 
 
 class TestAlbums:
+    # Depuis e68, un total d'album va au PROJET d'une parution : le disque
+    # existe d'abord (`poser_disque`).
+
     def test_upsert_puis_lecture(self, data_manager, artiste):
+        poser_disque(data_manager, artiste.id, "Album A")
         assert data_manager.upsert_album(artiste.id, "Album A", streams=10, daily_streams=1) is True
 
         albums = data_manager.get_albums_for_artist(artiste.id)
         assert [(a["title"], a["spotify_streams"]) for a in albums] == [("Album A", 10)]
 
     def test_upsert_met_a_jour_sans_dupliquer(self, data_manager, artiste):
+        poser_disque(data_manager, artiste.id, "Album A")
         data_manager.upsert_album(artiste.id, "Album A", streams=10, daily_streams=1)
         data_manager.upsert_album(artiste.id, "Album A", streams=20, daily_streams=2)
 
@@ -176,6 +182,8 @@ class TestAlbums:
         assert len(albums) == 1 and albums[0]["spotify_streams"] == 20
 
     def test_tri_par_streams_decroissants(self, data_manager, artiste):
+        poser_disque(data_manager, artiste.id, "Petit")
+        poser_disque(data_manager, artiste.id, "Gros")
         data_manager.upsert_album(artiste.id, "Petit", streams=1, daily_streams=1)
         data_manager.upsert_album(artiste.id, "Gros", streams=99, daily_streams=9)
 
@@ -185,6 +193,7 @@ class TestAlbums:
         ]
 
     def test_streams_ytm_dalbum(self, data_manager, artiste):
+        poser_disque(data_manager, artiste.id, "Album A")
         data_manager.upsert_album(artiste.id, "Album A", streams=10, daily_streams=1)
         assert data_manager.update_album_ytm_streams(artiste.id, "Album A", 42) is True
 
@@ -196,6 +205,7 @@ class TestAlbums:
         d'atteindre la GUI. Or Kworb ne somme que les morceaux de notre artiste
         là où Spotify compte toutes les pistes du disque : un total sans sa
         provenance n'est pas interprétable."""
+        poser_disque(data_manager, artiste.id, "Album A")
         data_manager.upsert_album(
             artiste.id, "Album A", streams=10, daily_streams=1, source="spotify_web"
         )
@@ -205,9 +215,23 @@ class TestAlbums:
 
     def test_les_editions_sont_rendues(self, data_manager, artiste):
         """`spotify_editions_json` était dans le même cas, et n'avait AUCUN
-        consommateur : écrit, sélectionné, jamais lu."""
+        consommateur : écrit, sélectionné, jamais lu. Depuis e68, le total de
+        chaque édition vit sur l'édition (`releases.spotify_streams`) et se rend
+        sous la même forme."""
+        rid = poser_disque(data_manager, artiste.id, "Album A")
+        with data_manager.engine.begin() as conn:
+            conn.exec_driver_sql(
+                "INSERT INTO release_identifiers (release_id, artist_id, source, external_id) "
+                "VALUES (?, ?, 'spotify_web', 'id1')",
+                (rid, artiste.id),
+            )
         data_manager.upsert_album(
-            artiste.id, "Album A", streams=10, daily_streams=1, editions_json='{"id1": 7}'
+            artiste.id,
+            "Album A",
+            streams=10,
+            daily_streams=1,
+            source="spotify_web",
+            editions_json='{"id1": 7}',
         )
 
         album = data_manager.get_albums_for_artist(artiste.id)[0]

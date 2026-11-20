@@ -55,7 +55,10 @@ CONTRAT: dict[str, dict[str, list[str] | None]] = {
     "src.utils.data_manager": {"DataManager": None},
     "src.utils.dates": {"parse_flexible": ["value"]},
     "src.utils.disabled_tracks_manager": {"DisabledTracksManager": None},
-    "src.utils.image_downloader": {"find_artist_image": ["name"]},
+    "src.utils.image_downloader": {
+        "cover_image_path": ["artist_name", "album_or_title"],  # pochettes des samples
+        "find_artist_image": ["name"],
+    },
     "src.utils.logger": {"get_logger": ["name"]},
     "src.utils.lyrics_sync": {
         "extract_sections": ["structured", "lrc"],
@@ -91,8 +94,10 @@ CONTRAT: dict[str, dict[str, list[str] | None]] = {
 
 # Méthodes de DataManager appelées par le studio.
 METHODES_DATA_MANAGER: dict[str, list[str]] = {
+    "credits_album": ["release_id"],  # crédits de la page album Genius (Analyse, page 4)
     "get_albums_for_artist": ["artist_id"],
     "get_projets_for_artist": ["artist_id"],
+    "get_track_releases": ["track_id"],
     "save_track": ["track"],
     "set_artist_image_path": ["artist_id", "path"],
 }

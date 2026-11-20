@@ -69,6 +69,9 @@ SOURCES_ACTIVES: frozenset[str] = frozenset(
         "musixmatch",
         "discogs",
         "youtube_data",
+        # 2026-11-20 : les requêtes internes du lecteur web Spotify (petites
+        # réponses JSON, `spotify_pathfinder`), rejouables hors ligne.
+        "spotify_pathfinder",
     }
 )
 #: Lectures DIFFÉRENTES gardées par requête.

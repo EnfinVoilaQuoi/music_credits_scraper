@@ -1,0 +1,213 @@
+{
+ "albumUnion": {
+  "__typename": "Album",
+  "playability": {
+   "playable": true
+  },
+  "tracksV2": {
+   "items": [
+    {
+     "track": {
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Lord Esperanza"
+         },
+         "uri": "spotify:artist:7CPznx8a1emLVLeCHGuJeN"
+        }
+       ]
+      },
+      "associationsV3": {
+       "audioAssociations": {
+        "totalCount": 0
+       },
+       "videoAssociations": {
+        "totalCount": 0
+       }
+      },
+      "contentRating": {
+       "label": "NONE"
+      },
+      "discNumber": 1,
+      "duration": {
+       "totalMilliseconds": 273499
+      },
+      "mediaType": "AUDIO",
+      "name": "Caméléon (Live)",
+      "playability": {
+       "playable": true
+      },
+      "playcount": "15141",
+      "relinkingInformation": null,
+      "saved": false,
+      "trackNumber": 1,
+      "uri": "spotify:track:2y68n9TC8nzvpAFJgy2ntA"
+     },
+     "uid": "0ffc1a47cefac48991df"
+    },
+    {
+     "track": {
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Lord Esperanza"
+         },
+         "uri": "spotify:artist:7CPznx8a1emLVLeCHGuJeN"
+        }
+       ]
+      },
+      "associationsV3": {
+       "audioAssociations": {
+        "totalCount": 0
+       },
+       "videoAssociations": {
+        "totalCount": 0
+       }
+      },
+      "contentRating": {
+       "label": "EXPLICIT"
+      },
+      "discNumber": 1,
+      "duration": {
+       "totalMilliseconds": 486476
+      },
+      "mediaType": "AUDIO",
+      "name": "Les Hommes pleurent (Live)",
+      "playability": {
+       "playable": true
+      },
+      "playcount": "41397",
+      "relinkingInformation": null,
+      "saved": false,
+      "trackNumber": 2,
+      "uri": "spotify:track:34qj7y4BSJvtiWFOboGMeH"
+     },
+     "uid": "af331640eb49252ab92f"
+    },
+    {
+     "track": {
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Lord Esperanza"
+         },
+         "uri": "spotify:artist:7CPznx8a1emLVLeCHGuJeN"
+        }
+       ]
+      },
+      "associationsV3": {
+       "audioAssociations": {
+        "totalCount": 0
+       },
+       "videoAssociations": {
+        "totalCount": 0
+       }
+      },
+      "contentRating": {
+       "label": "NONE"
+      },
+      "discNumber": 1,
+      "duration": {
+       "totalMilliseconds": 349127
+      },
+      "mediaType": "AUDIO",
+      "name": "Maria (Live)",
+      "playability": {
+       "playable": true
+      },
+      "playcount": "17136",
+      "relinkingInformation": null,
+      "saved": false,
+      "trackNumber": 3,
+      "uri": "spotify:track:79Wu8feUuVG45sqaBlwBj0"
+     },
+     "uid": "91289acaa6bb6ef50cb5"
+    },
+    {
+     "track": {
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Lord Esperanza"
+         },
+         "uri": "spotify:artist:7CPznx8a1emLVLeCHGuJeN"
+        }
+       ]
+      },
+      "associationsV3": {
+       "audioAssociations": {
+        "totalCount": 0
+       },
+       "videoAssociations": {
+        "totalCount": 0
+       }
+      },
+      "contentRating": {
+       "label": "NONE"
+      },
+      "discNumber": 1,
+      "duration": {
+       "totalMilliseconds": 271554
+      },
+      "mediaType": "AUDIO",
+      "name": "Drapeau Noir (Live)",
+      "playability": {
+       "playable": true
+      },
+      "playcount": "39375",
+      "relinkingInformation": null,
+      "saved": false,
+      "trackNumber": 4,
+      "uri": "spotify:track:42hlwnS8CR89C9GU21bUTY"
+     },
+     "uid": "68923a8edf1883c4f8a0"
+    },
+    {
+     "track": {
+      "artists": {
+       "items": [
+        {
+         "profile": {
+          "name": "Lord Esperanza"
+         },
+         "uri": "spotify:artist:7CPznx8a1emLVLeCHGuJeN"
+        }
+       ]
+      },
+      "associationsV3": {
+       "audioAssociations": {
+        "totalCount": 0
+       },
+       "videoAssociations": {
+        "totalCount": 0
+       }
+      },
+      "contentRating": {
+       "label": "NONE"
+      },
+      "discNumber": 1,
+      "duration": {
+       "totalMilliseconds": 340848
+      },
+      "mediaType": "AUDIO",
+      "name": "Jamais assez (Live)",
+      "playability": {
+       "playable": true
+      },
+      "playcount": "21689",
+      "relinkingInformation": null,
+      "saved": false,
+      "trackNumber": 5,
+      "uri": "spotify:track:3KNoJ7Z9irDbJtoJ2tm7WG"
+     },
+     "uid": "b6642c76532710c66b34"
+    }
+   ],
+   "totalCount": 5
+  }
+ }
+}

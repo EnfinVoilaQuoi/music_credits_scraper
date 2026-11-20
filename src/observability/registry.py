@@ -106,6 +106,9 @@ DOMAIN_TO_KEY: dict[str, str] = {
     # cette ligne : la basculer casserait l'attribution de l'embed sans rien
     # gagner. Cf. `KEYS_WITHOUT_OWN_DOMAIN`.
     "open.spotify.com": "spotify_embed",
+    # Requêtes internes du lecteur web (2026-11-20) : hôte propre, mais passées par
+    # `wreq` (aucun capteur transport) — `spotify_pathfinder` déclare sa clé.
+    "api-partner.spotify.com": "spotify_pathfinder",
     "www.riaa.com": "riaa",
     "riaa.com": "riaa",
     "www.ultratop.be": "brma",

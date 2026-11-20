@@ -1,0 +1,18 @@
+{
+ "artistUnion": {
+  "__typename": "Artist",
+  "id": "3jOstUTkEu2JkjvRdBA5Gu",
+  "uri": "spotify:artist:3jOstUTkEu2JkjvRdBA5Gu",
+  "profile": {
+   "name": "Weezer",
+   "biography": {
+    "text": null,
+    "type": "BIOGRAPHY"
+   }
+  },
+  "stats": {
+   "followers": 5790328,
+   "monthlyListeners": 20280373
+  }
+ }
+}

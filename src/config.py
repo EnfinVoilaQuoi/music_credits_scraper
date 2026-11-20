@@ -170,6 +170,11 @@ class Settings(BaseSettings):
     # entrées sur 930 dans le cache réel. Un mois est le compromis : le catalogue
     # ReccoBeats bouge lentement, mais un morceau ajouté finit par être repêché.
     reccobeats_not_found_ttl_days: int = 30
+    # --- Spotify par les requêtes internes du lecteur web (2026-11-20) ---
+    # Délai de GARDE d'un appel `spotify_pathfinder` (relances de SpotAPI
+    # comprises) : après un 429, SpotAPI met l'hôte en pause jusqu'à son
+    # `Retry-After`, plafonné à une HEURE — sans borne, un run attendrait.
+    spotify_pathfinder_delai_s: float = 60.0
     # Délai pendant lequel une source qui a RÉPONDU « rien » pour un morceau
     # n'est pas redemandée hors mode forcé (`source_track_absences`, e46). Même
     # valeur que les mémoires d'absence existantes (ReccoBeats, Musixmatch,
@@ -294,6 +299,9 @@ MUSIXMATCH_ABSENT_RETRY_DAYS = settings.musixmatch_absent_retry_days
 
 # ReccoBeats (péremption du cache négatif)
 RECCOBEATS_NOT_FOUND_TTL_DAYS = settings.reccobeats_not_found_ttl_days
+
+# Spotify par les requêtes internes du lecteur web (délai de garde d'un appel)
+SPOTIFY_PATHFINDER_DELAI_S = settings.spotify_pathfinder_delai_s
 
 # Désambiguïsation canal YTM (gate d'identité)
 YTM_IDENTITY_MIN_MATCHED = settings.ytm_identity_min_matched

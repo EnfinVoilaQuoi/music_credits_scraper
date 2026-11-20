@@ -192,6 +192,31 @@ def _probe_spotify_web() -> list[str]:
     return async_loop.run_sync(_run())
 
 
+def _probe_spotify_pathfinder() -> list[str]:
+    """Rejoue le VRAI chemin : découverte des requêtes, `getTrack` de la piste
+    sentinelle, lecture du JSON. Pas de sonde rapide : un GET de l'hôte ne dit
+    rien des requêtes persistées, qui sont ce qui casse (renommées par Spotify)."""
+    from src.api.spotify_pathfinder import SpotifyPathfinder
+    from src.concurrency import async_loop
+    from src.observability.issues import SansReponse
+
+    async def _run() -> list[str]:
+        async with SpotifyPathfinder() as sp:
+            piste = await sp.piste(_SPOTIFY_WEB_TRACK_ID)
+        if piste is None:
+            return ["piste sentinelle « NotFound »"]
+        if piste.compteur is None:
+            return ["compteur absent de getTrack (« playcount » renommé ?)"]
+        if piste.duree_s is None:
+            return ["durée absente de getTrack"]
+        return []
+
+    try:
+        return async_loop.run_sync(_run())
+    except SansReponse as e:
+        return [str(e)]
+
+
 def _probe_lrclib() -> list[str]:
     from src.api.lrclib_api import LRCLIBAPI
 
@@ -566,6 +591,21 @@ SOURCES: list[SourceSpec] = [
         ),
         families=(Family.STREAMS,),
         usage_note="repli quand Kworb ignore l'artiste ; seule source des auditeurs mensuels",
+    ),
+    SourceSpec(
+        key="spotify_pathfinder",
+        label="Spotify requêtes internes (streams, durées, auditeurs, sans navigateur)",
+        # La sonde rapide EST la complète : un GET de l'hôte ne dirait rien des
+        # requêtes persistées, qui sont ce qui casse ; une seule requête suffit.
+        fast_probe=_probe_spotify_pathfinder,
+        full_probe=_probe_spotify_pathfinder,
+        notes=(
+            "requêtes GraphQL du lecteur web par spotapi (jeton anonyme, requêtes "
+            "découvertes au premier appel, ~20 s à froid) ; sondes rapide et complète "
+            "identiques : une lecture de la piste sentinelle"
+        ),
+        families=(Family.STREAMS,),
+        usage_note="pas encore branchée sur l'étape streams (transport seul, 2026-11-20)",
     ),
     SourceSpec(
         key="riaa",

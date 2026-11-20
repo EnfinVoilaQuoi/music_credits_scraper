@@ -1,0 +1,6 @@
+{
+ "trackUnion": {
+  "__typename": "NotFound",
+  "message": "Object with uri 'spotify:track:0000000000000000000000' not found"
+ }
+}

@@ -210,6 +210,32 @@ def _from_ytmusicapi(exc: BaseException, absent: tuple[int, ...]) -> IssueKind:
     return IssueKind.CRASH
 
 
+#: Message de SpotAPI quand la requête interne répond un corps VIDE : la source
+#: n'a pas répondu (règle « absent ≠ échec » : une réponse vide est `throttled`).
+_SPOTAPI_CORPS_VIDE = "empty response body"
+
+
+def _from_spotapi(exc: BaseException, names: set[str], absent: tuple[int, ...]) -> IssueKind:
+    """SpotAPI (requêtes internes du lecteur web, 2026-11-20) : `HTTPError` porte
+    le code HTTP quand il y a eu une réponse, sinon l'erreur de transport `wreq`
+    en `__cause__` ; `CaptchaRequired` est un blocage ; une autre `BaseClientError`
+    est une réponse sans la structure attendue (requête renommée par Spotify,
+    `data` absent), sauf le corps vide, qui est un bridage."""
+    if "CaptchaRequired" in names:
+        return IssueKind.BLOCKED
+    if "HTTPError" in names:
+        statut = vars(exc).get("status_code")
+        if isinstance(statut, int):
+            return classify_status(statut, absent_statuses=absent)
+        cause = exc.__cause__
+        if cause is not None and "TimeoutError" in _class_names(cause):
+            return IssueKind.TIMEOUT
+        return IssueKind.UNREACHABLE
+    if _SPOTAPI_CORPS_VIDE in str(exc):
+        return IssueKind.THROTTLED
+    return IssueKind.PARSE
+
+
 def classify_exception(
     exc: BaseException, *, absent_statuses: tuple[int, ...] = DEFAULT_ABSENT_STATUSES
 ) -> IssueKind:
@@ -229,6 +255,8 @@ def classify_exception(
         return _from_httpx(exc, names, absent_statuses)
     if "ytmusicapi" in roots:
         return _from_ytmusicapi(exc, absent_statuses)
+    if "spotapi" in roots:
+        return _from_spotapi(exc, names, absent_statuses)
     if "CancelledError" in names:
         # Une annulation, dans ce projet, vient d'un délai de GARDE posé par
         # l'appelant (`asyncio.timeout(30)` de SongBPM : 148 « crash » sur une

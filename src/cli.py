@@ -194,6 +194,12 @@ def _credits_args(p: argparse.ArgumentParser) -> None:
         action="store_true",
         help="seulement les fiches dont le LRC LRCLIB n'a pas la durée de son audio",
     )
+    p.add_argument(
+        "--albums-seuls",
+        action="store_true",
+        help="seulement les crédits d'ALBUM Genius (une requête par album jamais lu ou en "
+        "échec), aucune fiche relue",
+    )
 
 
 def _fiches_arg(p: argparse.ArgumentParser) -> None:
@@ -405,6 +411,7 @@ def options_credits(a: argparse.Namespace) -> credits.OptionsCredits:
         sync_musixmatch=a.musixmatch,
         force_sync=a.force_sync,
         lrc_sans_duree_audio=getattr(a, "lrc_sans_duree_audio", False),
+        albums_seuls=getattr(a, "albums_seuls", False),
         track_ids=_ids_de_fiches(getattr(a, "fiches", None)),
     )
 

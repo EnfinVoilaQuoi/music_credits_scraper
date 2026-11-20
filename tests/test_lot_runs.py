@@ -40,6 +40,9 @@ class TestRunsCibles:
         )
         assert lot_runs.runs_non_cibles(runs) == ["credits Kanye West"]
 
+    def test_albums_seuls_est_cible(self):
+        assert lot_runs.runs_non_cibles([["credits", "IAM", "--albums-seuls"]]) == []
+
     def test_la_marque_rend_l_artiste_entier_voulu_et_part_avant_l_appel(self):
         run = ["streams", "Booba", "--artiste-entier"]
         assert lot_runs.runs_non_cibles([run]) == []

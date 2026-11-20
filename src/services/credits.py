@@ -52,6 +52,10 @@ class OptionsCredits:
     #: (lus avant le 2026-10-27) : avec `force_sync`, la relecture qui la pose
     #: sans refaire toute la discographie (Kanye : 2 h ne suffisaient pas).
     lrc_sans_duree_audio: bool = False
+    #: Seulement les crédits d'ALBUM Genius, aucune fiche relue (`credits
+    #: --albums-seuls`) : le rattrapage des albums jamais lus, une requête chacun
+    #: (2026-11-20 : 1 720 albums, 105 artistes).
+    albums_seuls: bool = False
     #: Ne traiter que ces fiches (ID de base, `credits --fiches`) : relire trois
     #: pages sans relancer toute la discographie (2026-10-31, crédits Genius de
     #: versions lues avant le correctif de l'héritage).
@@ -67,6 +71,8 @@ class OptionsCredits:
 
     def taches(self) -> list[str]:
         """Libellés des phases actives (confirmation GUI, en-tête CLI)."""
+        if self.albums_seuls:
+            return ["Crédits d'album Genius"]
         out = []
         if self.genius or self.discogs:
             srcs = [n for n, on in (("Genius", self.genius), ("Discogs", self.discogs)) if on]
@@ -540,6 +546,10 @@ def run(
     """Les trois phases puis la sauvegarde. À appeler HORS de la boucle asyncio
     (les crawls Genius passent par `run_sync`), sous `run_scope(Flow.ENRICHMENT)`."""
     clients = clients or Clients()
+    if options.albums_seuls:
+        bilan = BilanCredits(morceaux=0)
+        _phase_albums(runtime, artist, options, hooks, bilan, clients)
+        return bilan
     if options.lrc_sans_duree_audio:
         tracks = [
             t

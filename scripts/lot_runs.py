@@ -99,17 +99,21 @@ ETAPES_CIBLABLES = frozenset({"identite", "credits", "enrich", "streams"})
 #: Marque de lot (retirée avant l'appel) : l'artiste entier est VOULU (artiste
 #: neuf, demande explicite).
 MARQUE_ARTISTE_ENTIER = "--artiste-entier"
+#: Options qui ciblent sans `--fiches` : `credits --albums-seuls` ne relit
+#: aucune fiche, seulement les crédits d'album jamais lus (2026-11-20).
+OPTIONS_CIBLEES = frozenset({"--fiches", "--albums-seuls"})
 
 
 def runs_non_cibles(runs: list[list[str]]) -> list[str]:
     """PUR. Les lignes d'une étape ciblable lancée sur l'artiste entier sans
-    `--fiches` ni la marque `--artiste-entier`."""
+    option qui cible (`--fiches`, `--albums-seuls`) ni la marque
+    `--artiste-entier`."""
     return [
         " ".join(run)
         for run in runs
         if run
         and run[0] in ETAPES_CIBLABLES
-        and "--fiches" not in run
+        and not OPTIONS_CIBLEES.intersection(run)
         and MARQUE_ARTISTE_ENTIER not in run
     ]
 

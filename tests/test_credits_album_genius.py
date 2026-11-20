@@ -392,6 +392,44 @@ def test_sans_genius_pas_de_credits_d_album(data_manager):
     assert client.appels == []
 
 
+def test_albums_seuls_ne_relit_aucune_fiche(data_manager):
+    """`credits --albums-seuls` (rattrapage du 2026-11-20) : les albums sont
+    lus, les fiches passées à l'étape ne sont pas touchées (aucun scraper)."""
+    from src.cli import build_parser, options_credits
+    from src.services import credits
+    from src.services.runtime import Runtime
+
+    a = _artiste(data_manager)
+    fiche = Track(title="Intro", artist=a)
+    fiche.id = _fiche_sur_album(data_manager, a, "Intro", MAN)
+    client = _FauxClient({MAN: _album(MAN, _groupe("Artwork", "Dorian Feraud"))})
+    rt = Runtime(
+        data_manager=data_manager, genius_api=None, data_enricher=None, deleted=None, disabled=None
+    )
+
+    def interdit():
+        raise AssertionError("aucune fiche ne doit être relue")
+
+    options = options_credits(build_parser().parse_args(["credits", "X", "--albums-seuls"]))
+    assert options.albums_seuls and options.taches() == ["Crédits d'album Genius"]
+    bilan = credits.run(
+        rt,
+        a,
+        [fiche],
+        options,
+        credits.Hooks(),
+        credits.Clients(
+            genius=interdit,
+            discogs=interdit,
+            lyrics=lambda _o: interdit(),
+            ytmusic_meta=interdit,
+            genius_api=lambda: client,
+        ),
+    )
+    assert client.appels == [MAN]
+    assert bilan.albums.lus == 1 and bilan.morceaux == 0
+
+
 # ── Migration e66 ─────────────────────────────────────────────────────────────
 
 

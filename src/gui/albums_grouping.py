@@ -92,3 +92,41 @@ def format_streams(value) -> str:
     mesurée, alors qu'elle signifie « pas encore collecté ».
     """
     return f"{value:,}".replace(",", " ") if value else ""
+
+
+def _normaliser_titre_album(titre: str) -> str:
+    """Le normaliseur de la vue Albums, importé paresseusement (module léger)."""
+    from src.gui.helpers import normalize_album_title
+
+    return normalize_album_title(titre)
+
+
+def classer_visuellement(groups: dict, prefs: dict, normaliser=None) -> tuple[dict, list, list]:
+    """Applique le classement VISUEL (clic droit → 👁) aux groupes de la vue Albums.
+
+    `groups` : {clé: [libellé, morceaux]} ; `prefs` : {titre normalisé: {target, label}}.
+    Rend `(groupes restants, morceaux vers Featurings, morceaux vers Singles)`,
+    sans modifier les arguments.
+
+    La préférence est trouvée par la clé du groupe OU par le titre normalisé de
+    son libellé. Les groupes de secours (`tracks.album`) ont le titre pour clé,
+    mais une parution a pour clé `release:<id>` : sans le repli sur le libellé,
+    la préférence enregistrée au clic droit (sous le titre) ne s'appliquait
+    jamais à un album regroupé par parution (bug mesuré le 2026-11-20 : 4
+    préférences sur 6 ignorées). La clé de préférence reste le TITRE et non
+    `release:<id>` : une fusion de parutions par UPC change l'ID et perdrait la
+    préférence sans bruit. Une préférence vaut donc pour toutes les éditions
+    homonymes — c'est voulu.
+    """
+    normaliser = normaliser or _normaliser_titre_album
+    restants, feats, singles = {}, [], []
+    for key, (display, tracks) in groups.items():
+        pref = prefs.get(key) or prefs.get(normaliser(display))
+        target = (pref or {}).get("target")
+        if target == "feat":
+            feats.extend(tracks)
+        elif target == "single":
+            singles.extend(tracks)
+        else:
+            restants[key] = [display, tracks]
+    return restants, feats, singles

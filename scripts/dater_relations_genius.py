@@ -5,9 +5,13 @@ déjà enregistrées, depuis la dernière lecture de la page gardée dans le bru
     python scripts/dater_relations_genius.py                 # à blanc (défaut)
     python scripts/dater_relations_genius.py --apply         # backup + écriture
     python scripts/dater_relations_genius.py --base copie.db # sur une autre base
+    python scripts/dater_relations_genius.py --relire --apply
 
-Hors ligne : aucune page n'est relue, seul le brut l'est. Seule l'année
-manquante s'ajoute ; rien d'autre ne change, rien n'est retiré.
+Hors ligne par défaut : seul le brut est lu. `--relire` lit par l'API Genius
+(`GET /songs/{id}`, gardé dans le brut) les seules pages qui y manquent : aucune
+étape ciblée ne relit le détail d'un morceau PRINCIPAL déjà complet (2026-11-20 :
+1 002 pages). Seule l'année manquante s'ajoute ; rien d'autre ne change, rien
+n'est retiré.
 """
 
 import argparse
@@ -22,6 +26,9 @@ def main() -> int:
     parser.add_argument("--apply", action="store_true", help="écrit (backup automatique avant)")
     parser.add_argument("--base", type=Path, help="autre base que data/music_credits.db")
     parser.add_argument("--brut", type=Path, help="autre brut que data/brut/brut.db")
+    parser.add_argument(
+        "--relire", action="store_true", help="lit par l'API les pages absentes du brut"
+    )
     args = parser.parse_args()
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
@@ -49,8 +56,9 @@ def main() -> int:
             )
         ).fetchall()
 
-    cas, sans_lecture = [], 0
+    cas, sans_lecture, relues, echecs = [], 0, 0, 0
     lues_par_page: dict[int, list] = {}
+    api = GeniusAPI() if args.relire else None
     for track_id, genius_id, titre, artiste, relations_json in lignes:
         try:
             posees = json.loads(relations_json)
@@ -60,6 +68,14 @@ def main() -> int:
             continue
         if genius_id not in lues_par_page:
             lues_par_page[genius_id] = _relations_lues(brut, GeniusAPI, genius_id, args.brut)
+            if lues_par_page[genius_id] is None and api is not None:
+                lues_par_page[genius_id] = _relire(api, genius_id)
+                if lues_par_page[genius_id] is None:
+                    echecs += 1
+                else:
+                    relues += 1
+                    if relues % 100 == 0:
+                        print(f"  … {relues} page(s) relue(s)", flush=True)
         lues = lues_par_page[genius_id]
         if lues is None:
             sans_lecture += 1
@@ -72,6 +88,8 @@ def main() -> int:
         f"{len(lignes)} fiche(s) à relation Genius ; {len(cas)} à dater ; "
         f"{sans_lecture} sans lecture de page dans le brut"
     )
+    if api is not None:
+        print(f"Pages relues par l'API : {relues} ; sans réponse : {echecs}")
     for artiste, n in collections.Counter(c[1] for c in cas).most_common(15):
         print(f"  {artiste} : {n}")
     for _, artiste, titre, posees, datees in cas[:25]:
@@ -103,6 +121,24 @@ def _relations_lues(brut, genius_api, genius_id: int, chemin) -> list | None:
         if isinstance(song, dict):
             return genius_api._extract_relationships(song)
     return None
+
+
+def _relire(api, genius_id: int) -> list | None:
+    """Les relations de la page lue par l'API (gardée dans le brut), ou None."""
+    import time
+
+    import requests
+
+    from src.config import DELAY_BETWEEN_REQUESTS
+
+    try:
+        song = (api.genius.song(genius_id) or {}).get("song")
+    except (requests.RequestException, AssertionError) as e:
+        print(f"  ⚠️ page #{genius_id} : {e}")
+        return None
+    finally:
+        time.sleep(DELAY_BETWEEN_REQUESTS)
+    return api._extract_relationships(song) if isinstance(song, dict) else None
 
 
 def _sauvegarder(dm, args, nom: str) -> bool:

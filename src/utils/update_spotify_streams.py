@@ -38,7 +38,7 @@ from datetime import datetime, timedelta
 from src.concurrency import async_loop
 from src.config import settings
 from src.scrapers.crawl4ai_scraper_base import ChronoPages, CrawlAIScraperBase
-from src.scrapers.spotify_pathfinder_scraper import scraper_des_streams
+from src.scrapers.spotify_pathfinder_scraper import plafonds, scraper_des_streams
 from src.utils.logger import get_logger
 from src.utils.title_matching import base_album_key, normalize_title
 
@@ -313,7 +313,7 @@ async def _crawl(
 
         # ── Passe B : les pages titre, par péremption, sous plafond ──────────
         queue = _build_queue(artist, data_manager, seen_dates, now, releves, constats.tait)
-        budget = settings.spotify_web_max_pages_per_run - result["pages"]
+        budget = plafonds(scraper).par_run - result["pages"]
         logger.info(
             f"Spotify web '{artist.name}' : {len(queue)} morceau(x) à visiter, "
             f"plafond {max(budget, 0)} page(s)"
@@ -389,7 +389,7 @@ async def _visiter_sans_stream(
     tait = constats.tait if constats else None
     file = file_sans_stream(
         data_manager.get_artist_tracks(artist.id), seen_dates, now, releves, tait
-    )[: settings.spotify_web_pages_sans_stream]
+    )[: plafonds(scraper).sans_stream]
     if file:
         logger.info(f"Spotify web '{artist.name}' : {len(file)} morceau(x) à ID sans stream")
     for spotify_id in file:
@@ -429,7 +429,7 @@ async def _visiter_fiches(
         for t in data_manager.get_artist_tracks(artist.id)
         if t.id in fiches and t.spotify_id
     ]
-    budget = settings.spotify_web_max_pages_per_run - result["pages"]
+    budget = plafonds(scraper).par_run - result["pages"]
     logger.info(
         f"Spotify web '{artist.name}' : {len(file)} fiche(s) nommée(s) à visiter "
         f"(sur {len(fiches)}), sans file ni passe des albums"

@@ -226,6 +226,14 @@ class Settings(BaseSettings):
     # AUCUN stream (sous le plancher Kworb de 100 000) sont visités quand même,
     # sous ce plafond — 881 mesurés le 2026-09-23, le rattrapage s'étale.
     spotify_web_pages_sans_stream: int = 40
+    # Les mêmes plafonds pour les REQUÊTES internes (`spotify_pathfinder`),
+    # DISTINCTS de ceux des pages (décision utilisateur 2026-11-20) : une requête
+    # coûte ~4 s, une page ~12 s ; un seul réglage relevé pour les requêtes
+    # laisserait un repli massif ouvrir autant de pages. Valeurs : la même durée
+    # au pire que les plafonds de pages (120 pages ≈ 360 requêtes). Les pages du
+    # repli restent sous `spotify_web_max_pages_per_run`, comptées à part.
+    spotify_pathfinder_max_requetes_par_run: int = 360
+    spotify_pathfinder_requetes_sans_stream: int = 120
 
     # --- BPI (certifications UK) : plafond de pagination ---
     # Le corpus fait ~26 500 lignes à 24 par page, soit ~1 105 pages (mesuré le

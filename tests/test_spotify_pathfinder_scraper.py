@@ -13,6 +13,7 @@ from src.scrapers import spotify_pathfinder_scraper as sps
 from tests.test_update_spotify_streams import (
     _ID_A,
     _ID_B,
+    _Artist,
     _DataManager,
     _page_artiste,
     _run,
@@ -252,3 +253,58 @@ def test_reglage_choisit_le_scraper(monkeypatch):
     scraper = sps.scraper_des_streams()
     assert isinstance(scraper, sps.SpotifyAvecRepli)
     assert isinstance(scraper.repli, SpotifyWebScraper)
+
+
+# ── Deux plafonds distincts : requêtes et pages ───────────────────────────────
+class TestPlafonds:
+    def test_chaque_scraper_a_ses_plafonds(self, monkeypatch):
+        from src.config import settings
+
+        monkeypatch.setattr(settings, "spotify_web_max_pages_per_run", 120)
+        monkeypatch.setattr(settings, "spotify_web_pages_sans_stream", 40)
+        monkeypatch.setattr(settings, "spotify_pathfinder_max_requetes_par_run", 360)
+        monkeypatch.setattr(settings, "spotify_pathfinder_requetes_sans_stream", 120)
+        assert sps.plafonds(_Pages()) == sps.Plafonds(120, 40)
+        assert sps.plafonds(_scraper(_FauxClient())) == sps.Plafonds(360, 120)
+        assert sps.plafonds(_avec_repli(_FauxClient(), _Pages())) == sps.Plafonds(360, 120)
+
+    def test_les_pages_du_repli_ont_leur_propre_plafond(self):
+        """Relever le plafond des requêtes ne laisse pas un repli massif ouvrir
+        autant de pages : au-delà de `pages_max`, la lecture rend None."""
+        client = _FauxClient(erreurs=[_bride()] * 10)
+        pages = _Pages()
+        scraper = sps.SpotifyAvecRepli(sps.SpotifyPathfinderScraper(client), pages, pages_max=2)
+        rendus = asyncio.run(_lire_pistes(scraper, ["a", "b", "c", "d"]))
+        assert pages.lus == ["a", "b"]
+        assert rendus[2:] == [None, None]
+
+    def test_le_run_compte_en_requetes(self, monkeypatch):
+        """`update_spotify_streams` prend le plafond du scraper employé."""
+        from src.config import settings
+        from src.utils import update_spotify_streams as uss
+
+        monkeypatch.setattr(settings, "spotify_pathfinder_max_requetes_par_run", 2)
+        monkeypatch.setattr(settings, "spotify_web_max_pages_per_run", 1000)
+        dm = _DataManager()
+        artiste = sp.ArtisteSpotify("artistid", "ISHA", 10, 1, (), ())
+        client = _FauxClient(artiste=artiste, pistes={_ID_A: _piste(_ID_A), _ID_B: _piste(_ID_B)})
+        scraper = _scraper(client)
+        result = {
+            "recorded": 0,
+            "harvested_foreign": 0,
+            "unknown_ids": 0,
+            "albums_totalises": 0,
+            "durees": 0,
+            "ids_resolus": 0,
+            "pages": 0,
+            "sans_stream": 0,
+            "monthly_listeners": None,
+            "artist_name": None,
+            "spotify_artist_id": None,
+            "aborted": None,
+        }
+        asyncio.run(uss._crawl(_Artist(), dm, scraper, "artistid", None, result))
+        # Page artiste + UNE piste : sous le plafond des pages (1000), il en
+        # aurait lu deux.
+        assert result["pages"] == 2
+        assert client.appels == ["artiste:artistid", f"piste:{_ID_A}"]

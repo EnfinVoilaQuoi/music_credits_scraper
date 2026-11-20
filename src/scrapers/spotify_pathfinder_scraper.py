@@ -27,6 +27,7 @@ est lue à la place — la session navigateur ne s'ouvre qu'au premier repli. Ap
 from __future__ import annotations
 
 from contextlib import AsyncExitStack, asynccontextmanager
+from dataclasses import dataclass
 
 from src.api.spotify_pathfinder import PisteSpotify, SpotifyPathfinder
 from src.observability.issues import SansReponse
@@ -117,12 +118,21 @@ class SpotifyPathfinderScraper:
 class SpotifyAvecRepli:
     """Les requêtes internes d'abord, la page du navigateur en repli."""
 
-    def __init__(self, principal: SpotifyPathfinderScraper, repli) -> None:
+    def __init__(
+        self, principal: SpotifyPathfinderScraper, repli, *, pages_max: int | None = None
+    ) -> None:
+        from src.config import settings
+
         self.principal = principal
         self.repli = repli
         self.echecs_de_suite = 0
         self.bascule = False
         self.replis = 0
+        #: Pages du navigateur ouvertes en repli, sous LEUR plafond
+        #: (`spotify_web_max_pages_per_run`) : le budget du run compte des
+        #: requêtes (`plafonds`), trois fois moins chères qu'une page.
+        self.pages_max = settings.spotify_web_max_pages_per_run if pages_max is None else pages_max
+        self._plafond_dit = False
 
     @asynccontextmanager
     async def session(self):
@@ -149,6 +159,14 @@ class SpotifyAvecRepli:
             else:
                 self.echecs_de_suite = 0
                 return rendu
+        if self.replis >= self.pages_max:
+            if not self._plafond_dit:
+                self._plafond_dit = True
+                logger.warning(
+                    f"Spotify : plafond de {self.pages_max} pages de repli atteint — "
+                    "le reste attendra le prochain run"
+                )
+            return None
         self.replis += 1
         sess_repli = await sessions.repli_ouvert()
         return await lecture(self.repli, sess_repli)
@@ -181,6 +199,29 @@ class _SessionsAvecRepli:
             logger.info("Spotify : ouverture de la session navigateur (repli)")
             self._sess_repli = await self._pile.enter_async_context(self._repli.session())
         return self._sess_repli
+
+
+@dataclass(frozen=True)
+class Plafonds:
+    """Lectures permises à un run de la passe Spotify (`update_spotify_streams`)."""
+
+    par_run: int
+    sans_stream: int
+
+
+def plafonds(scraper) -> Plafonds:
+    """Les plafonds du SCRAPER employé : en requêtes internes pour
+    `spotify_pathfinder` (repli compris, ses pages ayant leur propre plafond),
+    en pages pour le navigateur seul (décision utilisateur 2026-11-20 : deux
+    réglages distincts, un relevé pour les requêtes ne vaut pas pour les pages)."""
+    from src.config import settings
+
+    if isinstance(scraper, SpotifyAvecRepli | SpotifyPathfinderScraper):
+        return Plafonds(
+            settings.spotify_pathfinder_max_requetes_par_run,
+            settings.spotify_pathfinder_requetes_sans_stream,
+        )
+    return Plafonds(settings.spotify_web_max_pages_per_run, settings.spotify_web_pages_sans_stream)
 
 
 def scraper_des_streams():

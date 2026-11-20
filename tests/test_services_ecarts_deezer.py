@@ -647,6 +647,21 @@ class TestCreerLignes:
         )
         assert vus == [("Suzy (Live 2006)", "Suzy")]
 
+    def test_l_instrumental_d_un_remix_herite_du_remix(self, data_manager):
+        """Règle C (2026-11-19) : l'écart désigne l'original « Authentik », le
+        juge de l'héritage (`socle_de_version`, celui de l'audit) le remix."""
+        artist = self._artiste(data_manager)
+        socle = Track(title="Authentik", artist=artist)
+        data_manager.save_track(socle)
+        data_manager.save_track(Track(title="Authentik (Remix)", artist=artist))
+        piste = _piste(91, "Authentik (Remix Instrumental)", "Authentik", "(Remix Instrumental)")
+        e = ed.Ecart("version", _album(9, "Authentik", [piste]), piste, socle=socle)
+        vus = []
+        ed.creer_lignes(
+            data_manager, artist, [e], heriter=lambda v, s: vus.append((v.title, s.title))
+        )
+        assert vus == [("Authentik (Remix Instrumental)", "Authentik (Remix)")]
+
 
 def test_resume_lisible():
     piste = _piste(1, "Coal lla")

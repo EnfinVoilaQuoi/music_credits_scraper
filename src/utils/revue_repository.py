@@ -149,6 +149,42 @@ class RevueRepository:
                 conn.execute(insert(revue_signalements), list(lignes.values()))
         return len(lignes)
 
+    def ajouter_signalement(
+        self,
+        artist_id: int,
+        detecteur: str,
+        cle: str,
+        *,
+        track_id: int | None,
+        morceau: str | None,
+        motif: str | None,
+        preuves: dict,
+        impact: int = 0,
+    ) -> None:
+        """Remet UN signalement (un cas rouvert), sans toucher aux autres du
+        détecteur ; le remplace s'il existait."""
+        with self.engine.begin() as conn:
+            conn.execute(
+                delete(revue_signalements).where(
+                    (revue_signalements.c.artist_id == artist_id)
+                    & (revue_signalements.c.detecteur == detecteur)
+                    & (revue_signalements.c.cle == cle)
+                )
+            )
+            conn.execute(
+                insert(revue_signalements).values(
+                    artist_id=artist_id,
+                    detecteur=detecteur,
+                    cle=cle,
+                    track_id=track_id,
+                    morceau=morceau,
+                    motif=motif,
+                    preuves=json.dumps(preuves, ensure_ascii=False, default=str),
+                    impact=impact,
+                    seen_at=datetime.now(),
+                )
+            )
+
     def signalements_revue(self, artist_id: int) -> list[dict]:
         with self.engine.connect() as conn:
             rows = conn.execute(
@@ -253,6 +289,23 @@ class RevueRepository:
                     d["annulation"] = {}
                 sortie.append(d)
             return sortie
+
+    def marquer_correction_rouverte(self, correction_id: int) -> bool:
+        """La correction ne vaut plus parce que sa RÈGLE a changé (pas un
+        « ↩ Rétablir » humain) : défaite, son action préfixée `rouverte:` —
+        hors des cas rendus à l'humain (`revue_auto._rendus_a_l_humain`)."""
+        with self.engine.begin() as conn:
+            ligne = conn.execute(
+                select(revue_corrections.c.action).where(revue_corrections.c.id == correction_id)
+            ).first()
+            if ligne is None:
+                return False
+            conn.execute(
+                update(revue_corrections)
+                .where(revue_corrections.c.id == correction_id)
+                .values(retablie_at=datetime.now(), action=f"rouverte:{ligne.action}")
+            )
+            return True
 
     def marquer_correction_retablie(self, correction_id: int) -> bool:
         with self.engine.begin() as conn:

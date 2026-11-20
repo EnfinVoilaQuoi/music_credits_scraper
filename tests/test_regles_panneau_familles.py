@@ -157,67 +157,338 @@ class TestAutrePageDeezer:
         assert pol.arbitrage_deezer(cas, t, _ctx(t), {}, set()) is None
 
 
-def _version(titre, isrc="FRX000000001"):
+def _version(titre, isrc="FRX000000001", duree=200, socle_id=5):
     return {
         "ecart": {
             "nature": "version",
-            "piste": {"id": 9, "title": titre, "isrc": isrc, "duration": 200},
+            "piste": {"id": 9, "title": titre, "isrc": isrc, "duration": duree},
             "album": {"id": 1, "title": "Fidèle à son contexte", "artist_id": 7},
+            "socle_id": socle_id,
         }
     }
 
 
 class TestVersionDeezerInstrumentale:
-    """DV1 : l'instrumental ou l'a cappella Deezer d'un morceau connu, sans
-    page Genius, ne devient pas une fiche (✓ Normal) ; les autres versions
-    restent à l'humain (décision du 2026-10-20)."""
+    """Règle C (décision utilisateur 2026-11-19, lève DV1 du 2026-10-31) :
+    l'instrumental ou l'a cappella Deezer d'un morceau connu, sans page
+    Genius, devient une fiche SECONDAIRE, même à la durée du socle ; l'étape
+    identité lui pose son ID Spotify."""
 
-    def _juger(self, titre, isrcs=None):
-        cas = _cas("deezer_version", None, _version(titre), morceau=titre)
-        return pol.arbitrage_deezer(cas, None, _ctx(), isrcs or {}, {7})
+    def _juger(self, titre, isrcs=None, duree=200, socle_id=5, autres=()):
+        cas = _cas("deezer_version", None, _version(titre, duree=duree, socle_id=socle_id))
+        ctx = _ctx(_t("Choc frontal", tid=5, duration=200), *autres)
+        return pol.arbitrage_deezer(cas, None, ctx, isrcs or {}, {7})
 
-    def test_instrumental_et_acapella(self):
-        assert self._juger("Choc Frontal (Instrumental)").action == "normal"
-        assert self._juger("Fidèle à son contexte (Acapella)").action == "normal"
+    def test_instrumental_et_acapella_a_la_duree_du_socle(self):
+        assert self._juger("Choc Frontal (Instrumental)").action == "deezer_appliquer"
+        assert self._juger("Choc Frontal (Acapella)").action == "deezer_appliquer"
 
-    def test_les_autres_versions_restent_a_l_humain(self):
-        assert self._juger("Caroline (Live)") is None
-        assert self._juger("Day 'N' Nite (Club Mix)") is None
-        assert self._juger("Marine (Version 2006)") is None
+    def test_sans_socle_reste_a_l_humain(self):
+        assert self._juger("Choc Frontal (Instrumental)", socle_id=None) is None
 
-    def test_un_isrc_connu_ne_devient_pas_normal(self):
+    def test_une_fiche_qui_la_porte_deja(self):
+        deja = _t("Choc Frontal (Instrumental)", tid=6)
+        assert self._juger("Choc Frontal (Instrumental)", autres=(deja,)) is None
+
+    def test_un_remix_a_la_duree_du_socle_reste_a_l_humain(self):
+        """Le libellé d'un remix peut être une mention de support."""
+        assert self._juger("Choc Frontal (Remix)") is None
+        assert self._juger("Choc Frontal (Remix)", duree=260).action == "deezer_appliquer"
+
+    def test_un_isrc_connu_reste_a_l_humain(self):
         assert self._juger("Choc Frontal (Instrumental)", {"FRX000000001": "Choc frontal"}) is None
 
 
-def test_instrumental_deezer_marque_normal_sans_fiche_puis_retabli(data_manager, monkeypatch):
-    """Bout en bout : le cas n'a pas de fiche, le « ✓ Normal » se pose quand même."""
+class TestVersionsLaisseesParA1:
+    """Règle C, décision utilisateur 2026-11-19 : trois groupes de versions
+    qu'A1 laissait à l'humain passent par règle."""
+
+    def _juger(self, titre, duree=200, autres=()):
+        cas = _cas("deezer_version", None, _version(titre, duree=duree))
+        ctx = _ctx(_t("Choc frontal", tid=5, duration=200), *autres)
+        return pol.arbitrage_deezer(cas, None, ctx, {}, {7})
+
+    def test_une_performance_a_la_duree_du_socle_se_cree(self):
+        """« Argentique - A COLORS SHOW » 244 s, « Argentique » 245 s."""
+        assert self._juger("Choc frontal - A COLORS SHOW").action == "deezer_appliquer"
+        assert self._juger("Choc frontal (Live Studio)", duree=201).action == "deezer_appliquer"
+
+    def test_un_remix_a_la_duree_du_socle_reste_a_l_humain(self):
+        """« À l'aise (Remix) » 228 s = « À l'aise » : l'original mal étiqueté ?"""
+        assert self._juger("Choc frontal (Remix)") is None
+        assert self._juger("Choc frontal (Version Longue)") is None
+
+    def test_mention_de_support_jugee_sans_elle(self):
+        """Oxmo, *Minutes magiques* : « Véridique (Live) [Bonus Track] »."""
+        assert self._juger("Choc frontal (Live) [Bonus Track]", 260).action == "deezer_appliquer"
+        deja = _t("Choc frontal (Live)", tid=6, duration=107)
+        assert self._juger("Choc frontal (Live) [Bonus Track]", 260, (deja,)) is None
+
+    def test_la_version_d_une_fiche_sous_un_autre_libelle_se_rattache(self):
+        """NTM : « J'appuie sur la gâchette (B.O.S.S. Remix) » 182 s →
+        « (Remix de B.O.S.S) » 183 s."""
+        fiche = _t("Choc frontal (Remix de B.O.S.S)", tid=6, duration=183)
+        arb = self._juger("Choc frontal (B.O.S.S. Remix)", 182, (fiche,))
+        assert arb.action == "deezer_rattacher_version" and "#6" in arb.raison
+
+    def test_a_plus_de_2_s_ou_avec_une_page_deezer_l_humain(self):
+        loin = _t("Choc frontal (Remix de B.O.S.S)", tid=6, duration=187)
+        assert self._juger("Choc frontal (B.O.S.S. Remix)", 182, (loin,)) is None
+        paginee = _t("Choc frontal (Remix de B.O.S.S)", tid=6, duration=183, deezer_id=44)
+        assert self._juger("Choc frontal (B.O.S.S. Remix)", 182, (paginee,)) is None
+
+    def test_deux_lives_de_lieux_differents_ne_se_rattachent_pas(self):
+        """« Où va la vie? (Live) » (Dôme de Marseille) n'est pas « (Live en
+        Egypt) », à 1 s près."""
+        egypte = _t("Choc frontal (Live en Egypt)", tid=6, duration=281)
+        arb = self._juger("Choc frontal (Live)", 280, (egypte,))
+        assert arb is None or arb.action != "deezer_rattacher_version"
+
+
+def test_instrumental_deezer_cree_en_fiche_secondaire_puis_retabli(data_manager, monkeypatch):
+    """Bout en bout : l'instrumental devient une fiche, version de son socle."""
     from src.services import ecarts_deezer as ed
     from src.services import revue_auto
 
     monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
     artiste = Artist(name="Flynt")
+    artiste.deezer_id = 77
     artiste.id = data_manager.save_artist(artiste)
     data_manager.save_track(Track(title="Choc frontal", artist=artiste, genius_id=1))
-    artiste.deezer_id = 77
+    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
+    socle = artiste.tracks[0]
     alb = ed.AlbumDeezer(id=500, title="Fidèle à son contexte", artist_id=77, artist_name="Flynt")
     bilan = ed.BilanEcarts(deezer_id=77, artiste="Flynt")
     piste = ed.PisteDeezer(id=9, title="Choc Frontal (Instrumental)", duration=137, isrc="FRX9")
-    bilan.ecarts = [ed.Ecart("version", alb, piste)]
+    bilan.ecarts = [ed.Ecart("version", alb, piste, socle=socle)]
     ed.enregistrer_signalements(data_manager, artiste, bilan)
-    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
     assert [c.detecteur for c in revue.analyser(data_manager, artiste).actifs] == ["deezer_version"]
 
     resultat = revue_auto.corriger(data_manager, artiste)
     assert len(resultat.appliquees) == 1 and not resultat.echecs, resultat
+    titres = {t.title for t in data_manager.get_artist_tracks(artiste.id)}
+    assert "Choc Frontal (Instrumental)" in titres
+
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    assert correction["action"] == "regle:deezer_appliquer"
+    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
+    revue_auto.retablir(data_manager, artiste, correction)
+    titres = {t.title for t in data_manager.get_artist_tracks(artiste.id)}
+    assert "Choc Frontal (Instrumental)" not in titres
+
+
+def test_un_normal_dv1_rouvert_est_cree_par_le_correcteur(data_manager, monkeypatch):
+    """Règle C : un « ✓ Normal » de DV1 rouvert (`rouvrir_normal_de_regle`,
+    `scripts/rouvrir_dv1.py`) revient au panneau, et le correcteur crée la fiche."""
+    from src.services import ecarts_deezer as ed
+    from src.services import revue_auto
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    artiste = Artist(name="Flynt")
+    artiste.deezer_id = 77
+    artiste.id = data_manager.save_artist(artiste)
+    data_manager.save_track(Track(title="Choc frontal", artist=artiste, genius_id=1))
+    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
+    alb = ed.AlbumDeezer(id=500, title="Fidèle à son contexte", artist_id=77, artist_name="Flynt")
+    bilan = ed.BilanEcarts(deezer_id=77, artiste="Flynt")
+    piste = ed.PisteDeezer(id=9, title="Choc Frontal (Instrumental)", duration=137, isrc="FRX9")
+    bilan.ecarts = [ed.Ecart("version", alb, piste, socle=artiste.tracks[0])]
+    ed.enregistrer_signalements(data_manager, artiste, bilan)
+    # Ce que faisait DV1 : « ✓ Normal » de règle, journalisé, signalement retiré.
+    (cas,) = revue.analyser(data_manager, artiste).actifs
+    _compte_rendu, annulation = revue_auto._marquer_normal(data_manager, artiste.id, cas)
+    data_manager.journaliser_correction(
+        artiste.id, cas, "regle:normal", "marqué normal par règle", annulation
+    )
+    data_manager.retirer_signalement(artiste.id, cas.detecteur, cas.cle)
     assert revue.analyser(data_manager, artiste).actifs == []
 
     (correction,) = data_manager.corrections_revue(artiste.id)
-    assert correction["action"] == "regle:normal"
-    revue_auto.retablir(data_manager, artiste, correction)
-    # Rendu à l'humain : le prochain run Deezer le resignale, la règle ne le reprend plus.
+    revue_auto.rouvrir_normal_de_regle(data_manager, correction)
+    assert [c.cle for c in revue.analyser(data_manager, artiste).actifs] == [cas.cle]
+    assert data_manager.corrections_revue(artiste.id) == []
+
+    resultat = revue_auto.corriger(data_manager, artiste)
+    assert len(resultat.appliquees) == 1 and not resultat.echecs, resultat
+    titres = {t.title for t in data_manager.get_artist_tracks(artiste.id)}
+    assert "Choc Frontal (Instrumental)" in titres
+
+
+def test_une_version_sur_deux_disques_ne_cree_qu_une_fiche(data_manager, monkeypatch):
+    """NTM : « Police (Live au Zénith de Paris 1998) » est sur *Live* et sur
+    *L'intégrale* ; la seconde piste attend la passe suivante, qui voit la
+    fiche créée (sans quoi les deux créations partaient dans la même passe)."""
+    from src.services import ecarts_deezer as ed
+    from src.services import revue_auto
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    artiste = Artist(name="Suprême NTM")
+    artiste.deezer_id = 77
+    artiste.id = data_manager.save_artist(artiste)
+    data_manager.save_track(Track(title="Police", artist=artiste, genius_id=1, duration=228))
+    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
+    socle = artiste.tracks[0]
+    bilan = ed.BilanEcarts(deezer_id=77, artiste="Suprême NTM")
+    titre = "Police (Live au Zénith de Paris 1998)"
+    bilan.ecarts = [
+        ed.Ecart(
+            "version",
+            ed.AlbumDeezer(id=500 + i, title=disque, artist_id=77, artist_name="Suprême NTM"),
+            ed.PisteDeezer(id=9 + i, title=titre, duration=229, isrc=f"FRX{i}"),
+            socle=socle,
+        )
+        for i, disque in enumerate(("Live", "L'intégrale"))
+    ]
     ed.enregistrer_signalements(data_manager, artiste, bilan)
-    assert [c.detecteur for c in revue.analyser(data_manager, artiste).actifs] == ["deezer_version"]
-    assert revue_auto.corriger(data_manager, artiste).appliquees == []
+
+    revue_auto.corriger(data_manager, artiste)
+    lives = [t for t in data_manager.get_artist_tracks(artiste.id) if t.title == titre]
+    assert len(lives) == 1
+
+
+def _absente(titre, album="Prouesses", artist_id=7, duree=300, isrc="FRX0", date=None, rid=2):
+    return {
+        "ecart": {
+            "nature": "absent",
+            "piste": {"id": 11, "title": titre, "isrc": isrc, "duration": duree},
+            "album": {
+                "id": rid,
+                "title": album,
+                "artist_id": artist_id,
+                "release_date": date,
+                "record_type": "album",
+            },
+        }
+    }
+
+
+class TestMedleyAuxPartiesConnues:
+    """Règle C (3) : le medley d'un disque propre dont toutes les parties sont
+    des fiches se crée ; la règle des titres joints le relie ensuite."""
+
+    def _juger(self, titre, artist_id=7):
+        cas = _cas("deezer_absent", None, _absente(titre, artist_id=artist_id), morceau=titre)
+        ctx = _ctx(_t("En froid", tid=1), _t("Relativise", tid=2))
+        return pol.arbitrage_deezer(cas, None, ctx, {}, {7}, lire_deezer=lambda _i: {})
+
+    def test_toutes_les_parties_connues(self):
+        arb = self._juger("En froid + Relativise")
+        assert arb.action == "deezer_appliquer" and "Relativise" in arb.raison
+
+    def test_une_partie_inconnue_reste_a_l_humain(self):
+        assert self._juger("En froid + Prouesses") is None
+
+    def test_le_disque_d_un_autre_reste_a_l_humain(self):
+        assert self._juger("En froid + Relativise", 99) is None
+
+
+class TestGeneriqueDuDisqueLePlusAncien:
+    """Règle C (2), décision utilisateur 2026-11-19 : un générique « absent »
+    d'un disque propre se crée sur l'album ou l'EP le plus ANCIEN qui le
+    porte ; une compilation plus récente s'y rattache à ± 2 s."""
+
+    def _juger(self, album="Prouesses", date="2010-05-03", rid=2, fiches=(), absentes=()):
+        preuves = _absente("Intro", album=album, duree=95, date=date, rid=rid)
+        cas = _cas("deezer_absent", None, preuves, morceau="Intro")
+        ctx = _ctx(*fiches)
+        ctx.pistes_deezer_absentes = [preuves["ecart"], *absentes]
+        return pol.arbitrage_deezer(cas, None, ctx, {}, {7}, lire_deezer=lambda _i: {})
+
+    @staticmethod
+    def _autre(date, rid=3, duree=96, record_type="album"):
+        e = _absente("Intro", album="Best Of", duree=duree, date=date, rid=rid)["ecart"]
+        e["album"]["record_type"] = record_type
+        return e
+
+    def test_seul_disque_cree(self):
+        assert self._juger().action == "deezer_appliquer"
+
+    def test_le_plus_ancien_cree_le_plus_recent_attend(self):
+        assert self._juger(absentes=[self._autre("2015-01-01")]).action == "deezer_appliquer"
+        assert self._juger(absentes=[self._autre("2008-01-01")]) is None
+
+    def test_meme_date_reste_a_l_humain(self):
+        assert self._juger(absentes=[self._autre("2010-05-03")]) is None
+
+    def test_une_autre_duree_est_une_autre_plage(self):
+        arb = self._juger(absentes=[self._autre("2008-01-01", duree=140)])
+        assert arb.action == "deezer_appliquer"
+
+    def test_la_compilation_se_rattache_a_la_fiche_plus_ancienne(self):
+        fiche = _t(
+            "Intro", tid=4, duration=94, album="Prouesses", release_date=datetime(2010, 5, 3)
+        )
+        arb = self._juger(album="Best Of", date="2015-01-01", fiches=(fiche,))
+        assert arb.action == "deezer_rattacher_generique" and "#4" in arb.raison
+
+    def test_une_fiche_plus_recente_ne_prend_pas_la_plage(self):
+        fiche = _t(
+            "Intro", tid=4, duration=94, album="Plus tard", release_date=datetime(2020, 1, 1)
+        )
+        assert self._juger(fiches=(fiche,)) is None
+
+    def test_deux_fiches_a_la_meme_plage_restent_a_l_humain(self):
+        f1 = _t("Intro", tid=4, duration=94, album="A", release_date=datetime(2001, 1, 1))
+        f2 = _t("Intro", tid=5, duration=95, album="B", release_date=datetime(2002, 1, 1))
+        assert self._juger(date="2015-01-01", fiches=(f1, f2)) is None
+
+    def test_un_single_ne_cree_pas(self):
+        preuves = _absente("Intro", duree=95, date="2010-05-03")
+        preuves["ecart"]["album"]["record_type"] = "single"
+        cas = _cas("deezer_absent", None, preuves, morceau="Intro")
+        ctx = _ctx()
+        ctx.pistes_deezer_absentes = [preuves["ecart"]]
+        assert pol.arbitrage_deezer(cas, None, ctx, {}, {7}, lire_deezer=lambda _i: {}) is None
+
+
+def test_generique_cree_puis_compilation_rattachee(data_manager, monkeypatch):
+    """Bout en bout : la plage se crée sur l'album, la compilation s'y rattache."""
+    from src.services import ecarts_deezer as ed
+    from src.services import revue_auto
+
+    monkeypatch.setattr(revue_auto, "REGLES_DEEZER_BRANCHEES", True)
+    artiste = Artist(name="Flynt")
+    artiste.deezer_id = 77
+    artiste.id = data_manager.save_artist(artiste)
+    data_manager.save_track(Track(title="Rien à voir", artist=artiste, genius_id=1))
+    artiste.tracks = data_manager.get_artist_tracks(artiste.id)
+    album = ed.AlbumDeezer(
+        id=500,
+        title="J'éclaire ma ville",
+        artist_id=77,
+        artist_name="Flynt",
+        record_type="album",
+        release_date="2007-11-05",
+    )
+    best = ed.AlbumDeezer(
+        id=600,
+        title="Best Of",
+        artist_id=77,
+        artist_name="Flynt",
+        record_type="compile",
+        release_date="2016-01-01",
+    )
+    bilan = ed.BilanEcarts(deezer_id=77, artiste="Flynt")
+    bilan.ecarts = [
+        ed.Ecart("absent", album, ed.PisteDeezer(id=9, title="Intro", duration=95, isrc="FRA1")),
+        ed.Ecart("absent", best, ed.PisteDeezer(id=19, title="Intro", duration=96, isrc="FRB1")),
+    ]
+    ed.enregistrer_signalements(data_manager, artiste, bilan)
+    monkeypatch.setattr(
+        "src.utils.deezer_identity.lire_piste_http",
+        lambda i: {"contributors": [{"id": 77, "name": "Flynt"}]},
+    )
+
+    resultat = revue_auto.corriger(data_manager, artiste)
+    assert len(resultat.appliquees) == 2 and not resultat.echecs, resultat
+    intros = [t for t in data_manager.get_artist_tracks(artiste.id) if t.title == "Intro"]
+    assert len(intros) == 1
+    actions = sorted(c["action"] for c in data_manager.corrections_revue(artiste.id))
+    # La page Deezer de la fiche donne sa durée par SON ID : A1 (édition de
+    # support) rattache la compilation avant la règle C, au même effet.
+    assert actions[0] == "regle:deezer_appliquer"
+    assert actions[1] in ("regle:deezer_rattacher_edition", "regle:deezer_rattacher_generique")
+    assert revue.analyser(data_manager, artiste).actifs == []
 
 
 class TestSpotifyConfirmeParUnAutreCatalogue:
@@ -519,9 +790,10 @@ class TestDisqueDeVersionsDUnTiers:
     def test_une_autre_famille_que_le_disque_reste_a_l_humain(self):
         assert self._juger("Freeze Raël (Remix)") is None
 
-    def test_un_instrumental_n_a_pas_de_fiche(self):
+    def test_un_instrumental_devient_une_fiche(self):
+        """Règle C : DV1 levée."""
         arb = self._juger("Freeze Raël (Instrumental)", album="LM$ (Instrumental)")
-        assert arb is None or arb.action != "deezer_appliquer"
+        assert arb.action == "deezer_appliquer"
 
     def test_une_page_genius_passe_par_la_regle_des_pages(self):
         arb = self._juger("Freeze Raël (Chopped & $crewed)", genius={"id": 1, "url": "u"})

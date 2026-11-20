@@ -30,6 +30,7 @@ marque le cas « normal » : la passe suivante ne la refait pas.
 from __future__ import annotations
 
 import functools
+import json
 from dataclasses import dataclass, field
 
 from src.services.revue import (
@@ -131,6 +132,8 @@ _SANS_FICHE = frozenset(
         "deezer_rattacher_isrc",
         "deezer_rattacher_fiche",
         "deezer_rattacher_edition",
+        "deezer_rattacher_generique",
+        "deezer_rattacher_version",
         "deezer_edition",
         "confirmer_lien",
         "confirmer_formation",
@@ -723,6 +726,37 @@ def _deezer_rattacher_edition(dm, _track, cas: Cas, *, artiste) -> tuple[str, di
     return _rattacher_a(dm, artiste, preuve, fiche, "edition_de_support")
 
 
+def _deezer_rattacher_generique(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Règle C (2) : rattache le générique d'une compilation (ou d'une
+    réédition) à la fiche du disque le plus ancien
+    (`politiques_revue.generique_du_disque_le_plus_ancien`)."""
+    from src.services.politiques_revue import generique_du_disque_le_plus_ancien
+
+    preuve = cas.preuves["ecart"]
+    ctx = charger_contexte(dm, artiste)
+    geste, fiche = generique_du_disque_le_plus_ancien(
+        preuve.get("piste") or {},
+        preuve.get("album") or {},
+        ctx.disco,
+        ctx.pistes_deezer_absentes,
+    )
+    if geste != "rattacher":
+        raise LookupError("la fiche du générique n'est plus identifiable")
+    return _rattacher_a(dm, artiste, preuve, fiche, "generique_plus_ancien")
+
+
+def _deezer_rattacher_version(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Règle C : rattache la version Deezer à la fiche qui la porte sous un
+    autre libellé (`politiques_revue.fiche_de_la_version`)."""
+    from src.services.politiques_revue import fiche_de_la_version
+
+    preuve = cas.preuves["ecart"]
+    fiche = fiche_de_la_version(preuve.get("piste") or {}, charger_contexte(dm, artiste).disco)
+    if fiche is None:
+        raise LookupError("la fiche de la version n'est plus identifiable")
+    return _rattacher_a(dm, artiste, preuve, fiche, "version_portee")
+
+
 def _rattacher_a(dm, artiste, preuve: dict, fiche, matched_by: str) -> tuple[str, dict]:
     """Le lien de la piste Deezer à `fiche` (`creer_lignes`), défait par
     `retablir` (type `lien_deezer`)."""
@@ -939,6 +973,8 @@ _CORRECTEURS_DE_REGLE = {
     "deezer_rattacher_isrc": _deezer_rattacher_isrc,
     "deezer_rattacher_fiche": _deezer_rattacher_fiche,
     "deezer_rattacher_edition": _deezer_rattacher_edition,
+    "deezer_rattacher_generique": _deezer_rattacher_generique,
+    "deezer_rattacher_version": _deezer_rattacher_version,
     "deezer_edition": _deezer_edition,
     "retirer_songbpm": _corriger_songbpm,
     "retirer_champs_songbpm": _corriger_champs_songbpm,
@@ -1003,6 +1039,19 @@ def a_corriger(dm, artiste, revue, ctx, tracks) -> list[tuple]:
     return a_faire
 
 
+def _titre_cree(cas: Cas, arbitrage) -> str | None:
+    """Le titre normalisé de la fiche qu'une correction CRÉE (piste Deezer
+    « absente » ou version), sinon None."""
+    from src.utils.title_matching import normalize_title
+
+    if arbitrage is None or arbitrage.action != "deezer_appliquer":
+        return None
+    if cas.detecteur == "deezer_link_candidate":
+        return None  # un rattachement, pas une création
+    piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
+    return normalize_title(piste.get("title") or cas.morceau) or None
+
+
 @etape_de_flux(
     "Corrections automatiques",
     verdict=lambda r: (not r.echecs, f"{len(r.echecs)} échec(s)"),
@@ -1026,7 +1075,17 @@ def corriger(dm, artiste, seulement: frozenset[str] | None = None) -> BilanCorre
         ]
         if not nouveaux:
             break
+        cree = False
+        crees: set[str] = set()
         for cas, arbitrage in nouveaux:
+            cle_creation = _titre_cree(cas, arbitrage)
+            if cle_creation is not None:
+                if cle_creation in crees:
+                    # La même version sur un autre disque (« Police (Live au
+                    # Zénith de Paris 1998) » sur *Live* et *L'intégrale*) :
+                    # jugée à la passe suivante, qui voit la fiche créée.
+                    continue
+                crees.add(cle_creation)
             deja.add((cas.detecteur, cas.cle))
             track = tracks.get(cas.track_id)
             if arbitrage is None:
@@ -1065,6 +1124,14 @@ def corriger(dm, artiste, seulement: frozenset[str] | None = None) -> BilanCorre
             dm.retirer_signalement(artiste.id, cas.detecteur, cas.cle)
             bilan.appliquees.append(compte_rendu)
             logger.info(f"À trancher — correction automatique : {compte_rendu}")
+            if annulation.get("type") == "fiche_deezer":
+                cree = True
+        if cree:
+            # Une fiche créée n'est pas dans la discographie chargée : la passe
+            # suivante la voit (règle C : la compilation se rattache au
+            # générique que la passe vient de créer).
+            artiste.tracks = dm.discographie_reunie(artiste)
+            tracks = {t.id: t for t in artiste.tracks or []}
     return bilan
 
 
@@ -1090,6 +1157,33 @@ def corriger_apres_run(dm, artiste) -> BilanCorrections:
 
 
 # ── Rétablir ────────────────────────────────────────────────────────────────
+
+
+def rouvrir_normal_de_regle(dm, correction: dict) -> str:
+    """Rouvre un « ✓ Normal » posé par une RÈGLE qui ne vaut plus (DV1 levée
+    par la règle C, 2026-11-19) : le verdict part, la correction est marquée
+    défaite, le signalement revient (ses preuves sont dans la clé) — le cas
+    retourne au correcteur, qui l'arbitre selon les règles d'aujourd'hui.
+    Contrairement à `retablir`, il n'est PAS rendu à l'humain."""
+    if correction["action"] != f"{PREFIXE_REGLE}normal":
+        raise ValueError(f"pas un « ✓ Normal » de règle : {correction['action']}")
+    cle = correction["cle"]
+    try:
+        preuves = json.loads(cle[cle.index("|{") + 1 :])
+    except (ValueError, json.JSONDecodeError) as e:
+        raise ValueError(f"preuves illisibles dans la clé : {cle[:80]}") from e
+    dm.annuler_verdict(correction["artist_id"], correction["detecteur"], cle)
+    dm.ajouter_signalement(
+        correction["artist_id"],
+        correction["detecteur"],
+        cle,
+        track_id=correction["track_id"],
+        morceau=correction["morceau"],
+        motif=correction["motif"],
+        preuves=preuves,
+    )
+    dm.marquer_correction_rouverte(correction["id"])
+    return f"« {correction['morceau']} » rouvert"
 
 
 def retablir(dm, artiste, correction: dict) -> str:

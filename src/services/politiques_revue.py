@@ -870,12 +870,10 @@ def politique_ecarts_deezer(
                         "deezer_edition",
                         f"{nature} : « {titre} »",
                     )
-            if fam in ("instrumental", "a_cappella"):
-                return Arbitrage(
-                    "instrumental / a cappella : ne pas créer de fiche",
-                    "normal",
-                    f"famille {fam}",
-                )
+            # DV1 (« instrumental / a cappella : pas de fiche », 2026-10-31) levée
+            # par la règle C (décision utilisateur 2026-11-19) : une version qui
+            # peut avoir des streams est une fiche secondaire
+            # (`_version_d_un_disque_de_versions`).
             if ecart.get("genius"):
                 return Arbitrage(
                     "créer la fiche (version à page Genius)",
@@ -1463,9 +1461,6 @@ REGLES_DEEZER = frozenset(
         # à la durée de la fiche (Eminem, 9 / 16 `deezer_absent`).
         ("deezer_absent", "deezer_rattacher_fiche"),
         ("deezer_album_absent", "deezer_rattacher_fiche"),
-        # 2026-10-31 (DV1) : l'instrumental / a cappella Deezer d'un morceau
-        # connu, sans page : pas de fiche. 3 / 15 sur la copie (Flynt).
-        ("deezer_version", "normal"),
         # A1 (décision utilisateur 2026-10-31) : l'édition de SUPPORT d'une
         # fiche (même ISRC, « Clean », BO) lui est rattachée ; la version
         # d'un autre enregistrement (live, remix, démo) devient une fiche
@@ -1477,6 +1472,12 @@ REGLES_DEEZER = frozenset(
         # sur un disque crédité à l'artiste (The Game, *G-Code*, BO de *Bosco*).
         ("deezer_absent", "normal"),
         ("deezer_album_absent", "normal"),
+        # Règle C (2), décision utilisateur 2026-11-19 : le générique d'une
+        # compilation se rattache à la fiche du disque le plus ancien.
+        ("deezer_absent", "deezer_rattacher_generique"),
+        ("deezer_album_absent", "deezer_rattacher_generique"),
+        # Règle C : la version portée par une fiche sous un autre libellé.
+        ("deezer_version", "deezer_rattacher_version"),
     }
 )
 
@@ -1522,6 +1523,70 @@ def _disque_tout_entier_de_la_famille(album_id, fam: str, lire_album: Callable |
     return bool(pistes) and all(famille_de(p.get("title")) == fam for p in pistes)
 
 
+#: Familles de version dont le libellé n'est jamais une mention de support :
+#: à la durée du socle, c'est quand même une autre prise (règle C, décision
+#: utilisateur 2026-11-19 — un live, une session « A COLORS SHOW » ou
+#: « Deezer Sessions », un acoustique, un instrumental, un a cappella). Un
+#: « (Remix) », un « (Edit Version) », une « Version Longue » à la durée du
+#: socle restent à l'humain : souvent l'original mal étiqueté.
+FAMILLES_JAMAIS_MENTION_DE_SUPPORT = frozenset({"instrumental", "a_cappella", "performance"})
+
+
+def _famille_de_remix(fam: str | None) -> str | None:
+    """« (Remix de B.O.S.S) » est un remix NU pour `famille_de`, « (B.O.S.S.
+    Remix) » un remix NOMMÉ : une même famille pour `fiche_de_la_version`, la
+    durée départage."""
+    return "remix" if fam in ("remix_bare", "remix_named") else fam
+
+
+def fiche_de_la_version(piste: dict, fiches) -> object | None:
+    """PUR. Règle C, décision utilisateur 2026-11-19 : la fiche UNIQUE qui porte
+    déjà la version Deezer sous un autre libellé (« J'appuie sur la gâchette
+    (B.O.S.S. Remix) » 182 s → « (Remix de B.O.S.S) » 183 s ; « My Medicine
+    (Demo) » → « (Demo Version) ») : même titre au descripteur près
+    (`titres_equivalents`), même famille, sans page Deezer, sa durée à ± 2 s.
+    Une performance exige le même titre normalisé : « Où va la vie? (Live) »
+    du *Live au Dôme de Marseille* n'est pas « (Live en Egypt) », à 1 s près."""
+    from src.utils.version_descriptors import meme_titre_normalise, titres_equivalents
+    from src.utils.version_heritage import famille_de
+
+    titre, duree = piste.get("title"), piste.get("duration")
+    fam = famille_de(titre)
+    if not duree or fam in (None, "edition"):
+        return None
+    candidates = [
+        t
+        for t in fiches
+        if titres_equivalents(t.title, titre)
+        and _famille_de_remix(famille_de(t.title)) == _famille_de_remix(fam)
+        and (fam != "performance" or meme_titre_normalise(t.title, titre))
+    ]
+    if len(candidates) != 1:
+        return None
+    t = candidates[0]
+    if t.deezer_id or not t.duration or abs(int(t.duration) - int(duree)) > ECART_FICHIER_S:
+        return None
+    return t
+
+
+def _version_portee_par_une_fiche(cas, ctx) -> Arbitrage | None:
+    """`fiche_de_la_version` pour une version Deezer : rattacher, ne pas créer."""
+    if cas.detecteur != "deezer_version" or ctx is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    if ecart.get("genius"):
+        return None
+    piste = ecart.get("piste") or {}
+    fiche = fiche_de_la_version(piste, ctx.disco)
+    if fiche is None:
+        return None
+    return Arbitrage(
+        f"version déjà portée par « {fiche.title} » : rattacher, ne pas créer",
+        "deezer_rattacher_version",
+        f"« {piste.get('title')} » {piste.get('duration')} s ; #{fiche.id} {fiche.duration} s",
+    )
+
+
 def _version_d_un_disque_de_versions(
     cas, ctx, lire_album: Callable | None = None
 ) -> Arbitrage | None:
@@ -1531,8 +1596,11 @@ def _version_d_un_disque_de_versions(
     disque et version d'une fiche connue de l'artiste (`socle_id`), devient une
     fiche SECONDAIRE : version de l'original (relation `version_of`, posée par
     `creer_lignes`), ses streams jamais sommés à ceux de l'original — comme les
-    15 fiches C&S de Freeze déjà créées. Instrumental et a cappella restent
-    sans fiche (DV1).
+    15 fiches C&S de Freeze déjà créées. Instrumental et a cappella aussi
+    (règle C, décision utilisateur 2026-11-19, qui lève DV1 : une version qui
+    peut avoir des streams est une fiche ; l'étape identité lui pose son ID
+    Spotify) — sans le garde de la durée du socle : leur libellé n'est jamais
+    une mention de support, et leur durée est d'ordinaire celle du socle.
 
     A1 (décision utilisateur 2026-10-31) : le même geste pour la version
     Deezer (`deezer_version` : live, remix, démo, mix) d'une fiche sur un
@@ -1557,7 +1625,7 @@ def _version_d_un_disque_de_versions(
     titre = piste.get("title") or cas.morceau
     album = (ecart.get("album") or {}).get("title") or ""
     fam = famille_de(titre)
-    if fam in (None, "edition", "instrumental", "a_cappella"):
+    if fam in (None, "edition"):
         return None
     if cas.detecteur == "deezer_apparition":
         album_id = (ecart.get("album") or {}).get("id")
@@ -1568,17 +1636,27 @@ def _version_d_un_disque_de_versions(
         sens = "disque de versions d'un tiers"
     else:
         isrc, duree = str(piste.get("isrc") or "").upper(), piste.get("duration")
-        if not duree or titre_sans_edition(titre) is not None:
+        if not duree:
             return None
+        # Une mention de support (« (Live) [Bonus Track] ») sur une prise qui
+        # n'en est jamais une : la version se juge aussi sous le titre sans
+        # elle (règle C, 2026-11-19). Sur un remix (« Shake That (Remix) (Album
+        # Version Explicit) »), c'est l'édition d'une autre fiche : l'humain.
+        sans_mention = titre_sans_edition(titre)
+        if sans_mention is not None and fam not in FAMILLES_JAMAIS_MENTION_DE_SUPPORT:
+            return None
+        titres = {titre, sans_mention or titre}
         if any(
             # Le même MORCEAU dans la même version : `meme_version` ne jugeait que
             # le descripteur — « Crack Music (Live at Abbey Road Studios) »
             # écartait « Dreams (Live from Dublin Version) » (The Game, 2026-11-03).
-            (isrc and t.isrc and str(t.isrc).upper() == isrc) or titres_equivalents(t.title, titre)
+            (isrc and t.isrc and str(t.isrc).upper() == isrc)
+            or any(titres_equivalents(t.title, x) for x in titres)
             for t in ctx.disco
         ):
             return None
-        if socle.duration and abs(int(socle.duration) - int(duree)) <= ECART_FICHIER_S:
+        meme_duree = socle.duration and abs(int(socle.duration) - int(duree)) <= ECART_FICHIER_S
+        if meme_duree and fam not in FAMILLES_JAMAIS_MENTION_DE_SUPPORT:
             return None
         sens = "aucune fiche ne la porte"
     return Arbitrage(
@@ -2103,13 +2181,22 @@ def arbitrage_deezer(
     creditee = _piste_creditee_sur_le_disque_d_un_autre(cas, ids_artiste, lire_deezer, nom_artiste)
     if creditee is not None:
         return creditee
+    medley = _medley_aux_parties_connues(cas, ctx, ids_artiste)
+    if medley is not None:
+        return medley if medley.action else None
+    generique = _generique_d_un_disque_propre(cas, ctx, ids_artiste)
+    if generique is not None:
+        return generique
     if cas.detecteur == "deezer_version":
-        # Une version n'est jamais un original : le « ✓ Normal » de
-        # l'instrumental / a cappella (aucune fiche créée, DV1), ou la fiche
-        # secondaire d'une version qu'aucune fiche ne porte (A1).
+        # Une version n'est jamais un original : la fiche secondaire d'une
+        # version qu'aucune fiche ne porte (A1 ; instrumental et a cappella
+        # compris depuis la règle C, 2026-11-19).
         arbitrage = politique_ecarts_deezer(isrcs_connus, ids_artiste)(cas, track, ctx)
-        if arbitrage is not None and arbitrage.action == "normal":
-            return arbitrage
+        if arbitrage is not None and arbitrage.action == "deezer_rattacher_isrc":
+            return None  # l'ISRC d'une fiche (peut-être d'un autre artiste) : l'humain
+        portee = _version_portee_par_une_fiche(cas, ctx)
+        if portee is not None:
+            return portee
         return _version_d_un_disque_de_versions(cas, ctx, lire_album)
     piste = ((cas.preuves or {}).get("ecart") or {}).get("piste") or {}
     disque_de_versions = _version_d_un_disque_de_versions(cas, ctx, lire_album)
@@ -2148,6 +2235,151 @@ def arbitrage_deezer(
         return None
     if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_DEEZER:
         return arbitrage
+    return None
+
+
+def _medley_aux_parties_connues(cas, ctx, ids_artiste: set) -> Arbitrage | None:
+    """Règle C (3), décision utilisateur 2026-11-19 : la piste « absente » d'un
+    disque PROPRE dont le titre joint plusieurs titres (« A + B », « A / B »)
+    qui sont TOUS des fiches de l'artiste (`contenants.proposer_contenus` :
+    une fiche par partie, un générique sur le même disque) est un medley : la
+    fiche se crée, la règle des titres joints (fin d'étape discographie) la
+    relie à ses parties par `contient`. Une partie inconnue : l'humain —
+    rendu comme un arbitrage SANS action, que l'appelant change en None (sinon
+    le titre joint passait pour un original et la fiche se créait)."""
+    from types import SimpleNamespace
+
+    from src.utils.contenants import parties_du_titre, proposer_contenus
+
+    if cas.detecteur not in ("deezer_absent", "deezer_album_absent") or ctx is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    if album.get("artist_id") not in ids_artiste:
+        return None
+    titre = piste.get("title") or cas.morceau
+    if not parties_du_titre(titre):
+        return None
+    medley = SimpleNamespace(id=None, title=titre, album=album.get("title"))
+    contenus = proposer_contenus(medley, ctx.disco)
+    if not contenus:
+        return Arbitrage("medley dont une partie n'est pas une fiche : l'humain", "", titre)
+    return Arbitrage(
+        "medley dont toutes les parties sont des fiches : créer la fiche",
+        "deezer_appliquer",
+        f"« {titre} » de « {album.get('title')} » contient "
+        + ", ".join(f"#{f.id} « {f.title} »" for f in contenus),
+    )
+
+
+#: Disques Deezer où un générique propre se CRÉE (règle C (2)) : un album ou
+#: un EP ; un single ou une compilation ne fait que s'y rattacher.
+TYPES_DU_DISQUE_D_ORIGINE = ("album", "ep")
+
+
+def _meme_plage(titre: str, duree, autre_titre: str | None, autre_duree, disque=None) -> bool:
+    """PUR. Le même titre générique (au nom du disque près, `titre_sans_son_disque`)
+    à ± 2 s."""
+    from src.utils.version_descriptors import meme_titre_de_base, titre_sans_son_disque
+
+    return bool(
+        duree
+        and autre_duree
+        and abs(int(duree) - int(autre_duree)) <= ECART_FICHIER_S
+        and meme_titre_de_base(titre_sans_son_disque(autre_titre, disque), titre)
+    )
+
+
+def _plage_titre_sans_page_deezer(fiche, disque: str | None) -> bool:
+    """PUR. La fiche du disque qui porte son nom, sans page Deezer : Genius
+    nomme parfois ainsi l'intro du disque (`_generique_au_nom_du_disque`)."""
+    from src.utils.version_descriptors import meme_disque, meme_titre_normalise
+
+    return bool(
+        disque
+        and not fiche.deezer_id
+        and meme_disque(fiche.album, disque)
+        and meme_titre_normalise(fiche.title, disque)
+    )
+
+
+def _date_du_disque(album: dict) -> str:
+    return str(album.get("release_date") or "")
+
+
+def generique_du_disque_le_plus_ancien(piste: dict, album: dict, fiches, absentes) -> tuple:
+    """PUR. Règle C (2), décision utilisateur 2026-11-19 : le générique
+    (« Intro », « Outro », « Interlude ») « absent » d'un disque propre.
+      · une fiche UNIQUE de l'artiste a cette plage (même titre, ± 2 s) et une
+        date de sortie qui n'est pas après celle du disque : la compilation
+        (ou la réédition) s'y rattache → `("rattacher", fiche)` ;
+      · aucune fiche, et le disque est l'album ou l'EP le plus ANCIEN parmi
+        ceux qui portent la plage « absente » (`absentes` : les écarts de
+        l'artiste) : la fiche se crée sur lui → `("creer", None)` ;
+      · sinon (plusieurs fiches, dates égales ou inconnues, disque plus
+        récent en attente de la création) → `(None, None)`.
+    La base ne marque pas les compilations : l'ordre des dates en tient lieu."""
+    titre, duree, date = piste.get("title"), piste.get("duration"), _date_du_disque(album)
+    if not duree or not date:
+        return None, None
+    memes = [t for t in fiches if _meme_plage(titre, duree, t.title, t.duration, t.album)]
+    if memes:
+        if len(memes) != 1 or memes[0].release_date is None:
+            return None, None
+        fiche = memes[0]
+        # Chaîne ou datetime selon le chemin de chargement : l'ISO se compare.
+        if str(fiche.release_date)[:10] > date[:10]:
+            return None, None
+        return "rattacher", fiche
+    if album.get("record_type") not in TYPES_DU_DISQUE_D_ORIGINE:
+        return None, None
+    if any(_plage_titre_sans_page_deezer(t, album.get("title")) for t in fiches):
+        # Keny Arkana, *État d'urgence* : la fiche « État d'urgence » (clip de
+        # 60 s) est peut-être cette « Intro » de 88 s — l'humain.
+        return None, None
+    soeurs = [
+        e
+        for e in absentes
+        if (e.get("album") or {}).get("id") != album.get("id")
+        and _meme_plage(
+            titre,
+            duree,
+            (e.get("piste") or {}).get("title"),
+            (e.get("piste") or {}).get("duration"),
+        )
+    ]
+    autres_dates = [_date_du_disque(e.get("album") or {}) for e in soeurs]
+    if any(not d or d <= date for d in autres_dates):
+        return None, None
+    return "creer", None
+
+
+def _generique_d_un_disque_propre(cas, ctx, ids_artiste: set) -> Arbitrage | None:
+    """Règle C (2) : `generique_du_disque_le_plus_ancien`, pour une piste
+    « absente » d'un disque propre au titre générique."""
+    if cas.detecteur not in ("deezer_absent", "deezer_album_absent") or ctx is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    if album.get("artist_id") not in ids_artiste or not titre_generique(piste.get("title")):
+        return None
+    geste, fiche = generique_du_disque_le_plus_ancien(
+        piste, album, ctx.disco, ctx.pistes_deezer_absentes
+    )
+    if geste == "creer":
+        return Arbitrage(
+            "générique du disque le plus ancien qui le porte : créer la fiche",
+            "deezer_appliquer",
+            f"« {piste.get('title')} » {piste.get('duration')} s de « {album.get('title')} » "
+            f"({album.get('record_type')}, {album.get('release_date')})",
+        )
+    if geste == "rattacher":
+        return Arbitrage(
+            f"générique de « {fiche.album} » repris sur un disque plus récent : rattacher",
+            "deezer_rattacher_generique",
+            f"« {piste.get('title')} » {piste.get('duration')} s de « {album.get('title')} » "
+            f"({album.get('release_date')}) ; #{fiche.id} {fiche.duration} s",
+        )
     return None
 
 

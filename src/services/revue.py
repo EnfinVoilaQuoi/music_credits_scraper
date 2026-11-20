@@ -238,6 +238,11 @@ class Contexte:
     #: l'ID lu dans la liste Genius du membre, la nature mesurée avec lui
     #: (`formations_prouvees_par_genius`, R4, 2026-11-13).
     formations_prouvees: dict = field(default_factory=dict)
+    #: Les écarts (`preuves["ecart"]`) des pistes Deezer « absentes » de
+    #: l'artiste (`deezer_absent`, `deezer_album_absent`), lus par
+    #: `charger_contexte` : la règle C des génériques y cherche le disque le
+    #: plus ancien qui porte la même plage (2026-11-19).
+    pistes_deezer_absentes: list = field(default_factory=list)
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -4208,6 +4213,11 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.formations_prouvees = formations_prouvees_par_genius(
         data_manager, artiste, ctx.relations_proposees
     )
+    ctx.pistes_deezer_absentes = [
+        (s["preuves"] or {}).get("ecart") or {}
+        for s in data_manager.signalements_revue(artiste.id)
+        if s["detecteur"] in ("deezer_absent", "deezer_album_absent")
+    ]
     if VIDEOS_MORTES_BRANCHEES:
         ctx.videos_mortes = data_manager.videos_mortes_constatees()
     return ctx

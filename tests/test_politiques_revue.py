@@ -687,7 +687,11 @@ class TestRegleA1:
         la fiche « … (Danny Lohner Remix) »), ou par le titre."""
         remix = _t("The King and I (Live)", 2, isrc="USIR1", duration=240)
         fiches = [self._socle(), remix]
-        assert self._juger("deezer_version", "The King and I (Live)", fiches, duree=240) is None
+        # Règle C (2026-11-19) : la fiche sans page Deezer, à ± 2 s, la reçoit.
+        portee = self._juger("deezer_version", "The King and I (Live)", fiches, duree=240)
+        assert portee.action == "deezer_rattacher_version"
+        loin = self._juger("deezer_version", "The King and I (Live)", fiches, duree=280)
+        assert loin is None
         isrc = self._juger("deezer_version", "The King and I (Live 2005)", fiches, isrc="USIR1")
         assert isrc is None or isrc.action != "deezer_appliquer"
 
@@ -702,7 +706,10 @@ class TestRegleA1:
         assert arb.action == "deezer_appliquer" and "secondaire" in arb.sens
 
     def test_version_a_la_duree_du_socle_l_humain(self):
-        assert self._juger("deezer_version", "The King and I (Live)", [self._socle()]) is None
+        """Un remix ; un live s'y crée depuis la règle C (2026-11-19)."""
+        assert self._juger("deezer_version", "The King and I (Remix)", [self._socle()]) is None
+        live = self._juger("deezer_version", "The King and I (Live)", [self._socle()])
+        assert live.action == "deezer_appliquer"
 
     def test_edition_d_une_version_pas_de_fiche(self):
         """« Shake That (Remix) (Album Version Explicit) » : l'édition d'un
@@ -717,9 +724,10 @@ class TestRegleA1:
         page = self._juger("deezer_version", titre, [socle], duree=240, genius={"id": 1})
         assert page is None
 
-    def test_instrumental_reste_sans_fiche(self):
+    def test_instrumental_devient_une_fiche_secondaire(self):
+        """Règle C (2026-11-19) lève DV1 : l'instrumental est une fiche."""
         arb = self._juger("deezer_version", "The King and I (Instrumental)", [self._socle()])
-        assert arb.action == "normal"
+        assert arb.action == "deezer_appliquer"
 
     def test_piste_nue_d_un_disque_live_l_humain(self, monkeypatch):
         """MC Solaar, *Le tour de la question* : Deezer omet « (Live) » ; la
@@ -796,11 +804,19 @@ class TestIntroDuMemeDisque:
             {
                 "ecart": {
                     "piste": {"id": 9, "title": "Intro", "duration": 88},
-                    "album": {"id": 5, "title": "État d'urgence", "artist_id": 7},
+                    "album": {
+                        "id": 5,
+                        "title": "État d'urgence",
+                        "artist_id": 7,
+                        "record_type": "album",
+                        "release_date": "2008-01-01",
+                    },
                 }
             },
         )
-        ctx = SimpleNamespace(disco=[fiche])
+        # Règle C (2) : seul disque à porter la plage, mais la fiche au nom du
+        # disque, sans page Deezer, peut l'être.
+        ctx = SimpleNamespace(disco=[fiche], pistes_deezer_absentes=[cas.preuves["ecart"]])
         assert pol.arbitrage_deezer(cas, None, ctx, {}, {7}, lire_deezer=lambda _i: None) is None
 
 

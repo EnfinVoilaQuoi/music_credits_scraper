@@ -210,6 +210,7 @@ scripts/*
 !scripts/refuser_profil_spotify.py
 !scripts/rattraper_colonnes_sans_provenance.py
 !scripts/dissocier_echecs_orphelins.py
+!scripts/rouvrir_dv1.py
 !scripts/retirer_photos_par_defaut.py
 !scripts/retirer_pochettes_photo_artiste.py
 !scripts/desactiver_homonymes.py

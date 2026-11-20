@@ -1411,7 +1411,12 @@ def creer_lignes(
             ]
         track = _ligne(artist, e, contributeurs)
         if e.socle is not None:
-            (heriter or version_heritage.heriter)(track, e.socle)
+            # Le modèle se choisit par le juge de l'héritage et de son audit
+            # (`socle_de_version`) : l'instrumental d'un remix hérite du REMIX,
+            # pas de l'original que l'écart désigne (règle C, 2026-11-19 : 5
+            # instrumentaux de NTM et IAM recevaient les crédits d'une autre fiche).
+            modele = version_heritage.socle_de_version(track, base) or e.socle
+            (heriter or version_heritage.heriter)(track, modele)
         dm.save_track(track)
         dm.record_pending(track)
         if a_relire:

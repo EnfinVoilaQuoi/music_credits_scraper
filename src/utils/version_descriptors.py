@@ -1580,6 +1580,13 @@ def meme_disque(a: str | None, b: str | None) -> bool:
         return False
     if meme_album(a, b):
         return True
+    # « Vol. 2 », « Volume 2 », « Vol.2 » et « 2 » numérotent le même tome :
+    # 11 doublons d'édition legacy / Deezer (« Kushtape Volume 2 » / « Kushtape,
+    # Vol. 2 », « ASADACHI TAPE Vol. 3 » / « ASADACHI TAPE 3 ») restaient deux
+    # disques (2026-11-20) ; deux NUMÉROS différents restent deux disques.
+    va, vb = _volume_nu(a), _volume_nu(b)
+    if (va, vb) != (a, b) and meme_disque(va, vb):
+        return True
     if any(meme_disque(t, b) for t in _tomes_du_disque_double(a)) or any(
         meme_disque(a, t) for t in _tomes_du_disque_double(b)
     ):
@@ -1594,6 +1601,44 @@ def meme_disque(a: str | None, b: str | None) -> bool:
     ):
         return True
     return either_contains_as_words(nus[0], nus[1])
+
+
+#: Un nombre DÉTACHÉ du mot qui le précède fait partie du NOM du disque (« The
+#: Marshall Mathers LP 2 » = « … LP2 ») — sauf après un mot de partie ou de
+#: volume, où il numérote la suite (« Or Noir Part 2 », « Untold Story Vol 2 »).
+_NOMBRE_DU_NOM = re.compile(
+    r"\b(?!(?:part|pt|partie|vol|volume|tome|chapitre|chapter|saison|season|episode)\b)"
+    r"([^\W\d_]{2,}) (?=\d+\b)",
+    re.IGNORECASE,
+)
+
+
+def memes_parties_de_disque(a: str | None, b: str | None) -> bool:
+    """PUR. Deux titres de DISQUE désignent-ils la même partie (ou aucune) ?
+    `memes_parties` lu sur des noms d'album, où un nombre détaché peut
+    appartenir au nom (« LP 2 » / « LP2 » : 8 paires d'éditions de *The Marshall
+    Mathers LP 2* tenues pour des suites, simulé le 2026-11-20). Sert à séparer
+    une SUITE qui reprend les précédentes (« Chambre 140 (Part. 3) »,
+    « HHHH² ») d'une réédition (décision utilisateur 2026-11-20)."""
+    a, b = a or "", b or ""
+    # Deux lectures d'un nombre détaché, la même pour les deux titres :
+    # (1) il fait partie du NOM (« LP 2 » = « LP2 »), un « Vol. N » reste un
+    #     tome ; (2) c'est le numéro du TOME que Deezer écrit sans « Vol. »
+    #     (« ASADACHI TAPE 3 » = « ASADACHI TAPE Vol. 3 »). Même partie si l'une
+    #     des deux lectures les accorde ; deux numéros différents, jamais.
+    nom = [_NOMBRE_DU_NOM.sub(r"\1", _MARQUEUR_DE_VOLUME.sub(" part ", x)) for x in (a, b)]
+    tome = [_volume_nu(x) for x in (a, b)]
+    return memes_parties(*nom) or memes_parties(*tome)
+
+
+#: Marqueur de tome d'un nom de DISQUE : « Vol. 2 », « Volume 2 », « Vol.2 ».
+_MARQUEUR_DE_VOLUME = re.compile(r"[,\s]*\b(?:volume|vol)\b\.?\s*(?=\d)", re.IGNORECASE)
+
+
+def _volume_nu(titre: str) -> str:
+    """« Kushtape, Vol. 2 » → « Kushtape 2 » : le numéro du tome sans son
+    marqueur, la forme qu'écrit Deezer (« ASADACHI TAPE 3 »)."""
+    return _MARQUEUR_DE_VOLUME.sub(" ", titre)
 
 
 def edition_de_diffusion(titre: str | None) -> str | None:

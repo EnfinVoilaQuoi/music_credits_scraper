@@ -27,7 +27,7 @@ _PARUTIONS = (
     "tables de parutions (`releases*`, `release_tracks`) : aucune colonne de fiche, "
     "aucun verdict n'en dépend"
 )
-_ALBUMS = "table `albums` (streams et nature du disque) : aucune colonne de fiche"
+_ALBUMS = "projets (e68 : streams et nature du disque) : aucune colonne de fiche"
 _CREDITS = "table `credits` : aucune colonne dérivée n'en dépend"
 _CREDITS_ALBUM = (
     "tables `genius_album_*` (crédits d'album, clé = ID d'album Genius) : aucune "
@@ -45,6 +45,10 @@ EXCEPTIONS: dict[str, str] = {
     "confirm_release_suggestion": _PARUTIONS,
     "fusionner_parutions_meme_upc": _PARUTIONS + " (réparation par lots, passage à blanc)",
     "marquer_parutions_live": _PARUTIONS,
+    "memoriser_meme_projet": _PARUTIONS + " (décision « même projet » + projets refaits)",
+    "oublier_meme_projet": _PARUTIONS + " (rétablit la décision « même projet »)",
+    "regrouper_projets": _PARUTIONS
+    + " (projets e67 : `releases.projet_id` et `projets` seulement)",
     "singles_fondus": _PARUTIONS + " (réparation par lots, passage à blanc)",
     "noter_parution_apple": _PARUTIONS,
     "noter_parution_musicbrainz": _PARUTIONS,
@@ -52,7 +56,6 @@ EXCEPTIONS: dict[str, str] = {
     "poser_upc_parution": _PARUTIONS,
     "record_release_observations": _PARUTIONS,
     # ── Albums ──
-    "retirer_albums_de_disques": _ALBUMS + " (lignes de disques refusés, sans fiche)",
     "set_album_record_type": _ALBUMS,
     "update_album_ytm_streams": _ALBUMS,
     "upsert_album": _ALBUMS,

@@ -92,6 +92,7 @@ CONTRAT: dict[str, dict[str, list[str] | None]] = {
 # Méthodes de DataManager appelées par le studio.
 METHODES_DATA_MANAGER: dict[str, list[str]] = {
     "get_albums_for_artist": ["artist_id"],
+    "get_projets_for_artist": ["artist_id"],
     "save_track": ["track"],
     "set_artist_image_path": ["artist_id", "path"],
 }

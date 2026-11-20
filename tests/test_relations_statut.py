@@ -15,6 +15,7 @@ from sqlalchemy import create_engine
 from alembic import command
 from src.models import Artist, ArtistRelation
 from src.persistence.bootstrap import make_alembic_config
+from tests.aide_disques import poser_disque
 
 
 def _artiste(dm, nom):
@@ -150,6 +151,8 @@ class TestArbitrer:
 class TestRecordType:
     def test_creates_row_without_streams(self, data_manager):
         a = _artiste(data_manager, "Isha")
+        # e68 : la nature Deezer va sur l'édition de cet ID, puis au projet.
+        poser_disque(data_manager, a.id, "Drôle d'oiseau", deezer_album_id=42)
         assert data_manager.set_album_record_type(a.id, "Drôle d'oiseau", "ep", deezer_album_id=42)
         [alb] = data_manager.get_albums_for_artist(a.id)
         assert alb["record_type"] == "ep" and alb["record_type_source"] == "deezer"
@@ -158,18 +161,17 @@ class TestRecordType:
 
     def test_manual_beats_deezer(self, data_manager):
         a = _artiste(data_manager, "Isha")
+        poser_disque(data_manager, a.id, "Labrador bleu", deezer_album_id=7)
         data_manager.upsert_album(a.id, "Labrador bleu", 1000, 10)
         assert data_manager.set_album_record_type(a.id, "Labrador bleu", "album", source="manual")
-        assert not data_manager.set_album_record_type(
-            a.id, "Labrador bleu", "ep", deezer_album_id=7
-        )
+        # Deezer écrit la nature de SON édition (e68) ; le projet garde la saisie.
+        data_manager.set_album_record_type(a.id, "Labrador bleu", "ep", deezer_album_id=7)
         [alb] = data_manager.get_albums_for_artist(a.id)
         assert (alb["record_type"], alb["record_type_source"]) == ("album", "manual")
         assert alb["deezer_album_id"] == 7  # la fiche est retenue quand même
         assert alb["spotify_streams"] == 1000  # les streams n'ont pas bougé
         # Effacer la saisie manuelle → Deezer reprend la main.
         assert data_manager.set_album_record_type(a.id, "Labrador bleu", None, source="manual")
-        assert data_manager.set_album_record_type(a.id, "Labrador bleu", "ep")
         assert data_manager.get_albums_for_artist(a.id)[0]["record_type"] == "ep"
 
     def test_vocabulary_guard(self, data_manager):

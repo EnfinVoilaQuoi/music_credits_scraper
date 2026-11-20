@@ -1499,6 +1499,8 @@ CIBLES_DES_LIENS = {
     "variant_track_id": "tracks",
     "related_artist_id": "artists",
     "release_track_id": "release_tracks",
+    "projet_id": "projets",
+    "edition_reference_id": "releases",
 }
 
 #: Lignes qui ne désignent légitimement plus rien : `(table, colonne)` → clause
@@ -1557,6 +1559,7 @@ def orphelins(c) -> list[Cas]:
                 "artists": "artiste",
                 "releases": "parution",
                 "release_tracks": "piste de parution",
+                "projets": "projet",
             }[cible]
             libelle = f"{table} : {n} ligne(s) sans {quoi}"
             if col != "track_id":

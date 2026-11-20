@@ -148,7 +148,7 @@ def populate_albums_table(app):
     if not app.current_artist or not app.current_artist.tracks:
         return
 
-    # Stats streams par album (table albums : Kworb Spotify + YTMusic)
+    # Stats streams par album : celles du PROJET (e68 : Kworb, Spotify, YTMusic)
     albums_db = {}
     try:
         for a in app.data_manager.get_albums_for_artist(app.current_artist.id):
@@ -178,12 +178,20 @@ def populate_albums_table(app):
         if track is None:
             continue
         linked_ids.add(track.id)
-        # L'ID évite de confondre deux éditions homonymes; le libellé visible
-        # reste le titre naturel dans le cas courant.
-        key = f"release:{link['release_id']}"
+        # Un disque = un PROJET (e67) : *M.A.N* et *M.A.N (Bonus)* font une
+        # ligne, au titre du projet, chaque fiche une fois. Sans projet (base
+        # pas encore regroupée), l'édition : l'ID évite de confondre deux
+        # éditions homonymes, le libellé reste le titre naturel.
+        if link.get("projet_id") is not None:
+            key = f"projet:{link['projet_id']}"
+            libelle = link.get("projet_titre") or link["title"]
+        else:
+            key = f"release:{link['release_id']}"
+            libelle = link["title"]
         if key not in groups:
-            groups[key] = [link["title"], []]
-        groups[key][1].append(track)
+            groups[key] = [libelle, []]
+        if track not in groups[key][1]:
+            groups[key][1].append(track)
     for track in app.current_artist.tracks:
         if track.id in linked_ids:
             continue

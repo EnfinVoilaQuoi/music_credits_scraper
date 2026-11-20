@@ -141,13 +141,9 @@ def main(argv=None) -> int:
         for f in d["fiches"]:
             fiches += bool(dm.delete_track(f["id"]))
         parutions += supprimer_parution_vide(dm, d["release_id"])
-    # Les lignes `albums` du disque : l'oracle d'identité Deezer les compterait
-    # encore comme disques connus (2026-11-14).
-    albums = dm.retirer_albums_de_disques(artiste.id, set(retenus))
-    print(
-        f"\n✅ {fiches} fiches supprimées, {parutions} parutions, {albums} lignes d'albums, "
-        f"{len(retenus)} disques refusés"
-    )
+    # Plus de lignes `albums` à retirer (e69) : un projet sans fiche n'est pas
+    # lu comme un disque connu (`get_albums_for_artist`).
+    print(f"\n✅ {fiches} fiches supprimées, {parutions} parutions, {len(retenus)} disques refusés")
     return 0
 
 

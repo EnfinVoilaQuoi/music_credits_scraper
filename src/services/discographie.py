@@ -345,6 +345,20 @@ def _filtrer_non_musique(nouveaux: list[Track]) -> tuple[list[Track], list[str]]
 
 
 @etape_de_flux("Discographie")
+def regrouper_projets(dm, artist: Artist) -> None:
+    """Réunit les éditions de l'artiste en projets (e67) en fin d'étape. Un
+    échec ne coûte pas l'étape : les projets seront refaits à la suivante."""
+    try:
+        b = dm.regrouper_projets(artist.id)
+        logger.info(
+            f"💿 Projets : {b.projets} ({b.reunis} à plusieurs éditions, {b.crees} créé(s), "
+            f"{b.retires} retiré(s), {b.deplacees} édition(s) déplacée(s), "
+            f"{len(b.a_trancher)} à trancher)"
+        )
+    except Exception:
+        logger.exception(f"Regroupement des projets de {artist.name} échoué")
+
+
 def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -> BilanDisco:
     """Récupère, fusionne, rematch les certifs, télécharge les images, sauve.
 
@@ -547,6 +561,8 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
 
     if runtime.disabled is not None:
         bilan.pages_reactivees = reactiver_pages_remplies(runtime.disabled, artist, artist.tracks)
+    # Les éditions vues par ce run rejoignent leur projet (e67).
+    regrouper_projets(dm, artist)
     bilan.total_en_base = len(artist.tracks)
     bilan.featurings_total = sum(1 for t in artist.tracks if t.is_featuring)
     bilan.albums_api = sum(1 for t in nouveaux if t.album)

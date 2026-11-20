@@ -215,48 +215,14 @@ scraping_errors = Table(
 )
 
 
-albums = Table(
-    "albums",
-    metadata,
-    Column("id", Integer, primary_key=True),
-    Column("title", Text, nullable=False),
-    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
-    Column("spotify_streams", Integer),
-    Column("spotify_daily_streams", Integer),
-    Column("spotify_streams_updated", TIMESTAMP),
-    # Migrations user_version 43-45
-    Column("ytm_streams", Integer),
-    Column("ytm_streams_updated", TIMESTAMP),
-    Column("spotify_album_ids", Text),
-    # Migration e14 : QUI a calculé `spotify_streams`. Kworb ne somme que les
-    # morceaux de l'artiste (total INCOMPLET sur un album commun ou de groupe),
-    # Spotify somme toutes les pistes du disque. Sans cette colonne, les deux
-    # sémantiques se mélangeraient en silence.
-    Column("spotify_streams_source", Text),
-    # Migration e15 : total de CHAQUE édition ({album_id: streams}). Le total
-    # du disque est la somme des enregistrements DISTINCTS — Spotify compte par
-    # enregistrement, pas par track_id, donc additionner les éditions
-    # compterait deux fois les titres partagés.
-    Column("spotify_editions_json", Text),
-    # Migration e26 : nature du disque telle que le DISTRIBUTEUR la déclare
-    # (album | ep | single | compile — `record_type` de Deezer). Mesuré sur
-    # Isha : ni le nombre de titres ni la durée ne la déduisent (des EP de
-    # 10 titres et 26 min, un EP de 8 titres à côté d'un album de 12 à 32 min).
-    # La donnée est SOURCÉE (`deezer` | `manual`), comme les streams : une
-    # saisie manuelle n'est jamais écrasée par un run Deezer.
-    Column("record_type", Text),
-    Column("record_type_source", Text),
-    Column("record_type_updated", TIMESTAMP),
-    Column("deezer_album_id", Integer),
-    UniqueConstraint("title", "artist_id"),
-    sqlite_autoincrement=True,
-)
+# `albums` (streams et nature d'album sous le TITRE du disque) : retirée en e69,
+# remplacée par les PROJETS (`projets`, e67-e68) plus bas.
 
 
-# Catalogue des parutions (e31). `albums` reste le magasin des agrégats de
-# streams : sa clé `(artist_id, title)` ne peut pas représenter proprement une
-# compilation extérieure ni deux éditions homonymes. Une parution est donc une
-# entité de catalogue séparée, reliée aux fiches `tracks` ci-dessous.
+# Catalogue des parutions (e31). L'ancienne table `albums` (clé `(artist_id,
+# title)`) ne pouvait représenter ni une compilation extérieure ni deux éditions
+# homonymes : une parution est une entité de catalogue séparée, reliée aux
+# fiches `tracks` ci-dessous ; les éditions d'un même disque forment un projet.
 #
 # `artist_id` est l'artiste dont on consulte le catalogue, pas nécessairement
 # l'auteur crédité du disque : une compilation Booska-P dans la base de Diam's
@@ -296,7 +262,53 @@ releases = Table(
     # « Live » du release-group), lu à la même recherche : 1 / 0, NULL =
     # inconnu. Une fiche studio n'en reçoit aucune piste (`studio_sur_live`).
     Column("mb_live", _BOOL),
+    # (e67) Le PROJET de l'édition (`projets`) : NULL pour une parution pas
+    # confirmée ; une apparition (`appearance`) a le sien, jamais mêlé à un
+    # disque de l'artiste (ses streams d'album en dépendent aussi). Posé par
+    # `regrouper_projets` (`utils/projets_disques`), jamais à la main.
+    Column("projet_id", Integer, ForeignKey("projets.id")),
+    # (e68) Total Spotify de CETTE édition (page album `spotify_web`) ; le
+    # total du disque, enregistrements distincts, est celui du projet.
+    Column("spotify_streams", Integer),
+    Column("spotify_streams_updated", TIMESTAMP),
+    # (e68) Total YouTube Music de CETTE édition (album YTM au même titre) ;
+    # le projet prend le plus grand (YTM ne dédoublonne pas les éditions).
+    Column("ytm_streams", Integer),
+    Column("ytm_streams_updated", TIMESTAMP),
     UniqueConstraint("artist_id", "identity_key"),
+    sqlite_autoincrement=True,
+)
+
+
+# Projets (e67) : les ÉDITIONS d'un même disque réunies (*M.A.N* + *M.A.N
+# (Bonus)*), par artiste comme `releases`. Le titre est celui de l'édition de
+# référence (la plus ancienne hors live). Règles : `utils/projets_disques`.
+# `edition_reference_id` n'a pas de clé étrangère déclarée (`releases` désigne
+# déjà `projets`) ; l'audit `orphelin` la vérifie par son nom.
+projets = Table(
+    "projets",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("artist_id", Integer, ForeignKey("artists.id"), nullable=False),
+    Column("titre", Text, nullable=False),
+    Column("edition_reference_id", Integer),
+    Column("created_at", TIMESTAMP),
+    Column("updated_at", TIMESTAMP),
+    # (e68) Nature du disque, VERDICT du projet : `manual` d'abord, sinon la
+    # nature que Deezer déclare pour l'édition de référence, puis pour une
+    # autre édition (`releases.record_type`, observation par édition).
+    Column("nature", Text),
+    Column("nature_source", Text),
+    Column("nature_maj", TIMESTAMP),
+    # (e68) Streams d'album, au disque et non plus au TITRE (`albums`) :
+    # mêmes arbitrages (un total Kworb n'écrase jamais un total Spotify).
+    Column("spotify_streams", Integer),
+    Column("spotify_daily_streams", Integer),
+    Column("spotify_streams_updated", TIMESTAMP),
+    Column("spotify_streams_source", Text),
+    Column("spotify_album_ids", Text),
+    Column("ytm_streams", Integer),
+    Column("ytm_streams_updated", TIMESTAMP),
     sqlite_autoincrement=True,
 )
 

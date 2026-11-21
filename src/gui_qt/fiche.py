@@ -121,9 +121,12 @@ def _onglet(onglet: Onglet) -> QWidget:
 class VueFiche(QWidget):
     """En-tête, liens, onglets, pied de statut. `afficher(None)` vide la fiche."""
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, parent=None, contexte_versions=None) -> None:
         super().__init__(parent)
         self._onglet_courant = 0
+        #: track -> (éditions, fiches chargées), pour l'onglet Versions ; posé par
+        #: la fenêtre, qui seule connaît la base et la discographie chargée.
+        self.contexte_versions = contexte_versions
         self.couche = QVBoxLayout(self)
         self.couche.setContentsMargins(8, 8, 8, 8)
         self.titre = QLabel()
@@ -165,7 +168,12 @@ class VueFiche(QWidget):
         self.vide.setVisible(not visible)
         if not visible:
             return
-        f: Fiche = presentation_fiche.construire(ligne.track, ligne.constat, ligne.contenu_dans)
+        editions, fiches = (
+            self.contexte_versions(ligne.track) if self.contexte_versions else ((), ())
+        )
+        f: Fiche = presentation_fiche.construire(
+            ligne.track, ligne.constat, ligne.contenu_dans, editions, fiches
+        )
         self.titre.setText(f.titre)
         self._vider(self.grille)
         moitie = (len(f.entete) + 1) // 2
@@ -195,14 +203,14 @@ class VueFiche(QWidget):
 class FenetreFiche(QDialog):
     """La fiche détachée (double-clic, Entrée avec la touche Maj)."""
 
-    def __init__(self, ligne, parent=None) -> None:
+    def __init__(self, ligne, parent=None, contexte_versions=None) -> None:
         super().__init__(parent)
         self.setWindowTitle(f"Détails • {ligne.track.title}")
         self.resize(780, 900)
         self.setModal(False)
         couche = QVBoxLayout(self)
         couche.setContentsMargins(0, 0, 0, 0)
-        self.vue = VueFiche(self)
+        self.vue = VueFiche(self, contexte_versions)
         couche.addWidget(self.vue)
         self.vue.afficher(ligne)
         from src.gui_qt.fenetres_windows import colorer_barre_titre

@@ -519,10 +519,118 @@ def onglet_technique(track) -> Onglet:
     return Onglet("technique", "Technique", bandeau or "Informations techniques", sections)
 
 
+# ── Onglet Versions ──────────────────────────────────────────────────────────
+
+_NATURE_ORIGINE = {"version_of": "version", "remix_of": "remix", "cover_of": "reprise"}
+
+
+def onglet_versions(track, editions=(), fiches=()) -> Onglet:
+    """Tout ce qui est une version de ce morceau (pendant de l'onglet CTk).
+
+    Décision utilisateur (2026-09-24) : radio edit, clean, explicit, album /
+    single version et remaster sont des ÉDITIONS de la même fiche
+    (`track_editions`, `editions` : lignes de `get_track_editions`) ; remix,
+    reprise, live, acoustique ont leur propre fiche (`versions_liees` sur les
+    `fiches` chargées) ; les versions Spotify sans fiche ont un compteur propre."""
+    from src.services.editions import versions_liees
+
+    origine = [
+        r
+        for r in track.relationships or []
+        if isinstance(r, dict) and r.get("type") in _NATURE_ORIGINE
+    ]
+    liees = versions_liees(track, list(fiches)) if fiches else []
+    renditions = [e for e in track.spotify_id_entries if e.est_rendition]
+    sections = []
+    if origine:
+        sections.append(
+            Section(
+                "Est une version de",
+                "vinyl",
+                tuple(
+                    Entree(
+                        f"{r.get('artist') or '?'} - {r.get('title') or '?'}",
+                        _NATURE_ORIGINE[r["type"]],
+                        url=r.get("url"),
+                    )
+                    for r in origine
+                ),
+            )
+        )
+    if editions:
+        sections.append(
+            Section(
+                "Éditions (même enregistrement, streams comptés dans le total)",
+                "disc",
+                tuple(
+                    Entree(
+                        e.get("label") or e.get("title") or "?",
+                        fmt.duree(e.get("duration")) or "—",
+                        e.get("source") or "",
+                        url=(
+                            f"https://open.spotify.com/track/{e['spotify_id']}"
+                            if e.get("spotify_id")
+                            else None
+                        ),
+                    )
+                    for e in editions
+                ),
+            )
+        )
+    if liees:
+        sections.append(
+            Section(
+                "Versions qui ont leur propre fiche",
+                "playlist",
+                tuple(
+                    Entree(
+                        f.title or "?",
+                        nature,
+                        f.primary_artist_name or "",
+                        str(f.release_date)[:4] if f.release_date else "",
+                    )
+                    for f, nature in sorted(liees, key=lambda x: (x[1], (x[0].title or "").lower()))
+                ),
+            )
+        )
+    if renditions:
+        sections.append(
+            Section(
+                "Versions Spotify sans fiche (compteur propre, hors total)",
+                "brand-spotify",
+                tuple(
+                    Entree(
+                        e.label or e.spotify_id,
+                        (
+                            "a sa propre fiche"
+                            if e.variant_track_id
+                            else f"{fmt.nombre(e.streams) or '—'} streams"
+                        ),
+                        url=f"https://open.spotify.com/track/{e.spotify_id}",
+                    )
+                    for e in renditions
+                ),
+            )
+        )
+    morceaux = [
+        (len(origine), "Origine", "Origines"),
+        (len(editions), "Édition", "Éditions"),
+        (len(liees), "Version", "Versions"),
+        (len(renditions), "Version Spotify", "Versions Spotify"),
+    ]
+    bandeau = " • ".join(f"{n} {pl if n > 1 else sg}" for n, sg, pl in morceaux if n)
+    return Onglet(
+        "versions",
+        "Versions",
+        bandeau or "Aucune version",
+        tuple(sections) or (Section("Versions", vide="Aucune version ni édition connue."),),
+    )
+
+
 # ── Assemblage ───────────────────────────────────────────────────────────────
 
 
-def construire(track, constat: Constat, contenu_dans=()) -> Fiche:
+def construire(track, constat: Constat, contenu_dans=(), editions=(), fiches=()) -> Fiche:
     return Fiche(
         titre=track.title or "",
         entete=entete(track),
@@ -531,6 +639,7 @@ def construire(track, constat: Constat, contenu_dans=()) -> Fiche:
             onglet_credits(track),
             onglet_paroles(track),
             onglet_samples(track, contenu_dans),
+            onglet_versions(track, editions, fiches),
             onglet_certifs(track),
             onglet_streams(track),
             onglet_technique(track),

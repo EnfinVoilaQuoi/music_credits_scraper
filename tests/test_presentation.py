@@ -369,6 +369,26 @@ class TestFiche:
         (ligne,) = lignes(t)
         return fiche.construire(t, ligne.constat)
 
+    def test_onglet_versions(self):
+        t = morceau()
+        t.relationships = [
+            {"type": "remix_of", "title": "Ailleurs", "artist": "Isha", "url": "https://g/a"}
+        ]
+        editions = [{"label": "Radio Edit", "duration": 185, "source": "deezer"}]
+        o = fiche.onglet_versions(t, editions)
+        assert o.bandeau == "1 Origine • 1 Édition"
+        origine, ed = o.sections
+        assert (origine.entrees[0].libelle, origine.entrees[0].valeur) == (
+            "Isha - Ailleurs",
+            "remix",
+        )
+        assert (ed.entrees[0].libelle, ed.entrees[0].valeur) == ("Radio Edit", "3:05")
+
+    def test_onglet_versions_vide(self):
+        o = fiche.onglet_versions(morceau())
+        assert o.bandeau == "Aucune version"
+        assert o.sections[0].vide
+
     def test_entete_liens_et_pied(self):
         t = morceau()
         t.genius_url = "https://genius.com/x"
@@ -382,6 +402,7 @@ class TestFiche:
             "credits",
             "paroles",
             "samples",
+            "versions",
             "certifs",
             "streams",
             "technique",

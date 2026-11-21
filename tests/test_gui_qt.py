@@ -231,7 +231,7 @@ class TestModele:
 # ── fiche ────────────────────────────────────────────────────────────────────
 
 
-def test_fiche_six_onglets(qtbot):
+def test_fiche_sept_onglets(qtbot):
     from src.gui_qt.fiche import VueFiche
 
     vue = VueFiche()
@@ -243,13 +243,14 @@ def test_fiche_six_onglets(qtbot):
         "Crédits",
         "Paroles",
         "Samples",
+        "Versions",
         "Certifs",
         "Streams",
         "Technique",
     ]
-    vue.onglets.setCurrentIndex(4)
+    vue.onglets.setCurrentIndex(5)
     vue.afficher(ligne)  # l'onglet choisi survit au changement de morceau
-    assert vue.onglets.currentIndex() == 4
+    assert vue.onglets.currentIndex() == 5
     vue.afficher(None)
     assert vue.vide.isVisibleTo(vue) and not vue.onglets.isVisibleTo(vue)
 

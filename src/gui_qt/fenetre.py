@@ -141,7 +141,7 @@ class FenetrePrincipale(QMainWindow):
         self.vue = VueMorceaux(self.modele, self.proxy)
         self.cartouche = CartoucheArtiste()
         self.pied = PiedTable()
-        self.fiche = VueFiche()
+        self.fiche = VueFiche(contexte_versions=self._contexte_versions)
 
         central = QWidget()
         couche = QVBoxLayout(central)
@@ -594,10 +594,16 @@ class FenetrePrincipale(QMainWindow):
         self.fiche.afficher(ligne)
 
     def _fiche_detachee(self, ligne) -> None:
-        f = FenetreFiche(ligne, self)
+        f = FenetreFiche(ligne, self, self._contexte_versions)
         self._fenetres_fiche.append(f)
         f.finished.connect(lambda _: self._fenetres_fiche.remove(f))
         f.show()
+
+    def _contexte_versions(self, track) -> tuple[list, list]:
+        """Les éditions de la fiche (base) et les fiches chargées, pour
+        l'onglet Versions. Une requête courte : lue sur le fil de l'interface."""
+        editions = self.runtime.data_manager.get_track_editions(track.id) if track.id else []
+        return editions, [ligne.track for ligne in self.modele.lignes]
 
     def _menu_ligne(self, ligne, position) -> None:
         menu = QMenu(self)

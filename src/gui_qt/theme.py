@@ -146,6 +146,15 @@ def feuille_de_style(t=TOKENS) -> str:
     /* Bouton sans fond (gestes d'une carte, index alphabétique). */
     QToolButton#discret {{ background: transparent; padding: 2px 6px; }}
     QToolButton#discret:hover {{ background: {t['survol']}; }}
+    QLineEdit#grand {{ font-size: 16pt; padding: 10px 14px; }}
+    QListWidget#liste {{
+        background: transparent;
+        border: none;
+        font-family: "{POLICE_SEMIGRAS}";
+        font-size: 15pt;
+    }}
+    QListWidget#liste::item {{ padding: 4px 0; }}
+    QListWidget#liste::item:selected {{ background: {t['selection']}; }}
     QLabel#titreCarte {{ font-family: "{POLICE_SEMIGRAS}"; font-size: 15pt; }}
     QToolButton#bascule {{ background: {t['onglet_inactif']}; color: {t['texte_doux']}; }}
     QToolButton#bascule:checked {{ background: {t['accent']}; color: {t['texte_sur_accent']}; }}

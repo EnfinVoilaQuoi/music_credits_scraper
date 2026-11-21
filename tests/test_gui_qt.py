@@ -519,3 +519,42 @@ def test_suppression_sans_sauvegarde_ne_fait_rien(qtbot, fenetre, monkeypatch):
     monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: None)
     d._supprimer("Isha")
     assert list(d.cartes) == ["Isha"]
+
+
+# ── Ajout d'artiste ──────────────────────────────────────────────────────────
+
+
+def test_ajout_liste_la_base_puis_filtre(qtbot, fenetre):
+    from src.gui_qt.dialogues import DialogueAjout
+    from src.presentation.artistes import ResumeArtiste
+
+    base = [ResumeArtiste(n) for n in ("ISHA", "Jazzy Bazz", "JeanJass", "Josman")]
+    d = DialogueAjout(fenetre.runtime, base)
+    qtbot.addWidget(d)
+    assert d.en_base.count() == 4
+    d._suggerer("jean")
+    assert [d.en_base.item(i).text() for i in range(d.en_base.count())] == ["JeanJass"]
+
+
+def test_ajout_homonymes_choix_obligatoire(qtbot, fenetre, monkeypatch):
+    from src.gui_qt.dialogues import DialogueAjout
+    from src.services import artiste as artiste_service
+
+    candidats = [Artist(name="Sniper", genius_id=1), Artist(name="Sniper", genius_id=2)]
+
+    def ambigu(runtime, nom):
+        raise artiste_service.ArtisteAmbigu(nom, candidats)
+
+    monkeypatch.setattr(artiste_service, "resoudre", ambigu)
+    d = DialogueAjout(fenetre.runtime, [])
+    qtbot.addWidget(d)
+    ajoutes = []
+    d.ajoute.connect(ajoutes.append)
+    d.saisie.setText("Sniper")
+    d._chercher()
+    qtbot.waitUntil(lambda: d.proposes.count() == 2, timeout=10_000)
+    assert not d.bouton_ajouter.isEnabled()  # jamais un homonyme choisi à notre place
+    d.proposes.setCurrentRow(1)
+    d.bouton_ajouter.click()
+    assert ajoutes == ["Sniper"]
+    assert fenetre.runtime.data_manager.get_artist_by_name("Sniper").genius_id == 2

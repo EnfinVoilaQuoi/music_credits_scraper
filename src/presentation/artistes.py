@@ -23,6 +23,10 @@ class ResumeArtiste:
     titres: int = 0
     #: Date (« AAAA-MM-JJ ») de la dernière écriture sur ses morceaux.
     derniere_maj: str | None = None
+    credits: int = 0
+    ajoute_le: str | None = None
+    #: Photo, relative au dossier des images (`artists.image_path`).
+    image: str | None = None
 
     @property
     def detail(self) -> str:
@@ -34,7 +38,22 @@ class ResumeArtiste:
     @classmethod
     def depuis_resume(cls, d: dict) -> ResumeArtiste:
         """Depuis une ligne de `ArtistRepository.resume_des_artistes`."""
-        return cls(d["name"], d.get("tracks_count") or 0, d.get("last_update"))
+        return cls(
+            d["name"],
+            d.get("tracks_count") or 0,
+            d.get("last_update"),
+            d.get("credits_count") or 0,
+            d.get("created_at"),
+            d.get("image_path"),
+        )
+
+
+def lettre_d_index(nom: str) -> str:
+    """La lettre de l'index alphabétique de la fenêtre Artistes : l'initiale
+    sans accent, « # » pour un chiffre ou un signe (« 1507 », « ¥$ »)."""
+    cle = fmt.normalize_text(nom).strip()
+    initiale = cle[:1].upper()
+    return initiale if "A" <= initiale <= "Z" else "#"
 
 
 def _rang(saisie: str, nom: str) -> int | None:

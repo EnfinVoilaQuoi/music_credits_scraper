@@ -464,3 +464,58 @@ def test_confirmer_refuser_retablir(qtbot, formations):
     assert pf.cartes(d.candidats)[pf.CARTE_ALIAS][0].decision is pf.Decision.A_DECIDER
     d.refuser(pf.cartes(d.candidats)[pf.CARTE_ALIAS][0])
     assert pf.cartes(d.candidats)[pf.CARTE_ALIAS][0].decision is pf.Decision.REFUSE
+
+
+# ── Base de données • Artistes ───────────────────────────────────────────────
+
+
+def test_lettre_d_index():
+    from src.presentation.artistes import lettre_d_index
+
+    assert [lettre_d_index(n) for n in ("Écorchée", "isha", "1507", "¥$")] == ["E", "I", "#", "#"]
+
+
+def test_cle_de_reglage_d_un_nom():
+    from src.gui_qt.fenetre import _cle_de_nom, _nom_de_cle
+
+    for nom in ("AC/DC", r"A\B", "100%"):
+        assert "/" not in _cle_de_nom(nom) and _nom_de_cle(_cle_de_nom(nom)) == nom
+
+
+def test_fenetre_artistes_supprime_apres_sauvegarde(qtbot, fenetre, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from src.gui_qt.artistes import FenetreArtistes
+
+    _charger(qtbot, fenetre)
+    qtbot.waitUntil(lambda: bool(fenetre.artistes), timeout=10_000)
+    assert fenetre._pourcentages()["Isha"].endswith("%")
+    sauvegardes = []
+    d = FenetreArtistes(
+        fenetre.runtime,
+        fenetre.artistes,
+        fenetre._pourcentages(),
+        lambda nom: sauvegardes.append(nom) or "copie.db",
+    )
+    qtbot.addWidget(d)
+    assert list(d.cartes) == ["Isha"]
+    assert d.lettres["I"].isEnabled() and not d.lettres["A"].isEnabled()
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    d._supprimer("Isha")
+    assert sauvegardes == ["Isha"]
+    assert d.cartes == {}
+    assert fenetre.runtime.data_manager.get_artist_by_name("Isha") is None
+
+
+def test_suppression_sans_sauvegarde_ne_fait_rien(qtbot, fenetre, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from src.gui_qt.artistes import FenetreArtistes
+
+    qtbot.waitUntil(lambda: bool(fenetre.artistes), timeout=10_000)
+    d = FenetreArtistes(fenetre.runtime, fenetre.artistes, {}, lambda nom: None)
+    qtbot.addWidget(d)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: None)
+    d._supprimer("Isha")
+    assert list(d.cartes) == ["Isha"]

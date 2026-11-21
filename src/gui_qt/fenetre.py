@@ -36,8 +36,9 @@ from PyQt6.QtWidgets import (
 )
 
 from src.gui_qt import icones
+from src.gui_qt.artistes import FenetreArtistes
 from src.gui_qt.centre_taches import CentreTaches
-from src.gui_qt.dialogues import DialogueAjout, DialogueArtistes
+from src.gui_qt.dialogues import DialogueAjout
 from src.gui_qt.fenetres_windows import colorer_barre_titre
 from src.gui_qt.fiche import FenetreFiche, VueFiche
 from src.gui_qt.formations import FenetreFormations
@@ -54,6 +55,7 @@ from src.presentation import pied as presentation_pied
 from src.presentation import runs
 from src.presentation.artistes import ResumeArtiste, suggestions
 from src.presentation.filtres import Filtre
+from src.presentation.pied import Portee
 from src.presentation.runs import PorteeFlux
 from src.utils.logger import get_logger
 
@@ -108,6 +110,16 @@ _CASES_PORTEE = (
     None,
     ("forcer", "Forcer", "Redemander ce qui est déjà là (Identité, Crédits, Données Tech.)."),
 )
+
+
+def _cle_de_nom(nom: str) -> str:
+    """Un nom d'artiste en clé QSettings : « / » et l'antislash y sont des séparateurs
+    de groupe (« AC/DC »)."""
+    return nom.replace("%", "%25").replace("/", "%2F").replace("\\", "%5C")
+
+
+def _nom_de_cle(cle: str) -> str:
+    return cle.replace("%5C", "\\").replace("%2F", "/").replace("%25", "%")
 
 
 def _bouton_icone(nom: str, infobulle: str, *, actif: bool = True) -> QToolButton:
@@ -549,6 +561,10 @@ class FenetrePrincipale(QMainWindow):
         self.cartouche.afficher(c.cartouche, getattr(c.artist, "image_path", None))
         self.setWindowTitle(f"théRAPie — {c.artist.name}")
         self.reglages.setValue("artiste", c.artist.name)
+        global_ = presentation_pied.calculer(c.lignes, c.lignes, Portee.GLOBAL)
+        self.reglages.setValue(
+            f"pourcentages/{_cle_de_nom(c.artist.name)}", global_.texte_pourcentage
+        )
         self._etat_boutons()
         self._rafraichir_pied()
 
@@ -567,9 +583,39 @@ class FenetrePrincipale(QMainWindow):
         d.exec()
 
     def _ouvrir_base(self) -> None:
-        d = DialogueArtistes(self.artistes, self)
+        d = FenetreArtistes(
+            self.runtime, self.artistes, self._pourcentages(), self._sauvegarder_base, self
+        )
         d.ouvrir.connect(self.charger)
+        d.ajouter.connect(lambda: QTimer.singleShot(0, self._ouvrir_ajout))
+        d.supprime.connect(self._sur_artiste_supprime)
         d.exec()
+
+    def _pourcentages(self) -> dict[str, str]:
+        """Le dernier pourcentage connu de chaque artiste (noté au chargement)."""
+        self.reglages.beginGroup("pourcentages")
+        try:
+            return {
+                _nom_de_cle(cle): str(self.reglages.value(cle)) for cle in self.reglages.childKeys()
+            }
+        finally:
+            self.reglages.endGroup()
+
+    @staticmethod
+    def _sauvegarder_base(nom: str):
+        """Sauvegarde de la base AVANT une suppression (règle des données)."""
+        from src.utils.database_backup import get_backup_manager
+
+        return get_backup_manager().create_backup(f"suppression_artiste_{nom}")
+
+    def _sur_artiste_supprime(self, nom: str) -> None:
+        self.reglages.remove(f"pourcentages/{_cle_de_nom(nom)}")
+        if self.chargement is not None and self.chargement.artist.name == nom:
+            self.chargement = None
+            self.modele.charger([])
+            self.reglages.remove("artiste")
+            self._afficher_vide()
+        self._charger_liste_artistes()
 
     # ── filtre, pied ─────────────────────────────────────────────────────────
     def _focus_recherche_table(self) -> None:

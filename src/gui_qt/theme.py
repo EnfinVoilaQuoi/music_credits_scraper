@@ -143,6 +143,9 @@ def feuille_de_style(t=TOKENS) -> str:
     QToolButton#non[plein="true"] {{ background: {t['erreur']}; }}
     QToolButton#oui[plein="false"] {{ background: transparent; border: 2px solid {t['ok']}; }}
     QToolButton#non[plein="false"] {{ background: transparent; border: 2px solid {t['erreur']}; }}
+    /* Bouton sans fond (gestes d'une carte, index alphabétique). */
+    QToolButton#discret {{ background: transparent; padding: 2px 6px; }}
+    QToolButton#discret:hover {{ background: {t['survol']}; }}
     QLabel#titreCarte {{ font-family: "{POLICE_SEMIGRAS}"; font-size: 15pt; }}
     QToolButton#bascule {{ background: {t['onglet_inactif']}; color: {t['texte_doux']}; }}
     QToolButton#bascule:checked {{ background: {t['accent']}; color: {t['texte_sur_accent']}; }}

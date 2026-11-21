@@ -266,11 +266,12 @@ class ArtistRepository:
                 COUNT(DISTINCT t.id) AS tracks_count,
                 COUNT(DISTINCT c.id) AS credits_count,
                 MAX(t.updated_at) AS last_update,
-                a.created_at
+                a.created_at,
+                a.image_path
             FROM artists a
             LEFT JOIN tracks t ON a.id = t.artist_id
             LEFT JOIN credits c ON t.id = c.track_id
-            GROUP BY a.id, a.name, a.created_at
+            GROUP BY a.id, a.name, a.created_at, a.image_path
             ORDER BY a.name
         """)
         with self.engine.connect() as conn:
@@ -282,6 +283,7 @@ class ArtistRepository:
                 "credits_count": row[2] or 0,
                 "last_update": str(row[3])[:10] if row[3] else None,
                 "created_at": str(row[4])[:10] if row[4] else None,
+                "image_path": row[5],
             }
             for row in rows
         ]

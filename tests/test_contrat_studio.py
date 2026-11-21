@@ -69,6 +69,7 @@ CONTRAT: dict[str, dict[str, list[str] | None]] = {
     },
     "src.utils.participation": {
         "compte_comme_sien": ["p", "prods"],
+        "est_inedit": ["track"],  # heatmap de l'Analyse : discographie sans inédits
         "participation": ["track", "noms", "formations"],
     },
     "src.utils.streams_calculator": {
@@ -89,6 +90,9 @@ CONTRAT: dict[str, dict[str, list[str] | None]] = {
         "meme_disque": ["a", "b"],
         "meme_enregistrement": ["a", "b"],
         "meme_titre_normalise": ["a", "b"],
+        # Heatmap de l'Analyse : discographie sans live ni instrumental.
+        "prise_live": ["titre"],
+        "rendition_instrumentale": ["titre"],
     },
 }
 

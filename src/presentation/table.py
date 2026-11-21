@@ -53,6 +53,7 @@ class Colonne:
 COLONNES: tuple[Colonne, ...] = (
     Colonne("titre", "Titre", obligatoire=True),
     Colonne("artiste", "Artiste principal"),
+    Colonne("prod", "Producteurs", infobulle="Producteurs crédités"),
     Colonne("album", "Album"),
     Colonne("date", "Date de sortie", Alignement.CENTRE),
     Colonne("duree", "Durée", Alignement.CENTRE),
@@ -69,7 +70,6 @@ COLONNES: tuple[Colonne, ...] = (
         infobulle="✓ texte · ⏱ synchronisées · 🎹 instrumental · 📭 pas encore transcrites",
     ),
     Colonne("bpm", "BPM (Key/Mode)", Alignement.CENTRE),
-    Colonne("prod", "Prod", visible=False, infobulle="Producteurs crédités"),
     Colonne("certif", "Certif", Alignement.CENTRE, infobulle="Plus haute certification"),
     Colonne(
         "streams",

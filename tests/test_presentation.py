@@ -210,7 +210,10 @@ class TestLignes:
             assert colonne.id in ligne.valeurs
             assert colonne.id in ligne.tri
         assert [c.id for c in table.COLONNES if c.obligatoire] == ["titre"]
-        assert not table.COLONNES_PAR_ID["prod"].visible
+        # Maquettes du 2026-11-21 : Producteurs visible, entre l'artiste et l'album.
+        assert table.COLONNES_PAR_ID["prod"].visible
+        ids = [c.id for c in table.COLONNES]
+        assert ids.index("prod") == ids.index("artiste") + 1 == ids.index("album") - 1
 
 
 # ── filtres ──────────────────────────────────────────────────────────────────

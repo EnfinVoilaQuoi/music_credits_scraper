@@ -50,9 +50,9 @@ SOMBRE = MappingProxyType(
         "spotify": "#1ed760",
         "youtube": "#ff3d3d",
         "genius": "#ffff64",
-        # Jauge de run (ébauche) : fond accent, progression foncée.
-        "jauge_fond": "#895ecc",
-        "jauge_progression": "#442f66",
+        # Jauge de run (maquette du 2026-11-21) : fond foncé, progression accent.
+        "jauge_fond": "#442f66",
+        "jauge_progression": "#895ecc",
     }
 )
 
@@ -123,6 +123,20 @@ def feuille_de_style(t=TOKENS) -> str:
         background: {t['accent']};
         color: {t['texte_sur_accent']};
     }}
+    /* Un bouton dont le menu est ouvert, ou qui est actif, change de couleur
+       (maquettes du 2026-11-21 : Menu, Filtre). */
+    QToolButton:open, QToolButton#actif {{ background: {t['accent_fonce']}; }}
+    /* Bouton de flux à flèche : la flèche est séparée de la partie qui lance. */
+    QToolButton[popupMode="1"] {{ padding-right: 30px; }}
+    QToolButton::menu-button {{
+        border: none;
+        border-left: 1px solid {t['survol']};
+        width: 24px;
+        border-top-right-radius: 6px;
+        border-bottom-right-radius: 6px;
+    }}
+    QToolButton::menu-button:hover {{ background: {t['survol']}; }}
+    QToolButton::menu-indicator {{ image: none; width: 0; }}
     QToolButton#bascule {{ background: {t['onglet_inactif']}; color: {t['texte_doux']}; }}
     QToolButton#bascule:checked {{ background: {t['accent']}; color: {t['texte_sur_accent']}; }}
     QTableView {{

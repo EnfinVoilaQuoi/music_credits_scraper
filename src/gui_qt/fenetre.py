@@ -11,6 +11,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QSettings, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
     QAction,
+    QActionGroup,
     QDesktopServices,
     QKeySequence,
     QShortcut,
@@ -18,9 +19,9 @@ from PyQt6.QtGui import (
     QStandardItemModel,
 )
 from PyQt6.QtWidgets import (
-    QCheckBox,
     QCompleter,
     QDockWidget,
+    QGridLayout,
     QHBoxLayout,
     QLineEdit,
     QMainWindow,
@@ -30,6 +31,7 @@ from PyQt6.QtWidgets import (
     QToolButton,
     QVBoxLayout,
     QWidget,
+    QWidgetAction,
 )
 
 from src.gui_qt import icones
@@ -41,39 +43,65 @@ from src.gui_qt.modele import ModeleMorceaux, ProxyMorceaux
 from src.gui_qt.pont import Etat, Taches, en_fond
 from src.gui_qt.theme import TOKENS
 from src.gui_qt.vue_table import VueMorceaux, colonne_triee_par_defaut
-from src.gui_qt.widgets import BoutonFlux, CartoucheArtiste, PiedTable
+from src.gui_qt.widgets import BoutonFlux, BoutonPastille, CartoucheArtiste, PiedTable
 from src.presentation import chargement as presentation_chargement
 from src.presentation import pied as presentation_pied
+from src.presentation import runs
 from src.presentation.artistes import ResumeArtiste, suggestions
 from src.presentation.filtres import Filtre
+from src.presentation.runs import PorteeFlux
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 ROLE_NOM = Qt.ItemDataRole.UserRole + 10
 
-#: (clé, libellé, icône, étapes du cycle). Ordre de la barre des flux.
+#: (clé, libellé, icône). Ordre de la barre des flux (maquettes du 2026-11-21) :
+#: Run Complet d'abord ; plus de bouton Certifications — le run certifs de
+#: l'artiste passe par Run Complet, la fenêtre des certifs par la barre du haut.
+CYCLE = ("cycle", "Run Complet", "player-track-next")
 FLUX = (
-    ("disco", "Discographie", "playlist-add", ("disco",)),
-    ("identite", "Identité", "user-search", ("identite",)),
-    ("credits", "Crédits & Paroles", "list-details", ("credits",)),
-    ("enrich", "Données Tech.", "ruler-measure", ("enrich",)),
-    ("certifs", "Certifications", "award", ("certifs",)),
-    ("streams", "Streams", "chart-bar-popular", ("streams",)),
+    ("disco", "Discographie", "playlist-add"),
+    ("identite", "Identité", "id"),
+    ("credits", "Crédits & Paroles", "list-details"),
+    ("enrich", "Données Tech.", "ruler-measure"),
+    ("streams", "Streams", "chart-bar-popular"),
 )
-CYCLE = ("cycle", "Tout mettre à jour", "reload", ())
 
-#: Cases du filtre : (attribut de `Filtre`, libellé). None = séparateur.
+#: Cases du filtre : (attribut de `Filtre`, libellé, inversée). None = séparateur.
+#: « Titres uniques » est l'INVERSE de `version_alt` : cochée, elle RETIRE les
+#: versions dérivées (décision utilisateur 2026-11-21).
 _CASES_FILTRE = (
-    ("principal", "Titres principaux"),
-    ("feat", "Invités (featurings)"),
-    ("prod", "Productions"),
-    ("secondaire", "Rôles secondaires"),
+    ("principal", "Titres principaux", False),
+    ("feat", "Invités", False),
+    ("secondaire", "Rôles secondaires", False),
+    ("prod", "Productions", False),
     None,
-    ("inedit", "Inédits"),
-    ("instrumental", "Instrumentaux"),
-    ("version_alt", "Versions alternatives"),
-    ("desactives", "Désactivés"),
+    ("inedit", "Inédit", False),
+    ("instrumental", "Instrumental", False),
+    ("version_alt", "Titres uniques", True),
+    ("desactives", "Désactivés", False),
+)
+
+#: Cases du menu d'un bouton de flux : (attribut de `PorteeFlux`, libellé,
+#: infobulle). None = séparateur.
+_CASES_PORTEE = (
+    (
+        "selection",
+        "Titres sélectionnés",
+        "Seulement les titres cochés dans la table (Identité, Crédits, Données Tech., Streams).",
+    ),
+    (
+        "desactives",
+        "Titres désactivés",
+        "Inclure les titres désactivés — à venir : les services les écartent encore toujours.",
+    ),
+    None,
+    ("manquants", "Manquants", "Les morceaux auxquels il manque la donnée de ce flux."),
+    ("echecs", "Échecs", "Les morceaux qu'une source n'a pas servis au dernier passage."),
+    ("tout", "Tout", "Tous les morceaux, sans forcer les valeurs déjà là."),
+    None,
+    ("forcer", "Forcer", "Redemander ce qui est déjà là (Identité, Crédits, Données Tech.)."),
 )
 
 
@@ -103,6 +131,7 @@ class FenetrePrincipale(QMainWindow):
         self.taches.terminee.connect(self._sur_fin_tache)
         self._centre: CentreTaches | None = None
         self._fenetres_fiche: list[FenetreFiche] = []
+        self.verification = None  # nouveautés de l'artiste chargé
         self.setWindowTitle("théRAPie")
         self.resize(1500, 900)
 
@@ -159,51 +188,98 @@ class FenetrePrincipale(QMainWindow):
         # EditRole et DisplayRole, d'où un rôle à part pour la complétion.
         self.completion.setCompletionRole(ROLE_NOM)
         self.recherche.setCompleter(self.completion)
-        self.b_groupes = _bouton_icone(
-            "users-group",
-            "Groupes & formations — fenêtre à venir (version CustomTkinter)",
-            actif=False,
+        # À droite de la recherche (maquettes du 2026-11-21). Une pastille « ! »
+        # dit qu'un cas attend ; les fenêtres pas encore portées sont grisées.
+        self.b_formations = BoutonPastille(
+            "users-group", "Alias • Formations — fenêtre à venir (version CustomTkinter)"
         )
-        self.b_sources = _bouton_icone(
-            "activity", "État des sources — fenêtre à venir (version CustomTkinter)", actif=False
+        self.b_certifs = BoutonPastille(
+            "award", "Certifications — fenêtre à venir (version CustomTkinter)"
         )
-        self.b_file = _bouton_icone(
-            "list-check", "File d'attente et tâches planifiées (V2)", actif=False
+        self.b_media = BoutonPastille("photo", "Media — fenêtre à venir (version CustomTkinter)")
+        self.b_decisions = BoutonPastille(
+            "alert-triangle", "Décisions • Erreurs — panneau à venir (version CustomTkinter)"
         )
-        self.b_taches = QPushButton()
-        self.b_taches.setObjectName("accent")
-        self.b_taches.setToolTip("Tâches de la session")
-        self.b_taches.setVisible(False)
-        self.b_reglages = _bouton_icone("settings", "Paramètres (V2)", actif=False)
+        self.b_sante = BoutonPastille(
+            "activity", "Santé des sources — fenêtre à venir (version CustomTkinter)"
+        )
+        self.b_file = BoutonPastille(
+            "list-check", "Liste de tâches : runs en cours, planifiés, en attente"
+        )
+        self.b_menu = BoutonPastille("settings", "Menu")
+        self.b_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.b_menu.setMenu(self._menu_general())
+        for b in (self.b_formations, self.b_certifs, self.b_media, self.b_decisions, self.b_sante):
+            b.setEnabled(False)
         for w in (self.b_ajout, self.b_base):
             h.addWidget(w)
         h.addWidget(self.recherche, 1)
-        h.addWidget(self.b_groupes)
-        h.addStretch()
-        for w in (self.b_taches, self.b_sources, self.b_file, self.b_reglages):
+        for w in (self.b_formations, self.b_certifs, self.b_media, self.b_decisions):
+            h.addWidget(w)
+        h.addSpacing(48)
+        for w in (self.b_sante, self.b_file, self.b_menu):
             h.addWidget(w)
         return h
+
+    def _menu_general(self) -> QMenu:
+        """Le Menu (roue) : deux colonnes, comme la maquette. Rien n'y est encore
+        branché ; « Mise à Jour » sera la mise à jour de l'APPLICATION."""
+        menu = QMenu(self)
+        grille = QWidget()
+        g = QGridLayout(grille)
+        g.setContentsMargins(8, 8, 8, 8)
+        entrees = (
+            ("Thème", "Thème — à venir"),
+            ("Emplacement", "Dossier d'écriture de l'application installée — à venir"),
+            ("Debug", "Montre ou cache des options de maintenance — à venir"),
+            ("Sources", "Les sources de chaque run — à venir"),
+            ("Mise à Jour", "Mise à jour de l'application — à venir"),
+            ("Paramètres", "Délais de relecture, réglages — à venir"),
+        )
+        self.entrees_menu: dict[str, QToolButton] = {}
+        for i, (libelle, infobulle) in enumerate(entrees):
+            b = QToolButton()
+            b.setText(libelle)
+            b.setToolTip(infobulle)
+            b.setEnabled(False)
+            b.setAutoRaise(True)
+            self.entrees_menu[libelle] = b
+            g.addWidget(b, i // 2, i % 2)
+        action = QWidgetAction(menu)
+        action.setDefaultWidget(grille)
+        menu.addAction(action)
+        return menu
 
     def _barre_flux(self) -> QHBoxLayout:
         h = QHBoxLayout()
         self.boutons_flux: dict[str, BoutonFlux] = {}
-        for cle, libelle, icone, etapes in (*FLUX, CYCLE):
+        self.portees: dict[str, PorteeFlux] = {}
+        self._actions_portee: dict[str, dict[str, QAction]] = {}
+        cle, libelle, icone = CYCLE
+        b = BoutonFlux(libelle, icone, sur_accent=True)
+        b.avec_menu(self._menu_complet())
+        b.clicked.connect(self._sur_cycle)
+        self.boutons_flux[cle] = b
+        h.addWidget(b)
+        h.addSpacing(12)
+        for cle, libelle, icone in FLUX:
             b = BoutonFlux(libelle, icone)
-            b.setToolTip(
-                f"Lancer « {libelle} » sur l'artiste chargé (réglages par défaut — la "
-                "fenêtre d'options arrive avec les nouvelles maquettes)"
-            )
-            b.clicked.connect(lambda _=False, c=cle, l_=libelle, e=etapes: self._sur_flux(c, l_, e))
+            self.portees[cle] = self._portee_memorisee(cle)
+            b.avec_menu(self._menu_portee(cle))
+            b.clicked.connect(lambda _=False, c=cle, l_=libelle: self._sur_flux(c, l_))
             self.boutons_flux[cle] = b
+            self._infobulle_flux(cle)
             h.addWidget(b)
         self.boutons_flux["cycle"].setObjectName("accent")
+        h.addSpacing(12)
         self.b_export = QPushButton(icones.icone("file-export", TOKENS["accent"], 22), "  Export")
+        self.b_export.setMinimumHeight(44)
         self.b_export.setEnabled(False)
         self.b_export.setToolTip("Export — fenêtre à venir (version CustomTkinter)")
         h.addWidget(self.b_export)
-        h.addSpacing(16)
+        h.addStretch()
         self.recherche_table = QLineEdit()
-        self.recherche_table.setPlaceholderText("Rechercher dans la table (Ctrl+F)")
+        self.recherche_table.setPlaceholderText("Rechercher un titre (Ctrl+F)")
         self.recherche_table.setClearButtonEnabled(True)
         self.recherche_table.setMinimumWidth(180)
         self.recherche_table.setMaximumWidth(300)
@@ -219,25 +295,134 @@ class FenetrePrincipale(QMainWindow):
         for b in (self.b_titre, self.b_album):
             b.setObjectName("bascule")
             b.setCheckable(True)
+            b.setMinimumHeight(44)
             h.addWidget(b)
         self.b_titre.setChecked(True)
         self.b_album.setEnabled(False)
-        self.b_album.setToolTip("Vue Albums — à venir (version CustomTkinter)")
+        self.b_album.setToolTip("Vue Album — à venir")
         return h
+
+    # ── menus des runs ───────────────────────────────────────────────────────
+    def _portee_memorisee(self, cle: str) -> PorteeFlux:
+        valeurs = {
+            k: self.reglages.value(f"runs/{cle}/{k}")
+            for k in PorteeFlux().en_texte()
+            if self.reglages.value(f"runs/{cle}/{k}") is not None
+        }
+        return PorteeFlux.depuis_texte(valeurs)
+
+    def _memoriser_portee(self, cle: str) -> None:
+        for k, v in self.portees[cle].en_texte().items():
+            self.reglages.setValue(f"runs/{cle}/{k}", v)
+
+    def _menu_portee(self, cle: str) -> QMenu:
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        actions: dict[str, QAction] = {}
+        if cle == "disco":
+            # La discographie relit tout l'artiste : pas de portée par titre.
+            info = menu.addAction("Toute la discographie de l'artiste")
+            info.setEnabled(False)
+            self.a_nouveautes = menu.addAction("Voir les nouveaux titres", self._montrer_nouveautes)
+            self.a_nouveautes.setEnabled(False)
+            self._actions_portee[cle] = actions
+            return menu
+        for case in _CASES_PORTEE:
+            if case is None:
+                menu.addSeparator()
+                continue
+            attribut, libelle, infobulle = case
+            if attribut == "selection" and cle not in runs.ETAPES_PAR_FICHES:
+                continue
+            if attribut == "forcer" and cle not in runs.ETAPES_FORCABLES:
+                continue
+            if attribut in ("manquants", "echecs", "tout") and cle not in runs.ETAPES_RESTREINTES:
+                continue
+            a = QAction(libelle, menu)
+            a.setCheckable(True)
+            a.setToolTip(infobulle)
+            a.setEnabled(attribut not in runs.OPTIONS_A_VENIR)
+            a.toggled.connect(lambda oui, c=cle, k=attribut: self._sur_case_portee(c, k, oui))
+            actions[attribut] = a
+            menu.addAction(a)
+        self._actions_portee[cle] = actions
+        self._cocher_portee(cle)
+        return menu
+
+    def _cocher_portee(self, cle: str) -> None:
+        valeurs = self.portees[cle].en_texte()
+        for k, a in self._actions_portee[cle].items():
+            a.blockSignals(True)
+            a.setChecked(bool(valeurs[k]) and a.isEnabled())
+            a.blockSignals(False)
+
+    def _sur_case_portee(self, cle: str, attribut: str, oui: bool) -> None:
+        self.portees[cle] = self.portees[cle].avec(**{attribut: oui})
+        self._cocher_portee(cle)
+        self._memoriser_portee(cle)
+        self._infobulle_flux(cle)
+
+    def _infobulle_flux(self, cle: str) -> None:
+        libelle = next(lib for c, lib, _ in FLUX if c == cle)
+        portee = runs.resume_portee(cle, self.portees[cle], len(self.modele.selection))
+        self.boutons_flux[cle].setToolTip(
+            f"Lancer « {libelle} » : {portee}.\nLa flèche choisit les titres concernés."
+        )
+
+    def _menu_complet(self) -> QMenu:
+        menu = QMenu(self)
+        menu.setToolTipsVisible(True)
+        groupe = QActionGroup(menu)
+        groupe.setExclusive(True)
+        memorise = self.reglages.value("runs/cycle/mode", runs.ModeComplet.MANQUANTS_ECHECS.value)
+        try:
+            self.mode_complet = runs.ModeComplet(memorise)
+        except ValueError:
+            self.mode_complet = runs.ModeComplet.MANQUANTS_ECHECS
+        if self.mode_complet in runs.MODES_A_VENIR:
+            self.mode_complet = runs.ModeComplet.MANQUANTS_ECHECS
+        infobulles = {
+            runs.ModeComplet.MANQUANTS_ECHECS: "Le défaut : ce qui manque et ce qui a échoué.",
+            runs.ModeComplet.ECHECS: "Seulement ce qu'une source n'a pas servi.",
+            runs.ModeComplet.IGNORER_DELAIS: (
+                "Redemander les « pas sur Spotify / Deezer / Apple » et les absences "
+                "récentes avant leur délai — à venir."
+            ),
+            runs.ModeComplet.TOUT: "Tous les morceaux, sans forcer les valeurs déjà là.",
+        }
+        self._actions_complet: dict[runs.ModeComplet, QAction] = {}
+        for mode, libelle in runs.LIBELLES_COMPLET.items():
+            a = QAction(libelle, menu)
+            a.setCheckable(True)
+            a.setToolTip(infobulles[mode])
+            a.setEnabled(mode not in runs.MODES_A_VENIR)
+            a.setChecked(mode is self.mode_complet)
+            a.triggered.connect(lambda _=False, m=mode: self._sur_mode_complet(m))
+            groupe.addAction(a)
+            menu.addAction(a)
+            self._actions_complet[mode] = a
+        return menu
+
+    def _sur_mode_complet(self, mode: runs.ModeComplet) -> None:
+        self.mode_complet = mode
+        self.reglages.setValue("runs/cycle/mode", mode.value)
 
     def _menu_filtre(self) -> QMenu:
         menu = QMenu(self)
         self._actions_filtre: dict[str, QAction] = {}
+        self._cases_inversees: set[str] = set()
         for case in _CASES_FILTRE:
             if case is None:
                 menu.addSeparator()
                 continue
-            attribut, libelle = case
+            attribut, libelle, inversee = case
             a = QAction(libelle, menu)
             a.setCheckable(True)
-            a.setChecked(True)
+            a.setChecked(not inversee)
             a.toggled.connect(self._appliquer_filtre)
             self._actions_filtre[attribut] = a
+            if inversee:
+                self._cases_inversees.add(attribut)
             menu.addAction(a)
         menu.addSeparator()
         self.a_couleurs = QAction("Afficher les lignes colorées", menu)
@@ -254,13 +439,14 @@ class FenetrePrincipale(QMainWindow):
     def _relier(self) -> None:
         self.b_ajout.clicked.connect(self._ouvrir_ajout)
         self.b_base.clicked.connect(self._ouvrir_base)
-        self.b_taches.clicked.connect(self._ouvrir_centre)
+        self.b_file.clicked.connect(self._ouvrir_centre)
         self.recherche.textEdited.connect(self._completer)
         self.recherche.returnPressed.connect(lambda: self.charger(self.recherche.text()))
         self.completion.activated[str].connect(self.charger)
         self.recherche_table.textChanged.connect(lambda _: self._appliquer_filtre())
         QShortcut(QKeySequence.StandardKey.Find, self, activated=self._focus_recherche_table)
         self.modele.selection_changee.connect(self._rafraichir_pied)
+        self.modele.selection_changee.connect(self._rafraichir_infobulles_flux)
         self.proxy.filtre_change.connect(self._rafraichir_pied)
         self.proxy.rowsInserted.connect(self._rafraichir_pied)
         self.proxy.modelReset.connect(self._rafraichir_pied)
@@ -338,6 +524,7 @@ class FenetrePrincipale(QMainWindow):
             self.modele.charger(c.lignes)
             colonne_triee_par_defaut(self.vue)
             self.fiche.afficher(None)
+            self._verifier_nouveautes()
         self.cartouche.afficher(c.cartouche, getattr(c.artist, "image_path", None))
         self.setWindowTitle(f"théRAPie — {c.artist.name}")
         self.reglages.setValue("artiste", c.artist.name)
@@ -369,7 +556,10 @@ class FenetrePrincipale(QMainWindow):
         self.recherche_table.selectAll()
 
     def _appliquer_filtre(self, *_) -> None:
-        cases = {k: a.isChecked() for k, a in self._actions_filtre.items()}
+        cases = {
+            k: a.isChecked() != (k in self._cases_inversees)
+            for k, a in self._actions_filtre.items()
+        }
         coche = next((b for c, b in self.pied.compteurs.items() if b.isChecked()), None)
         manque = next((c for c, b in self.pied.compteurs.items() if b is coche), None)
         filtre = Filtre(**cases, texte=self.recherche_table.text(), manque=manque)
@@ -454,59 +644,79 @@ class FenetrePrincipale(QMainWindow):
         for b in self.boutons_flux.values():
             b.setEnabled(charge and (not occupe or b.en_cours))
 
-    def _sur_flux(self, cle: str, libelle: str, etapes: tuple) -> None:
+    def _rafraichir_infobulles_flux(self, *_) -> None:
+        for cle in self.portees:
+            self._infobulle_flux(cle)
+
+    def _confirmer(self, titre: str, texte: str) -> bool:
+        """Jamais en silence : chaque run dit sa portée avant de partir."""
+        r = QMessageBox.question(self, titre, texte)
+        return r == QMessageBox.StandardButton.Yes
+
+    def _sur_flux(self, cle: str, libelle: str) -> None:
         if self.boutons_flux[cle].en_cours:
             self._ouvrir_centre()
             return
         c = self.chargement
         if c is None or self.taches.occupe:
             return
-        boite = QMessageBox(self)
-        boite.setWindowTitle(libelle)
-        boite.setIcon(QMessageBox.Icon.Question)
-        quoi = "toutes les étapes du cycle" if not etapes else f"l'étape « {libelle} »"
-        boite.setText(
-            f"Lancer {quoi} sur {c.artist.name} ?\n\n"
-            f"Portée : toute la discographie ({len(c.lignes)} titres, désactivés exclus).\n"
-            "Réglages : ceux par défaut (les mêmes que la CLI)."
-        )
-        manquants = QCheckBox("Seulement les morceaux à donnée manquante ou en échec")
-        manquants.setChecked(True)
-        manquants.setToolTip(
-            "Ne traiter que les morceaux auxquels il manque la donnée de CE flux, "
-            "et ceux qu'une source n'a pas servis. Décoché : tous les morceaux."
-        )
-        boite.setCheckBox(manquants)
-        boite.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
-        if boite.exec() != QMessageBox.StandardButton.Ok:
+        portee = self.portees[cle]
+        try:
+            options = runs.options_flux(cle, portee, self.modele.selection)
+        except runs.RunImpossible as e:
+            QMessageBox.information(self, libelle, str(e))
             return
-        nom = c.artist.name
-        seulement = manquants.isChecked()
+        resume = runs.resume_portee(cle, portee, len(self.modele.selection))
+        if not self._confirmer(libelle, f"Lancer « {libelle} » sur {c.artist.name} ?\n\n{resume}."):
+            return
+        self._lancer(cle, libelle, options)
+
+    def _sur_cycle(self) -> None:
+        cle, libelle, _ = CYCLE
+        if self.boutons_flux[cle].en_cours:
+            self._ouvrir_centre()
+            return
+        c = self.chargement
+        if c is None or self.taches.occupe:
+            return
+        try:
+            options = runs.options_complet(self.mode_complet)
+        except runs.RunImpossible as e:
+            QMessageBox.information(self, libelle, str(e))
+            return
+        mode = runs.LIBELLES_COMPLET[self.mode_complet]
+        if not self._confirmer(
+            libelle,
+            f"Lancer toutes les étapes sur {c.artist.name} ?\n\n"
+            f"Discographie, identité, crédits, données tech., streams, certifications — "
+            f"{mode.lower()}.",
+        ):
+            return
+        self._lancer(cle, libelle, options)
+
+    def _lancer(self, cle: str, libelle: str, options) -> None:
+        nom = self.chargement.artist.name
 
         def corps(hooks):
             from src.services import cycle
 
-            options = cycle.OptionsCycle(only=etapes, tout=not seulement)
             return cycle.run(self.runtime, nom, options, hooks)
 
         if self.taches.lancer(cle, f"{libelle} — {nom}", corps):
-            self.boutons_flux[cle].progression(0.0, f"{libelle} — démarrage…")
+            self.boutons_flux[cle].progression(0.0, "0 %")
+            self.boutons_flux[cle].setToolTip(f"{libelle} — démarrage…")
             self._etat_boutons()
+            self.b_file.poser_pastille(len(self.taches.en_cours()) or None)
 
     def _sur_tache(self, cle: str) -> None:
         t = self.taches.tache(cle)
         if t is None:
             return
         b = self.boutons_flux.get(cle)
-        if t.active:
+        if t.active and b is not None:
             pct = t.pourcentage
-            etiquette = (
-                f"{pct} % — {t.etape or t.titre}" if pct is not None else (t.etape or t.titre)
-            )
-            if b is not None:
-                b.progression((pct or 0) / 100, etiquette)
-            self.b_taches.setText(f"⏳ {t.titre}" + (f" — {pct} %" if pct is not None else ""))
-            self.b_taches.setVisible(True)
+            b.progression((pct or 0) / 100, f"{pct} %" if pct is not None else "…")
+            b.setToolTip(" — ".join(x for x in (t.titre, t.etape, t.libelle) if x))
         if self._centre is not None:
             self._centre._rafraichir()
 
@@ -515,9 +725,11 @@ class FenetrePrincipale(QMainWindow):
         b = self.boutons_flux.get(cle)
         if b is not None:
             b.au_repos()
-        self.b_taches.setText(
-            f"{'✔' if t.etat is Etat.COMPLET else '⚠'} {t.titre} — {t.etat.value}"
-        )
+            if cle in self.portees:
+                self._infobulle_flux(cle)
+            else:
+                b.setToolTip("Lancer toutes les étapes. La flèche choisit ce qui est relu.")
+        self.b_file.poser_pastille(len(self.taches.en_cours()) or None)
         self._etat_boutons()
         # Les écritures du run sont relues : la table se rafraîchit SANS perdre
         # tri, filtre, sélection ni défilement.
@@ -528,12 +740,56 @@ class FenetrePrincipale(QMainWindow):
                 lambda c: self._sur_chargement(c, nom, garder=True),
                 nom="qt:recharger-artiste",
             )
+            if cle in ("disco", "cycle"):
+                self._verifier_nouveautes(force=True)
         icone = QMessageBox.Icon.Information if t.etat is Etat.COMPLET else QMessageBox.Icon.Warning
         boite = QMessageBox(
             icone, f"{t.titre} — {t.etat.value}", t.message or t.etat.value, parent=self
         )
         boite.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         boite.show()
+
+    # ── nouveautés (pastille de Discographie) ────────────────────────────────
+    def _verifier_nouveautes(self, *, force: bool = False) -> None:
+        """Les titres Genius absents de la base (`services.nouveautes`, cache
+        d'un jour). La pastille de Discographie en porte le nombre."""
+        c = self.chargement
+        self.verification = None
+        self.boutons_flux["disco"].poser_pastille(None)
+        self.a_nouveautes.setEnabled(False)
+        if c is None:
+            return
+        artist = c.artist
+
+        def travail():
+            from src.services import nouveautes
+
+            return nouveautes.verifier(self.runtime, artist, force=force)
+
+        en_fond(
+            travail,
+            lambda v: self._sur_nouveautes(artist, v),
+            lambda message: logger.debug(f"Nouveautés non vérifiées : {message}"),
+            nom="qt:nouveautes",
+        )
+
+    def _sur_nouveautes(self, artist, verification) -> None:
+        if self.chargement is None or self.chargement.artist.id != artist.id:
+            return
+        self.verification = verification
+        n = len(verification.nouveautes)
+        self.boutons_flux["disco"].poser_pastille(n or None)
+        self.a_nouveautes.setEnabled(bool(n))
+
+    def _montrer_nouveautes(self) -> None:
+        from src.services import nouveautes
+
+        v = self.verification
+        if v is None or self.chargement is None:
+            return
+        QMessageBox.information(
+            self, "Nouveaux titres", nouveautes.resume(v, self.chargement.artist.name)
+        )
 
     def _ouvrir_centre(self) -> None:
         if self._centre is None:

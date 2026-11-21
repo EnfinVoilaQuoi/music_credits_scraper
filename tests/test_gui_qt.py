@@ -342,3 +342,62 @@ def test_auto_completion_insere_le_nom_seul(qtbot, fenetre):
     assert item.data(ROLE_NOM) == "Isha"
     assert item.text().startswith("Isha") and "titre" in item.text()
     assert fenetre.completion.completionRole() == ROLE_NOM
+
+
+# ── barres des maquettes du 2026-11-21 ───────────────────────────────────────
+
+
+def test_barre_des_flux_sans_bouton_certifs(fenetre):
+    assert list(fenetre.boutons_flux) == [
+        "cycle",
+        "disco",
+        "identite",
+        "credits",
+        "enrich",
+        "streams",
+    ]
+    assert all(b.menu() is not None for b in fenetre.boutons_flux.values())
+
+
+def test_titres_uniques_retire_les_versions(qtbot, fenetre):
+    _charger(qtbot, fenetre)
+    a = fenetre._actions_filtre["version_alt"]
+    assert a.text() == "Titres uniques" and not a.isChecked()
+    a.setChecked(True)
+    assert fenetre.proxy.filtre.version_alt is False
+    a.setChecked(False)
+    assert fenetre.proxy.filtre.version_alt is True
+
+
+def test_portee_memorisee(fenetre):
+    from src.gui_qt.fenetre import FenetrePrincipale
+
+    fenetre._actions_portee["credits"]["selection"].setChecked(True)
+    fenetre._actions_portee["credits"]["tout"].setChecked(True)
+    assert not fenetre._actions_portee["credits"]["manquants"].isChecked()
+    autre = FenetrePrincipale(fenetre.runtime, fenetre.reglages)
+    assert autre.portees["credits"].selection and autre.portees["credits"].tout
+    autre.close()
+
+
+def test_titres_selectionnes_sans_coche_ne_lance_rien(qtbot, fenetre, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    _charger(qtbot, fenetre)
+    messages = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: messages.append(a[2]))
+    fenetre._actions_portee["credits"]["selection"].setChecked(True)
+    fenetre.boutons_flux["credits"].click()
+    assert messages and "Aucun titre sélectionné" in messages[0]
+    assert not fenetre.taches.occupe
+
+
+def test_pastille(qtbot):
+    from src.gui_qt.widgets import BoutonPastille
+
+    b = BoutonPastille("alert-triangle", "Décisions")
+    qtbot.addWidget(b)
+    b.poser_pastille("!")
+    assert b.pastille == "!"
+    b.poser_pastille(0)
+    assert b.pastille == ""

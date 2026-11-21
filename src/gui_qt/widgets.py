@@ -7,12 +7,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PyQt6.QtCore import QRectF, Qt, pyqtSignal
+from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
-    QPushButton,
     QSizePolicy,
     QToolButton,
     QVBoxLayout,
@@ -119,19 +118,78 @@ class CartoucheArtiste(QWidget):
 # ── Bouton de flux / jauge ───────────────────────────────────────────────────
 
 
-class BoutonFlux(QPushButton):
-    """Un bouton de flux qui devient une JAUGE pendant son run : fond accent,
-    progression foncée, pourcentage et étape (ébauche)."""
+class BoutonPastille(QToolButton):
+    """Un bouton à icône qui porte une PASTILLE : un petit carré accent en haut
+    à droite, « ! » (un cas attend) ou un nombre (nouveautés). Peinte par le
+    bouton lui-même : elle suit sa géométrie, jamais superposée à part."""
 
-    def __init__(self, texte: str, icone: str, parent=None) -> None:
-        super().__init__(
-            icones.icone(icone, TOKENS["accent"], 22), "  " + texte.replace("&", "&&"), parent
-        )
+    def __init__(
+        self,
+        icone: str,
+        infobulle: str,
+        *,
+        taille: int = 24,
+        couleur: str | None = None,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._nom_icone = icone
+        self.setIcon(icones.icone(icone, couleur or TOKENS["accent"], taille))
+        self.setIconSize(QSize(taille, taille))
+        self.setToolTip(infobulle)
+        self.setAccessibleName(infobulle)
+        self.setMinimumSize(44, 44)
+        self._pastille = ""
+
+    @property
+    def pastille(self) -> str:
+        return self._pastille
+
+    def poser_pastille(self, texte: str | int | None) -> None:
+        """« ! », un nombre, ou rien (None, 0, « ») pour l'effacer."""
+        self._pastille = "" if not texte else str(texte)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if not self._pastille:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        police = self.font()
+        police.setPointSizeF(7.5)
+        police.setBold(True)
+        p.setFont(police)
+        largeur = max(14, self.fontMetrics().horizontalAdvance(self._pastille) + 6)
+        r = QRectF(self.width() - largeur - 1, 1, largeur, 14)
+        trace = QPainterPath()
+        trace.addRoundedRect(r, 3, 3)
+        p.fillPath(trace, QColor(TOKENS["accent"]))
+        p.setPen(QColor(TOKENS["texte_sur_accent"]))
+        p.drawText(r, Qt.AlignmentFlag.AlignCenter, self._pastille)
+        p.end()
+
+
+class BoutonFlux(BoutonPastille):
+    """Un bouton de flux À FLÈCHE (maquettes du 2026-11-21) : la partie gauche
+    lance le run, la flèche ouvre le menu de portée. Pendant son run, il devient
+    une JAUGE : progression accent sous l'icône, fond foncé, pourcentage."""
+
+    def __init__(self, texte: str, icone: str, *, sur_accent: bool = False, parent=None) -> None:
+        # Sur un bouton plein (Run Complet), l'icône prend la couleur du texte.
+        couleur = TOKENS["texte_sur_accent"] if sur_accent else None
+        super().__init__(icone, texte, taille=22, couleur=couleur, parent=parent)
+        self.setText("  " + texte.replace("&", "&&"))
+        self.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._texte = texte
         self._fraction: float | None = None
         self._etiquette = ""
-        self.setMinimumHeight(40)
+        self.setMinimumHeight(44)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+
+    def avec_menu(self, menu) -> None:
+        self.setMenu(menu)
+        self.setPopupMode(QToolButton.ToolButtonPopupMode.MenuButtonPopup)
 
     def progression(self, fraction: float | None, etiquette: str) -> None:
         self._fraction = fraction
@@ -156,6 +214,8 @@ class BoutonFlux(QPushButton):
         r = QRectF(self.rect())
         trace = QPainterPath()
         trace.addRoundedRect(r, 6, 6)
+        # Maquette du 2026-11-21 : fond foncé, progression accent, l'icône du
+        # flux à gauche et le pourcentage à droite (l'étape en infobulle).
         p.fillPath(trace, QColor(TOKENS["jauge_fond"]))
         p.save()
         p.setClipPath(trace)
@@ -164,12 +224,18 @@ class BoutonFlux(QPushButton):
             QColor(TOKENS["jauge_progression"]),
         )
         p.restore()
+        cote = 22
+        p.drawPixmap(
+            12,
+            int((r.height() - cote) / 2),
+            icones.pixmap(self._nom_icone, TOKENS["texte_sur_accent"], cote),
+        )
         p.setPen(QColor(TOKENS["texte_sur_accent"]))
         p.drawText(
-            r.adjusted(8, 0, -8, 0),
-            Qt.AlignmentFlag.AlignCenter,
+            r.adjusted(12 + cote + 8, 0, -12, 0),
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
             self.fontMetrics().elidedText(
-                self._etiquette, Qt.TextElideMode.ElideRight, int(r.width()) - 16
+                self._etiquette, Qt.TextElideMode.ElideLeft, int(r.width()) - cote - 32
             ),
         )
         p.end()

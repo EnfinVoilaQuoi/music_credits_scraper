@@ -402,3 +402,15 @@ def test_pastille(qtbot):
     assert b.pastille == "!"
     b.poser_pastille(0)
     assert b.pastille == ""
+
+
+def test_vue_album(qtbot, fenetre):
+    _charger(qtbot, fenetre)
+    fenetre.b_album.click()
+    assert fenetre.en_vue_album and fenetre.b_album.isChecked() and not fenetre.b_titre.isChecked()
+    qtbot.waitUntil(lambda: fenetre.projets is not None, timeout=10_000)
+    titres = [a.titre for a in fenetre.vue_albums.albums]
+    assert titres  # les 3 titres de test, sans parution : dans « Singles »
+    assert fenetre.reglages.value("vue") == "album"
+    fenetre.b_titre.click()
+    assert not fenetre.en_vue_album

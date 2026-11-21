@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -42,8 +43,10 @@ from src.gui_qt.fiche import FenetreFiche, VueFiche
 from src.gui_qt.modele import ModeleMorceaux, ProxyMorceaux
 from src.gui_qt.pont import Etat, Taches, en_fond
 from src.gui_qt.theme import TOKENS
+from src.gui_qt.vue_albums import VueAlbums
 from src.gui_qt.vue_table import VueMorceaux, colonne_triee_par_defaut
 from src.gui_qt.widgets import BoutonFlux, BoutonPastille, CartoucheArtiste, PiedTable
+from src.presentation import albums as presentation_albums
 from src.presentation import chargement as presentation_chargement
 from src.presentation import pied as presentation_pied
 from src.presentation import runs
@@ -139,6 +142,13 @@ class FenetrePrincipale(QMainWindow):
         self.proxy = ProxyMorceaux(self)
         self.proxy.setSourceModel(self.modele)
         self.vue = VueMorceaux(self.modele, self.proxy)
+        self.vue_albums = VueAlbums()
+        #: Les projets de l'artiste chargé (`get_projets_for_artist`), lus à la
+        #: première bascule en vue Album, relus après un run.
+        self.projets: list[dict] | None = None
+        self.pile = QStackedWidget()
+        self.pile.addWidget(self.vue)
+        self.pile.addWidget(self.vue_albums)
         self.cartouche = CartoucheArtiste()
         self.pied = PiedTable()
         self.fiche = VueFiche(contexte_versions=self._contexte_versions)
@@ -150,7 +160,7 @@ class FenetrePrincipale(QMainWindow):
         couche.addLayout(self._barre_artiste())
         couche.addWidget(self.cartouche)
         couche.addLayout(self._barre_flux())
-        couche.addWidget(self.vue, 1)
+        couche.addWidget(self.pile, 1)
         couche.addWidget(self.pied)
         self.setCentralWidget(central)
 
@@ -298,8 +308,10 @@ class FenetrePrincipale(QMainWindow):
             b.setMinimumHeight(44)
             h.addWidget(b)
         self.b_titre.setChecked(True)
-        self.b_album.setEnabled(False)
-        self.b_album.setToolTip("Vue Album — à venir")
+        self.b_titre.setToolTip("Vue Titre : un morceau par ligne")
+        self.b_album.setToolTip("Vue Album : un projet par ligne, ses éditions dépliables")
+        self.b_titre.clicked.connect(lambda: self._basculer_vue(album=False))
+        self.b_album.clicked.connect(lambda: self._basculer_vue(album=True))
         return h
 
     # ── menus des runs ───────────────────────────────────────────────────────
@@ -458,6 +470,7 @@ class FenetrePrincipale(QMainWindow):
         self.vue.desactiver.connect(self._desactiver)
         self.vue.menu_ligne.connect(self._menu_ligne)
         self.vue.entete.colonnes_changees.connect(lambda: self.vue.sauver(self.reglages))
+        self.vue_albums.menu_album.connect(self._menu_album)
 
     # ── artistes ─────────────────────────────────────────────────────────────
     def _charger_liste_artistes(self) -> None:
@@ -525,6 +538,9 @@ class FenetrePrincipale(QMainWindow):
             colonne_triee_par_defaut(self.vue)
             self.fiche.afficher(None)
             self._verifier_nouveautes()
+        self.projets = None
+        if self.en_vue_album:
+            self._charger_albums()
         self.cartouche.afficher(c.cartouche, getattr(c.artist, "image_path", None))
         self.setWindowTitle(f"théRAPie — {c.artist.name}")
         self.reglages.setValue("artiste", c.artist.name)
@@ -579,9 +595,70 @@ class FenetrePrincipale(QMainWindow):
         if self.chargement is None:
             self.pied.afficher(None, "Aucun artiste chargé")
             return
+        self.pied.bouton_portee.setVisible(not self.en_vue_album)
+        if self.en_vue_album:
+            # Le pied de la vue Album suivra ses colonnes (à définir) ; pour
+            # l'instant il dit ce qui est montré.
+            self.pied.afficher(None, presentation_albums.resume(self.vue_albums.albums))
+            return
         visibles = self.proxy.lignes_visibles()
         p = presentation_pied.calculer(self.modele.lignes, visibles, self.pied.portee)
         self.pied.afficher(p, presentation_pied.texte_selection(self.modele.selection, visibles))
+
+    # ── vue Album ────────────────────────────────────────────────────────────
+    @property
+    def en_vue_album(self) -> bool:
+        return self.pile.currentWidget() is self.vue_albums
+
+    def _basculer_vue(self, *, album: bool) -> None:
+        self.b_titre.setChecked(not album)
+        self.b_album.setChecked(album)
+        self.pile.setCurrentWidget(self.vue_albums if album else self.vue)
+        self.reglages.setValue("vue", "album" if album else "titre")
+        if album and self.chargement is not None:
+            self._charger_albums()
+        self._rafraichir_pied()
+
+    def _charger_albums(self) -> None:
+        c = self.chargement
+        if c is None:
+            return
+        if self.projets is not None:
+            self._afficher_albums()
+            return
+        artist_id = c.artist.id
+
+        def lus(projets) -> None:
+            if self.chargement is None or self.chargement.artist.id != artist_id:
+                return
+            self.projets = projets
+            self._afficher_albums()
+
+        en_fond(
+            lambda: self.runtime.data_manager.get_projets_for_artist(artist_id),
+            lus,
+            lambda message: QMessageBox.warning(self, "Vue Album", message),
+            nom="qt:projets",
+        )
+
+    def _afficher_albums(self) -> None:
+        self.vue_albums.charger(
+            presentation_albums.construire(self.projets or [], self.modele.lignes)
+        )
+        self._rafraichir_pied()
+
+    def _menu_album(self, album, position) -> None:
+        menu = QMenu(self)
+        menu.addAction(
+            "Voir ses titres",
+            lambda: (
+                self._basculer_vue(album=False),
+                self.recherche_table.setText(
+                    album.titre if album.rang == presentation_albums.RANG_PROJET else ""
+                ),
+            ),
+        )
+        menu.exec(position)
 
     # ── fiche ────────────────────────────────────────────────────────────────
     def _sur_ligne_courante(self, ligne) -> None:
@@ -812,6 +889,9 @@ class FenetrePrincipale(QMainWindow):
         if etat is not None:
             self.restoreState(etat)
         self.vue.restaurer(self.reglages)
+        self.vue_albums.restaurer(self.reglages)
+        if self.reglages.value("vue") == "album":
+            self._basculer_vue(album=True)
         artiste = self.reglages.value("artiste")
         if artiste:
             QTimer.singleShot(0, lambda: self.charger(str(artiste)))
@@ -834,5 +914,6 @@ class FenetrePrincipale(QMainWindow):
         self.reglages.setValue("fenetre/geometrie", self.saveGeometry())
         self.reglages.setValue("fenetre/etat", self.saveState())
         self.vue.sauver(self.reglages)
+        self.vue_albums.sauver(self.reglages)
         self.taches.fermer()
         event.accept()

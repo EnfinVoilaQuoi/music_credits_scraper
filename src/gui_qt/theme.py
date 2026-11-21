@@ -139,7 +139,7 @@ def feuille_de_style(t=TOKENS) -> str:
     QToolButton::menu-indicator {{ image: none; width: 0; }}
     QToolButton#bascule {{ background: {t['onglet_inactif']}; color: {t['texte_doux']}; }}
     QToolButton#bascule:checked {{ background: {t['accent']}; color: {t['texte_sur_accent']}; }}
-    QTableView {{
+    QTableView, QTreeView {{
         background: {t['table']};
         alternate-background-color: {t['table_alterne']};
         gridline-color: {t['grille']};

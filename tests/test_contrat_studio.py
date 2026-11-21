@@ -80,6 +80,7 @@ CONTRAT: dict[str, dict[str, list[str] | None]] = {
     },
     "src.utils.title_matching": {
         "clean_display_title": ["title"],
+        "contains_as_words": ["needle", "haystack"],  # Analyse : album commun
         "normalize_title": ["s"],
         "split_title_paren": ["title"],
     },
@@ -100,6 +101,9 @@ CONTRAT: dict[str, dict[str, list[str] | None]] = {
 METHODES_DATA_MANAGER: dict[str, list[str]] = {
     "credits_album": ["release_id"],  # crédits de la page album Genius (Analyse, page 4)
     "get_albums_for_artist": ["artist_id"],
+    # Analyse, page 3 : « membre de GROUPE » / « Duo X » (formations de l'artiste).
+    "get_artist_relations": ["artist_id", "status"],
+    "membres_de_formation": ["related_name"],
     "get_projets_for_artist": ["artist_id"],
     "get_track_releases": ["track_id"],
     "save_track": ["track"],

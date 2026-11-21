@@ -137,6 +137,13 @@ def feuille_de_style(t=TOKENS) -> str:
     }}
     QToolButton::menu-button:hover {{ background: {t['survol']}; }}
     QToolButton::menu-indicator {{ image: none; width: 0; }}
+    /* Décisions (convention commune, 2026-11-22) : plein = à décider,
+       contour = décidé (un clic rétablit). */
+    QToolButton#oui[plein="true"] {{ background: {t['ok']}; }}
+    QToolButton#non[plein="true"] {{ background: {t['erreur']}; }}
+    QToolButton#oui[plein="false"] {{ background: transparent; border: 2px solid {t['ok']}; }}
+    QToolButton#non[plein="false"] {{ background: transparent; border: 2px solid {t['erreur']}; }}
+    QLabel#titreCarte {{ font-family: "{POLICE_SEMIGRAS}"; font-size: 15pt; }}
     QToolButton#bascule {{ background: {t['onglet_inactif']}; color: {t['texte_doux']}; }}
     QToolButton#bascule:checked {{ background: {t['accent']}; color: {t['texte_sur_accent']}; }}
     QTableView, QTreeView {{

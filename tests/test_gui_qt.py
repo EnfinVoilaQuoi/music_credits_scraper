@@ -414,3 +414,53 @@ def test_vue_album(qtbot, fenetre):
     assert fenetre.reglages.value("vue") == "album"
     fenetre.b_titre.click()
     assert not fenetre.en_vue_album
+
+
+# ── Alias • Formations ───────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def formations(qtbot, fenetre):
+    from src.models.artist import ArtistRelation
+
+    _charger(qtbot, fenetre)
+    dm = fenetre.runtime.data_manager
+    aid = fenetre.chargement.artist.id
+    dm.propose_artist_relations(
+        aid,
+        [
+            ArtistRelation(related_name="PsMaker", kind="alias", source="discogs"),
+            ArtistRelation(related_name="L'Animalerie", kind="member_of", source="musicbrainz"),
+        ],
+    )
+    return fenetre
+
+
+def test_pastille_formations(qtbot, formations):
+    formations._compter_formations()
+    qtbot.waitUntil(lambda: formations.b_formations.pastille == "!", timeout=10_000)
+
+
+def test_confirmer_refuser_retablir(qtbot, formations):
+    from src.gui_qt.formations import FenetreFormations
+    from src.presentation import formations as pf
+
+    d = FenetreFormations(formations.runtime, formations.chargement.artist)
+    qtbot.addWidget(d)
+    cartes = pf.cartes(d.candidats)
+    (alias,) = cartes[pf.CARTE_ALIAS]
+    (groupe,) = cartes[pf.CARTE_FORMATIONS]
+    assert alias.decision is pf.Decision.A_DECIDER
+    d.confirmer(alias)
+    d.choisir_nature(groupe, "collectif")  # attend le ✓
+    d.confirmer(pf.cartes(d.candidats)[pf.CARTE_FORMATIONS][0])
+    cartes = pf.cartes(d.candidats)
+    assert cartes[pf.CARTE_ALIAS][0].decision is pf.Decision.CONFIRME
+    assert cartes[pf.CARTE_FORMATIONS][0].decision is pf.Decision.CONFIRME
+    assert cartes[pf.CARTE_FORMATIONS][0].nature == "collectif"
+    d.choisir_nature(cartes[pf.CARTE_FORMATIONS][0], "groupe")  # écrit tout de suite
+    assert pf.cartes(d.candidats)[pf.CARTE_FORMATIONS][0].nature == "groupe"
+    d.retablir(pf.cartes(d.candidats)[pf.CARTE_ALIAS][0])
+    assert pf.cartes(d.candidats)[pf.CARTE_ALIAS][0].decision is pf.Decision.A_DECIDER
+    d.refuser(pf.cartes(d.candidats)[pf.CARTE_ALIAS][0])
+    assert pf.cartes(d.candidats)[pf.CARTE_ALIAS][0].decision is pf.Decision.REFUSE

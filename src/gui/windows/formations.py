@@ -34,6 +34,7 @@ pur, à 1 req/s côté MusicBrainz, elle ne doit pas figer l'interface.
 import customtkinter as ctk
 
 from src.concurrency.lifecycle import start_worker
+from src.presentation.formations import section_de as _section_de
 from src.utils.formations import (
     NATURES_ALIAS,
     candidats_de_base,
@@ -79,14 +80,8 @@ _SECTIONS = (
 )
 
 
-def section_de(candidat) -> str:
-    """La section d'un candidat. Un candidat NEUF non proposable (variante de
-    graphie, état civil…) va « pour info » — il était rangé avec les proposés et
-    enregistré en `proposed` s'il était laissé tel quel (20 variantes en base,
-    2026-09-23). Fonction pure."""
-    if candidat.status is None:
-        return "proposed" if candidat.proposable else "info"
-    return candidat.status
+# Le juge de la section vit dans la présentation, partagé avec la GUI Qt.
+section_de = _section_de
 
 
 class FormationsWindow:

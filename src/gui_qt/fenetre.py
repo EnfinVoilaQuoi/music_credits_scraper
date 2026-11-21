@@ -40,6 +40,7 @@ from src.gui_qt.centre_taches import CentreTaches
 from src.gui_qt.dialogues import DialogueAjout, DialogueArtistes
 from src.gui_qt.fenetres_windows import colorer_barre_titre
 from src.gui_qt.fiche import FenetreFiche, VueFiche
+from src.gui_qt.formations import FenetreFormations
 from src.gui_qt.modele import ModeleMorceaux, ProxyMorceaux
 from src.gui_qt.pont import Etat, Taches, en_fond
 from src.gui_qt.theme import TOKENS
@@ -48,6 +49,7 @@ from src.gui_qt.vue_table import VueMorceaux, colonne_triee_par_defaut
 from src.gui_qt.widgets import BoutonFlux, BoutonPastille, CartoucheArtiste, PiedTable
 from src.presentation import albums as presentation_albums
 from src.presentation import chargement as presentation_chargement
+from src.presentation import formations as presentation_formations
 from src.presentation import pied as presentation_pied
 from src.presentation import runs
 from src.presentation.artistes import ResumeArtiste, suggestions
@@ -201,7 +203,7 @@ class FenetrePrincipale(QMainWindow):
         # À droite de la recherche (maquettes du 2026-11-21). Une pastille « ! »
         # dit qu'un cas attend ; les fenêtres pas encore portées sont grisées.
         self.b_formations = BoutonPastille(
-            "users-group", "Alias • Formations — fenêtre à venir (version CustomTkinter)"
+            "users-group", "Alias • Formations — la pastille dit qu'un lien attend une décision"
         )
         self.b_certifs = BoutonPastille(
             "award", "Certifications — fenêtre à venir (version CustomTkinter)"
@@ -219,7 +221,7 @@ class FenetrePrincipale(QMainWindow):
         self.b_menu = BoutonPastille("settings", "Menu")
         self.b_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.b_menu.setMenu(self._menu_general())
-        for b in (self.b_formations, self.b_certifs, self.b_media, self.b_decisions, self.b_sante):
+        for b in (self.b_certifs, self.b_media, self.b_decisions, self.b_sante):
             b.setEnabled(False)
         for w in (self.b_ajout, self.b_base):
             h.addWidget(w)
@@ -452,6 +454,8 @@ class FenetrePrincipale(QMainWindow):
         self.b_ajout.clicked.connect(self._ouvrir_ajout)
         self.b_base.clicked.connect(self._ouvrir_base)
         self.b_file.clicked.connect(self._ouvrir_centre)
+        self.b_formations.clicked.connect(self._ouvrir_formations)
+        self.cartouche.formations_cliquees.connect(self._ouvrir_formations)
         self.recherche.textEdited.connect(self._completer)
         self.recherche.returnPressed.connect(lambda: self.charger(self.recherche.text()))
         self.completion.activated[str].connect(self.charger)
@@ -539,6 +543,7 @@ class FenetrePrincipale(QMainWindow):
             self.fiche.afficher(None)
             self._verifier_nouveautes()
         self.projets = None
+        self._compter_formations()
         if self.en_vue_album:
             self._charger_albums()
         self.cartouche.afficher(c.cartouche, getattr(c.artist, "image_path", None))
@@ -604,6 +609,46 @@ class FenetrePrincipale(QMainWindow):
         visibles = self.proxy.lignes_visibles()
         p = presentation_pied.calculer(self.modele.lignes, visibles, self.pied.portee)
         self.pied.afficher(p, presentation_pied.texte_selection(self.modele.selection, visibles))
+
+    # ── formations ───────────────────────────────────────────────────────────
+    def _compter_formations(self) -> None:
+        c = self.chargement
+        if c is None:
+            self.b_formations.poser_pastille(None)
+            return
+        artist_id = c.artist.id
+
+        def compter():
+            from src.utils.formations import candidats_de_base
+
+            relations = self.runtime.data_manager.get_artist_relations(artist_id, status=None)
+            return presentation_formations.a_decider(candidats_de_base(relations))
+
+        def poser(n) -> None:
+            if self.chargement is not None and self.chargement.artist.id == artist_id:
+                self.b_formations.poser_pastille("!" if n else None)
+
+        en_fond(compter, poser, lambda m: logger.debug(f"Formations non comptées : {m}"))
+
+    def _ouvrir_formations(self) -> None:
+        c = self.chargement
+        if c is None:
+            return
+        d = FenetreFormations(self.runtime, c.artist, self)
+        nom = c.artist.name
+        d.modifie.connect(lambda: self._recharger(nom))
+        self.b_formations.setObjectName("actif")
+        self.b_formations.style().polish(self.b_formations)
+        d.exec()
+        self.b_formations.setObjectName("")
+        self.b_formations.style().polish(self.b_formations)
+
+    def _recharger(self, nom: str) -> None:
+        en_fond(
+            lambda: presentation_chargement.charger(self.runtime, nom),
+            lambda c: self._sur_chargement(c, nom, garder=True),
+            nom="qt:recharger-artiste",
+        )
 
     # ── vue Album ────────────────────────────────────────────────────────────
     @property
@@ -726,6 +771,7 @@ class FenetrePrincipale(QMainWindow):
         occupe = self.taches.occupe
         for b in self.boutons_flux.values():
             b.setEnabled(charge and (not occupe or b.en_cours))
+        self.b_formations.setEnabled(charge)
 
     def _rafraichir_infobulles_flux(self, *_) -> None:
         for cle in self.portees:

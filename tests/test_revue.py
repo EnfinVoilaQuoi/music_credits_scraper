@@ -706,6 +706,23 @@ class TestNatures:
         t.credits.append(Credit("Plain Pat", CreditRole.PRODUCER, source="genius"))
         assert self._nature("credits_api", t) == [revue.INFORMATION]
 
+    def test_credits_api_d_une_page_relue_apres_le_detail_sont_une_decision(self):
+        """CORRECTIFS 2026-11-14 : Kanye « Arguing », relue le 15/11 en
+        `--force-credits`, détail API lu le 16/10 — aucun run ne la règle."""
+        from datetime import datetime
+
+        t = _t("Arguing", last_scraped=datetime(2026, 11, 15, 0, 18))
+        t.credits = [Credit("Kid Cudi", CreditRole.PROGRAMMER, source="genius_api")]
+        t.genius_detail_checked_at = "2026-10-16T17:06:41"
+        assert self._nature("credits_api", t) == [revue.DECISION]
+        # Détail relu APRÈS la page (IAM « Rapline II ») : la page n'a peut-être
+        # pas vu ces crédits, un run la relira.
+        t.genius_detail_checked_at = "2026-11-20T13:22:32"
+        assert self._nature("credits_api", t) == [revue.RUN]
+        # Sans date du détail, on ne sait pas quand ils ont été posés : un run.
+        t.genius_detail_checked_at = None
+        assert self._nature("credits_api", t) == [revue.RUN]
+
     def test_video_partagee_comptee_nulle_part_ou_chez_un_seul(self):
         autre = Artist(name="Lunatic")
         autre.id, _A.id = 2, 1
@@ -2045,3 +2062,52 @@ class TestPageEtFichePlateforme:
         page = self._f("Mélomanes", 1, 150, genius_id=11, spotify_id="A", album="The Narvalow Tape")
         fiche = self._f("Melomanes", 2, 159, spotify_id="B", album="Hérésie Tape")
         assert revue.page_et_fiche_plateforme(fiche, _ctx(page, fiche))
+
+
+class TestCreeeSansTrace:
+    """Règle C, reste (CORRECTIFS 2026-11-09) : une fiche créée par règle qui,
+    son étape identité passée, n'a ni ID Spotify ni vidéo va à l'humain."""
+
+    _CORR = {
+        "id": 7,
+        "detecteur": "deezer_version",
+        "applied_at": "2026-11-19 10:00:00",
+        "retablie_at": None,
+        "annulation": {"type": "fiche_deezer", "deezer_id": 555},
+    }
+
+    def _cas(self, t, corrections=None):
+        ctx = _ctx(t)
+        ctx.creees_par_regle = revue.fiches_creees_par_regle(
+            [self._CORR] if corrections is None else corrections, [t]
+        )
+        d = [x for x in revue.DETECTEURS if x.code == "creee_sans_trace"]
+        return revue.detecter(ctx, detecteurs=d, detecteurs_artiste=())
+
+    def test_creee_puis_identite_sans_rien_va_a_l_humain(self):
+        t = _t("H (Instrumental)", deezer_id=555, spotify_id_checked_at="2026-11-20T08:00:00")
+        (cas,) = self._cas(t)
+        assert cas.nature == revue.DECISION and "deezer_version" in cas.motif
+        assert cas.cle.endswith("|cree:7")
+
+    def test_identite_pas_encore_passee(self):
+        t = _t("H (Instrumental)", deezer_id=555, spotify_id_checked_at="2026-11-18T08:00:00")
+        assert self._cas(t) == []
+        t.spotify_id_checked_at = None
+        assert self._cas(t) == []
+
+    def test_un_id_spotify_ou_une_video_suffit(self):
+        t = _t("H", deezer_id=555, spotify_id_checked_at="2026-11-20T08:00:00", spotify_id="SP")
+        assert self._cas(t) == []
+        t.spotify_id, t.youtube_url = None, "https://youtu.be/abc"
+        assert self._cas(t) == []
+
+    def test_fiche_creee_par_l_humain_ou_retablie_ignoree(self):
+        t = _t("H", deezer_id=555, spotify_id_checked_at="2026-11-20T08:00:00")
+        assert self._cas(t, corrections=[]) == []
+        assert self._cas(t, corrections=[{**self._CORR, "retablie_at": "2026-11-21"}]) == []
+
+    def test_fiche_kworb_retrouvee_par_son_id(self):
+        t = _t("X (Remix)", 42, spotify_id_checked_at="2026-11-20T08:00:00")
+        kworb = {**self._CORR, "annulation": {"type": "fiche_kworb", "creee": 42}}
+        assert len(self._cas(t, corrections=[kworb])) == 1

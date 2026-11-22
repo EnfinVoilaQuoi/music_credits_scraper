@@ -250,6 +250,11 @@ class Contexte:
     #: `temoins_des_liens`), lus par `charger_contexte` quand des liens sont
     #: proposés : les règles des liens proposés restent pures (2026-11-22).
     temoins_liens: object = None
+    #: `{track_id: {"correction", "detecteur", "le"}}` des fiches qu'une
+    #: correction de RÈGLE a créées (`revue_corrections`, non rétablie), lues
+    #: par `charger_contexte` (`fiches_creees_par_regle`) : le détecteur
+    #: `creee_sans_trace` reste pur.
+    creees_par_regle: dict = field(default_factory=dict)
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -1488,15 +1493,106 @@ def credits_api_seuls(track, _ctx=None):
     return None
 
 
+def _horodatage(valeur):
+    """Une date de la fiche (objet ou chaîne ISO) en `datetime` naïf, ou None."""
+    from datetime import datetime
+
+    if isinstance(valeur, str):
+        try:
+            valeur = datetime.fromisoformat(valeur)
+        except ValueError:
+            return None
+    if not isinstance(valeur, datetime):
+        return None
+    return valeur.replace(tzinfo=None)
+
+
+def page_relue_apres_l_api(track) -> bool:
+    """La page Genius a-t-elle été lue APRÈS la dernière pose possible des
+    crédits 🎫 ? Ils viennent du détail `GET /songs/{id}`, daté par
+    `genius_detail_checked_at` (e45) : une lecture de la page postérieure les a
+    eus sous les yeux et ne les a pas confirmés. Sans date du détail, on ne
+    sait pas : non."""
+    lu = _horodatage(track.last_scraped)
+    detail = _horodatage(track.genius_detail_checked_at)
+    return lu is not None and detail is not None and lu >= detail
+
+
 def nature_credits_api(track, _preuves, _ctx) -> str:
     """Sans AUCUN crédit scrapé, la section crédits n'a rien donné : l'étape
     Crédits la relira (`est_manquant(CREDITS_GENIUS)` ne regarde que la source
-    `genius`) — un run, pas une décision. À côté de crédits scrapés, ce sont
-    les compléments que la page ne montre pas, GARDÉS en 🎫 par décision
-    utilisateur (2026-09-26) : une information."""
+    `genius`) — un run, pas une décision. Sauf si la page a été lue APRÈS la
+    pose des crédits 🎫 (`page_relue_apres_l_api`) : la lecture les a vus et ne
+    les confirme pas, un nouveau run lirait la même page (Kanye « Arguing »,
+    « Liberian (Kanye West Mix) », « You Ain't No Model », relues en
+    `--force-credits` le 2026-11-15) — une décision (CORRECTIFS 2026-11-14).
+    À côté de crédits scrapés, ce sont les compléments que la page ne montre
+    pas, GARDÉS en 🎫 par décision utilisateur (2026-09-26) : une information."""
     if any(c.source == SOURCE_SCRAPE for c in track.credits):
         return INFORMATION
+    if page_relue_apres_l_api(track):
+        return DECISION
     return RUN
+
+
+#: Les corrections de règle qui CRÉENT une fiche (`revue_auto`, type de
+#: l'annulation) : une piste Deezer « absente » (règle C, DA1, A1, R1…) ou un
+#: remix d'un tiers venu de Kworb.
+_ANNULATIONS_CREATRICES = ("fiche_deezer", "fiche_kworb")
+
+
+def fiches_creees_par_regle(corrections, tracks) -> dict[int, dict]:
+    """PUR. `{track_id: {"correction", "detecteur", "le"}}` des fiches de
+    `tracks` créées par une correction de règle encore en vigueur
+    (`corrections` : `corrections_revue`, annulation décodée). La fiche d'une
+    piste Deezer se retrouve par son `deezer_id` (ce que « ↩ Rétablir » relit
+    aussi), celle de Kworb par l'ID noté à la création."""
+    par_deezer = {}
+    for t in tracks:
+        if t.id and t.deezer_id:
+            par_deezer.setdefault(str(t.deezer_id), t.id)
+    ids = {t.id for t in tracks if t.id}
+    creees: dict[int, dict] = {}
+    for c in corrections:
+        if c.get("retablie_at"):
+            continue
+        annulation = c.get("annulation") or {}
+        genre = annulation.get("type")
+        if genre not in _ANNULATIONS_CREATRICES:
+            continue
+        if genre == "fiche_deezer":
+            tid = par_deezer.get(str(annulation.get("deezer_id")))
+        else:
+            tid = annulation.get("creee") if annulation.get("creee") in ids else None
+        if tid is None:
+            continue
+        creees.setdefault(
+            tid,
+            {"correction": c.get("id"), "detecteur": c.get("detecteur"), "le": c.get("applied_at")},
+        )
+    return creees
+
+
+def creee_sans_trace(track, ctx=None):
+    """Fiche CRÉÉE par une règle (règle C, DA1, A1, Kworb…) qui, une fois son
+    étape identité passée, n'a ni ID Spotify ni vidéo : rien d'autre que la
+    piste qui l'a fait naître ne la confirme — l'humain (CORRECTIFS, règle C,
+    décision du 2026-11-19). « Passée » = Spotify a répondu « pas là » APRÈS
+    la création (`spotify_id_checked_at`) ; avant, c'est un run qui manque,
+    pas une décision."""
+    if ctx is None or track.id not in ctx.creees_par_regle:
+        return None
+    if track.spotify_id or track.youtube_url or track.videos:
+        return None
+    origine = ctx.creees_par_regle[track.id]
+    cree, verifie = _horodatage(origine.get("le")), _horodatage(track.spotify_id_checked_at)
+    if cree is None or verifie is None or verifie < cree:
+        return None
+    return (
+        f"fiche créée par règle ({origine.get('detecteur')}) le {cree:%Y-%m-%d}, "
+        "sans ID Spotify ni vidéo après l'étape identité",
+        {"correction": origine.get("correction"), "empreinte": f"cree:{origine.get('correction')}"},
+    )
 
 
 def cle_doublon(titre: str | None) -> str:
@@ -3688,7 +3784,8 @@ def _noms_de_la_disco(ctx) -> frozenset[str]:
 #: Détecteurs dont un cas « pour information » reste ouvert aux règles du
 #: correcteur (`revue_auto`) : un alias que MusicBrainz ET Discogs donnent se
 #: confirme même sans trace dans la discographie (Q1, 2026-10-31).
-INFORMATIONS_ARBITRABLES = frozenset({"liens_proposes"})
+#: Les crédits 🎫 aussi : ✓ Normal ou indécidable par règle (2026-11-22).
+INFORMATIONS_ARBITRABLES = frozenset({"liens_proposes", "credits_api"})
 
 
 def nature_lien_propose(preuves, ctx) -> str:
@@ -3819,6 +3916,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         "🎫",
         credits_api_seuls,
         nature_du_cas=nature_credits_api,
+    ),
+    Detecteur(
+        "creee_sans_trace",
+        "Fiche créée par règle, ni sur Spotify ni en vidéo",
+        "🌱",
+        creee_sans_trace,
     ),
     Detecteur(
         "annotee", "Page « Non-Music » sans sortie officielle", "🏷️", page_annotee_sans_trace
@@ -4344,6 +4447,9 @@ def charger_contexte(data_manager, artiste) -> Contexte:
         for s in data_manager.signalements_revue(artiste.id)
         if s["detecteur"] in ("deezer_absent", "deezer_album_absent")
     ]
+    ctx.creees_par_regle = fiches_creees_par_regle(
+        data_manager.corrections_revue(artiste.id), tracks
+    )
     if VIDEOS_MORTES_BRANCHEES:
         ctx.videos_mortes = data_manager.videos_mortes_constatees()
     return ctx

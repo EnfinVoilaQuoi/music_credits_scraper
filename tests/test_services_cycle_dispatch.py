@@ -133,7 +133,7 @@ class TestExecuterEtape:
 
     def test_streams_intersecte_manquants_et_track_ids(self, monkeypatch):
         vus = {}
-        monkeypatch.setattr(cycle.streams, "track_ids_actifs", lambda rt, a, ids: ids)
+        monkeypatch.setattr(cycle.streams, "track_ids_actifs", lambda rt, a, ids, **k: ids)
         monkeypatch.setattr(
             cycle.streams, "run", lambda rt, a, o, h: vus.update(ids=o.track_ids) or Bilan()
         )
@@ -146,7 +146,7 @@ class TestExecuterEtape:
 
     def test_streams_sans_manquants_transmet_les_ids_tels_quels(self, monkeypatch):
         vus = {}
-        monkeypatch.setattr(cycle.streams, "track_ids_actifs", lambda rt, a, ids: ids)
+        monkeypatch.setattr(cycle.streams, "track_ids_actifs", lambda rt, a, ids, **k: ids)
         monkeypatch.setattr(cycle.streams, "run", lambda rt, a, o, h: vus.update(o=o) or Bilan())
         opts = cycle.OptionsCycle(streams=streams.OptionsStreams(kworb=False, ytm_channel="@x"))
         cycle.executer_etape(_rt([]), _artist([]), "streams", opts, Hooks())

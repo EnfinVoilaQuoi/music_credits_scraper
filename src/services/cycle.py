@@ -11,7 +11,7 @@ artiste), continue sur l'échec d'une étape (consigné) et s'arrête sur
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from src.models import Artist
 from src.observability import source_usage
@@ -55,6 +55,10 @@ class OptionsCycle:
     manquants: bool = False
     echecs: bool = False
     tout: bool = False
+    #: Les fiches désactivées entrent aussi dans la sélection des étapes
+    #: identité, crédits, enrich et streams (`--inclure-desactives`, menu
+    #: « Titres désactivés » de la GUI Qt, 2026-11-22). Sans elle, rien ne change.
+    inclure_desactives: bool = False
     disco: discographie.OptionsDisco = discographie.OptionsDisco()
     identite: identite.OptionsIdentite = identite.OptionsIdentite()
     credits: credits.OptionsCredits = credits.OptionsCredits()
@@ -132,6 +136,15 @@ def corriger_apres_etape_seule(
         b.corrections = revue_auto.corriger_apres_run(runtime.data_manager, artist).appliquees
 
 
+def options_identite(options: OptionsCycle) -> identite.OptionsIdentite:
+    """Les options de l'étape identité, qui sélectionne elle-même ses fiches :
+    les options de run du cycle s'y ajoutent (elles ne retirent rien)."""
+    o = options.identite
+    if options.inclure_desactives and not o.inclure_desactives:
+        o = replace(o, inclure_desactives=True)
+    return o
+
+
 def executer_etape(
     runtime: Runtime, artist: Artist, etape: str, options: OptionsCycle, hooks: Hooks
 ) -> Bilan:
@@ -147,7 +160,7 @@ def executer_etape(
         if etape == "identite":
             # Toujours « manquants » par construction (ce qui n'est pas relié) ;
             # `--force` élargit, `--manquants` n'y change rien.
-            return identite.run(runtime, artist, options.identite, hooks)
+            return identite.run(runtime, artist, options_identite(options), hooks)
         if etape == "credits":
             par_manque, par_echec = restriction(
                 options.credits.force(), options.tout, options.manquants, options.echecs
@@ -160,6 +173,7 @@ def executer_etape(
                 manquants=kinds,
                 echecs=sources,
                 track_ids=options.credits.track_ids,
+                inclure_desactives=options.inclure_desactives,
             )
             return credits.run(runtime, artist, tracks, options.credits, hooks)
         if etape == "enrich":
@@ -174,14 +188,18 @@ def executer_etape(
                 manquants=kinds,
                 echecs=sources,
                 track_ids=options.enrich.track_ids,
+                inclure_desactives=options.inclure_desactives,
             )
             return enrichissement.run(runtime, artist, tracks, options.enrich, hooks)
         if etape == "streams":
             ids = options.streams.track_ids
+            avec = options.inclure_desactives
             if options.manquants:
                 voulus = {
                     t.id
-                    for t in selection_morceaux(runtime, artist, manquants=(Manque.STREAMS,))
+                    for t in selection_morceaux(
+                        runtime, artist, manquants=(Manque.STREAMS,), inclure_desactives=avec
+                    )
                     if t.id is not None
                 }
                 ids = frozenset(voulus if ids is None else voulus & set(ids))
@@ -191,11 +209,13 @@ def executer_etape(
                 spotify_full=options.streams.spotify_full,
                 ytm=options.streams.ytm,
                 ytm_channel=options.streams.ytm_channel,
-                track_ids=streams.track_ids_actifs(runtime, artist, ids),
+                track_ids=streams.track_ids_actifs(runtime, artist, ids, inclure_desactives=avec),
                 fiches=(
                     None
                     if options.streams.fiches is None
-                    else streams.track_ids_actifs(runtime, artist, options.streams.fiches)
+                    else streams.track_ids_actifs(
+                        runtime, artist, options.streams.fiches, inclure_desactives=avec
+                    )
                 ),
             )
             return streams.run(runtime, artist, opts, hooks)

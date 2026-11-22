@@ -317,6 +317,7 @@ def selection_morceaux(
     manquants: Iterable[Manque] = (),
     echecs: Iterable[str] = (),
     track_ids: Iterable[int] | None = None,
+    inclure_desactives: bool = False,
 ) -> list[Track]:
     """« Tous les morceaux » d'un flux : la discographie RÉUNIE (comme la GUI),
     moins les désactivés, restreinte aux `track_ids` s'ils sont donnés, puis
@@ -324,9 +325,14 @@ def selection_morceaux(
     (union : `credits --manquants` traite un morceau sans Discogs même s'il a
     ses crédits Genius) OU qu'une des sources `echecs` n'a pas servis
     (`--echecs` : ce qui n'est pas passé, retenté — une ABSENCE constatée n'y
-    est pas, la source a répondu)."""
-    desactives = runtime.disabled.load_disabled_tracks(artist.name)
-    tracks = [t for t in artist.tracks if t.id not in desactives]
+    est pas, la source a répondu).
+
+    `inclure_desactives` (option de run, `--inclure-desactives`, 2026-11-22) :
+    les fiches désactivées restent dans la sélection."""
+    tracks = list(artist.tracks)
+    if not inclure_desactives:
+        desactives = runtime.disabled.load_disabled_tracks(artist.name)
+        tracks = [t for t in tracks if t.id not in desactives]
     if track_ids is not None:
         voulus = set(track_ids)
         tracks = [t for t in tracks if t.id in voulus]

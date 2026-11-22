@@ -235,11 +235,18 @@ def _propositions_kworb(dm, artist: Artist, resultat: dict) -> None:
 
 
 def track_ids_actifs(
-    runtime: Runtime, artist: Artist, ids: Iterable[int] | None
+    runtime: Runtime,
+    artist: Artist,
+    ids: Iterable[int] | None,
+    *,
+    inclure_desactives: bool = False,
 ) -> frozenset[int] | None:
     """Restreint des identifiants aux morceaux NON désactivés. `None` (pas de
     restriction) devient l'ensemble des actifs seulement s'il y a des
-    désactivés — sinon reste `None` (aucun filtre côté updaters)."""
+    désactivés — sinon reste `None` (aucun filtre côté updaters).
+    `inclure_desactives` (option de run, 2026-11-22) : aucun filtre."""
+    if inclure_desactives:
+        return None if ids is None else frozenset(ids)
     desactives = runtime.disabled.load_disabled_tracks(artist.name)
     if ids is not None:
         return frozenset(i for i in ids if i not in desactives)

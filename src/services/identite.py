@@ -72,6 +72,9 @@ class OptionsIdentite:
     #: Passes PAR MORCEAU (3a, 3b) restreintes à ces fiches (`identite --fiches`) ;
     #: les couches d'artiste tournent quand même.
     track_ids: frozenset[int] | None = None
+    #: Passes par morceau ouvertes aussi aux fiches désactivées (option de run
+    #: « Titres désactivés », `--inclure-desactives`, 2026-11-22).
+    inclure_desactives: bool = False
 
 
 @dataclass
@@ -360,6 +363,19 @@ def _recharger(runtime: Runtime, artist: Artist) -> None:
 
 
 @etape_de_flux("Identité")
+def _selection(
+    runtime: Runtime, artist: Artist, options: OptionsIdentite, kinds: tuple[Manque, ...] = ()
+) -> list:
+    """La sélection d'une passe par morceau, aux options de run de l'étape."""
+    return selection_morceaux(
+        runtime,
+        artist,
+        manquants=kinds,
+        track_ids=options.track_ids,
+        inclure_desactives=options.inclure_desactives,
+    )
+
+
 def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks) -> BilanIdentite:
     """Les couches dans l'ordre de la preuve. Sync : appelée depuis le fil du
     worker ou de la CLI, jamais depuis la boucle asyncio."""
@@ -417,7 +433,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
     hits_albums: dict[int, int] = {}
     if options.par_morceau and options.deezer and not arret("Deezer par morceau"):
         kinds = () if options.force else (Manque.IDENTITE_DEEZER,)
-        tracks = selection_morceaux(runtime, artist, manquants=kinds, track_ids=options.track_ids)
+        tracks = _selection(runtime, artist, options, kinds)
         if tracks:
             b = _passage(runtime, artist, tracks, "deezer", hooks, "Deezer par morceau")
             bilan.deezer_morceaux = b.traites
@@ -518,7 +534,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
     # 3b — Spotify par morceau (APRÈS 3a : une durée indépendante existe)
     if options.par_morceau and not arret("Spotify par morceau"):
         kinds = (Manque.IDENTITE_SPOTIFY_FORCE,) if options.force else (Manque.IDENTITE_SPOTIFY,)
-        tracks = selection_morceaux(runtime, artist, manquants=kinds, track_ids=options.track_ids)
+        tracks = _selection(runtime, artist, options, kinds)
         sans_duree = {
             t.id for t in tracks if not (set(t.durations_observees) & set(DUREES_INDEPENDANTES))
         }
@@ -531,7 +547,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
         # plus : l'échec d'une recherche d'avant n'a plus d'objet (6 fiches de
         # Kaaris, coupure du 2026-11-07, restées « en échec » à vie).
         choisies = {t.id for t in tracks}
-        for t in selection_morceaux(runtime, artist, track_ids=options.track_ids):
+        for t in _selection(runtime, artist, options):
             if t.id not in choisies:
                 source_usage.sans_besoin("spotify_embed", t.id, flux=(Flow.IDENTITY,))
         _recharger(runtime, artist)

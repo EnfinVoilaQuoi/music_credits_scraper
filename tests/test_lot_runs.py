@@ -3,6 +3,7 @@ en fond » de PROJET.md (2026-10-21 : un run figé, 10 h perdues). Les runs des
 tests sont de petits `python -c`, jamais la CLI ; aucune base réelle."""
 
 import importlib.util
+import itertools
 import sys
 from pathlib import Path
 
@@ -119,11 +120,25 @@ def _executer(tmp_path, codes_python, **kw):
 
 
 def test_un_run_fige_est_tue_et_le_lot_continue(tmp_path):
+    """Horloge et activité injectées : le premier run ne bouge plus jamais, le
+    second est toujours actif, quel que soit le temps qu'il met à démarrer (il
+    passait pour figé, `gel_s=1` en temps réel, sur une machine chargée)."""
+    temps = itertools.count(0, 100)  # chaque lecture de l'horloge : 100 s de plus
+
+    def activite(journal):
+        return 0.0 if journal.name.startswith("run_01_") else float("inf")
+
     lot = _executer(
-        tmp_path, ["import time; time.sleep(60)", "print('suivant')"], delai_s=600, gel_s=1
+        tmp_path,
+        ["import time; time.sleep(60)", "print('suivant')"],
+        delai_s=float("inf"),
+        gel_s=1,
+        horloge=lambda: next(temps),
+        activite=activite,
     )
-    assert [r.statut for r in lot.resultats] == ["figé", "ok"]
-    assert lot.resultats[0].duree_s < 30 and lot.code == 1
+    assert [r.statut for r in lot.resultats] == ["figé", "ok"] and lot.code == 1
+    # Tué au premier relevé (une lecture pour le début, une pour le verdict).
+    assert lot.resultats[0].duree_s == 200
     assert "FIN (figé" in (tmp_path / "sortie" / "lot.log").read_text(encoding="utf-8")
 
 

@@ -1796,6 +1796,17 @@ def meme_titre_normalise(a: str | None, b: str | None) -> bool:
     return normalize_title(a or "") == normalize_title(b or "")
 
 
+def titre_plus_long(titre: str | None, autre: str | None) -> bool:
+    """PUR. `autre` porte tous les mots normalisés de `titre` (featurings
+    retirés, `normalize_title`) et d'autres en plus : « Bande organisée » /
+    « Bande organisée (Remix) », un titre que la source a complété. Mots pris
+    comme ensembles, ordre ignoré."""
+    mots, mots_autre = set(normalize_title(titre or "").split()), set(
+        normalize_title(autre or "").split()
+    )
+    return bool(mots_autre - mots) and mots <= mots_autre
+
+
 def est_un_remix(titre: str | None) -> bool:
     """PUR. Le titre porte un descripteur de REMIX, nommé ou nu."""
     return cle_titre(titre).variant.est_remix

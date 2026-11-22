@@ -141,7 +141,7 @@ class FakeDM:
     def verdicts_revue(self, artist_id):
         return {}
 
-    def recalculer_vues_ytm(self, track_id, exclues=frozenset()):
+    def recalculer_vues_ytm(self, track_id):
         return self.totaux().get(track_id)
 
     def record_duration_observation(self, track_id, secondes, source):

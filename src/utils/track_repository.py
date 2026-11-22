@@ -1272,6 +1272,13 @@ class TrackRepository:
         colonne, et inventer une source serait pire que d'avouer qu'on l'ignore.
         Le moteur l'écarte dès qu'une source réelle existe, exactement comme il
         faut. N'écrase jamais une observation existante.
+
+        UNE transaction par fiche, par `_ecrire` (2026-11-22, chantier A) : la
+        fiche qui reçoit son observation est recalculée avec ses sœurs avant le
+        commit, et le verrou d'écriture ne dure que le temps d'une fiche (une
+        seule transaction pour tout le lot — 6 201 fiches datées après e24 — le
+        tenait d'autant, sans aucun recalcul). Une fiche en erreur n'arrête pas
+        les suivantes.
         """
         if field not in self.COLONNES_DISCOGRAPHIE:
             raise ValueError(f"champ non arbitrable : {field!r}")
@@ -1279,10 +1286,10 @@ class TrackRepository:
         if not lignes:
             return 0
         maintenant = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            posees = 0
-            with self.engine.begin() as conn:
-                for track_id, valeur in lignes:
+        posees = 0
+        for track_id, valeur in lignes:
+            try:
+                with self._ecrire() as conn:
                     res = conn.execute(
                         text(
                             "INSERT OR IGNORE INTO observations "
@@ -1298,12 +1305,13 @@ class TrackRepository:
                     )
                     # Compter ce qui est POSÉ, pas ce qui est demandé : rejoué,
                     # le script annonçait N déclarations sans rien écrire.
-                    posees += int(res.rowcount or 0)
-            logger.info(f"🧾 {posees} colonne(s) {field} déclarée(s) `legacy`")
-            return posees
-        except SQLAlchemyError as e:
-            logger.error(f"Erreur declarer_provenance_legacy({field}): {e}")
-            return 0
+                    if res.rowcount:
+                        self._toucher(conn, int(track_id))
+                        posees += int(res.rowcount)
+            except SQLAlchemyError as e:
+                logger.error(f"Erreur declarer_provenance_legacy({field}, #{track_id}): {e}")
+        logger.info(f"🧾 {posees} colonne(s) {field} déclarée(s) `legacy`")
+        return posees
 
     def _upsert_observations(self, conn, track_id: int, observations) -> None:
         if observations:
@@ -6982,22 +6990,28 @@ class TrackRepository:
         ).scalar()
         return lire_compteurs_ytm(valeur, track_id)
 
-    def recalculer_vues_ytm(self, track_id: int, exclues=None) -> int | None:
+    def recalculer_vues_ytm(self, track_id: int) -> int | None:
         """Recalcule `ytm_streams` depuis les vidéos de la fiche déjà mesurées et
-        ses compteurs sans mesure exacte (`record_ytm_compteurs`), HORS `exclues`
-        (vidéos qui ne sont pas le morceau, `services.vues_comptees`) et hors
-        celles qu'une autre fiche du même artiste porte (règle du run YTM). Sans
-        rien de comptable, le total est VIDÉ — une valeur ancienne y compterait
-        encore la vidéo écartée. `exclues=None` : relues en base (verdicts
-        « ✓ Normal » compris). Rend le nouveau total (ou None)."""
+        ses compteurs sans mesure exacte (`record_ytm_compteurs`), hors les
+        vidéos qui ne sont pas le morceau (`services.vues_comptees`, relues en
+        base, verdicts « ✓ Normal » compris) et hors celles qu'une autre fiche du
+        même artiste porte (règle du run YTM). Sans rien de comptable, le total
+        est VIDÉ — une valeur ancienne y compterait encore la vidéo écartée. Rend
+        le nouveau total (ou None).
+
+        Les exclusions ne viennent plus de l'appelant (2026-11-22, chantier A) :
+        un ensemble passé à la main donnait un total que le verdict de la
+        colonne (`_rematerialiser_fiche`, exclusions relues en base) défaisait
+        au prochain recalcul. Par `_ecrire` : la fiche et ses sœurs suivent."""
         try:
-            with self.engine.begin() as conn:
-                return self._recalculer_vues_ytm(conn, track_id, exclues)
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
+                return self._recalculer_vues_ytm(conn, track_id)
         except SQLAlchemyError as e:
             logger.error(f"Erreur recalculer_vues_ytm (track_id={track_id}): {e}")
             return None
 
-    def _recalculer_vues_ytm(self, conn, track_id: int, exclues=None) -> int | None:
+    def _recalculer_vues_ytm(self, conn, track_id: int) -> int | None:
         """Corps de `recalculer_vues_ytm`, dans la transaction de l'appelant."""
         aid = conn.execute(
             text("SELECT artist_id FROM tracks WHERE id = :t"), {"t": track_id}
@@ -7016,8 +7030,7 @@ class TrackRepository:
                 {"t": track_id, "aid": aid},
             ).all()
         )
-        if exclues is None:
-            exclues = self._videos_exclues(conn, track_id, aid)
+        exclues = self._videos_exclues(conn, track_id, aid)
         total = total_ytm(propres, self._compteurs_ytm(conn, track_id), exclues)
         if total is not None:
             maintenant = datetime.now()

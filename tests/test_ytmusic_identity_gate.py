@@ -179,7 +179,7 @@ class FakeDM:
     def verdicts_revue(self, artist_id):
         return {}
 
-    def recalculer_vues_ytm(self, track_id, exclues=frozenset()):
+    def recalculer_vues_ytm(self, track_id):
         return None
 
     def update_album_ytm_streams(self, artist_id, album_title, total):

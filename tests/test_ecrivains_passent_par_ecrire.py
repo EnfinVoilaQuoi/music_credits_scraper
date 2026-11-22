@@ -81,16 +81,8 @@ EXCEPTIONS: dict[str, str] = {
     "realigner_soeurs": (
         _RECALCUL + " (pilote le mécanisme à la main, une transaction par famille, passage à blanc)"
     ),
-    "recalculer_vues_ytm": (
-        _RECALCUL + " — avec les exclusions de l'APPELANT (`vues_comptees`), que le "
-        "recalcul générique (exclusions relues en base) défairait"
-    ),
-    # ── Décisions documentées (CORRECTIFS, chantier A lot 2) ──
-    "declarer_provenance_legacy": (
-        "par lots ; déclare `legacy` la valeur DÉJÀ en colonne, et `legacy` ne sert que "
-        "seul — aucun verdict ne change. Le convertir recalculerait des milliers de "
-        "fiches (6 201 datées après e24) en UNE transaction, verrou tenu d'autant"
-    ),
+    # (`recalculer_vues_ytm` et `declarer_provenance_legacy` passent par `_ecrire`
+    # depuis le 2026-11-22 : exclusions relues en base, une transaction par fiche.)
 }
 
 

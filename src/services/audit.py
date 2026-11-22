@@ -81,9 +81,11 @@ from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
     meme_socle,
+    meme_titre_normalise,
     porte_une_version,
     studio_sur_disque_live,
     titre_generique,
+    titre_plus_long,
     titres_equivalents,
 )
 from src.utils.version_heritage import est_instrumental
@@ -263,14 +265,6 @@ INVARIANTS = (
     "photo_par_defaut",
     "heritage_sans_source",
 )
-
-_FEAT = re.compile(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", re.IGNORECASE)
-
-
-def _base(titre: str | None) -> str:
-    """Titre normalisé SANS featuring, mots conservés (la clé de doublon de
-    `revue` colle les mots : inutilisable pour comparer des ensembles de mots)."""
-    return normalize_title(_FEAT.sub("", titre or ""))
 
 
 def _connexion(db_path) -> sqlite3.Connection:
@@ -819,10 +813,9 @@ def certifs(pistes) -> list[Cas]:
             if e.get("category") == "album":
                 cas.append(Cas("certif_album", t["artiste"], [t["id"]], lib))
                 continue
-            if _base(t["title"]) == _base(ct) or titres_equivalents(t["title"], ct):
+            if meme_titre_normalise(t["title"], ct) or titres_equivalents(t["title"], ct):
                 continue
-            mots_t, mots_c = set(_base(t["title"]).split()), set(_base(ct).split())
-            if mots_c - mots_t and mots_t <= mots_c:
+            if titre_plus_long(t["title"], ct):
                 famille = "certif_plus_long"
             elif version and not porte_une_version(ct) and meme_socle(t["title"], ct):
                 famille = "certif_version"

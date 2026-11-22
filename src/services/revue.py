@@ -113,8 +113,10 @@ _SOURCES_PAR_ID_SPOTIFY = ("spotify_web", "reccobeats")
 #: Sources qui ne mesurent rien (reprise, héritage, saisie) : hors des votes.
 _SOURCES_NON_MESUREES = frozenset({"legacy", "heritage", "manual"})
 
-#: Tolérance d'accord entre deux BPM, après correction d'octave.
-TOLERANCE_BPM = 0.03
+#: Tolérance d'accord entre deux BPM, après correction d'octave. 5 % (2026-11-22,
+#: simulé sur la base : 34 des 133 cas BPM partent, tous le même tempo arrondi par
+#: deux analyseurs — 71/74, 133/138 — ; un demi-ton de vitesse fait 5,9 %).
+TOLERANCE_BPM = 0.05
 
 #: Vues YouTube au-delà desquelles un écart avec Spotify devient suspect, et
 #: rapport qui le rend anormal (Booba « Cruella » : 5,5 M contre 316 k).

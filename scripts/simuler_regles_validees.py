@@ -4,7 +4,9 @@ Les règles de `politiques_revue.REGLES_VALIDEES` ne s'appliquent qu'une fois
 `revue_auto.REGLES_BRANCHEES` levé — après l'accord de l'utilisateur sur CE
 passage à blanc. Le script les applique pour de vrai, mais sur une COPIE de la
 base (sauvegarde SQLite en ligne : sûre même pendant un run ; la vraie base
-n'est que lue), artiste par artiste, puis rend le journal obtenu : chaque
+n'est que lue) et sur une copie des pages désactivées et supprimées
+(`data/disabled_tracks/`, `data/deleted_tracks/`, lus seulement), artiste par
+artiste, puis rend le journal obtenu : chaque
 correction, son sens, et de quoi la défaire. Les corrections FORMELLES déjà
 actives (LRC d'une autre fiche, certif d'un autre titre…) sont listées à part :
 elles sont de toute façon faites en fin de run.
@@ -45,6 +47,41 @@ def copier_la_base(copie: Path) -> None:
         source.backup(cible)
 
 
+#: Magasins JSON hors base qu'une règle écrit (pages désactivées, pages supprimées).
+MAGASINS = ("disabled_tracks", "deleted_tracks")
+
+
+def copier_les_magasins(source: Path, dossier: Path) -> dict[str, Path]:
+    """Copie les magasins JSON de `source` (le `data/` réel, LU seulement) dans
+    `dossier`, à côté de la base copiée, et y pointe les deux gestionnaires :
+    une règle qui désactive ou supprime des pages écrit dans la copie, jamais
+    dans `data/` (CORRECTIFS 2026-11-07 : la règle Non-Music n'avait pu se
+    simuler qu'en lecture). Rend {magasin: dossier de la copie}."""
+    import src.utils.deleted_tracks_manager as deleted
+    import src.utils.disabled_tracks_manager as disabled
+    from src.utils.deleted_tracks_manager import DeletedTracksManager
+    from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+    copies = {}
+    for magasin in MAGASINS:
+        cible = dossier / magasin
+        if (source / magasin).is_dir():
+            shutil.copytree(source / magasin, cible)
+        else:
+            cible.mkdir(parents=True)
+        copies[magasin] = cible
+    disabled.DATA_DIR = dossier
+    deleted.DATA_DIR = dossier
+    vus = {
+        "disabled_tracks": DisabledTracksManager().disabled_tracks_dir,
+        "deleted_tracks": DeletedTracksManager().deleted_tracks_dir,
+    }
+    for magasin, chemin in vus.items():
+        if Path(chemin).resolve() != copies[magasin].resolve():
+            raise RuntimeError(f"le magasin {magasin} n'est pas la copie : {chemin}")
+    return copies
+
+
 def main(argv=None) -> int:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
@@ -71,6 +108,7 @@ def main(argv=None) -> int:
     copie = dossier / "copie.db"
     try:
         copier_la_base(copie)
+        copier_les_magasins(Path(DATA_DIR), dossier)
         import src.utils.data_manager as module_dm
         from src.services import revue_auto
         from src.utils import corrections_fiches

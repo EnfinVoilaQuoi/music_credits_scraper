@@ -401,10 +401,22 @@ def executer_lot(
     ecrire: Callable[[str], None] = print,
     tuer: Callable[[subprocess.Popen], set[int]] = tuer_arbre,
     code_libelle: str | None = None,
+    horloge: Callable[[], float] = time.time,
+    activite: Callable[[Path], float] | None = None,
 ) -> Lot:
     """Les runs un par un, chacun surveillé (délai, gel). Un autre écrivain
     arrête le lot avant le run suivant ; un run figé ou hors délai est tué,
-    et le lot continue (sauf `arreter_si_fige`)."""
+    et le lot continue (sauf `arreter_si_fige`).
+
+    `horloge` et `activite` (dernière activité vue pour le journal d'un run :
+    journal, base, brut) sont des points d'injection : les tests y jugent le gel
+    sans dépendre de la charge de la machine (un run lent à démarrer passait pour
+    figé, `test_un_run_fige_est_tue_et_le_lot_continue`, 2026-11)."""
+    if activite is None:
+
+        def activite(journal: Path) -> float:
+            return derniere_activite(a_surveiller(data, journal))
+
     sortie.mkdir(parents=True, exist_ok=True)
     journal_lot = sortie / "lot.log"
     lot = Lot()
@@ -434,7 +446,7 @@ def executer_lot(
             libelle = " ".join(args)
             journal = sortie / nom_de_journal(n, args)
             noter(f"DÉBUT : {libelle}")
-            debut = time.time()
+            debut = horloge()
             with journal.open("w", encoding="utf-8") as f:
                 proc = subprocess.Popen(
                     commande(args),
@@ -451,17 +463,11 @@ def executer_lot(
                         break
                     except subprocess.TimeoutExpired:
                         pass
-                    statut = verdict(
-                        time.time(),
-                        debut,
-                        derniere_activite(a_surveiller(data, journal)),
-                        delai_s,
-                        gel_s,
-                    )
+                    statut = verdict(horloge(), debut, activite(journal), delai_s, gel_s)
                     if statut:
                         tues |= tuer(proc)
                         break
-            duree = time.time() - debut
+            duree = horloge() - debut
             if statut is None:
                 statut = "ok" if proc.returncode == 0 else f"code {proc.returncode}"
             lot.resultats.append(Resultat(args, statut, duree))

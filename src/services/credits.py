@@ -60,6 +60,10 @@ class OptionsCredits:
     #: pages sans relancer toute la discographie (2026-10-31, crédits Genius de
     #: versions lues avant le correctif de l'héritage).
     track_ids: frozenset[int] | None = None
+    #: Une absence constatée récemment (page lue sans crédit, Discogs « rien »)
+    #: ne fait plus taire la donnée (option de run « ignorer les délais »,
+    #: `--sans-delais`, 2026-11-22) ; ce qui est là n'est pas relu.
+    sans_delais: bool = False
 
     @property
     def paroles(self) -> bool:
@@ -169,7 +173,9 @@ def avec_page_genius(tracks, phase: str) -> list:
 LECTURE_GENIUS = "genius_scrape"
 
 
-def pages_genius_utiles(runtime: Runtime, tracks, *, force: bool) -> list:
+def pages_genius_utiles(
+    runtime: Runtime, tracks, *, force: bool, sans_delais: bool = False
+) -> list:
     """Les morceaux dont la page Genius a quelque chose à apporter à la phase
     crédits : crédits Genius manquants (constat d'absence récent compris, comme
     partout), ou dernière lecture en échec. Forcé : tous.
@@ -183,7 +189,11 @@ def pages_genius_utiles(runtime: Runtime, tracks, *, force: bool) -> list:
     if force:
         return list(tracks)
     return morceaux_a_traiter(
-        runtime, tracks, manquants=(Manque.CREDITS_GENIUS,), echecs=(LECTURE_GENIUS,)
+        runtime,
+        tracks,
+        manquants=(Manque.CREDITS_GENIUS,),
+        echecs=(LECTURE_GENIUS,),
+        sans_delais=sans_delais,
     )
 
 
@@ -579,7 +589,9 @@ def run(
             # remplace les crédits `genius` d'un morceau quand SA page est lue,
             # et seulement alors — un échec de page n'efface rien.
             avec_page = avec_page_genius(tracks, "Genius")
-            besoin = pages_genius_utiles(runtime, avec_page, force=options.force_credits)
+            besoin = pages_genius_utiles(
+                runtime, avec_page, force=options.force_credits, sans_delais=options.sans_delais
+            )
             bilan.genius_complets = len(avec_page) - len(besoin)
             if bilan.genius_complets:
                 logger.info(
@@ -619,7 +631,12 @@ def run(
             a_lire = (
                 tracks
                 if options.force_credits
-                else morceaux_a_traiter(runtime, tracks, manquants=(Manque.CREDITS_DISCOGS,))
+                else morceaux_a_traiter(
+                    runtime,
+                    tracks,
+                    manquants=(Manque.CREDITS_DISCOGS,),
+                    sans_delais=options.sans_delais,
+                )
             )
             bilan.discogs_ignores = len(tracks) - len(a_lire)
             ok = ko = 0

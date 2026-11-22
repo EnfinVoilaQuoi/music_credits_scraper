@@ -72,6 +72,13 @@ class OptionsIdentite:
     #: Passes PAR MORCEAU (3a, 3b) restreintes à ces fiches (`identite --fiches`) ;
     #: les couches d'artiste tournent quand même.
     track_ids: frozenset[int] | None = None
+    #: Passes par morceau ouvertes aussi aux fiches désactivées (option de run
+    #: « Titres désactivés », `--inclure-desactives`, 2026-11-22).
+    inclure_desactives: bool = False
+    #: Les « pas sur Deezer / Spotify / Apple » datés sont redemandés quel que
+    #: soit leur âge, sans relire ce qui est relié (option de run « ignorer les
+    #: délais », `--sans-delais`, 2026-11-22 ; ce n'est pas `force`).
+    sans_delais: bool = False
 
 
 @dataclass
@@ -360,6 +367,20 @@ def _recharger(runtime: Runtime, artist: Artist) -> None:
 
 
 @etape_de_flux("Identité")
+def _selection(
+    runtime: Runtime, artist: Artist, options: OptionsIdentite, kinds: tuple[Manque, ...] = ()
+) -> list:
+    """La sélection d'une passe par morceau, aux options de run de l'étape."""
+    return selection_morceaux(
+        runtime,
+        artist,
+        manquants=kinds,
+        track_ids=options.track_ids,
+        inclure_desactives=options.inclure_desactives,
+        sans_delais=options.sans_delais,
+    )
+
+
 def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks) -> BilanIdentite:
     """Les couches dans l'ordre de la preuve. Sync : appelée depuis le fil du
     worker ou de la CLI, jamais depuis la boucle asyncio."""
@@ -417,7 +438,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
     hits_albums: dict[int, int] = {}
     if options.par_morceau and options.deezer and not arret("Deezer par morceau"):
         kinds = () if options.force else (Manque.IDENTITE_DEEZER,)
-        tracks = selection_morceaux(runtime, artist, manquants=kinds, track_ids=options.track_ids)
+        tracks = _selection(runtime, artist, options, kinds)
         if tracks:
             b = _passage(runtime, artist, tracks, "deezer", hooks, "Deezer par morceau")
             bilan.deezer_morceaux = b.traites
@@ -437,7 +458,12 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
         hooks.progress(0, 1, "Albums par code-barres", "Apple Music")
         try:
             bilan.apple_parutions = rattacher_parutions_apple(
-                dm, artist, albums_deezer, force=options.force, should_stop=hooks.should_stop
+                dm,
+                artist,
+                albums_deezer,
+                force=options.force,
+                sans_delais=options.sans_delais,
+                should_stop=hooks.should_stop,
             )
         except Exception as e:  # noqa: BLE001 — une couche en panne n'arrête pas les suivantes
             logger.exception("Identité (Apple par code-barres) : échec")
@@ -450,7 +476,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
         hooks.progress(0, 1, "ID proposés par Genius", "Apple Music")
         try:
             bilan.apple_ids, bilan.apple_dementis = verifier_apple_music(
-                runtime, artist, force=options.force
+                runtime, artist, force=options.force, sans_delais=options.sans_delais
             )
         except Exception as e:  # noqa: BLE001 — une couche en panne n'arrête pas les suivantes
             logger.exception("Identité (Apple Music) : échec")
@@ -508,7 +534,12 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
         hooks.progress(0, 1, "Albums par code-barres", "Spotify (MusicBrainz)")
         try:
             bilan.spotify_parutions = relier_par_parution(
-                dm, artist, albums_deezer, force=options.force, should_stop=hooks.should_stop
+                dm,
+                artist,
+                albums_deezer,
+                force=options.force,
+                sans_delais=options.sans_delais,
+                should_stop=hooks.should_stop,
             )
         except Exception as e:  # noqa: BLE001 — une couche en panne n'arrête pas les suivantes
             logger.exception("Identité (Spotify par la parution) : échec")
@@ -518,7 +549,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
     # 3b — Spotify par morceau (APRÈS 3a : une durée indépendante existe)
     if options.par_morceau and not arret("Spotify par morceau"):
         kinds = (Manque.IDENTITE_SPOTIFY_FORCE,) if options.force else (Manque.IDENTITE_SPOTIFY,)
-        tracks = selection_morceaux(runtime, artist, manquants=kinds, track_ids=options.track_ids)
+        tracks = _selection(runtime, artist, options, kinds)
         sans_duree = {
             t.id for t in tracks if not (set(t.durations_observees) & set(DUREES_INDEPENDANTES))
         }
@@ -531,7 +562,7 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
         # plus : l'échec d'une recherche d'avant n'a plus d'objet (6 fiches de
         # Kaaris, coupure du 2026-11-07, restées « en échec » à vie).
         choisies = {t.id for t in tracks}
-        for t in selection_morceaux(runtime, artist, track_ids=options.track_ids):
+        for t in _selection(runtime, artist, options):
             if t.id not in choisies:
                 source_usage.sans_besoin("spotify_embed", t.id, flux=(Flow.IDENTITY,))
         _recharger(runtime, artist)
@@ -553,7 +584,9 @@ def run(runtime: Runtime, artist: Artist, options: OptionsIdentite, hooks: Hooks
     return bilan
 
 
-def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client=None):
+def verifier_apple_music(
+    runtime, artist: Artist, *, force: bool = False, sans_delais: bool = False, client=None
+):
     """3c — `(retenus, démentis)`. Les `apple_music_id` que Genius a DÉCLARÉS
     passent le contrôle d'identité (`apple_identity.fiche_concorde`) sur la
     fiche iTunes, lue par lots de 150 ; seul un ID qui concorde est écrit, avec
@@ -576,7 +609,8 @@ def verifier_apple_music(runtime, artist: Artist, *, force: bool = False, client
     for t in artist.tracks:
         # Un « pas sur Apple » daté EXPIRE (30 j sortie récente, 180 j sinon).
         if t.apple_music_id or (
-            not force and not constat_perime(t.apple_music_checked_at, t.release_date)
+            not force
+            and not constat_perime(t.apple_music_checked_at, t.release_date, sans_delai=sans_delais)
         ):
             continue
         for o in obs.get(t.id, []):

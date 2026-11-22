@@ -30,7 +30,8 @@ ETAPES_RESTREINTES = frozenset({"credits", "enrich", "streams"})
 
 #: Une option que le menu montre mais que les services ne savent pas encore
 #: faire : cochée, elle ne doit rien changer en silence — elle est grisée.
-OPTIONS_A_VENIR = frozenset({"desactives"})
+#: « Titres désactivés » en est sortie le 2026-11-22 (`inclure_desactives`).
+OPTIONS_A_VENIR: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -89,7 +90,7 @@ class ModeComplet(StrEnum):
     MANQUANTS_ECHECS = "manquants_echecs"
     ECHECS = "echecs"
     #: Redemander les « pas sur Spotify / Deezer / Apple » et les absences
-    #: récentes : les services n'ont pas encore d'option pour lever les délais.
+    #: récentes, sans forcer (`OptionsCycle.sans_delais`, 2026-11-22).
     IGNORER_DELAIS = "ignorer_delais"
     TOUT = "tout"
 
@@ -100,7 +101,8 @@ LIBELLES_COMPLET = {
     ModeComplet.IGNORER_DELAIS: "Ignorer les délais",
     ModeComplet.TOUT: "Tout relire",
 }
-MODES_A_VENIR = frozenset({ModeComplet.IGNORER_DELAIS})
+#: Les modes que les services ne savent pas encore faire (grisés).
+MODES_A_VENIR: frozenset[ModeComplet] = frozenset()
 
 
 class RunImpossible(ValueError):
@@ -126,6 +128,7 @@ def options_flux(etape: str, portee: PorteeFlux, coches: Iterable[int]) -> cycle
         # Les deux cochés = le défaut des services (aucun des deux demandé).
         manquants=portee.manquants and not portee.echecs,
         echecs=portee.echecs and not portee.manquants,
+        inclure_desactives=portee.desactives and etape in ETAPES_PAR_FICHES,
     )
     if etape == "identite":
         options = replace(options, identite=replace(options.identite, track_ids=ids, force=forcer))
@@ -152,6 +155,7 @@ def options_complet(mode: ModeComplet) -> cycle.OptionsCycle:
     return cycle.OptionsCycle(
         tout=mode is ModeComplet.TOUT,
         echecs=mode is ModeComplet.ECHECS,
+        sans_delais=mode is ModeComplet.IGNORER_DELAIS,
     )
 
 
@@ -171,5 +175,6 @@ def resume_portee(etape: str, portee: PorteeFlux, n_coches: int) -> str:
         critere = ", données manquantes seulement"
     else:
         critere = ", échecs seulement"
+    desactives = ", désactivés compris" if portee.desactives and etape in ETAPES_PAR_FICHES else ""
     forcer = " — forcé" if portee.forcer and etape in ETAPES_FORCABLES else ""
-    return f"{quoi}{critere}{forcer}"
+    return f"{quoi}{critere}{desactives}{forcer}"

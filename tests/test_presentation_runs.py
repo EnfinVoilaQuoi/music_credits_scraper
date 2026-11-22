@@ -85,6 +85,38 @@ class TestRunComplet:
         assert runs.options_complet(ModeComplet.TOUT).tout
         assert runs.options_complet(ModeComplet.TOUT).only == ()
 
-    def test_ignorer_les_delais_n_est_pas_encore_branche(self):
-        with pytest.raises(RunImpossible):
-            runs.options_complet(ModeComplet.IGNORER_DELAIS)
+    def test_ignorer_les_delais_leve_les_delais_sans_forcer(self):
+        o = runs.options_complet(ModeComplet.IGNORER_DELAIS)
+        assert o.sans_delais and not (o.tout or o.echecs or o.manquants)
+        assert not o.identite.force and not o.credits.force()
+        assert o.only == ()
+
+    @pytest.mark.parametrize(
+        "mode", [ModeComplet.MANQUANTS_ECHECS, ModeComplet.ECHECS, ModeComplet.TOUT]
+    )
+    def test_les_autres_modes_gardent_les_delais(self, mode):
+        assert not runs.options_complet(mode).sans_delais
+
+    def test_tous_les_modes_sont_disponibles(self):
+        assert not runs.MODES_A_VENIR
+
+
+class TestTitresDesactives:
+    def test_l_option_est_disponible(self):
+        assert "desactives" not in runs.OPTIONS_A_VENIR
+
+    @pytest.mark.parametrize("etape", ["identite", "credits", "enrich", "streams"])
+    def test_cochee_elle_inclut_les_desactives(self, etape):
+        assert runs.options_flux(etape, PorteeFlux(desactives=True), ()).inclure_desactives
+        assert not runs.options_flux(etape, PorteeFlux(), ()).inclure_desactives
+
+    @pytest.mark.parametrize("etape", ["disco", "certifs"])
+    def test_sans_objet_hors_des_etapes_par_fiches(self, etape):
+        assert not runs.options_flux(etape, PorteeFlux(desactives=True), ()).inclure_desactives
+
+    def test_resume(self):
+        p = PorteeFlux(desactives=True)
+        assert runs.resume_portee("enrich", p, 0) == (
+            "toute la discographie, données manquantes et échecs, désactivés compris"
+        )
+        assert runs.resume_portee("disco", p, 0) == "toute la discographie"

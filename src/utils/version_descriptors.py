@@ -2113,3 +2113,38 @@ def indice_meme_morceau(titre_kworb: str, titre_base: str) -> tuple[str, bool]:
     if mots & MOTS_DE_MEME_MORCEAU:
         return "✓ même morceau probable", True
     return "à vérifier", False
+
+
+def mots_de_titre(titre: str | None) -> list[str]:
+    """PUR. Les mots du titre, sans les invités (règle 3)."""
+    return _tokens(strip_featuring(titre or ""))
+
+
+def titre_contenu_ou_sigle(a: str | None, b: str | None) -> bool:
+    """PUR. L'un des titres est-il l'autre en plus court — ses mots, deux au
+    moins, à la suite dans l'autre (« Out The Game » / « Getting Out the Game »)
+    — ou son SIGLE (« JW » / « James Worthy », « DCR » / « Dolce Camara
+    Remix ») ? Jamais un titre générique (« Intro » se trouve partout). La
+    question des règle 3 (2026-11-22) : deux pages, un même enregistrement ;
+    le titre seul ne prouve rien, d'autres témoins sont exigés."""
+    if titre_generique(a) or titre_generique(b):
+        return False
+    ma, mb = mots_de_titre(a), mots_de_titre(b)
+    if not ma or not mb or ma == mb:
+        return False
+    for court, long_ in ((ma, mb), (mb, ma)):
+        n = len(court)
+        if (
+            n >= 2
+            and n < len(long_)
+            and any(long_[i : i + n] == court for i in range(len(long_) - n + 1))
+        ):
+            return True
+        if (
+            n == 1
+            and len(court[0]) >= 2
+            and len(long_) == len(court[0])
+            and "".join(m[0] for m in long_) == court[0]
+        ):
+            return True
+    return False

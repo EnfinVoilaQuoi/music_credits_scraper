@@ -1795,6 +1795,14 @@ def meme_enregistrement(track, ctx):
             "doublon de pages Genius ou version que le titre ne nomme pas — fusionner ?",
             {"autres": [autre.id], "texte": True, "empreinte": empreinte},
         )
+    if paire.get("deux_pages"):
+        # Règle 3 (décision utilisateur 2026-11-22).
+        return (
+            f"même enregistrement que « {autre.title} »"
+            + (f" ({autre.album})" if autre.album else "")
+            + f" ? {paire['deux_pages']} — fusionner, ou noter l'une en édition de l'autre ?",
+            {"autres": [autre.id], "deux_pages": paire["deux_pages"], "empreinte": empreinte},
+        )
     if paire.get("compteur"):
         # Versé de `streams_double` (audit) le 2026-11-11.
         return (

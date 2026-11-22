@@ -55,6 +55,65 @@ class TestOracle:
         assert cp.jugeable(G5)
 
 
+#: Kanye « Intro (Graduation Day) » (#11705, 19 s chez Discogs) : le couplet de
+#: John Legend. Son LRC YTM était celui de « Graduation Day » (#6806) : le
+#: sketch, puis le même couplet, 70 s (2026-11-22).
+INTRO_GRADUATION = (
+    "[Verse: John Legend]\nI'm no longer confused, but, don't tell anybody\n"
+    "I'm about to break the rules, but, don't tell anybody\n"
+    "I got something better than school, so don't tell anybody\n"
+    "My momma would kill me, so, don't tell anybody\n"
+    "She wants me to get a good ass job, just like everybody\n"
+    "She ain't walked in my shoes, I'm just not everybody"
+)
+LRC_GRADUATION_DAY = (
+    "[00:00.12]What in the fuck was that, Kanye? I told you to do some shit for the kids\n"
+    "[00:04.33]You give me your motherfuckin' graduation ticket right now\n"
+    "[00:06.33]You give me this motherfuckin' robe before you catch some senioritis\n"
+    "[00:09.58]You will not walk 'cross that stage, you won't slide across that stage\n"
+    "[00:12.65]Motherfucker, I can't pull you 'cross that motherfuckin' stage, Kanye\n"
+    "[00:16.89]Who told you? See, I told you to do something uplifting\n"
+    "[00:19.44]I'm tryna get you out here with these white people and this how you gon' do me?\n"
+    "[00:22.89]You know what? You's a nigga\n"
+    "[00:24.97]And I don't mean that in no nice way\n"
+    "[00:27.58]Had little kids singin' about the shit, no, the joke's on you\n"
+    "[00:30.18]You can throw yo' hands in the air, and wave good-bye to every - body\n"
+    "[00:33.80]As you get the fuck out of this campus\n"
+    "[00:36.03]What the f- you gone do now?\n"
+    "[00:42.57]I'm no longer confused, but don't tell anybody\n"
+    "[00:48.26]I'm about to break the rules, but don't tell anybody\n"
+    "[00:53.76]I got something better than school, but don't tell anybody\n"
+    "[00:59.51]My momma would kill me, so don't tell anybody\n"
+    "[01:04.74]She wants me to get a good ass job, just like everybody\n"
+    "[01:10.22]She ain't walked in my shoes, I'm just not everybody"
+)
+
+
+class TestLrcDUnEnregistrementPlusLong:
+    """2026-11-22 : des paroles CONTENUES dans le LRC d'un enregistrement plus
+    long passent le max des deux sens (1,0) ; la durée de la fiche, avec un LRC
+    aux mots surtout étrangers, les dément."""
+
+    def test_le_lrc_de_graduation_day_dementi_par_la_duree(self):
+        assert cp.recouvrement(INTRO_GRADUATION, LRC_GRADUATION_DAY) == 1.0
+        assert not cp.lrc_dementi(INTRO_GRADUATION, LRC_GRADUATION_DAY)
+        assert cp.part_du_lrc_dans_les_paroles(INTRO_GRADUATION, LRC_GRADUATION_DAY) < 0.4
+        assert cp.lrc_dementi(INTRO_GRADUATION, LRC_GRADUATION_DAY, 19)
+        r = reconcile(
+            [_obs("ytmusic", LRC_GRADUATION_DAY)], paroles=INTRO_GRADUATION, track_duration=19
+        )["lyrics_synced"]
+        assert r.value is None
+
+    def test_sans_debordement_ou_avec_des_mots_communs_rien(self):
+        # Une durée d'une seule vidéo plus courte que le morceau (« Ennemi
+        # d'État » de Kaaris : clip de 145 s, LRC juste de 182 s) ne suffit pas.
+        assert not cp.lrc_dementi(INTRO_GRADUATION, LRC_GRADUATION_DAY, 60)
+        assert not cp.lrc_dementi(INTRO_GRADUATION, LRC_GRADUATION_DAY, None)
+        # Genius partiel face au LRC complet du même morceau : ses mots sont là.
+        extrait = "Massif, âme de destruction massive\nMachine, c'est plus dur que tu l'imagines"
+        assert not cp.lrc_dementi(extrait, LRC_G5, 10)
+
+
 #: Deux morceaux d'un même artiste, même vocabulaire, AUCUNE phrase commune : les
 #: mots isolés les confondent (tranche 0,4-0,6), les bigrammes non.
 PAROLES_A = (

@@ -372,7 +372,15 @@ def chercher_formations(artist, data_manager, mb=None, discogs=None) -> RapportF
             from src.api.musicbrainz_api import MusicBrainzAPI
 
             mb = MusicBrainzAPI()
-        retenu = mb.resoudre_artiste(artist.name, nos_albums)
+        # Un candidat SEUL se prouve aussi (2026-11-22, Swing relié à un duo
+        # de Hong Kong) : single au titre d'un morceau, profil déjà connu.
+        retenu = mb.resoudre_artiste(
+            artist.name,
+            nos_albums,
+            nos_titres={normalize_title(t.title) for t in tracks if t.title},
+            profils_spotify={artist.spotify_id} if artist.spotify_id else set(),
+            profils_discogs={int(artist.discogs_id)} if artist.discogs_id else set(),
+        )
         if retenu is None:
             # `None` n'a que deux causes (une panne LÈVE) : aucun artiste de ce
             # nom exact, ou des homonymes qu'aucun album commun ne départage.

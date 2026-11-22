@@ -10,11 +10,13 @@ import pytest
 from src.api.musicbrainz_api import (
     MEMBRE_DE_GROUPE,
     CandidatArtiste,
+    autres_preuves,
     candidats_exacts,
     compter_albums_communs,
     departager,
     relations_membre,
 )
+from src.utils.title_matching import normalize_title
 
 # ── Extraits réels ───────────────────────────────────────────────────────────
 
@@ -177,10 +179,10 @@ class TestDepartager:
         retenu = departager([self._c("hk", 0), self._c("be", 3), self._c("us", 0)])
         assert retenu.nom == "be"
 
-    def test_un_seul_candidat_passe_sans_recouvrement(self):
-        """Personne avec qui le confondre. La validation humaine reste le
-        dernier mot."""
+    def test_un_seul_candidat_sans_rien_a_comparer_passe(self):
+        """Base sans album : rien à lui opposer, le seul candidat reste admis."""
         assert departager([self._c("seul", 0)]).nom == "seul"
+        assert departager([self._c("seul", 0)], a_comparer=False).nom == "seul"
 
     def test_egalite_en_tete_non_tranchee(self):
         """L'ordre y serait arbitraire, et se tromper produit des relations
@@ -294,6 +296,109 @@ class TestReessaiSur503:
         with pytest.raises(RuntimeError, match="HTTP 500"):
             api.details_artiste("mbid")
         assert len(file) == 1
+
+
+class TestCandidatSeulSansPreuve:
+    """Swing (rap FR), 2026-11-22 : seul candidat au nom exact, un duo de Hong
+    Kong sans album commun — profil Spotify, membres (Eric Kwok, Jerald Chan)
+    et alias « Snowman » posés chez le rappeur."""
+
+    def _c(self, nom, communs):
+        return CandidatArtiste(mbid=nom, nom=nom, albums_communs=communs)
+
+    def test_seul_sans_album_commun_est_refuse_quand_la_base_compare(self):
+        assert departager([self._c("hk", 0)], a_comparer=True) is None
+
+    def test_seul_avec_un_album_commun_est_accepte(self):
+        assert departager([self._c("be", 1)], a_comparer=True).nom == "be"
+
+    def test_resoudre_refuse_le_seul_homonyme_sans_album_commun(self, monkeypatch):
+        recherche = _Reponse(200, {"artists": [{"id": "hk", "name": "Swing", "type": "Group"}]})
+        lookup = _Reponse(
+            200,
+            {
+                "name": "Swing",
+                "relations": [],
+                "release-groups": [{"title": "Snowman"}],
+            },
+        )
+        api, _ = _client(monkeypatch, [recherche, lookup])
+        assert api.resoudre_artiste("Swing", {normalize_title("Marée noire")}) is None
+
+    def test_resoudre_accepte_le_seul_homonyme_qui_partage_un_album(self, monkeypatch):
+        recherche = _Reponse(200, {"artists": [{"id": "be", "name": "Swing", "type": "Person"}]})
+        lookup = _Reponse(
+            200, {"name": "Swing", "relations": [], "release-groups": [{"title": "Marée noire"}]}
+        )
+        api, _ = _client(monkeypatch, [recherche, lookup])
+        assert api.resoudre_artiste("Swing", {normalize_title("Marée noire")}).mbid == "be"
+
+    def test_seul_avec_une_autre_preuve_est_accepte(self):
+        seul = CandidatArtiste(mbid="crs", nom="crs", preuves=["single:Us Placers"])
+        assert departager([seul], a_comparer=True) is seul
+
+    def test_une_preuve_ne_departage_pas_plusieurs_homonymes(self):
+        """Les preuves hors albums ne servent qu'au candidat SEUL : le
+        départage des homonymes reste celui des albums."""
+        a = CandidatArtiste(mbid="a", nom="a", preuves=["single:X"])
+        b = CandidatArtiste(mbid="b", nom="b")
+        assert departager([a, b], a_comparer=True) is None
+
+
+class TestAutresPreuves:
+    """Mesuré sur le brut le 2026-11-22 : les trois justes que l'exigence
+    d'un album commun aurait perdus."""
+
+    def test_single_au_titre_d_un_morceau(self):
+        """Child Rebel Soldier, THE SCOTTS : des singles, aucun album."""
+        detail = {
+            "release-groups": [
+                {"title": "Us Placers", "primary-type": "Single"},
+                {"title": "Shrink", "primary-type": "Single"},
+            ]
+        }
+        titres = {normalize_title("Us Placers"), normalize_title("Engine Light")}
+        assert autres_preuves(detail, nos_titres=titres) == ["single:Us Placers"]
+
+    def test_un_album_au_titre_d_un_morceau_ne_prouve_pas(self):
+        """Swing de Hong Kong : « On Fire », « For Sale »… sont des albums ;
+        un morceau homonyme chez le rappeur ne prouverait rien."""
+        detail = {"release-groups": [{"title": "On Fire", "primary-type": "Album"}]}
+        assert autres_preuves(detail, nos_titres={normalize_title("On Fire")}) == []
+
+    def test_profil_spotify_ou_discogs_deja_connu(self):
+        """Karlit & Kabok : l'album s'écrit « eskalier » chez MusicBrainz, mais
+        la fiche lie le profil Spotify que la base tient pour le duo."""
+        detail = {
+            "relations": [
+                {"url": {"resource": "https://open.spotify.com/artist/5CoxowK3mnGyw6jx6Uszi2"}},
+                {"url": {"resource": "https://www.discogs.com/artist/1030931"}},
+            ]
+        }
+        assert autres_preuves(
+            detail, profils_spotify={"5CoxowK3mnGyw6jx6Uszi2"}, profils_discogs={1030931}
+        ) == ["spotify:5CoxowK3mnGyw6jx6Uszi2", "discogs:1030931"]
+        assert autres_preuves(detail, profils_spotify={"6LdLJ6nh1qFyveuaXwxdXQ"}) == []
+
+    def test_resoudre_accepte_le_seul_homonyme_par_son_single(self, monkeypatch):
+        recherche = _Reponse(
+            200, {"artists": [{"id": "sc", "name": "THE SCOTTS", "type": "Group"}]}
+        )
+        lookup = _Reponse(
+            200,
+            {
+                "name": "THE SCOTTS",
+                "relations": [],
+                "release-groups": [{"title": "THE SCOTTS", "primary-type": "Single"}],
+            },
+        )
+        api, _ = _client(monkeypatch, [recherche, lookup])
+        retenu = api.resoudre_artiste(
+            "THE SCOTTS",
+            {normalize_title("Fortnite Present: Astronomical")},
+            nos_titres={normalize_title("THE SCOTTS")},
+        )
+        assert retenu.mbid == "sc"
 
 
 class TestVerdictDUsage:

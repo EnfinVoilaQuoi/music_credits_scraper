@@ -168,7 +168,7 @@ class _MB:
     def __init__(self, retenu=True, boum=False, aliases=()):
         self.retenu, self.boum, self.aliases = retenu, boum, list(aliases)
 
-    def resoudre_artiste(self, nom, nos_albums):
+    def resoudre_artiste(self, nom, nos_albums, **preuves):
         if self.boum:
             raise RuntimeError("503 saturé")
         if not self.retenu:

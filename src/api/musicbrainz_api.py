@@ -149,6 +149,8 @@ class CandidatArtiste:
     #: souvent plusieurs quand Spotify a dédoublé l'artiste — référence du
     #: garde des homonymes (`spotify_identity.ids_artiste_attendus`), 2026-10-14.
     spotify_ids: list[str] = field(default_factory=list)
+    #: Preuves hors albums (`autres_preuves`) : ne servent qu'au candidat SEUL.
+    preuves: list[str] = field(default_factory=list)
 
 
 # ── Logique PURE (testable sans réseau) ──────────────────────────────────────
@@ -312,7 +314,38 @@ def compter_albums_communs(detail: dict, nos_albums: set[str]) -> int:
     return len(titres & nos_albums)
 
 
-def departager(candidats: list[CandidatArtiste]) -> CandidatArtiste | None:
+def autres_preuves(
+    detail: dict,
+    *,
+    nos_titres: set[str] = frozenset(),
+    profils_spotify: set[str] = frozenset(),
+    profils_discogs: set[int] = frozenset(),
+) -> list[str]:
+    """Ce qui, hors des albums, rattache le candidat à NOTRE artiste. Pure.
+
+    - un SINGLE du candidat (release-group de type « Single ») au titre
+      normalisé d'un de nos morceaux (Child Rebel Soldier, THE SCOTTS : aucun
+      album, des singles) ;
+    - un profil Spotify ou Discogs que la fiche lie et que la base tient déjà
+      pour celui de l'artiste (`artists.spotify_id`, `artists.discogs_id` :
+      jamais un profil venu de MusicBrainz lui-même). Karlit & Kabok : l'album
+      s'écrit « eskalier » chez MusicBrainz, « escalier » chez nous.
+
+    Mesuré le 2026-11-22 sur le brut (182 lectures, 107 artistes).
+    """
+    preuves = []
+    for rg in detail.get("release-groups") or []:
+        titre = rg.get("title")
+        if rg.get("primary-type") == "Single" and titre and normalize_title(titre) in nos_titres:
+            preuves.append(f"single:{titre}")
+    preuves += [f"spotify:{s}" for s in spotify_ids_de(detail) if s in profils_spotify]
+    preuves += [f"discogs:{d}" for d in discogs_ids_de(detail) if d in profils_discogs]
+    return preuves
+
+
+def departager(
+    candidats: list[CandidatArtiste], *, a_comparer: bool = False
+) -> CandidatArtiste | None:
     """Le bon artiste parmi des homonymes EXACTS, ou None si on ne peut pas conclure.
 
     Fonction pure. Même règle que le départage des canaux YTMusic : il faut un
@@ -321,13 +354,20 @@ def departager(candidats: list[CandidatArtiste]) -> CandidatArtiste | None:
     arbitraire, et se tromper d'artiste ici produit des relations crédibles vers
     quelqu'un d'autre.
 
-    Le cas à UN seul candidat est accepté SANS recouvrement : il n'y a personne
-    avec qui le confondre. C'est la validation humaine qui reste le dernier mot.
+    Le cas à UN seul candidat n'est accepté sans preuve que si la base n'a
+    rien à lui opposer (`a_comparer` faux : ni album ni morceau en base). Dès
+    que la base a de quoi comparer, seul au nom exact ne prouve rien : il faut
+    un album commun ou une autre preuve (`autres_preuves`). Swing (rap FR) a été
+    relié ainsi à un duo de Hong Kong, profil Spotify, membres et alias compris
+    (2026-11-22 ; modèle : l'oracle Deezer, The Graduates).
     """
     if not candidats:
         return None
     if len(candidats) == 1:
-        return candidats[0]
+        seul = candidats[0]
+        if a_comparer and seul.albums_communs == 0 and not seul.preuves:
+            return None
+        return seul
     classes = sorted(candidats, key=lambda c: -c.albums_communs)
     if classes[0].albums_communs == 0:
         return None
@@ -435,7 +475,15 @@ class MusicBrainzAPI:
             obs.ok()
             return details
 
-    def resoudre_artiste(self, nom: str, nos_albums: set[str]) -> CandidatArtiste | None:
+    def resoudre_artiste(
+        self,
+        nom: str,
+        nos_albums: set[str],
+        *,
+        nos_titres: set[str] = frozenset(),
+        profils_spotify: set[str] = frozenset(),
+        profils_discogs: set[int] = frozenset(),
+    ) -> CandidatArtiste | None:
         """Nom → l'artiste MusicBrainz correspondant, relations comprises.
 
         Enchaîne les trois décisions mesurées : nom EXACT, départage par
@@ -452,6 +500,11 @@ class MusicBrainzAPI:
         lookup en 503 était sauté (`continue`), et un artiste unique dont le
         seul lookup échouait ressortait comme « ambigu » — Kid Cudi, un seul
         homonyme exact, l'était une fois sur deux.
+
+        `nos_titres` (titres normalisés des morceaux) et les profils Spotify /
+        Discogs que la base tient pour l'artiste ne servent qu'à prouver un
+        candidat SEUL (`autres_preuves`) : depuis le 2026-11-22, il n'est plus
+        retenu sans preuve quand la base a de quoi comparer.
         """
         exacts = candidats_exacts(nom, self.rechercher_artiste(nom))
         if not exacts:
@@ -476,20 +529,27 @@ class MusicBrainzAPI:
                     aliases=aliases_de(detail),
                     discogs_ids=discogs_ids_de(detail),
                     spotify_ids=spotify_ids_de(detail),
+                    preuves=autres_preuves(
+                        detail,
+                        nos_titres=nos_titres,
+                        profils_spotify=profils_spotify,
+                        profils_discogs=profils_discogs,
+                    ),
                 )
             )
 
-        retenu = departager(candidats)
+        retenu = departager(candidats, a_comparer=bool(nos_albums or nos_titres))
         if retenu is None:
             logger.warning(
-                f"MusicBrainz : {len(candidats)} homonymes exacts pour « {nom} », "
-                "aucun ne se détache — rien n'est retenu."
+                f"MusicBrainz : {len(candidats)} homonyme(s) exact(s) pour « {nom} », "
+                "aucun n'a d'album commun qui le détache — rien n'est retenu."
             )
             return None
         logger.info(
             f"MusicBrainz : « {nom} » → {retenu.mbid} "
             f"({retenu.desambiguation or retenu.type or '?'}), "
-            f"{retenu.albums_communs} album(s) commun(s), {len(retenu.relations)} relation(s)"
+            f"{retenu.albums_communs} album(s) commun(s), "
+            f"{len(retenu.preuves)} autre(s) preuve(s), {len(retenu.relations)} relation(s)"
         )
         return retenu
 

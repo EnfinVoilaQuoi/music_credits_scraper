@@ -470,7 +470,7 @@ def test_formations_et_alias_proposes_jamais_confirmes(monkeypatch):
     from src.api.musicbrainz_api import AliasArtiste, RelationGroupe
 
     class _MB:
-        def resoudre_artiste(self, nom, nos_albums):
+        def resoudre_artiste(self, nom, nos_albums, **preuves):
             return SimpleNamespace(
                 mbid="mb-1",
                 relations=[RelationGroupe("member_of", "Panama Bende", "mb-pb", "Group")],
@@ -496,7 +496,7 @@ def test_formations_et_alias_proposes_jamais_confirmes(monkeypatch):
 
 def test_saturation_musicbrainz_est_une_panne(monkeypatch):
     class _MB:
-        def resoudre_artiste(self, nom, nos_albums):
+        def resoudre_artiste(self, nom, nos_albums, **preuves):
             raise RuntimeError("503 saturé")
 
     rt = _rt_formations(monkeypatch, _MB())

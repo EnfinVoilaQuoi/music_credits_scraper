@@ -228,7 +228,7 @@ class FenetrePrincipale(QMainWindow):
             "alert-triangle", "Décisions • Erreurs — panneau à venir (version CustomTkinter)"
         )
         self.b_sante = BoutonPastille(
-            "activity", "Santé des sources — fenêtre à venir (version CustomTkinter)"
+            "activity", "Santé des sources — la pastille dit qu'une source est cassée"
         )
         self.b_file = BoutonPastille(
             "list-check", "Liste de tâches : runs en cours, planifiés, en attente"
@@ -236,7 +236,7 @@ class FenetrePrincipale(QMainWindow):
         self.b_menu = BoutonPastille("settings", "Menu")
         self.b_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.b_menu.setMenu(self._menu_general())
-        for b in (self.b_certifs, self.b_media, self.b_decisions, self.b_sante):
+        for b in (self.b_certifs, self.b_media, self.b_decisions):
             b.setEnabled(False)
         for w in (self.b_ajout, self.b_base):
             h.addWidget(w)
@@ -470,6 +470,7 @@ class FenetrePrincipale(QMainWindow):
         self.b_base.clicked.connect(self._ouvrir_base)
         self.b_file.clicked.connect(self._ouvrir_centre)
         self.b_formations.clicked.connect(self._ouvrir_formations)
+        self.b_sante.clicked.connect(self._ouvrir_sante)
         self.cartouche.formations_cliquees.connect(self._ouvrir_formations)
         self.recherche.textEdited.connect(self._completer)
         self.recherche.returnPressed.connect(lambda: self.charger(self.recherche.text()))
@@ -698,6 +699,21 @@ class FenetrePrincipale(QMainWindow):
             lambda c: self._sur_chargement(c, nom, garder=True),
             nom="qt:recharger-artiste",
         )
+
+    # ── santé des sources ────────────────────────────────────────────────────
+    def _ouvrir_sante(self) -> None:
+        from src.gui_qt.sante import FenetreSante
+        from src.observability.repository import SourceUsageRepository
+        from src.utils.source_health import SOURCES, check_all, load_health, save_health
+
+        def sonder(niveau: str) -> dict:
+            save_health(check_all(level=niveau))
+            return load_health()
+
+        engine = self.runtime.data_manager.engine
+        d = FenetreSante(SourceUsageRepository(engine), SOURCES, load_health, sonder, self)
+        d.sondee.connect(lambda n: self.b_sante.poser_pastille("!" if n else None))
+        d.show()
 
     # ── vue Album ────────────────────────────────────────────────────────────
     @property

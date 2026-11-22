@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from PyQt6 import sip
 from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QPainter, QPainterPath, QPixmap
 from PyQt6.QtWidgets import (
@@ -146,7 +147,11 @@ class BoutonPastille(QToolButton):
         return self._pastille
 
     def poser_pastille(self, texte: str | int | None) -> None:
-        """« ! », un nombre, ou rien (None, 0, « ») pour l'effacer."""
+        """« ! », un nombre, ou rien (None, 0, « ») pour l'effacer. Sans effet
+        sur un bouton déjà détruit : un comptage en fond peut revenir après la
+        fermeture de la fenêtre."""
+        if sip.isdeleted(self):
+            return
         self._pastille = "" if not texte else str(texte)
         self.update()
 

@@ -259,9 +259,14 @@ def test_fiche_sept_onglets(qtbot):
 
 
 @pytest.fixture
-def fenetre(qtbot, data_manager, tmp_path):
+def fenetre(qtbot, data_manager, tmp_path, monkeypatch):
     from src.gui_qt.fenetre import FenetrePrincipale
+    from src.services import revue
     from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+    # Le panneau Décisions lit les pages désactivées du dossier RÉEL : jamais
+    # dans un test.
+    monkeypatch.setattr(revue, "fiches_actives", lambda artiste: list(artiste.tracks or []))
 
     desactives = DisabledTracksManager()
     desactives.disabled_tracks_dir = tmp_path
@@ -606,3 +611,41 @@ def test_run_mis_en_attente_puis_lance(qtbot, fenetre, monkeypatch):
     qtbot.waitUntil(lambda: not fenetre.taches.occupe, timeout=10_000)
     assert fenetre.file_attente == []
     fenetre.taches.fermer()
+
+
+# ── Décisions • Erreurs ──────────────────────────────────────────────────────
+
+
+def test_panneau_decisions(qtbot, fenetre):
+    from src.gui_qt.decisions import FenetreDecisions
+    from src.presentation.decisions import Vue
+
+    _charger(qtbot, fenetre)
+    d = FenetreDecisions(fenetre.runtime, fenetre.chargement.artist, {})
+    qtbot.addWidget(d)
+    assert d.boutons_vue[Vue.DECISIONS].isChecked()
+    assert d.titre.text().endswith("triés par impact")
+    tous = d.revue.actifs
+    if tous:
+        c = next(iter(tous))
+        d.vue = Vue(
+            next(
+                v
+                for v, n in __import__(
+                    "src.presentation.decisions", fromlist=["NATURE_DE_LA_VUE"]
+                ).NATURE_DE_LA_VUE.items()
+                if n == c.nature
+            )
+        )
+        d.normal(c)
+        assert c in d.revue.masques
+        d.retablir(c)
+        assert c in d.revue.actifs
+    d.changer_vue(Vue.JOURNAL)
+    assert d.filtre.count() == 1
+
+
+def test_format_impact():
+    from src.presentation.decisions import format_impact
+
+    assert [format_impact(n) for n in (0, 999, 12_000, 2_500_000)] == ["—", "999", "12 k", "2.5 M"]

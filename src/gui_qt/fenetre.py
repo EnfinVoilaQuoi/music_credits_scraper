@@ -8,6 +8,7 @@ CLI) après une confirmation qui dit sa portée — jamais en silence.
 
 from __future__ import annotations
 
+from PyQt6 import sip
 from PyQt6.QtCore import QSettings, Qt, QTimer, QUrl
 from PyQt6.QtGui import (
     QAction,
@@ -225,7 +226,7 @@ class FenetrePrincipale(QMainWindow):
         )
         self.b_media = BoutonPastille("photo", "Media — fenêtre à venir (version CustomTkinter)")
         self.b_decisions = BoutonPastille(
-            "alert-triangle", "Décisions • Erreurs — panneau à venir (version CustomTkinter)"
+            "alert-triangle", "Décisions • Erreurs — la pastille dit qu'un cas attend"
         )
         self.b_sante = BoutonPastille(
             "activity", "Santé des sources — la pastille dit qu'une source est cassée"
@@ -236,7 +237,7 @@ class FenetrePrincipale(QMainWindow):
         self.b_menu = BoutonPastille("settings", "Menu")
         self.b_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.b_menu.setMenu(self._menu_general())
-        for b in (self.b_certifs, self.b_media, self.b_decisions):
+        for b in (self.b_certifs, self.b_media):
             b.setEnabled(False)
         for w in (self.b_ajout, self.b_base):
             h.addWidget(w)
@@ -471,6 +472,7 @@ class FenetrePrincipale(QMainWindow):
         self.b_file.clicked.connect(self._ouvrir_centre)
         self.b_formations.clicked.connect(self._ouvrir_formations)
         self.b_sante.clicked.connect(self._ouvrir_sante)
+        self.b_decisions.clicked.connect(self._ouvrir_decisions)
         self.cartouche.formations_cliquees.connect(self._ouvrir_formations)
         self.recherche.textEdited.connect(self._completer)
         self.recherche.returnPressed.connect(lambda: self.charger(self.recherche.text()))
@@ -560,6 +562,7 @@ class FenetrePrincipale(QMainWindow):
             self._verifier_nouveautes()
         self.projets = None
         self._compter_formations()
+        self._compter_decisions()
         if self.en_vue_album:
             self._charger_albums()
         self.cartouche.afficher(c.cartouche, getattr(c.artist, "image_path", None))
@@ -700,6 +703,77 @@ class FenetrePrincipale(QMainWindow):
             nom="qt:recharger-artiste",
         )
 
+    # ── décisions • erreurs ──────────────────────────────────────────────────
+    def _compter_decisions(self) -> None:
+        """La pastille « ! » : des décisions attendent (analyse hors ligne, en fond)."""
+        c = self.chargement
+        if c is None:
+            self.b_decisions.poser_pastille(None)
+            return
+        artist = c.artist
+
+        def compter() -> int:
+            from src.presentation.decisions import a_trancher
+            from src.services.revue import analyser
+
+            return a_trancher(analyser(self.runtime.data_manager, artist))
+
+        def poser(n) -> None:
+            if self.chargement is not None and self.chargement.artist.id == artist.id:
+                self.b_decisions.poser_pastille("!" if n else None)
+
+        en_fond(compter, poser, lambda m: logger.debug(f"Décisions non comptées : {m}"))
+
+    def _renvois_decisions(self) -> dict:
+        """Les fenêtres vers lesquelles une action du panneau renvoie."""
+
+        def pas_encore(quoi: str):
+            def renvoi(*_):
+                QMessageBox.information(
+                    self,
+                    "Décisions",
+                    f"{quoi} n'a pas encore sa fenêtre en Qt : passez par la version "
+                    "CustomTkinter (`python src/main.py`).",
+                )
+
+            return renvoi
+
+        def lire_piste_deezer(tid):
+            # Appelé depuis le fil de fond de l'action (réseau) : le pont vers la
+            # boucle asyncio, comme la fenêtre CustomTkinter.
+            from src.concurrency import async_loop
+
+            enricher = self.runtime.data_enricher
+            return async_loop.run_sync(enricher.deezer_client.get_track_async(enricher.http, tid))
+
+        return {
+            "fusion": pas_encore("La fusion de deux fiches"),
+            "groupes": lambda: QTimer.singleShot(0, self._ouvrir_formations),
+            "ecarts_deezer": pas_encore("Les écarts Deezer"),
+            "lire_piste_deezer": lire_piste_deezer,
+        }
+
+    def _ouvrir_decisions(self) -> None:
+        from src.gui_qt.decisions import FenetreDecisions
+
+        c = self.chargement
+        if c is None:
+            return
+        nom = c.artist.name
+        d = FenetreDecisions(self.runtime, c.artist, self._renvois_decisions(), self)
+        from src.presentation.decisions import a_trancher
+
+        self.b_decisions.poser_pastille("!" if a_trancher(d.revue) else None)
+        d.compte.connect(lambda n: self.b_decisions.poser_pastille("!" if n else None))
+        d.modifie.connect(lambda: self._recharger(nom))
+        d.ouvrir_fiche.connect(self._ouvrir_fiche_par_id)
+        d.show()
+
+    def _ouvrir_fiche_par_id(self, track_id: int) -> None:
+        ligne = next((x for x in self.modele.lignes if x.id == track_id), None)
+        if ligne is not None:
+            self._fiche_detachee(ligne)
+
     # ── santé des sources ────────────────────────────────────────────────────
     def _ouvrir_sante(self) -> None:
         from src.gui_qt.sante import FenetreSante
@@ -838,6 +912,7 @@ class FenetrePrincipale(QMainWindow):
         for b in self.boutons_flux.values():
             b.setEnabled(charge or (occupe and b.en_cours))
         self.b_formations.setEnabled(charge)
+        self.b_decisions.setEnabled(charge)
 
     def _rafraichir_infobulles_flux(self, *_) -> None:
         for cle in self.portees:
@@ -995,6 +1070,9 @@ class FenetrePrincipale(QMainWindow):
         )
 
     def _sur_nouveautes(self, artist, verification) -> None:
+        # La vérification en fond peut revenir après la fermeture de la fenêtre.
+        if sip.isdeleted(self.a_nouveautes):
+            return
         if self.chargement is None or self.chargement.artist.id != artist.id:
             return
         self.verification = verification

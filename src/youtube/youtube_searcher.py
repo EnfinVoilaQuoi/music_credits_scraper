@@ -105,6 +105,10 @@ def relevance_score(
     2026-10-26 : « Day 'N' Nite (Crookers Remix) », 16,9 M de vues, comptait
     pour le remix avec Jim Jones).
     """
+    # « <série> : Episode N / <titre> » désigne <titre> (décision utilisateur
+    # 2026-11-22), des deux côtés : certaines fiches gardent le préfixe.
+    target_title = sans_prefixe_d_episode(target_title)
+    result_title = sans_prefixe_d_episode(result_title)
     # Le nom du disque que Genius ajoute à un titre générique n'en fait pas
     # partie : « Intro (Table d'écoute) » est l'« Intro » de *Table d'écoute*.
     target_title = titre_sans_son_disque(target_title, album)
@@ -121,6 +125,24 @@ def relevance_score(
         _pertinence(forme, artistes, target_artist, target_title)
         for forme in formes_publiees(result_title)
     )
+
+
+#: « Jesuispasséchezso : Episode 6 / 93 Empire » : le préfixe d'une série de
+#: vidéos, devant le titre du morceau.
+_PREFIXE_D_EPISODE = re.compile(
+    r"^\s*#?[^:/]+?\s*:\s*[ÉE]pisode\s*\d+\s*/\s*(?P<titre>\S.*?)\s*$", re.IGNORECASE
+)
+
+
+def sans_prefixe_d_episode(titre: str | None) -> str | None:
+    """PUR. « <série> : Episode N / <titre> » → « <titre> » (décision
+    utilisateur 2026-11-22 : les épisodes de *#JeSuisPasséChezSo* de Sofiane,
+    « 93 Empire », « Fais le mouv », refusés par le score). Un titre sans ce
+    préfixe (« Respect (Episode 3) », « Épisode sombre ») reste tel quel."""
+    if not titre:
+        return titre
+    m = _PREFIXE_D_EPISODE.match(titre)
+    return m["titre"] if m else titre
 
 
 #: « (Extrait du projet Art de rue) », « - Extrait de l'album Oderunt Poetas » :

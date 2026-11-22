@@ -68,6 +68,27 @@ class TestClasser:
         (e,) = ed.classer(albums, base, [], NOUS)[0]
         assert e.nature == "apparition" and e.socle is base[0]
 
+    def test_le_socle_n_est_pas_la_fiche_ou_l_artiste_n_est_que_producteur(self):
+        """2026-11-22 : la démo de « The Return of Chip Douglas » de Kid Cudi
+        visait « The Return Of Chip Douglas » de Nuevo (USA), qu'il produit
+        (#3960), et non le sien (#3638) — quel que soit l'ordre de la base."""
+        nuevo = _track("The Return Of Chip Douglas", "God’s Experiment")
+        nuevo.secondary_role = "Producer"
+        cudi = _track("The Return of Chip Douglas", "Speedin’ Bullet 2 Heaven")
+        p = _piste(
+            10,
+            "The Return of Chip Douglas (Demo)",
+            short="The Return of Chip Douglas",
+            version="(Demo)",
+        )
+        for base in ([nuevo, cudi], [cudi, nuevo]):
+            albums = [_album(1, "Speedin' Bullet 2 Heaven", [p])]
+            (e,) = ed.classer(albums, base, [], NOUS)[0]
+            assert e.socle is cudi
+        # Sans autre fiche, celle du producteur reste l'original.
+        (e,) = ed.classer([_album(1, "Speedin' Bullet 2 Heaven", [p])], [nuevo], [], NOUS)[0]
+        assert e.socle is nuevo
+
     def test_une_partie_seule_n_est_le_socle_de_personne(self):
         base = [_track("Part 2", "A")]
         p = _piste(10, "Pt. 2 (Remix)", "Pt. 2", "(Remix)", contributors=[(NOUS, "Nous")])
@@ -733,12 +754,21 @@ class TestCreerLignes:
 
     def test_la_version_nomme_le_principal_que_la_page_de_l_original_donne(self):
         artist = Artist(name="Lucio Bukowski")
-        socle = Track(title="Socle", artist=artist)
+        socle = Track(title="Socle", artist=artist, genius_id=12)
         socle.primary_artist_name = "Mani Deïz"
         assert ed.artiste_de_l_original(socle, artist) == "Mani Deïz"
         assert ed.artiste_de_l_original(Track(title="Socle", artist=artist), artist) == (
             "Lucio Bukowski"
         )
+
+    def test_sans_page_genius_le_principal_n_est_que_l_hote_du_disque(self):
+        """2026-11-22 : une fiche créée depuis Deezer porte en principal l'artiste
+        du DISQUE où elle apparaît (« Dimanche 31 » d'Anton Serra, sur un disque
+        d'Oster Lapwass) : il ne fait pas l'interprète de l'original."""
+        artist = Artist(name="Anton Serra")
+        socle = Track(title="Dimanche 31", artist=artist)
+        socle.is_featuring, socle.primary_artist_name = True, "Oster Lapwass"
+        assert ed.artiste_de_l_original(socle, artist) == "Anton Serra"
 
     def test_la_version_ne_prend_pas_un_id_kworb_refuse(self, data_manager):
         from src.utils import corrections_fiches as cf

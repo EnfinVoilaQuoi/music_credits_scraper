@@ -576,9 +576,20 @@ def classer(
         if t.isrc:
             isrcs.setdefault(str(t.isrc).upper(), []).append(t)
         if not porte_une_version(t.title):
-            socles.setdefault(k, t)
-            if cle_partie := cle_de_socle(t.title):
-                socles_par_partie.setdefault(cle_partie, t)
+            # Entre deux fiches au même socle, celle où l'artiste n'a qu'un
+            # rôle SECONDAIRE (producteur, auteur) n'est l'original qu'à défaut
+            # d'autre, comme chez `version_heritage.socle_parmi` (2026-11-22 :
+            # la démo de « The Return of Chip Douglas » de Kid Cudi visait le
+            # morceau de Nuevo (USA) qu'il produit, l'« Fugitif (Instrumental) »
+            # de Shurik'n la page d'IAM qu'il écrit).
+            if k not in socles or (socles[k].secondary_role and not t.secondary_role):
+                socles[k] = t
+            cle_partie = cle_de_socle(t.title)
+            if cle_partie and (
+                cle_partie not in socles_par_partie
+                or (socles_par_partie[cle_partie].secondary_role and not t.secondary_role)
+            ):
+                socles_par_partie[cle_partie] = t
     cles_albums = {cle_album(t.album) for t in base if t.album}
     cles_albums |= {cle_album(a.get("title")) for a in albums_base if a.get("title")}
     # Disques que la base ne connaît QUE par des lignes d'invité : celui d'un
@@ -1072,8 +1083,13 @@ def artiste_de_l_original(socle: Track, artist) -> str:
     """PUR. L'interprète principal de l'original d'une version créée : celui
     que sa page nomme, sinon l'artiste dont c'est la fiche — pas l'artiste qui
     crée la version (NTM « Un ange dans le ciel (Live …) », original de Kool
-    Shen #31136, disait « Suprême NTM »)."""
-    if socle.primary_artist_name:
+    Shen #31136, disait « Suprême NTM »).
+
+    Le principal ne fait foi que lu sur une page GENIUS (c'est celui que Genius
+    écrit dans ses propres relations) : une fiche sans page, créée depuis
+    Deezer, porte en principal l'artiste du DISQUE où elle apparaît, qui peut
+    n'être que son hôte (2026-11-22)."""
+    if socle.primary_artist_name and (socle.genius_id or socle.genius_url):
         return socle.primary_artist_name
     proprietaire = socle.artist.name if socle.artist is not None else None
     return proprietaire or artist.name

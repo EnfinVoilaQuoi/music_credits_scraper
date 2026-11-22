@@ -13,8 +13,23 @@ page et le `track_id` étaient justes : seul le nom change.
 
 Visée : une relation qui porte un `track_id` (seul `ecarts_deezer` en pose),
 dont le nom est celui de l'artiste de la fiche et diffère de l'interprète de la
-fiche désignée (son principal Genius, sinon l'artiste dont c'est la fiche).
-L'écriture passe par `record_relationships` (sœurs comprises).
+fiche désignée. L'écriture passe par `record_relationships` (sœurs comprises).
+
+Règle de l'interprète (2026-11-22, `ecarts_deezer.artiste_de_l_original`) : le
+principal GENIUS de l'original — celui que Genius écrit lui-même dans ses
+relations (`primary_artist`) —, lu sur une fiche qui a sa page ; sinon
+l'artiste dont c'est la fiche. Sans page, le principal d'une fiche créée depuis
+Deezer est l'artiste du DISQUE où elle apparaît, qui peut n'être que son hôte.
+Relu dans le brut Genius pour les 18 originaux qui ont une page : le principal
+y est partout le `primary_artist` de Genius ; les noms qui étonnent (« -M- »
+pour Oxmo, « Dajak » pour Swing, « Napoleon Da Legend » pour Akhenaton,
+« Diamond Deuklo » pour les Casseurs Flowters) sont ceux de pages où l'artiste
+n'est qu'invité, producteur, ou signataire du disque (*Comment c'est loin*).
+
+Un original DOUTEUX n'est pas renommé : une fiche où l'artiste n'a qu'un rôle
+secondaire, quand il a la sienne au même titre (« The Return of Chip
+Douglas » de Nuevo (USA), produit par Kid Cudi) — la relation vise la mauvaise
+fiche, `scripts/ponctuels/chip_douglas_version.py` la repointe.
 """
 
 import argparse
@@ -25,9 +40,10 @@ from pathlib import Path
 TYPES = ("version_of", "remix_of")
 
 
-def interprete(principal: str | None, proprietaire: str | None) -> str | None:
-    """PUR. Même règle que `ecarts_deezer.artiste_de_l_original`."""
-    return principal or proprietaire
+def interprete(principal: str | None, proprietaire: str | None, page: bool = True) -> str | None:
+    """PUR. Même règle que `ecarts_deezer.artiste_de_l_original` : le principal
+    ne fait foi que lu sur une page Genius (`page`)."""
+    return (principal if page else None) or proprietaire
 
 
 def relations_corrigees(relations: list, artiste_de_la_fiche: str, originaux: dict) -> list | None:
@@ -49,6 +65,17 @@ def relations_corrigees(relations: list, artiste_de_la_fiche: str, originaux: di
     return sortie if changees else None
 
 
+def originaux_douteux(fiches) -> set[int]:
+    """PUR. Les fiches à rôle SECONDAIRE dont l'artiste a une fiche propre au
+    même titre normalisé : l'original d'une version n'y est pas (même règle que
+    `ecarts_deezer.classer` et `version_heritage.socle_parmi`). `fiches` :
+    `(id, principal, artiste, genius_id, genius_url, rôle, artist_id, titre)`."""
+    from src.utils.title_matching import normalize_title
+
+    propres = {(f[6], normalize_title(f[7] or "")) for f in fiches if not f[5]}
+    return {f[0] for f in fiches if f[5] and (f[6], normalize_title(f[7] or "")) in propres}
+
+
 def _cas(dm) -> list[dict]:
     from sqlalchemy import text
 
@@ -60,22 +87,29 @@ def _cas(dm) -> list[dict]:
                 "WHERE t.relationships LIKE '%track_id%'"
             )
         ).all()
-        originaux = {
-            r[0]: interprete(r[1], r[2])
-            for r in conn.execute(
-                text(
-                    "SELECT t.id, t.primary_artist_name, a.name FROM tracks t "
-                    "JOIN artists a ON a.id = t.artist_id"
-                )
+        fiches = conn.execute(
+            text(
+                "SELECT t.id, t.primary_artist_name, a.name, t.genius_id, t.genius_url, "
+                "t.secondary_role, t.artist_id, t.title FROM tracks t "
+                "JOIN artists a ON a.id = t.artist_id"
             )
-        }
+        ).all()
         titres = dict(conn.execute(text("SELECT id, title FROM tracks")).all())
-    cas = []
+    douteux = originaux_douteux(fiches)
+    originaux = {
+        r[0]: interprete(r[1], r[2], bool(r[3] or r[4])) for r in fiches if r[0] not in douteux
+    }
+    cas, ecartes = [], []
     for tid, titre, artiste, brut in lignes:
         try:
             relations = json.loads(brut or "[]")
         except json.JSONDecodeError:
             continue
+        ecartes += [
+            (tid, titre, artiste, r["track_id"], titres.get(r["track_id"]))
+            for r in relations
+            if isinstance(r, dict) and r.get("type") in TYPES and r.get("track_id") in douteux
+        ]
         corrigees = relations_corrigees(relations, artiste, originaux)
         if corrigees is not None:
             cas.append(
@@ -91,7 +125,7 @@ def _cas(dm) -> list[dict]:
                     ],
                 }
             )
-    return cas
+    return cas, ecartes
 
 
 def main() -> int:
@@ -110,7 +144,12 @@ def main() -> int:
     dm = module_dm.DataManager()
     print(f"Base : {dm.db_path}")
 
-    cas = _cas(dm)
+    cas, ecartes = _cas(dm)
+    for tid, titre, artiste, oid, otitre in ecartes:
+        print(
+            f"  ⚠ #{tid} {artiste} « {titre} » → original douteux #{oid} « {otitre} » "
+            "(rôle secondaire, fiche propre au même titre) : non renommé"
+        )
     for c in cas:
         for oid, otitre, nom in c["originaux"]:
             print(
@@ -124,7 +163,7 @@ def main() -> int:
     if not _sauvegarder(dm, args, "before_corriger_artiste_des_versions"):
         return 1
     echecs = sum(0 if dm.record_relationships(c["id"], c["relations"]) else 1 for c in cas)
-    reste = _cas(dm)
+    reste, _ = _cas(dm)
     print(f"✅ {len(cas) - echecs} fiche(s) corrigée(s) ; reste {len(reste)}.")
     return 0 if not reste else 2
 

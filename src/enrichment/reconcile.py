@@ -686,7 +686,9 @@ def _reconcile_lyrics_synced(
     by_source = {
         o.source: o
         for o in observations
-        if o.field == LYRICS_SYNCED_FIELD and not lrc_dementi(paroles, o.value) and not trop_long(o)
+        if o.field == LYRICS_SYNCED_FIELD
+        and not lrc_dementi(paroles, o.value, track_duration)
+        and not trop_long(o)
     }
     lrclib = by_source.get("lrclib")
     ytm = by_source.get("ytmusic")

@@ -1346,6 +1346,73 @@ class TestVideoPartagee:
         )
         assert [c.nature for c in cas] == [revue.DECISION]
 
+    def test_le_clip_revient_a_la_page_principale_jamais_a_sa_version(self):
+        """Décision utilisateur 2026-11-22 : un clip partagé par la page
+        principale et sa démo, son freestyle ou son édition revient à la page
+        principale (Eminem « The Real Slim Shady » / « - Clean(Ish) », Dinos
+        « NMD_V3 » / « Dinos x Adidas / NMD_V3 », Kid Cudi : Genius rattache le
+        « Day ‘N’ Nite » d'un disque de remixes à « (Nightmare) »)."""
+        clip = self._v("RSS", "Eminem - The Real Slim Shady (Official Video - Clean Version)")
+        page = _t("The Real Slim Shady", 1, videos=[clip], genius_id=531)
+        clean = _t("The Real Slim Shady - Clean(Ish)", 2, videos=[clip], genius_id=6614924)
+        demo = _t("The Real Slim Shady (Demo)", 3, videos=[clip], genius_id=7)
+        ((_, motif, preuves),) = revue.video_partagee(_ctx(page, clean, demo))
+        assert preuves["garder"] == 1 and preuves["track_ids"] == [2, 3]
+        assert "page principale" in motif
+
+        dinos = Artist(name="Dinos")
+        pub = self._v("NMD", "Dinos x Adidas / NMD_V3")
+        a = _t("NMD_V3", 1, videos=[pub], genius_id=8341294, artist=dinos)
+        b = _t("Dinos x Adidas / NMD_V3", 2, videos=[pub], genius_id=10801919, artist=dinos)
+        ((_, _, preuves),) = revue.video_partagee(_ctx(a, b))
+        assert preuves["garder"] == 1 and preuves["track_ids"] == [2]
+
+        dnn = self._v("DNN", "Kid Cudi - Day 'N' Nite")
+        nightmare = _t(
+            "Day ’N’ Nite (Nightmare)",
+            1,
+            videos=[dnn],
+            genius_id=131,
+            genius_url="https://genius.com/Kid-cudi-day-n-nite-nightmare-lyrics",
+        )
+        remix = _t(
+            "Day ‘N’ Nite",
+            2,
+            videos=[dnn],
+            genius_id=1836726,
+            album="Just Dance (The Biggest Club Remixes)",
+            relationships=[
+                {
+                    "type": "remix_of",
+                    "url": "https://genius.com/Kid-cudi-day-n-nite-nightmare-lyrics",
+                }
+            ],
+        )
+        ((_, _, preuves),) = revue.video_partagee(_ctx(nightmare, remix))
+        assert preuves["garder"] == 1 and preuves["track_ids"] == [2]
+
+    def test_deux_versions_ou_une_video_de_la_version_restent_a_l_humain(self):
+        # Deux démos sans leur page principale (« Joyride » de Travis Scott) :
+        # aucune n'est principale.
+        v = self._v("J", "Travis Scott - Joyride (Ft. Tinashe) (Unreleased)")
+        d1 = _t("Joyride (Demo)", 1, videos=[v], genius_id=1)
+        d2 = _t("Joyride (Demo 2)", 2, videos=[v], genius_id=2)
+        ((_, _, preuves),) = revue.video_partagee(_ctx(d1, d2))
+        assert "garder" not in preuves
+        # La vidéo nomme le sous-titre de l'autre page : c'est la sienne.
+        game = self._v("G", "The Game: My Bitch (Dissin 50cent,Jay-Z,Suge Knight)")
+        a = _t("My Bitch", 1, videos=[game], genius_id=1)
+        b = _t("My Bitch (Dissin’ 50 Cent, Jay-Z, Suge Knight)", 2, videos=[game], genius_id=2)
+        ((_, _, preuves),) = revue.video_partagee(_ctx(a, b))
+        assert preuves.get("garder") != 1
+        # Un live garde sa vidéo : ce n'est ni une démo ni une édition.
+        live = self._v("L", "Kery James - Le Ghetto Français")
+        a = _t("Le Ghetto Français", 1, videos=[live], genius_id=1)
+        b = _t("Le Ghetto Français (Live)", 2, videos=[live], genius_id=2)
+        from src.services.politiques_revue import versions_de_la_page_principale
+
+        assert versions_de_la_page_principale([a, b], live) is None
+
     def _king(self, duree_video=157, bully=None, vultures=None):
         """« KING » : la vidéo de ¥$ (157 s) posée par Genius sur la page de
         *BULLY* (126 s) et sur celle de *VULTURES 1* (157 s), 2026-10-29."""

@@ -963,6 +963,49 @@ def test_video_d_un_homonyme_retiree_par_regle_puis_retablie(data_manager, artis
     assert fiche.durations_observees.get("youtube") == 225
 
 
+def test_le_clip_quitte_l_edition_de_la_page_principale_puis_revient(
+    data_manager, artiste, monkeypatch
+):
+    """Décision utilisateur 2026-11-22 : le clip de « The Real Slim Shady »,
+    porté aussi par sa page « - Clean(Ish) », quitte l'édition (refus de
+    règle `regle:video_partagee`) ; rétablir le rend."""
+    from src.models.track import TrackVideo
+    from src.utils.corrections_fiches import origine_du_refus, videos_refusees
+
+    monkeypatch.setattr(revue_auto, "REGLES_ETENDUES_BRANCHEES", True)
+    clip = TrackVideo(
+        video_id="eJO5HU_7_1w",
+        url="https://www.youtube.com/watch?v=eJO5HU_7_1w",
+        source="genius_media",
+        views=1_203_887_972,
+        title="Eminem - The Real Slim Shady (Official Video - Clean Version)",
+    )
+    page = Track(title="The Real Slim Shady", artist=artiste, genius_id=531)
+    clean = Track(title="The Real Slim Shady - Clean(Ish)", artist=artiste, genius_id=6614924)
+    for t in (page, clean):
+        data_manager.save_track(t)
+        data_manager.record_track_videos(t.id, [clip])
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert any("gardée par « The Real Slim Shady »" in a for a in bilan.appliquees), bilan
+    fiches = {t.id: t for t in data_manager.get_artist_tracks(artiste.id)}
+    assert [v.video_id for v in fiches[page.id].videos] == ["eJO5HU_7_1w"]
+    assert fiches[clean.id].videos == []
+    assert origine_du_refus(fiches[clean.id], "video", "eJO5HU_7_1w") == "regle:video_partagee"
+
+    (correction,) = [
+        c
+        for c in data_manager.corrections_revue(artiste.id)
+        if c["action"] == "regle:retirer_video_partagee"
+    ]
+    _charger(data_manager, artiste)
+    revue_auto.retablir(data_manager, artiste, correction)
+    fiche = {t.id: t for t in data_manager.get_artist_tracks(artiste.id)}[clean.id]
+    assert [v.video_id for v in fiche.videos] == ["eJO5HU_7_1w"]
+    assert "eJO5HU_7_1w" not in videos_refusees(fiche)
+
+
 def test_video_de_recherche_d_un_autre_artiste_retiree_puis_retablie(
     data_manager, artiste, monkeypatch
 ):

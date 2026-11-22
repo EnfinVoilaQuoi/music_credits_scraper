@@ -72,6 +72,16 @@ class Tache:
     def active(self) -> bool:
         return self.etat is Etat.EN_COURS
 
+    @property
+    def restant(self) -> float | None:
+        """Secondes restantes ESTIMÉES pour l'étape en cours, au rythme observé
+        depuis le début du run ; None tant qu'on ne peut rien dire (moins de 1 %,
+        pas de total, ou run fini)."""
+        pct = self.pourcentage
+        if not self.active or not pct or pct >= 100:
+            return None
+        return self.duree * (100 - pct) / pct
+
 
 def etat_final(resultat, erreur: str | None, arret_demande: bool) -> tuple[Etat, str]:
     """L'état final d'un run et son message — PUR, testé.

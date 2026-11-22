@@ -558,3 +558,51 @@ def test_ajout_homonymes_choix_obligatoire(qtbot, fenetre, monkeypatch):
     d.bouton_ajouter.click()
     assert ajoutes == ["Sniper"]
     assert fenetre.runtime.data_manager.get_artist_by_name("Sniper").genius_id == 2
+
+
+# ── liste de tâches (hub) ────────────────────────────────────────────────────
+
+
+def test_temps_restant_estime():
+    from src.gui_qt.pont import Tache
+
+    t = Tache("x", "X", debut=time.monotonic() - 100, courant=25, total=100)
+    assert 290 < t.restant < 310  # 25 % en 100 s : ~300 s restantes
+    assert Tache("y", "Y", courant=0, total=100).restant is None
+
+
+def test_run_mis_en_attente_puis_lance(qtbot, fenetre, monkeypatch):
+    import threading
+
+    from PyQt6.QtWidgets import QMessageBox
+
+    from src.services import cycle
+
+    _charger(qtbot, fenetre)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "show", lambda self: None)
+    libere = threading.Event()
+    lances = []
+
+    def faux_run(runtime, nom, options, hooks):
+        lances.append(options.only)
+        if len(lances) == 1:
+            libere.wait(5)
+        return SimpleNamespace(complete=True, resume=lambda: "ok")
+
+    monkeypatch.setattr(cycle, "run", faux_run)
+    monkeypatch.setattr(fenetre, "_recharger", lambda nom: None)
+    fenetre.boutons_flux["enrich"].click()
+    qtbot.waitUntil(lambda: fenetre.taches.occupe, timeout=5_000)
+    assert fenetre.boutons_flux["streams"].isEnabled()
+    fenetre.boutons_flux["streams"].click()
+    assert [e.cle for e in fenetre.file_attente] == ["streams"]
+    assert fenetre.b_file.pastille == "2"
+    fenetre._ouvrir_centre()
+    textes = [fenetre._centre.liste.item(i).text() for i in range(fenetre._centre.liste.count())]
+    assert "En attente" in textes and "Streams — Isha" in textes
+    libere.set()
+    qtbot.waitUntil(lambda: lances == [("enrich",), ("streams",)], timeout=10_000)
+    qtbot.waitUntil(lambda: not fenetre.taches.occupe, timeout=10_000)
+    assert fenetre.file_attente == []
+    fenetre.taches.fermer()

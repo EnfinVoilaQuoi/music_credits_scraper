@@ -37,7 +37,7 @@ from PyQt6.QtWidgets import (
 
 from src.gui_qt import icones
 from src.gui_qt.artistes import FenetreArtistes
-from src.gui_qt.centre_taches import CentreTaches
+from src.gui_qt.centre_taches import CentreTaches, EnAttente
 from src.gui_qt.dialogues import DialogueAjout
 from src.gui_qt.fenetres_windows import colorer_barre_titre
 from src.gui_qt.fiche import FenetreFiche, VueFiche
@@ -147,6 +147,9 @@ class FenetrePrincipale(QMainWindow):
         self.taches.changee.connect(self._sur_tache)
         self.taches.terminee.connect(self._sur_fin_tache)
         self._centre: CentreTaches | None = None
+        #: Runs demandés pendant qu'un autre tournait : un seul écrivain à la
+        #: fois, ils partent l'un après l'autre (liste de tâches).
+        self.file_attente: list[EnAttente] = []
         self._fenetres_fiche: list[FenetreFiche] = []
         self.verification = None  # nouveautés de l'artiste chargé
         self.setWindowTitle("théRAPie")
@@ -815,8 +818,9 @@ class FenetrePrincipale(QMainWindow):
     def _etat_boutons(self) -> None:
         charge = self.chargement is not None
         occupe = self.taches.occupe
+        # Occupé, un bouton reste actif : son run va dans la file d'attente.
         for b in self.boutons_flux.values():
-            b.setEnabled(charge and (not occupe or b.en_cours))
+            b.setEnabled(charge or (occupe and b.en_cours))
         self.b_formations.setEnabled(charge)
 
     def _rafraichir_infobulles_flux(self, *_) -> None:
@@ -833,7 +837,7 @@ class FenetrePrincipale(QMainWindow):
             self._ouvrir_centre()
             return
         c = self.chargement
-        if c is None or self.taches.occupe:
+        if c is None:
             return
         portee = self.portees[cle]
         try:
@@ -842,9 +846,7 @@ class FenetrePrincipale(QMainWindow):
             QMessageBox.information(self, libelle, str(e))
             return
         resume = runs.resume_portee(cle, portee, len(self.modele.selection))
-        if not self._confirmer(libelle, f"Lancer « {libelle} » sur {c.artist.name} ?\n\n{resume}."):
-            return
-        self._lancer(cle, libelle, options)
+        self._demander(cle, libelle, options, f"« {libelle} » sur {c.artist.name}", resume)
 
     def _sur_cycle(self) -> None:
         cle, libelle, _ = CYCLE
@@ -852,7 +854,7 @@ class FenetrePrincipale(QMainWindow):
             self._ouvrir_centre()
             return
         c = self.chargement
-        if c is None or self.taches.occupe:
+        if c is None:
             return
         try:
             options = runs.options_complet(self.mode_complet)
@@ -860,17 +862,42 @@ class FenetrePrincipale(QMainWindow):
             QMessageBox.information(self, libelle, str(e))
             return
         mode = runs.LIBELLES_COMPLET[self.mode_complet]
-        if not self._confirmer(
+        self._demander(
+            cle,
             libelle,
-            f"Lancer toutes les étapes sur {c.artist.name} ?\n\n"
-            f"Discographie, identité, crédits, données tech., streams, certifications — "
-            f"{mode.lower()}.",
-        ):
-            return
-        self._lancer(cle, libelle, options)
+            options,
+            f"toutes les étapes sur {c.artist.name}",
+            "Discographie, identité, crédits, données tech., streams, certifications — "
+            f"{mode.lower()}",
+        )
 
-    def _lancer(self, cle: str, libelle: str, options) -> None:
+    def _demander(self, cle: str, libelle: str, options, quoi: str, portee: str) -> None:
+        """Lance le run, ou le met en ATTENTE si un autre tourne — toujours
+        après une confirmation qui dit sa portée."""
         nom = self.chargement.artist.name
+        if self.taches.occupe:
+            if self._confirmer(
+                libelle,
+                f"Un run est en cours. Mettre en attente {quoi} ?\n\n{portee}.\n\n"
+                "Il partira à la fin des runs en cours (liste de tâches).",
+            ):
+                self.file_attente.append(EnAttente(cle, libelle, nom, options))
+                self._rafraichir_file()
+            return
+        if self._confirmer(libelle, f"Lancer {quoi} ?\n\n{portee}."):
+            self._lancer(cle, libelle, options, nom)
+
+    def _rafraichir_file(self) -> None:
+        self.b_file.poser_pastille(len(self.taches.en_cours()) + len(self.file_attente) or None)
+        if self._centre is not None:
+            self._centre._rafraichir()
+
+    def _retirer_de_la_file(self, i: int) -> None:
+        if 0 <= i < len(self.file_attente):
+            del self.file_attente[i]
+        self._rafraichir_file()
+
+    def _lancer(self, cle: str, libelle: str, options, nom: str) -> None:
 
         def corps(hooks):
             from src.services import cycle
@@ -881,7 +908,7 @@ class FenetrePrincipale(QMainWindow):
             self.boutons_flux[cle].progression(0.0, "0 %")
             self.boutons_flux[cle].setToolTip(f"{libelle} — démarrage…")
             self._etat_boutons()
-            self.b_file.poser_pastille(len(self.taches.en_cours()) or None)
+            self._rafraichir_file()
 
     def _sur_tache(self, cle: str) -> None:
         t = self.taches.tache(cle)
@@ -904,8 +931,11 @@ class FenetrePrincipale(QMainWindow):
                 self._infobulle_flux(cle)
             else:
                 b.setToolTip("Lancer toutes les étapes. La flèche choisit ce qui est relu.")
-        self.b_file.poser_pastille(len(self.taches.en_cours()) or None)
         self._etat_boutons()
+        if self.file_attente and not self.taches.occupe:
+            e = self.file_attente.pop(0)
+            self._lancer(e.cle, e.libelle, e.options, e.artiste)
+        self._rafraichir_file()
         # Les écritures du run sont relues : la table se rafraîchit SANS perdre
         # tri, filtre, sélection ni défilement.
         if self.chargement is not None:
@@ -968,7 +998,8 @@ class FenetrePrincipale(QMainWindow):
 
     def _ouvrir_centre(self) -> None:
         if self._centre is None:
-            self._centre = CentreTaches(self.taches, self)
+            self._centre = CentreTaches(self.taches, self, self.file_attente)
+            self._centre.retirer.connect(self._retirer_de_la_file)
         self._centre.show()
         self._centre.raise_()
 

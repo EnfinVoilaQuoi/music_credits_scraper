@@ -231,6 +231,13 @@ def fusionner(
             track.credits = unir_credits(existant.credits, track.credits)
         if not track.certs.entries and existant.certs.entries:
             track.certs.entries = existant.certs.entries
+        # L'album de la base, quand la page n'a pas été relue (MàJ : pas de
+        # prefill des fiches connues). `save_track` le garde déjà (COALESCE),
+        # mais la pose des certifs, AVANT le save, lit l'objet : sans album,
+        # elle vidait les certifs d'album (2026-11-22, lot `disco --maj` :
+        # Dosseh 68 fiches → 0, OrelSan 108 → 0, Travis Scott 170 → 2).
+        if not track.album and existant.album:
+            track.album = existant.album
         if track.genius_id and not existant.genius_id:
             adoptees.add(existant.id)
         track.id = existant.id
@@ -452,12 +459,22 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
 
         alias = runtime.data_manager.noms_de_lartiste(artist.id, artist.name) - {artist.name}
         formations = runtime.data_manager.noms_des_formations(artist.id)
+        # Les GROUPES aussi, comme l'étape certifs (`certifs._rematcher`) : sans
+        # eux, la discographie retirait les certifs d'album d'un groupe que
+        # l'étape certifs venait de poser (Casseurs Flowters chez OrelSan,
+        # 2026-11-22).
+        groupes = {
+            rel.related_name
+            for rel in runtime.data_manager.get_artist_relations(artist.id)
+            if rel.kind == "member_of" and rel.formation == "groupe" and rel.related_name
+        }
         apply_certifications(
             artist,
             nouveaux,
             get_cert_matcher(),
             alias=tuple(sorted(alias)),
             formations=tuple(sorted(formations)),
+            groupes=tuple(sorted(groupes & formations)),
         )
     except Exception:
         logger.exception("Rematch certifications échoué")

@@ -269,6 +269,44 @@ def test_un_refus_se_retablit(fichier):
     assert cf.oublier_lrc_refuse(fiche, lrc) is False
 
 
+def test_un_refus_se_retablit_depuis_la_ligne_soeur(fichier):
+    """« Rétablir » sur la ligne de Kid Cudi lève le refus posé sur celle de
+    Kanye (même page Genius) : le refus vaut pour l'enregistrement, son retrait
+    aussi. Sans quoi la ligne sœur restait refusée (2026-11-22)."""
+    kanye = _t("Sky City", artiste="Kanye West", genius_id=7)
+    cudi = _t("Sky City", artiste="Kid Cudi", genius_id=7)
+    cf.memoriser_id_refuse(kanye, "X" * 22)
+    cf.memoriser_video_refusee(kanye, "v" * 11)
+
+    assert cf.oublier_id_refuse(cudi, "X" * 22) is True
+    assert cf.oublier_video_refusee(cudi, "v" * 11) is True
+
+    assert cf.ids_refuses(kanye) == cf.ids_refuses(cudi) == set()
+    assert cf.videos_refusees(kanye) == set()
+
+
+def test_un_refus_de_certif_ne_se_retablit_que_depuis_sa_ligne(fichier):
+    """Les certifications gardent leur refus PAR LIGNE : Rétablir depuis la
+    sœur ne lève pas celui de Kanye."""
+    certif = {"body": "RIAA", "title": "SKY CITY", "certification": "Gold", "date": "2022"}
+    kanye = _t("Sky City", artiste="Kanye West", genius_id=7)
+    cudi = _t("Sky City", artiste="Kid Cudi", genius_id=7)
+    cf.memoriser_certif_refusee(kanye, certif)
+
+    assert cf.oublier_certif_refusee(cudi, certif) is False
+    assert cf.certifs_refusees(kanye)
+
+
+def test_un_refus_par_titre_ne_se_retablit_pas_chez_un_autre_artiste(fichier):
+    """Sans page Genius, un refus vaut pour l'artiste de la fiche seulement."""
+    a2h = _t("Titre", artiste="A2H", album="Disque")
+    autre = _t("Titre", artiste="Autre", album="Disque")
+    cf.memoriser_id_refuse(a2h, "Y" * 22)
+
+    assert cf.oublier_id_refuse(autre, "Y" * 22) is False
+    assert cf.ids_refuses(a2h) == {"Y" * 22}
+
+
 def test_une_fusion_par_regle_va_en_base(data_manager):
     """Chantier C, lot 3 : base ouverte, la fusion décidée par une règle
     (import discographie) s'écrit dans la table `corrections`, pas le fichier."""

@@ -364,15 +364,25 @@ def _oublier(track, nature: str, valeur, table: str = "refus") -> bool:
         return False
     from sqlalchemy import text
 
+    # Un refus que les sœurs partagent (même page Genius) se lève depuis
+    # n'importe laquelle d'entre elles : « Rétablir » sur la ligne de Kid Cudi
+    # lève celui posé sur la ligne de Kanye. Les certifications, par ligne,
+    # restent à l'artiste qui les a refusées.
+    designation = designation_de(track)
+    portee = (
+        ""
+        if designation.get("genius_id") is not None and nature in PAR_ENREGISTREMENT
+        else " AND artiste = :a"
+    )
     with moteur.begin() as conn:
         return bool(
             conn.execute(
                 text(
-                    f"DELETE FROM {table} WHERE cle_fiche = :c AND artiste = :a "
+                    f"DELETE FROM {table} WHERE cle_fiche = :c{portee} "
                     "AND nature = :n AND valeur = :v"
                 ),
                 {
-                    "c": _cle_fiche(designation_de(track)),
+                    "c": _cle_fiche(designation),
                     "a": artiste,
                     "n": nature,
                     "v": _cle(nature, valeur),

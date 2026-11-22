@@ -240,6 +240,10 @@ scripts/*
 !scripts/remplacer_photos_homonymes.py
 # Échantillon témoin : ce que l'audit rate, vérifié à la main (2026-11-09).
 !scripts/echantillon_temoin.py
+# Scripts ponctuels (une réparation datée, nommée) : le dossier, puis chacun.
+!scripts/ponctuels/
+scripts/ponctuels/*
+!scripts/ponctuels/chip_douglas_version.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
 # méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
 # `scripts/*` les exclut déjà : ne PAS ajouter de négation ici.

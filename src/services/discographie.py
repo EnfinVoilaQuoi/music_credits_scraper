@@ -35,7 +35,10 @@ class OptionsDisco:
     include_features: bool = True
     prefill: bool = True
     update_only: bool = False
-    include_secondary: bool = False
+    #: Les autres rôles secondaires (écriture, composition, chœurs…) : par
+    #: défaut aussi (décision utilisateur 2026-11-22 — sans eux, un rôle
+    #: d'auteur ne crée pas la fiche : Shurik'n, « Revoir un printemps »).
+    include_secondary: bool = True
     #: Les PRODS de l'artiste pour d'autres : un statut à part entière
     #: (`participation.PROD`), donc gardées par défaut (décision 2026-09-26).
     include_prods: bool = True

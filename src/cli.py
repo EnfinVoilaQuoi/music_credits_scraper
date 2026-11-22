@@ -126,7 +126,7 @@ def _disco_args(p: argparse.ArgumentParser) -> None:
     _bool_flags(p, "features", True, "inclure les featurings")
     _bool_flags(p, "prefill", True, "appel API détail (album, Spotify ID, YouTube)")
     _bool_flags(p, "prods", True, "morceaux produits pour d'autres (vérif détail)")
-    _bool_flags(p, "secondaires", False, "autres rôles secondaires (vérif détail)")
+    _bool_flags(p, "secondaires", True, "autres rôles secondaires (vérif détail)")
     _bool_flags(p, "respecter-supprimes", True, "ne pas réajouter les morceaux supprimés")
     _bool_flags(p, "images", True, "télécharger photos, pochettes, vignettes")
     p.add_argument("--maj", action="store_true", help="mode MàJ : prefill des seuls nouveaux")

@@ -42,7 +42,7 @@ def get_tracks(app):
     include_features_var = ctk.BooleanVar(value=True)  # Par défaut, inclure les features
     prefill_var = ctk.BooleanVar(value=True)  # Appel API album + Spotify/YouTube (media)
     include_prods_var = ctk.BooleanVar(value=True)  # Prods pour d'autres (statut à part)
-    include_secondary_var = ctk.BooleanVar(value=False)  # Autres rôles (Additional Voices…)
+    include_secondary_var = ctk.BooleanVar(value=True)  # Autres rôles (Additional Voices…)
     respect_deleted_var = ctk.BooleanVar(value=True)  # Ne pas réajouter les morceaux supprimés
     download_images_var = ctk.BooleanVar(value=True)  # Télécharger photos/covers/vignettes (Media)
 
@@ -288,7 +288,7 @@ def start_track_retrieval(
     include_features: bool,
     prefill: bool = True,
     update_only: bool = False,
-    include_secondary: bool = False,
+    include_secondary: bool = True,
     respect_deleted: bool = True,
     download_images: bool = True,
     include_prods: bool = True,

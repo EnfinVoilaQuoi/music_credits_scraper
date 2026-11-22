@@ -101,7 +101,7 @@ _CASES_PORTEE = (
     (
         "desactives",
         "Titres désactivés",
-        "Inclure les titres désactivés — à venir : les services les écartent encore toujours.",
+        "Inclure aussi les titres désactivés (Identité, Crédits, Données Tech., Streams).",
     ),
     None,
     ("manquants", "Manquants", "Les morceaux auxquels il manque la donnée de ce flux."),
@@ -415,7 +415,7 @@ class FenetrePrincipale(QMainWindow):
             runs.ModeComplet.ECHECS: "Seulement ce qu'une source n'a pas servi.",
             runs.ModeComplet.IGNORER_DELAIS: (
                 "Redemander les « pas sur Spotify / Deezer / Apple » et les absences "
-                "récentes avant leur délai — à venir."
+                "récentes avant leur délai, sans relire ce qui est déjà là."
             ),
             runs.ModeComplet.TOUT: "Tous les morceaux, sans forcer les valeurs déjà là.",
         }

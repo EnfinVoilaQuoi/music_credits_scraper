@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from PyQt6 import sip
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QBrush, QColor
 from PyQt6.QtWidgets import (
@@ -53,11 +54,16 @@ class FenetreCertifs(QDialog):
         artist=None,
         etats: Callable[[], list[tuple[str, dict]]] | None = None,
         trous: Callable[[str], dict] | None = None,
+        lancer: Callable[[str, str, Callable], bool] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self.runtime = runtime
         self.taches = taches
+        #: (clé, titre, corps) -> lancé ou mis en file ? La fenêtre principale
+        #: passe sa FILE D'ATTENTE ; seule, la fenêtre lance ou refuse.
+        self.lancer = lancer or self._lancer_seule
+        taches.terminee.connect(self._apres)
         self.artist = artist
         #: () -> [(source, freshness)] — `all_certification_sources()` en vrai.
         self.etats = etats or _etats_reels
@@ -181,22 +187,25 @@ class FenetreCertifs(QDialog):
         en_fond(lire, fini, echec, nom="qt:certifs-trous")
 
     # ── écritures : par la liste de tâches ──
-    def _lancer(self, cle: str, titre: str, corps) -> None:
+    def _lancer_seule(self, cle: str, titre: str, corps) -> bool:
         if self.taches.occupe:
             QMessageBox.information(
                 self,
                 "Certifications",
                 "Un run est en cours : relancez quand il aura fini (liste de tâches).",
             )
-            return
-        if self.taches.lancer(cle, titre, corps):
-            self.etat.setText(f"« {titre} » lancé — suivi dans la liste de tâches.")
-            self.taches.terminee.connect(self._apres)
+            return False
+        return self.taches.lancer(cle, titre, corps)
+
+    def _lancer(self, cle: str, titre: str, corps) -> None:
+        occupe = self.taches.occupe
+        if self.lancer(cle, titre, corps):
+            quoi = "mis en attente" if occupe else "lancé"
+            self.etat.setText(f"« {titre} » {quoi} — suivi dans la liste de tâches.")
 
     def _apres(self, cle: str) -> None:
-        if not cle.startswith("certifs:"):
+        if not cle.startswith("certifs:") or sip.isdeleted(self):
             return
-        self.taches.terminee.disconnect(self._apres)
         t = self.taches.tache(cle)
         if t is not None:
             self.etat.setText(f"{t.titre} — {t.etat.value}")

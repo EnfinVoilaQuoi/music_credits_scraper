@@ -694,3 +694,46 @@ def test_fenetre_certifs_met_a_jour_par_la_liste_de_taches(qtbot, monkeypatch):
     assert taches.tache("certifs:SNEP").etat is Etat.COMPLET
     assert not d.b_appliquer.isEnabled()  # aucun artiste chargé
     taches.fermer()
+
+
+def test_maj_des_certifs_mise_en_attente_pendant_un_run(qtbot, fenetre, monkeypatch):
+    import threading
+
+    from PyQt6.QtWidgets import QMessageBox
+
+    from src.gui_qt.certifs import FenetreCertifs
+    from src.services import certifs as service
+    from src.services import cycle
+
+    _charger(qtbot, fenetre)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "show", lambda self: None)
+    monkeypatch.setattr(fenetre, "_recharger", lambda nom: None)
+    libere = threading.Event()
+    ordre = []
+
+    def faux_run(runtime, nom, options, hooks):
+        ordre.append("run")
+        libere.wait(5)
+        return SimpleNamespace(complete=True, resume=lambda: "ok")
+
+    def fausse_maj(nom, progres):
+        ordre.append(f"maj {nom}")
+        return 0, "ok"
+
+    monkeypatch.setattr(cycle, "run", faux_run)
+    monkeypatch.setattr(service, "executer_maj", fausse_maj)
+    fenetre.boutons_flux["enrich"].click()
+    qtbot.waitUntil(lambda: fenetre.taches.occupe, timeout=5_000)
+    d = FenetreCertifs(
+        fenetre.runtime, fenetre.taches, None, lambda: [], lambda s: {}, fenetre.demander_tache
+    )
+    qtbot.addWidget(d)
+    d.mettre_a_jour("SNEP")
+    assert [e.titre for e in fenetre.file_attente] == ["Mise à jour SNEP"]
+    assert "mis en attente" in d.etat.text()
+    libere.set()
+    qtbot.waitUntil(lambda: ordre == ["run", "maj SNEP"], timeout=10_000)
+    qtbot.waitUntil(lambda: not fenetre.taches.occupe, timeout=10_000)
+    assert fenetre.file_attente == []
+    fenetre.taches.fermer()

@@ -795,7 +795,9 @@ class FenetrePrincipale(QMainWindow):
         from src.gui_qt.certifs import FenetreCertifs
 
         artist = self.chargement.artist if self.chargement is not None else None
-        d = FenetreCertifs(self.runtime, self.taches, artist, parent=self)
+        d = FenetreCertifs(
+            self.runtime, self.taches, artist, lancer=self.demander_tache, parent=self
+        )
         d.a_jour.connect(lambda n: self.b_certifs.poser_pastille("!" if n else None))
         d.show()
 
@@ -997,11 +999,30 @@ class FenetrePrincipale(QMainWindow):
                 f"Un run est en cours. Mettre en attente {quoi} ?\n\n{portee}.\n\n"
                 "Il partira à la fin des runs en cours (liste de tâches).",
             ):
-                self.file_attente.append(EnAttente(cle, libelle, nom, options))
+                self.file_attente.append(
+                    EnAttente(cle, f"{libelle} — {nom}", self._corps(nom, options))
+                )
                 self._rafraichir_file()
             return
         if self._confirmer(libelle, f"Lancer {quoi} ?\n\n{portee}."):
             self._lancer(cle, libelle, options, nom)
+
+    def demander_tache(self, cle: str, titre: str, corps) -> bool:
+        """Pour une autre fenêtre (certifs) : lance le traitement, ou le met
+        en ATTENTE après confirmation si un autre tourne. Vrai s'il est parti
+        ou en file ; faux si l'utilisateur a renoncé."""
+        if self.taches.occupe:
+            if not self._confirmer(
+                titre,
+                f"Un run est en cours. Mettre en attente « {titre} » ?\n\n"
+                "Il partira à la fin des runs en cours (liste de tâches).",
+            ):
+                return False
+            self.file_attente.append(EnAttente(cle, titre, corps))
+            self._rafraichir_file()
+            return True
+        self._lancer_tache(cle, titre, corps)
+        return True
 
     def _rafraichir_file(self) -> None:
         self.b_file.poser_pastille(len(self.taches.en_cours()) + len(self.file_attente) or None)
@@ -1013,16 +1034,23 @@ class FenetrePrincipale(QMainWindow):
             del self.file_attente[i]
         self._rafraichir_file()
 
-    def _lancer(self, cle: str, libelle: str, options, nom: str) -> None:
-
+    def _corps(self, nom: str, options):
         def corps(hooks):
             from src.services import cycle
 
             return cycle.run(self.runtime, nom, options, hooks)
 
-        if self.taches.lancer(cle, f"{libelle} — {nom}", corps):
-            self.boutons_flux[cle].progression(0.0, "0 %")
-            self.boutons_flux[cle].setToolTip(f"{libelle} — démarrage…")
+        return corps
+
+    def _lancer(self, cle: str, libelle: str, options, nom: str) -> None:
+        self._lancer_tache(cle, f"{libelle} — {nom}", self._corps(nom, options))
+
+    def _lancer_tache(self, cle: str, titre: str, corps) -> None:
+        if self.taches.lancer(cle, titre, corps):
+            b = self.boutons_flux.get(cle)
+            if b is not None:
+                b.progression(0.0, "0 %")
+                b.setToolTip(f"{titre} — démarrage…")
             self._etat_boutons()
             self._rafraichir_file()
 
@@ -1050,7 +1078,7 @@ class FenetrePrincipale(QMainWindow):
         self._etat_boutons()
         if self.file_attente and not self.taches.occupe:
             e = self.file_attente.pop(0)
-            self._lancer(e.cle, e.libelle, e.options, e.artiste)
+            self._lancer_tache(e.cle, e.titre, e.corps)
         self._rafraichir_file()
         # Les écritures du run sont relues : la table se rafraîchit SANS perdre
         # tri, filtre, sélection ni défilement.

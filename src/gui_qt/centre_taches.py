@@ -4,12 +4,13 @@ l'application — en cours, en attente, planifié, terminé dans la session
 
 En cours : progression, étape, temps restant estimé, RÉCIT live, arrêt (entre
 deux morceaux, jamais au milieu d'un enregistrement). En attente : les runs
-demandés pendant qu'un autre tournait, lancés l'un après l'autre (un seul
-écrivain à la fois). Planifié : rien encore (la MàJ des certifs viendra).
+demandés pendant qu'un autre tournait (runs, certifs), lancés l'un après
+l'autre (un seul écrivain à la fois). Planifié : rien encore (la MàJ des certifs viendra).
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -30,16 +31,12 @@ from src.gui_qt.pont import Etat, Tache, Taches
 
 @dataclass(frozen=True)
 class EnAttente:
-    """Un run demandé pendant qu'un autre tournait."""
+    """Un traitement demandé pendant qu'un autre tournait : run d'artiste,
+    mise à jour des certifs… `corps(hooks)` est ce que `Taches.lancer` lancera."""
 
     cle: str
-    libelle: str
-    artiste: str
-    options: object
-
-    @property
-    def titre(self) -> str:
-        return f"{self.libelle} — {self.artiste}"
+    titre: str
+    corps: Callable
 
 
 def _duree(secondes: float) -> str:

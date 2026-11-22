@@ -638,6 +638,57 @@ class TestCreerLignes:
             and fiche.relationships[0]["track_id"] == socle.id
         )
 
+    def test_la_version_nomme_l_interprete_de_l_original(self, data_manager):
+        """NTM « Un ange dans le ciel (Live …) » #34979 (2026-11-22) : l'original
+        est la fiche de Kool Shen #31136 ; la relation disait « Suprême NTM »,
+        l'artiste qui créait la version."""
+        groupe = Artist(name="Suprême NTM")
+        groupe.id = data_manager.save_artist(groupe)
+        membre = Artist(name="Kool Shen")
+        membre.id = data_manager.save_artist(membre)
+        socle = Track(title="Un ange dans le ciel", artist=membre)
+        data_manager.save_track(socle)
+        (socle,) = data_manager.get_artist_tracks(membre.id)
+        piste = _piste(81, "Un ange dans le ciel (Live)", "Un ange dans le ciel", "(Live)")
+        e = ed.Ecart("version", _album(9, "Live", [piste]), piste, socle=socle)
+        e.coche = True
+
+        ed.creer_lignes(data_manager, groupe, [e])
+
+        (fiche,) = data_manager.get_artist_tracks(groupe.id)
+        relation = fiche.relationships[0]
+        assert (relation["artist"], relation["track_id"]) == ("Kool Shen", socle.id)
+
+    def test_la_version_nomme_le_principal_que_la_page_de_l_original_donne(self):
+        artist = Artist(name="Lucio Bukowski")
+        socle = Track(title="Socle", artist=artist)
+        socle.primary_artist_name = "Mani Deïz"
+        assert ed.artiste_de_l_original(socle, artist) == "Mani Deïz"
+        assert ed.artiste_de_l_original(Track(title="Socle", artist=artist), artist) == (
+            "Lucio Bukowski"
+        )
+
+    def test_la_version_ne_prend_pas_un_id_kworb_refuse(self, data_manager):
+        from src.utils import corrections_fiches as cf
+
+        artist = self._artiste(data_manager)
+        socle = Track(title="DKR", artist=artist)
+        socle.spotify_id = "0QLjm2PNqKRJfWsxDPa9Ra"
+        data_manager.save_track(socle)
+        data_manager.record_variant_streams(socle.id, "SPBONUS", 108, 3, None, label="DKR - Live")
+        (socle,) = data_manager.get_artist_tracks(artist.id)
+        piste = _piste(80, "DKR (Live)", "DKR", "(Live)")
+        e = ed.Ecart("version", _album(8, "Ultra (Bonus)", [piste]), piste, socle=socle)
+        ed.cocher_par_defaut([e], [socle])
+        cf.memoriser_id_refuse(
+            Track(title="DKR (Live)", artist=artist, album="Ultra (Bonus)"), "SPBONUS"
+        )
+
+        ed.creer_lignes(data_manager, artist, [e])
+
+        fiche = {t.title: t for t in data_manager.get_artist_tracks(artist.id)}["DKR (Live)"]
+        assert fiche.spotify_id is None
+
     def test_heritage_injecte(self, data_manager):
         artist = self._artiste(data_manager)
         socle = Track(title="Suzy", artist=artist)

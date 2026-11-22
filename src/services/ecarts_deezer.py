@@ -111,6 +111,55 @@ LIBELLES = {
 #: (`spotify_identity`) — une REVUE ne doit pas crier sur un écart d'encodage.
 ECART_DUREE_LIEN_A_REVOIR = 5
 
+#: Règle 1 (décision utilisateur 2026-11-22) : au-delà, une page Deezer d'un
+#: AUTRE ISRC que la fiche n'en est plus une édition, mais une version.
+ECART_AUTRE_ENREGISTREMENT_S = 10
+
+#: Les catalogues de la fiche qui témoignent contre une page Deezer : lus par
+#: LEUR identifiant, et indépendants de Spotify — l'ID Spotify peut être
+#: celui du réenregistrement (*92.2012* : quatre originaux de Kery James
+#: portaient le sien, sa durée « confirmait » la piste).
+TEMOINS_AUTRE_ENREGISTREMENT = ("deezer", "apple_music")
+
+
+def autre_enregistrement(isrc: str | None, duree, deezer_id, fiche) -> str | None:
+    """PUR. Règle 1 (décision utilisateur 2026-11-22) : la page Deezer
+    (`isrc`, `duree`, `deezer_id`) n'est PAS une édition de `fiche` quand son
+    ISRC n'est pas celui de la fiche et que les catalogues de la fiche lus
+    par leur identifiant (`TEMOINS_AUTRE_ENREGISTREMENT` ; la page Deezer de
+    la fiche seulement si c'en est une AUTRE) l'ont tous à plus de
+    `ECART_AUTRE_ENREGISTREMENT_S`, et qu'aucune ÉDITION connue de la fiche
+    n'a sa durée à ± 2 s (Kid Cudi « Make Her Say » 216 s, ISRC propre :
+    l'« Album Version Edited » déjà notée) : un autre enregistrement, donc une
+    version (fiche secondaire, geste DA1 / règle C), jamais une édition
+    (*92.2012* de Kery James : deux réenregistrements rangés en édition des
+    originaux à 33 et 44 s, 2026-11-14). Une édition de DIFFUSION (radio
+    edit, « Clean ») n'est pas son affaire : l'appelant l'écarte (décision
+    utilisateur 2026-10-19). Rend le motif, ou None."""
+    isrc = str(isrc or "").strip().upper()
+    isrc_fiche = str(fiche.isrc or "").strip().upper()
+    if not isrc or not duree or not isrc_fiche or isrc == isrc_fiche:
+        return None
+    observees = fiche.durations_observees or {}
+    temoins = {}
+    for source in TEMOINS_AUTRE_ENREGISTREMENT:
+        d = observees.get(source)
+        if source == "deezer" and (
+            not fiche.deezer_id or int(fiche.deezer_id) == int(deezer_id or 0)
+        ):
+            continue
+        if d:
+            temoins[source] = int(d)
+    if not temoins or any(
+        abs(d - int(duree)) <= ECART_AUTRE_ENREGISTREMENT_S for d in temoins.values()
+    ):
+        return None
+    if any(d and abs(int(d) - int(duree)) <= 2 for d in fiche.durees_editions or ()):
+        return None
+    lus = ", ".join(f"{s} {d} s" for s, d in sorted(temoins.items()))
+    return f"autre enregistrement : ISRC {isrc} ≠ {isrc_fiche}, {duree} s contre {lus}"
+
+
 #: Preuves qui rattachent SANS confirmation. Mesuré le 2026-09-22 : l'ID Deezer
 #: n'est posé que sur 6 % des fiches et l'ISRC sur 14 % — exiger l'un des deux
 #: renvoyait 90 % des morceaux CONNUS en « à confirmer » à chaque run (EP,
@@ -561,7 +610,7 @@ def classer(
         connu = (album.id in ids_albums or cle in cles_albums or cle_base is not None) and not (
             not est_a_nous and cles_du_disque & cles_invite_seulement
         )
-        inconnues: list[tuple[PisteDeezer, Track | None, bool]] = []
+        inconnues: list[tuple[PisteDeezer, Track | None, bool, str | None]] = []
         for p in album.pistes:
             if p.id in editions_connues and p.id not in deezer_ids:
                 continue
@@ -580,6 +629,21 @@ def classer(
                 notre_id=notre_id,
             )
             present = est_a_nous or connu or notre_id in {cid for cid, _ in p.contributors}
+            motif_version = (
+                autre_enregistrement(p.isrc, p.duration, p.id, existing)
+                if existing is not None
+                and match_by not in ("deezer_id", "isrc")
+                and (album.id, existing.id) not in liens_connus
+                and not _edition_de_diffusion(p)
+                and not edition_generique
+                else None
+            )
+            if motif_version is not None:
+                # Règle 1 (2026-11-22) : un autre enregistrement au même titre
+                # est une VERSION de la fiche, pas son édition.
+                if present:
+                    inconnues.append((p, existing, True, motif_version))
+                continue
             if existing is not None:
                 # Un titre ne prouve rien sur le disque d'un AUTRE où l'artiste
                 # n'est pas crédité : homonyme, on passe (comme avant e31).
@@ -640,14 +704,14 @@ def classer(
                 or titres.get(socle_key)
                 or socles_par_partie.get(cle_de_socle(p.title_short or p.title))
             )
-            inconnues.append((p, socle, est_version and socle is not None))
+            inconnues.append((p, socle, est_version and socle is not None, None))
         if not inconnues:
             if album.pistes and not connu:
                 jumelles.append(album.title)
             continue
-        versions = sum(1 for _, _, v in inconnues if v)
+        versions = sum(1 for _, _, v, _ in inconnues if v)
         disque_de_versions = not connu and versions * 2 >= len(inconnues)
-        for p, socle, est_version in inconnues:
+        for p, socle, est_version, motif_version in inconnues:
             if not est_a_nous and not connu:
                 # Un disque CONNU de la base reste le nôtre même si Deezer le
                 # crédite au beatmaker (« Chardons Bleus » — Mani Deiz) : ses
@@ -667,6 +731,8 @@ def classer(
                 e.motifs.append(f"disque de {album.artist_name}")
             if nature == "version" and socle is not None:
                 e.motifs.append(f"version de « {socle.title} »")
+            if motif_version:
+                e.motifs.append(motif_version)
             ecarts.append(e)
     _degrader_liens_divergents(ecarts)
     return ecarts, jumelles

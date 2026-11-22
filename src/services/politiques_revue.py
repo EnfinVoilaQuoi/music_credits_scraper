@@ -1745,10 +1745,13 @@ def _edition_a_la_duree_de_l_id_spotify(cas, track) -> Arbitrage | None:
     """Une AUTRE page Deezer, au même titre, a la durée de l'ID Spotify de la
     fiche à ± 2 s : les deux catalogues ont la même édition du disque, dont la
     durée diffère de la page principale de la fiche. Elle se note en édition, et
-    `duree_spotify` tombe seul : le vote lit les durées d'édition (Kery James,
-    *92.2012* : « 28 Décembre 1977 » à 537 s chez Spotify et Deezer, la fiche à
-    581 s). Un rapprochement ambigu ou un titre générique reste à l'humain, une
-    page refusée n'est jamais rattachée."""
+    `duree_spotify` tombe seul : le vote lit les durées d'édition. Un
+    rapprochement ambigu ou un titre générique reste à l'humain, une page
+    refusée n'est jamais rattachée, ni un AUTRE enregistrement
+    (`ecarts_deezer.autre_enregistrement`, règle 1 du 2026-11-22) : le cas qui
+    l'avait fait écrire, « 28 Décembre 1977 » de *92.2012* (537 s, la fiche à
+    581 s), était un réenregistrement à l'ISRC neuf, et l'ID Spotify de la
+    fiche celui de *92.2012* (Kery James, 2026-11-14)."""
     from src.utils.corrections_fiches import deezer_refuses
     from src.utils.version_descriptors import meme_titre_normalise
 
@@ -1766,6 +1769,13 @@ def _edition_a_la_duree_de_l_id_spotify(cas, track) -> Arbitrage | None:
     if not meme_titre_normalise(piste.get("title"), track.title) or titre_generique(track.title):
         return None
     if int(piste.get("id") or 0) in deezer_refuses(track):
+        return None
+    # Règle 1 (2026-11-22) : l'ID Spotify peut être celui du réenregistrement
+    # (le cas même de *92.2012*) ; la page Deezer et Apple de la fiche, eux,
+    # disent si la piste est un autre enregistrement.
+    from src.services.ecarts_deezer import autre_enregistrement
+
+    if autre_enregistrement(piste.get("isrc"), duree, piste.get("id"), track):
         return None
     disque = (ecart.get("album") or {}).get("title")
     return Arbitrage(

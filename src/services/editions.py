@@ -14,6 +14,7 @@ script de fusion des fiches existantes :
 
 from __future__ import annotations
 
+from src.utils.corrections_fiches import designation_de, memoriser_fusion
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_title
 from src.utils.version_descriptors import (
@@ -111,7 +112,16 @@ def absorber(dm, socle, fiche) -> bool:
     )
     for champ in CHAMPS_D_EDITION:
         dm.delete_observations(fiche.id, champ)
-    return dm.merge_tracks(socle.id, fiche.id)
+    absorbee, gardee = designation_de(fiche), designation_de(socle)
+    if not dm.merge_tracks(socle.id, fiche.id):
+        return False
+    # Une fusion se CONSIGNE (`fusionner_dans`) : sans elle, ni l'export des
+    # décisions ni les juges des fusions (`genius_ids_absorbes`,
+    # `titres_absorbes`) ne la connaissent — 130 fusions d'édition sans ligne
+    # le 2026-11-22 (fin d'étape discographie, `fusions_20261110`).
+    if socle.artist is not None and socle.artist.name and absorbee != gardee:
+        memoriser_fusion(socle.artist.name, absorbee, gardee)
+    return True
 
 
 def absorber_les_editions(dm, fiches, *, appliquer: bool = True) -> tuple[list, list]:

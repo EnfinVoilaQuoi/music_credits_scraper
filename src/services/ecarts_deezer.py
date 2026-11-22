@@ -48,6 +48,7 @@ from src.utils import version_heritage
 from src.utils.corrections_fiches import (
     deezer_refuses,
     disques_refuses,
+    ids_refuses,
     isrcs_refuses,
     memoriser_deezer_refuse,
 )
@@ -1001,6 +1002,17 @@ def _date(texte: str | None) -> datetime | None:
         return None
 
 
+def artiste_de_l_original(socle: Track, artist) -> str:
+    """PUR. L'interprète principal de l'original d'une version créée : celui
+    que sa page nomme, sinon l'artiste dont c'est la fiche — pas l'artiste qui
+    crée la version (NTM « Un ange dans le ciel (Live …) », original de Kool
+    Shen #31136, disait « Suprême NTM »)."""
+    if socle.primary_artist_name:
+        return socle.primary_artist_name
+    proprietaire = socle.artist.name if socle.artist is not None else None
+    return proprietaire or artist.name
+
+
 def _ligne(artist, e: Ecart, contributeurs: list[tuple[int, str]]) -> Track:
     """La ligne de morceau d'un écart, renseignée par Deezer."""
     a, p = e.album, e.piste
@@ -1066,7 +1078,7 @@ def _ligne(artist, e: Ecart, contributeurs: list[tuple[int, str]]) -> Track:
             {
                 "type": "remix_of" if est_un_remix(p.title) else "version_of",
                 "title": e.socle.title,
-                "artist": artist.name,
+                "artist": artiste_de_l_original(e.socle, artist),
                 "url": e.socle.genius_url,
                 "track_id": e.socle.id,
             }
@@ -1458,7 +1470,9 @@ def creer_lignes(
                         updated_at=entree.streams_at,
                         daily_streams=entree.daily_streams,
                     )
-                dm.update_track_spotify_id(track.id, entree.spotify_id)
+                # Une fiche recréée garde les refus de sa désignation.
+                if entree.spotify_id not in ids_refuses(track):
+                    dm.update_track_spotify_id(track.id, entree.spotify_id)
         comptes.append(
             f"« {track.title} » créé ({LIBELLES[e.nature]}"
             + (", page Genius accrochée" if e.genius else "")

@@ -1513,6 +1513,65 @@ class TrackRepository:
         "apple_music_checked_at",
     )
 
+    #: Colonne dépendante → l'identifiant qu'elle décrit : refusé, il ne passe
+    #: pas non plus.
+    _COLONNE_DE_L_ID = {
+        "spotify_url": "spotify_id",
+        "spotify_page_title": "spotify_id",
+        "spotify_id_checked_at": "spotify_id",
+        "deezer_url": "deezer_id",
+        "deezer_checked_at": "deezer_id",
+        "apple_music_checked_at": "apple_music_id",
+    }
+
+    @staticmethod
+    def _identites_refusees_a_la_fusion(conn, keep_id: int, delete_id: int) -> set[str]:
+        """Les colonnes d'identité de `delete_id` dont la valeur est refusée pour
+        `keep_id` (refus à la main ou d'une règle : l'identifiant a été jugé
+        faux pour cet enregistrement, la fusion n'y change rien)."""
+        from src.utils.corrections_fiches import (
+            NATURE_DU_REFUS_D_IDENTITE,
+            cle_de_refus,
+            refus_de_la_fiche,
+        )
+
+        colonnes = list(NATURE_DU_REFUS_D_IDENTITE)
+        ligne = (
+            conn.execute(
+                text(f"SELECT {', '.join(colonnes)} FROM tracks WHERE id = :d"),  # noqa: S608
+                {"d": delete_id},
+            )
+            .mappings()
+            .first()
+        )
+        if ligne is None:
+            return set()
+        refusees = set()
+        for col, nature in NATURE_DU_REFUS_D_IDENTITE.items():
+            valeur = ligne[col]
+            if valeur in (None, ""):
+                continue
+            if cle_de_refus(nature, valeur) in refus_de_la_fiche(conn, keep_id, nature):
+                refusees.add(col)
+        return refusees
+
+    @staticmethod
+    def _spotify_refuses_de(conn, keep_id: int, delete_id: int) -> list[str]:
+        """Les ID de `track_spotify_ids` de `delete_id` que `keep_id` refuse."""
+        from src.utils.corrections_fiches import refus_de_la_fiche
+
+        refuses = refus_de_la_fiche(conn, keep_id, "id_spotify")
+        if not refuses:
+            return []
+        return [
+            r[0]
+            for r in conn.execute(
+                text("SELECT spotify_id FROM track_spotify_ids WHERE track_id = :d"),
+                {"d": delete_id},
+            )
+            if r[0] in refuses
+        ]
+
     def merge_tracks(self, keep_id: int, delete_id: int) -> bool:
         """Fusionne delete_id dans keep_id : transfère les crédits (en écartant
         ceux déjà présents à l'identique sur le morceau conservé) et les erreurs
@@ -1546,7 +1605,14 @@ class TrackRepository:
                 # fusions du lot 1.1 l'avaient perdu ; le dialogue de l'app ne le
                 # recopiait pas non plus). Avant `track_spotify_ids` : `is_primary`
                 # se recale sur la colonne.
+                # Un identifiant que la fiche GARDÉE refuse ne passe pas, ni sa
+                # ligne `track_spotify_ids` : « New God Flow » (fiche Deezer,
+                # ID posé par `relier_par_isrc` le 2026-11-11) fusionnée dans
+                # « New God Flow.1 » y remettait l'ID refusé à la main le 31/10.
+                refuses = self._identites_refusees_a_la_fusion(conn, keep_id, delete_id)
                 for col in self._COLONNES_IDENTITE_FUSION:
+                    if self._COLONNE_DE_L_ID.get(col, col) in refuses:
+                        continue
                     conn.execute(
                         text(
                             f"UPDATE tracks SET {col} = "
@@ -1600,6 +1666,16 @@ class TrackRepository:
                     {"delete_id": delete_id},
                 )
                 self._unir_compteurs_ytm(conn, keep_id, delete_id)
+                if "spotify_id" in refuses:
+                    # Ce que les sources liées à l'ID ont dit de la fiche absorbée
+                    # décrit l'ID refusé : il ne passe pas non plus.
+                    sources = bindparam("sources", expanding=True)
+                    conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :d AND source IN :sources"
+                        ).bindparams(sources),
+                        {"d": delete_id, "sources": list(self.SOURCES_LIEES_A_L_ID_SPOTIFY)},
+                    )
                 # Observations : dédup par la clé unique (field, source) — le keep
                 # gagne (on écarte celles du doublon déjà couvertes) — puis
                 # réaffectation du reste. Pas de cascade FK (E4).
@@ -1697,6 +1773,15 @@ class TrackRepository:
                 # doublons portent souvent chacun une édition différente (le
                 # single d'un côté, l'album de l'autre) : en faire choisir une
                 # perdrait la reconnaissance de l'autre à la récolte croisée.
+                # Sauf les ID que la fiche gardée refuse.
+                for sid in self._spotify_refuses_de(conn, keep_id, delete_id):
+                    conn.execute(
+                        text(
+                            "DELETE FROM track_spotify_ids "
+                            "WHERE track_id = :d AND spotify_id = :s"
+                        ),
+                        {"d": delete_id, "s": sid},
+                    )
                 conn.execute(
                     text("""
                     DELETE FROM track_spotify_ids WHERE track_id = :delete_id AND EXISTS (

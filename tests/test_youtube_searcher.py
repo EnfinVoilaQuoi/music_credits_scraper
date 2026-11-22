@@ -601,6 +601,50 @@ class TestRefusATortDuScore:
         ):
             assert sans_mention_du_disque(titre, album) == titre
 
+    def test_un_prefixe_d_episode_designe_le_titre(self):
+        """2026-11-22 (décision utilisateur) : « Jesuispasséchezso : Episode 6 /
+        93 Empire » est « 93 Empire » de Sofiane ; le préfixe se retire des deux
+        côtés (des fiches le gardent dans leur titre). `recherche_perimee` ne
+        refuse plus ces liens (simulé : 3 vidéos sur 9 087, rien d'autre)."""
+        from types import SimpleNamespace
+
+        from src.config import YOUTUBE_CONFIDENCE_THRESHOLD
+        from src.services.vues_comptees import recherche_valide
+        from src.youtube.youtube_searcher import relevance_score, sans_prefixe_d_episode
+
+        for video, fiche in (
+            ("Jesuispasséchezso : Episode 6 / 93 Empire (feat. Kalash Criminel)", "93 Empire"),
+            ("Jesuispasséchezso : Episode 8 / Fais le mouv", "Fais le mouv"),
+            (
+                "Jesuispasséchezso : Épisode 5 / Police nationale",
+                "#Jesuispasséchezso : Episode 5 / Police Nationale",
+            ),
+        ):
+            assert (
+                relevance_score(video, ["Sofiane"], "Sofiane", fiche)
+                >= YOUTUBE_CONFIDENCE_THRESHOLD
+            )
+        # Le préfixe seul ne fait pas la ressemblance : un autre épisode reste refusé.
+        assert relevance_score(
+            "Jesuispasséchezso : Episode 8 / Fais le mouv", ["Sofiane"], "Sofiane", "93 Empire"
+        ) < (YOUTUBE_CONFIDENCE_THRESHOLD)
+        for titre in ("Respect (Episode 3)", "Épisode sombre", "#JesuispasséchezSo EP 11"):
+            assert sans_prefixe_d_episode(titre) == titre
+        fiche = SimpleNamespace(
+            title="93 Empire",
+            album="#JeSuisPasséChezSo",
+            primary_artist_name="Sofiane",
+            featured_artists="Kalash Criminel",
+            artist=SimpleNamespace(name="Sofiane"),
+            durations_observees={},
+        )
+        recherche = {
+            "titre": "Jesuispasséchezso : Episode 6 / 93 Empire (feat. Kalash Criminel)",
+            "artistes": ["Sofiane"],
+            "album": "Jesuispasséchezso : Episode 6 / 93 Empire",
+        }
+        assert recherche_valide(fiche, recherche)
+
     def test_la_recherche_garde_artistes_et_disque(self, searcher):
         """Pour REJUGER un lien quand le score change : la chaîne ne nomme que
         le premier artiste (« Simorgh » pour un disque avec Lucio Bukowski)."""

@@ -118,3 +118,36 @@ def test_nom_civil_garde_pour_info_par_regle_puis_retabli(data_manager, monkeypa
     revue_auto.retablir(data_manager, a, correction)
     statuts = {r.related_name: r.status for r in data_manager.get_artist_relations(a.id, None)}
     assert statuts["François Marletta"] == "proposed"
+
+
+class TestMemePersonne:
+    """Mac Miller proposé deux fois chez Larry Lovestein & The Velvet Revival."""
+
+    def _t(self, proposes):
+        mac = lp.personne(
+            "Mac Miller",
+            [
+                _alias("Larry Lovestein"),
+                _alias("Malcolm McCormick"),
+                _alias("Malcolm James McCormick", "info", "Legal name"),
+            ],
+        )
+        t = _temoins(lp.personne("Larry Lovestein & The Velvet Revival"))
+        t.membres_proposes = list(proposes)
+        t.personnes_de_la_base = [mac]
+        return t
+
+    def test_le_nom_civil_se_tait_le_nom_de_scene_reste(self):
+        t = self._t(["Larry Lovestein", "Malcolm McCormick", "Choo Jackson"])
+        v = lp.juger("has_member", "Malcolm McCormick", t)
+        assert v.action == "taire_lien" and "Larry Lovestein" in v.motif
+        assert lp.juger("has_member", "Larry Lovestein", t) is None
+        assert lp.juger("has_member", "Choo Jackson", t) is None
+
+    def test_le_nom_meme_de_l_artiste_est_garde(self):
+        t = self._t(["Larry Lovestein", "Mac Miller"])
+        assert lp.juger("has_member", "Larry Lovestein", t).action == "taire_lien"
+        assert lp.juger("has_member", "Mac Miller", t) is None
+
+    def test_seul_il_reste_a_l_humain(self):
+        assert lp.juger("has_member", "Malcolm McCormick", self._t(["Malcolm McCormick"])) is None

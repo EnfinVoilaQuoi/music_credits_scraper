@@ -2996,6 +2996,128 @@ def politique_video_partagee(cas, _track, _ctx):
     )
 
 
+#: Familles de version dont la page ne garde pas le clip de sa page
+#: principale (décision utilisateur 2026-11-22 : démo, freestyle, édition).
+#: Ni un live, ni un instrumental, ni un remix nommé par son titre : leur
+#: vidéo peut être la leur.
+FAMILLES_SANS_LE_CLIP = frozenset({"demo", "alternate", "snippet"})
+
+#: « Dinos x Adidas / NMD_V3 » : une série ou une publicité, nommée avant le
+#: titre du morceau.
+_PREFIXE_DE_SERIE = re.compile(r"^(?P<serie>[^/]+?)\s+/\s+(?P<titre>\S.*)$")
+
+
+def _version_de(q, p, fiches) -> bool:
+    """PUR. La page `q` est-elle une VERSION de la page principale `p`, au sens
+    du juge des titres : l'original que Genius lui désigne (`socle_designe`) ;
+    une démo, une prise alternative ou un extrait au même socle
+    (« - Clean(Ish) ») ; une édition de diffusion (« (Clean) ») ou un
+    freestyle au même titre de base ; ou « <série de l'artiste> / <titre> »."""
+    from src.utils.title_matching import contains_as_words, normalize_name
+    from src.utils.version_descriptors import (
+        edition_de_diffusion,
+        meme_titre_de_base,
+        meme_titre_normalise,
+        porte_une_version,
+        socle_du_titre,
+    )
+    from src.utils.version_heritage import famille_de_fiche, socle_designe
+
+    if meme_titre_normalise(q.title, p.title):
+        return False  # homonymes : rien ne les départage ici
+    designe = socle_designe(q, fiches)
+    if designe is not None:
+        return revue._page(designe) == revue._page(p)
+    if porte_une_version(q.title):
+        return (
+            meme_titre_normalise(socle_du_titre(q.title), p.title)
+            and famille_de_fiche(q.title, q.relationships) in FAMILLES_SANS_LE_CLIP
+        )
+    if meme_titre_de_base(q.title, p.title):
+        # Un sous-titre quelconque (« 530 (Haikou LP) ») peut nommer une autre
+        # prise : seuls l'édition de diffusion et le freestyle comptent.
+        return bool(edition_de_diffusion(q.title) or revue._FREESTYLE_RE.search(q.title or ""))
+    m = _PREFIXE_DE_SERIE.match(q.title or "")
+    if m is None or not meme_titre_normalise(m["titre"], p.title):
+        return False
+    serie = normalize_name(m["serie"])
+    noms = [q.primary_artist_name, q.artist.name if q.artist else None]
+    return any(n and contains_as_words(normalize_name(n), serie) for n in noms)
+
+
+#: Part des mots d'un sous-titre que le titre de la vidéo doit porter pour le
+#: NOMMER (graphies du distributeur : « 50cent » pour « 50 Cent »).
+_PART_DU_SOUS_TITRE = 0.6
+
+
+def _video_nomme_le_sous_titre(q, v) -> bool:
+    """PUR. Le titre de la vidéo porte-t-il le SOUS-TITRE qui distingue la page
+    `q` (« The Game: My Bitch (Dissin 50cent,Jay-Z,Suge Knight) » : la vidéo
+    est celle de « My Bitch (Dissin’ 50 Cent, Jay-Z, Suge Knight) ») ?"""
+    from src.utils.title_matching import normalize_name
+    from src.utils.version_descriptors import sous_titres
+
+    vus = set(normalize_name(v.title or "").split())
+    for sous_titre in sous_titres(q.title):
+        mots = [m for m in normalize_name(sous_titre).split() if len(m) >= 3]
+        if mots and sum(m in vus for m in mots) / len(mots) >= _PART_DU_SOUS_TITRE:
+            return True
+    return False
+
+
+def versions_de_la_page_principale(fiches, v):
+    """PUR. `(page principale, [fiches de ses versions])` quand une vidéo que
+    plusieurs PAGES portent est le clip d'une page principale que ses autres
+    porteuses déclinent — démo, freestyle, édition (décision utilisateur
+    2026-11-22 : Dinos « NMD_V3 » et « Dinos x Adidas / NMD_V3 », Eminem « The
+    Real Slim Shady » et sa « - Clean(Ish) », Kid Cudi « Day ’N’ Nite
+    (Nightmare) » et le remix « Day ‘N’ Nite » que Genius lui rattache). Le
+    clip revient à la page principale, jamais à la démo. Sinon None.
+
+    La page principale n'est pas elle-même une version : titre d'original
+    (`titre_d_original`) ou original que Genius désigne pour une porteuse.
+    Elle doit être UNIQUE, et la vidéo la nommer (`revue.video_nomme`) ; une
+    vidéo qui EST la version d'une porteuse (« … (Demo) » posé sur la démo)
+    reste à cette porteuse."""
+    from src.utils.version_descriptors import meme_version_publiee, porte_une_version
+    from src.utils.version_heritage import socle_designe
+
+    pages: dict = {}
+    for t in fiches:
+        pages.setdefault(revue._page(t), []).append(t)
+    if len(pages) < 2:
+        return None
+    reps = {page: lignes[0] for page, lignes in pages.items()}
+    designes = {
+        revue._page(d) for t in reps.values() if (d := socle_designe(t, fiches)) is not None
+    }
+    candidates = [
+        p
+        for page, p in reps.items()
+        if socle_designe(p, fiches) is None
+        and not porte_une_version(p.title)
+        and (titre_d_original(p.title) or page in designes)
+    ]
+    trouves = []
+    for p in candidates:
+        versions = [
+            q for page, q in reps.items() if page != revue._page(p) and _version_de(q, p, fiches)
+        ]
+        if versions:
+            trouves.append((p, versions))
+    if len(trouves) != 1:
+        return None
+    p, versions = trouves[0]
+    if not revue.video_nomme(p, v):
+        return None
+    if porte_une_version(v.title) and any(meme_version_publiee(q.title, v.title) for q in versions):
+        return None
+    if any(_video_nomme_le_sous_titre(q, v) for q in versions):
+        return None
+    retirees = {revue._page(q) for q in versions}
+    return p, [t for t in fiches if revue._page(t) in retirees]
+
+
 def politique_kworb_tiers(cas, _track, ctx):
     """Une ligne Kworb « remix par un tiers » (★ du rapprochement) que l'en-tête
     Spotify confirme : remix NOMMÉ (le remixeur est dans le titre) ET l'artiste

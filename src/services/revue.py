@@ -3098,9 +3098,19 @@ def video_partagee(ctx):
             (x for t in fiches for x in t.videos or [] if x.video_id == video_id and x.recherche),
             v,
         )
-        gagnante, temoin = proprietaire_et_temoin(fiches, vue)
+        # Le clip d'une page principale que ses autres porteuses déclinent
+        # (démo, freestyle, édition) lui revient, quels que soient les autres
+        # témoins (décision utilisateur 2026-11-22 : jamais à la démo).
+        from src.services.politiques_revue import versions_de_la_page_principale
+
+        principale = versions_de_la_page_principale(fiches, vue)
+        if principale is not None:
+            gagnante, autres = principale
+            temoin = "page principale, les autres porteuses en sont des versions"
+        else:
+            gagnante, temoin = proprietaire_et_temoin(fiches, vue)
+            autres = [t for t in fiches if gagnante is not None and _page(t) != _page(gagnante)]
         if gagnante is not None:
-            autres = [t for t in fiches if _page(t) != _page(gagnante)]
             noms = ", ".join(f"« {t.title} » (#{t.id})" for t in autres)
             cas.append(
                 (

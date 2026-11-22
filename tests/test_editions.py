@@ -80,6 +80,28 @@ def test_absorber_garde_l_original_et_note_l_edition(data_manager):
     assert data_manager.get_artist_edition_genius_ids(a.id) == {2}
 
 
+def test_absorber_consigne_la_fusion(data_manager):
+    """2026-11-22 : 130 fusions d'édition (fin d'étape discographie, one-shot du
+    10/11) sans ligne `fusionner_dans` — ni exportées, ni lues par les juges."""
+    from src.utils import corrections_fiches as cf
+
+    a = Artist(name="Sofiane")
+    a.id = data_manager.save_artist(a)
+    socle = Track(title="93 Empire", artist=a, duration=251)
+    socle.genius_id = 2817838
+    socle.id = data_manager.save_track(socle)
+    episode = Track(title="#Jesuispasséchezso : Épisode 6 / 93 Empire", artist=a, duration=251)
+    episode.genius_id = 2973005
+    episode.id = data_manager.save_track(episode)
+
+    assert editions.absorber(data_manager, socle, episode)
+
+    assert cf.genius_ids_absorbes("Sofiane") == {2973005}
+    assert cf.charger()["Sofiane"] == [
+        {"fiche": {"genius_id": 2973005}, "fusionner_dans": {"genius_id": 2817838}}
+    ]
+
+
 def test_absorber_les_editions_de_la_discographie(data_manager):
     """Branché en fin d'étape discographie (2026-11-02) : 40 pages d'édition
     chez Eminem. Un original absent n'est jamais deviné ; à blanc, rien ne bouge."""

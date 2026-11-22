@@ -53,6 +53,38 @@ class TestNomCivil:
         assert lp.juger("alias", "Moon Man", _temoins(cudi)) is None
 
 
+class TestMembreConnu:
+    def _scotts(self):
+        cudi = lp.personne(
+            "Kid Cudi", [_alias("Scott Mescudi")], {"aliases": [{"name": "Moon Man (9)"}]}
+        )
+        travis = lp.personne("Travis Scott", [_alias("Jacques Webster", "info", "Search hint")])
+        return _temoins(lp.personne("THE SCOTTS"), [cudi, travis], ["Kid Cudi", "Travis Scott"])
+
+    def test_l_autre_nom_d_un_membre_confirme_se_tait(self):
+        t = self._scotts()
+        v = lp.juger("has_member", "Scott Mescudi", t)
+        assert v.action == "taire_lien" and "Kid Cudi" in v.motif
+        assert lp.juger("has_member", "Jacques Webster", t).action == "taire_lien"
+
+    def test_le_membre_qui_se_dit_membre_se_confirme(self):
+        v = lp.juger("has_member", "Travis Scott", self._scotts())
+        assert v.action == "confirmer_formation"
+
+    def test_un_alias_seulement_propose_ne_prouve_rien(self):
+        nepal = lp.personne("Népal", [_alias("Clément Di Fiore", "proposed")])
+        t = _temoins(lp.personne("2Fingz"), [nepal])
+        assert lp.juger("has_member", "Clément Di Fiore", t) is None
+
+    def test_la_page_d_alias_discogs_du_membre_compte(self):
+        nepal = lp.personne("Népal", (), {"aliases": [{"name": "Clément Di Fiore", "id": 1}]})
+        t = _temoins(lp.personne("2Fingz"), [nepal])
+        assert lp.juger("has_member", "Clément Di Fiore", t).action == "taire_lien"
+
+    def test_un_inconnu_reste_a_l_humain(self):
+        assert lp.juger("has_member", "Khadimou Fall", self._scotts()) is None
+
+
 def test_sans_temoins_rien_ne_change():
     assert lp.juger("alias", "Qui", None) is None
 

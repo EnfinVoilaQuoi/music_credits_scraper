@@ -79,6 +79,18 @@ class TestMesures:
         ctx = _ctx(t, obs={1: self._obs(getsongbpm={"bpm": 83}, reccobeats={"bpm": 130})})
         assert "getsongbpm 83" in revue.bpm_desaccord(t, ctx)[0]
 
+    def test_le_meme_tempo_arrondi_par_deux_analyseurs_n_est_pas_un_desaccord(self):
+        """71 / 74, 82 / 85 (The Game) : 3,6 à 4,2 %, le même tempo (5 %, 2026-11-22)."""
+        for a, b in ((71, 74), (82, 85), (78, 81)):
+            t = _t("X")
+            obs = self._obs(deezer={"bpm": b}, reccobeats={"bpm": a})
+            assert revue.bpm_desaccord(t, _ctx(t, obs={1: obs})) is None
+
+    def test_un_demi_ton_de_vitesse_reste_un_desaccord(self):
+        t = _t("X")
+        obs = self._obs(deezer={"bpm": 106}, reccobeats={"bpm": 100})
+        assert revue.bpm_desaccord(t, _ctx(t, obs={1: obs})) is not None
+
     def test_octave_et_repli_ne_sont_pas_un_desaccord(self):
         t = _t("X")
         obs = self._obs(songbpm={"bpm": 70}, reccobeats={"bpm": 140}, heritage={"bpm": 99})

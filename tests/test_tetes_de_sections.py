@@ -94,12 +94,21 @@ class TestAttribuerSections:
     def test_seules_les_sections_sans_attribution_recoivent_le_nom(self):
         paroles = (
             "[Produced by Scott Storch]\n[Couplet 1]\nun\n"
-            "[Refrain : Akhenaton]\ndeux\n[Outro]\ntrois [Hook] dedans"
+            "[Refrain : Isha]\ndeux\n[Outro]\ntrois [Hook] dedans"
         )
         assert attribuer_sections(paroles, "Isha") == (
             "[Produced by Scott Storch]\n[Couplet 1 : Isha]\nun\n"
-            "[Refrain : Akhenaton]\ndeux\n[Outro : Isha]\ntrois [Hook] dedans"
+            "[Refrain : Isha]\ndeux\n[Outro : Isha]\ntrois [Hook] dedans"
         )
+
+    def test_une_page_a_plusieurs_voix_ne_recoit_aucun_nom(self):
+        paroles = "[Couplet 1]\nun\n[Refrain : Akhenaton]\ndeux\n[Outro]\ntrois"
+        assert attribuer_sections(paroles, "Isha") == paroles
+
+    def test_une_fiche_a_invites_ne_recoit_aucun_nom(self):
+        paroles = "[Couplet 1]\nun"
+        assert attribuer_sections(paroles, "Isha", "Booba") == paroles
+        assert attribuer_sections(paroles, "Isha", "") == "[Couplet 1 : Isha]\nun"
 
     def test_sans_interprete_le_texte_reste_celui_de_genius(self):
         assert attribuer_sections("[Couplet 1]\nun", None) == "[Couplet 1]\nun"
@@ -142,6 +151,16 @@ class TestAuScraper:
         t = Track(title="Solo", artist=Artist(name="Isha"), is_featuring=False)
         scraper._apply_lyrics_from_html(_page("[Couplet 1]", "des paroles ici"), t)
         assert t.lyrics.text == "[Couplet 1 : Isha]\ndes paroles ici"
+
+    def test_un_feat_declare_laisse_les_tetes_nues(self, scraper):
+        t = Track(
+            title="Duo",
+            artist=Artist(name="Isha"),
+            is_featuring=False,
+            featured_artists="Booba",
+        )
+        scraper._apply_lyrics_from_html(_page("[Couplet 1]", "des paroles ici"), t)
+        assert t.lyrics.text == "[Couplet 1]\ndes paroles ici"
 
     def test_deux_lignes_soeurs_lisent_le_meme_texte(self, scraper):
         """Les paroles sont une donnée de PAGE : la lecture de n'importe quelle

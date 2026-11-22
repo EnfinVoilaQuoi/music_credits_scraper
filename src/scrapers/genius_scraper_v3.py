@@ -416,6 +416,7 @@ class GeniusScraperV3(CrawlAIScraperBase):
                     track.is_featuring,
                     track.secondary_role,
                 ),
+                track.featured_artists,
             )
 
             track.lyrics.text = lyrics

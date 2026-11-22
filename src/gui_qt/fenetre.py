@@ -196,6 +196,7 @@ class FenetrePrincipale(QMainWindow):
         self._restaurer()
         self._afficher_vide()
         QTimer.singleShot(0, self._charger_liste_artistes)
+        QTimer.singleShot(0, self._compter_certifs)
 
     # ── construction ─────────────────────────────────────────────────────────
     def _barre_artiste(self) -> QHBoxLayout:
@@ -222,7 +223,7 @@ class FenetrePrincipale(QMainWindow):
             "users-group", "Alias • Formations — la pastille dit qu'un lien attend une décision"
         )
         self.b_certifs = BoutonPastille(
-            "award", "Certifications — fenêtre à venir (version CustomTkinter)"
+            "award", "Certifications — la pastille dit qu'une base attend sa mise à jour"
         )
         self.b_media = BoutonPastille("photo", "Media — fenêtre à venir (version CustomTkinter)")
         self.b_decisions = BoutonPastille(
@@ -237,7 +238,7 @@ class FenetrePrincipale(QMainWindow):
         self.b_menu = BoutonPastille("settings", "Menu")
         self.b_menu.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.b_menu.setMenu(self._menu_general())
-        for b in (self.b_certifs, self.b_media):
+        for b in (self.b_media,):
             b.setEnabled(False)
         for w in (self.b_ajout, self.b_base):
             h.addWidget(w)
@@ -473,6 +474,7 @@ class FenetrePrincipale(QMainWindow):
         self.b_formations.clicked.connect(self._ouvrir_formations)
         self.b_sante.clicked.connect(self._ouvrir_sante)
         self.b_decisions.clicked.connect(self._ouvrir_decisions)
+        self.b_certifs.clicked.connect(self._ouvrir_certifs)
         self.cartouche.formations_cliquees.connect(self._ouvrir_formations)
         self.recherche.textEdited.connect(self._completer)
         self.recherche.returnPressed.connect(lambda: self.charger(self.recherche.text()))
@@ -773,6 +775,29 @@ class FenetrePrincipale(QMainWindow):
         ligne = next((x for x in self.modele.lignes if x.id == track_id), None)
         if ligne is not None:
             self._fiche_detachee(ligne)
+
+    # ── certifications ───────────────────────────────────────────────────────
+    def _compter_certifs(self) -> None:
+        """La pastille « ! » : une base de certifs attend sa mise à jour (lu en fond)."""
+        from src.gui_qt.certifs import _etats_reels
+        from src.presentation.certifs import a_mettre_a_jour
+
+        def compter() -> int:
+            return sum(a_mettre_a_jour(frais) for _, frais in _etats_reels())
+
+        en_fond(
+            compter,
+            lambda n: self.b_certifs.poser_pastille("!" if n else None),
+            lambda m: logger.debug(f"Bases de certifs non lues : {m}"),
+        )
+
+    def _ouvrir_certifs(self) -> None:
+        from src.gui_qt.certifs import FenetreCertifs
+
+        artist = self.chargement.artist if self.chargement is not None else None
+        d = FenetreCertifs(self.runtime, self.taches, artist, parent=self)
+        d.a_jour.connect(lambda n: self.b_certifs.poser_pastille("!" if n else None))
+        d.show()
 
     # ── santé des sources ────────────────────────────────────────────────────
     def _ouvrir_sante(self) -> None:

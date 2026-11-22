@@ -267,6 +267,8 @@ def fenetre(qtbot, data_manager, tmp_path, monkeypatch):
     # Le panneau Décisions lit les pages désactivées du dossier RÉEL : jamais
     # dans un test.
     monkeypatch.setattr(revue, "fiches_actives", lambda artiste: list(artiste.tracks or []))
+    # Ni les bases de certifs réelles (pastille au démarrage).
+    monkeypatch.setattr(FenetrePrincipale, "_compter_certifs", lambda self: None)
 
     desactives = DisabledTracksManager()
     desactives.disabled_tracks_dir = tmp_path
@@ -649,3 +651,46 @@ def test_format_impact():
     from src.presentation.decisions import format_impact
 
     assert [format_impact(n) for n in (0, 999, 12_000, 2_500_000)] == ["—", "999", "12 k", "2.5 M"]
+
+
+# ── Certifications ───────────────────────────────────────────────────────────
+
+
+def test_base_a_mettre_a_jour():
+    from datetime import datetime
+
+    from src.presentation.certifs import a_mettre_a_jour, ligne
+
+    now = datetime(2026, 11, 22)
+    frais = {"available": True, "last_global": "2026-11-01T10:00", "count": 12345}
+    assert not a_mettre_a_jour(frais, now)
+    assert a_mettre_a_jour({**frais, "last_global": "2026-09-01T10:00"}, now)
+    assert a_mettre_a_jour({**frais, "partial": "RIAA coupée"}, now)
+    assert a_mettre_a_jour({"available": False}, now)
+    lg = ligne("SNEP", frais, {"gaps": ["2024-03"]}, now)
+    assert (lg.etat, lg.certifications, lg.trous) == (
+        "À jour",
+        "12 345",
+        "1 période(s) manquante(s)",
+    )
+    assert "France" in lg.libelle
+
+
+def test_fenetre_certifs_met_a_jour_par_la_liste_de_taches(qtbot, monkeypatch):
+    from src.gui_qt import certifs as fenetre_certifs
+    from src.services import certifs as service
+
+    taches = Taches()
+    etats = [("SNEP", {"available": True, "last_global": "2020-01-01T00:00"})]
+    monkeypatch.setattr(service, "executer_maj", lambda nom, progres: (0, "ok"))
+    d = fenetre_certifs.FenetreCertifs(None, taches, None, lambda: etats, lambda s: {})
+    qtbot.addWidget(d)
+    with qtbot.waitSignal(d.a_jour, timeout=10_000) as signal:
+        d.relire()
+    assert signal.args == [1]  # base de 2020 : à mettre à jour
+    assert d.arbre.topLevelItemCount() == 1
+    with qtbot.waitSignal(taches.terminee, timeout=10_000):
+        d.mettre_a_jour("SNEP")
+    assert taches.tache("certifs:SNEP").etat is Etat.COMPLET
+    assert not d.b_appliquer.isEnabled()  # aucun artiste chargé
+    taches.fermer()

@@ -2036,3 +2036,52 @@ class TestPageEtFichePlateforme:
         }
         assert revue.page_et_fiche_plateforme(fiche, ctx) is None
         assert revue.meme_place(page, ctx)
+
+
+class TestCreeeSansTrace:
+    """Règle C, reste (CORRECTIFS 2026-11-09) : une fiche créée par règle qui,
+    son étape identité passée, n'a ni ID Spotify ni vidéo va à l'humain."""
+
+    _CORR = {
+        "id": 7,
+        "detecteur": "deezer_version",
+        "applied_at": "2026-11-19 10:00:00",
+        "retablie_at": None,
+        "annulation": {"type": "fiche_deezer", "deezer_id": 555},
+    }
+
+    def _cas(self, t, corrections=None):
+        ctx = _ctx(t)
+        ctx.creees_par_regle = revue.fiches_creees_par_regle(
+            [self._CORR] if corrections is None else corrections, [t]
+        )
+        d = [x for x in revue.DETECTEURS if x.code == "creee_sans_trace"]
+        return revue.detecter(ctx, detecteurs=d, detecteurs_artiste=())
+
+    def test_creee_puis_identite_sans_rien_va_a_l_humain(self):
+        t = _t("H (Instrumental)", deezer_id=555, spotify_id_checked_at="2026-11-20T08:00:00")
+        (cas,) = self._cas(t)
+        assert cas.nature == revue.DECISION and "deezer_version" in cas.motif
+        assert cas.cle.endswith("|cree:7")
+
+    def test_identite_pas_encore_passee(self):
+        t = _t("H (Instrumental)", deezer_id=555, spotify_id_checked_at="2026-11-18T08:00:00")
+        assert self._cas(t) == []
+        t.spotify_id_checked_at = None
+        assert self._cas(t) == []
+
+    def test_un_id_spotify_ou_une_video_suffit(self):
+        t = _t("H", deezer_id=555, spotify_id_checked_at="2026-11-20T08:00:00", spotify_id="SP")
+        assert self._cas(t) == []
+        t.spotify_id, t.youtube_url = None, "https://youtu.be/abc"
+        assert self._cas(t) == []
+
+    def test_fiche_creee_par_l_humain_ou_retablie_ignoree(self):
+        t = _t("H", deezer_id=555, spotify_id_checked_at="2026-11-20T08:00:00")
+        assert self._cas(t, corrections=[]) == []
+        assert self._cas(t, corrections=[{**self._CORR, "retablie_at": "2026-11-21"}]) == []
+
+    def test_fiche_kworb_retrouvee_par_son_id(self):
+        t = _t("X (Remix)", 42, spotify_id_checked_at="2026-11-20T08:00:00")
+        kworb = {**self._CORR, "annulation": {"type": "fiche_kworb", "creee": 42}}
+        assert len(self._cas(t, corrections=[kworb])) == 1

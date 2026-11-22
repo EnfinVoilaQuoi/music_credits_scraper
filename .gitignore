@@ -211,6 +211,7 @@ scripts/*
 !scripts/retirer_disque_homonyme.py
 !scripts/refuser_profil_deezer.py
 !scripts/refuser_profil_spotify.py
+!scripts/retirer_homonyme_musicbrainz.py
 !scripts/rattraper_colonnes_sans_provenance.py
 !scripts/dissocier_echecs_orphelins.py
 !scripts/rouvrir_dv1.py

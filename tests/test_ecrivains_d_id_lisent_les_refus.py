@@ -43,6 +43,20 @@ EXCEPTIONS = {
     ("src/services/revue_auto.py", "retablir"): "lève le refus qu'il rétablit",
     # Décision humaine : accepter un ID est le contraire d'un refus.
     ("scripts/accepter_id_spotify.py", "main"): "acceptation à la main",
+    # One-shots ignorés par git (`scripts/ponctuels/`) : décisions humaines
+    # appliquées une fois, l'ID posé est celui que l'utilisateur a choisi.
+    ("scripts/ponctuels/decisions_humaines_20261029.py", "main"): "décision humaine, one-shot",
+    ("scripts/ponctuels/decisions_humaines_20261030b.py", "solvable"): (
+        "décision humaine, one-shot"
+    ),
+    ("scripts/ponctuels/decisions_humaines_20261113.py", "apres_fusions"): (
+        "décision humaine, one-shot"
+    ),
+    ("scripts/ponctuels/decisions_humaines_20261113.py", "lives_solaar"): (
+        "décision humaine, one-shot"
+    ),
+    ("scripts/ponctuels/make_her_say_originale.py", "reparer"): "décision humaine, one-shot",
+    ("scripts/ponctuels/new_god_flow_1.py", "main"): "décision humaine, one-shot",
 }
 
 
@@ -84,8 +98,10 @@ def test_tout_ecrivain_d_id_spotify_lit_les_refus():
 
 def test_la_liste_des_exceptions_ne_garde_que_des_vivantes():
     """Une exception qui ne pose plus d'ID sort de la liste (elle ne fait que
-    baisser)."""
-    morts = set(EXCEPTIONS) - _ecrivains_sans_lecture()
+    baisser). Celle d'un script ignoré par git (`scripts/ponctuels/`) ne se
+    juge que là où il existe : absent d'un worktree, il n'est pas périmé."""
+    presentes = {(f, n) for f, n in EXCEPTIONS if (RACINE / f).exists()}
+    morts = presentes - _ecrivains_sans_lecture()
     assert not morts, f"Exceptions sans objet : {sorted(morts)}"
 
 

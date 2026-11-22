@@ -218,7 +218,7 @@ def _meme_personne(kind: str, nom: str, t: TemoinsLiens) -> Verdict | None:
 
 
 #: Les règles, dans l'ordre : la première qui tranche l'emporte.
-REGLES = (_nom_civil, _membre_connu, _meme_personne)
+REGLES = (_nom_civil, _alias_d_un_membre, _membre_connu, _meme_personne, _membre_d_une_personne)
 
 
 def juger(kind: str, nom: str, t: TemoinsLiens | None) -> Verdict | None:

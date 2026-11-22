@@ -8,7 +8,8 @@ from types import SimpleNamespace
 import pytest
 
 from src.models import Artist, ArtistRelation
-from src.services import revue_auto
+from src.services import politiques_revue as pol
+from src.services import revue, revue_auto
 from src.utils import liens_proposes as lp
 
 
@@ -85,8 +86,115 @@ class TestMembreConnu:
         assert lp.juger("has_member", "Khadimou Fall", self._scotts()) is None
 
 
+class TestParasites:
+    def _sniper(self):
+        tunisiano = lp.personne(
+            "Tunisiano",
+            [
+                _alias("Bachir Baccour", "info", "Legal name"),
+                _alias("Sniper", "info", "name_variation"),
+            ],
+            {"aliases": [{"name": "Akeem (5)", "id": 1203302}]},
+        )
+        return _temoins(lp.personne("Sniper"), [tunisiano])
+
+    @pytest.mark.parametrize("nom", ["Akeem", "Bachir Baccour"])
+    def test_le_nom_d_un_membre_n_est_pas_un_alias_de_la_formation(self, nom):
+        v = lp.juger("alias", nom, self._sniper())
+        assert v.action == "refuser_lien" and "Tunisiano" in v.motif
+
+    def test_une_simple_graphie_du_membre_ne_refuse_rien(self):
+        """`name_variation` / `Search hint` : une source les rend aussi pour la
+        formation du membre (« Sniper » chez Tunisiano)."""
+        tunisiano = lp.personne("Tunisiano", [_alias("NTM", "info", "name_variation")])
+        t = _temoins(lp.personne("Sniper"), [tunisiano])
+        assert lp.juger("alias", "NTM", t) is None
+
+    def test_une_personne_n_a_pas_de_membres(self):
+        swing = lp.personne("Swing", [_alias("Siméon Zuyten", "confirmed", "Legal name")])
+        v = lp.juger("has_member", "Eric Kwok", _temoins(swing))
+        assert v.action == "refuser_lien" and "Siméon Zuyten" in v.motif
+
+    def test_une_formation_qui_a_des_membres_n_est_pas_une_personne(self):
+        """Un nom civil posé à tort sur une formation ne la fait pas personne."""
+        groupe = lp.personne("Groupe", [_alias("Jean Dupont", "info", "Legal name")])
+        t = _temoins(groupe, [lp.personne("Membre")])
+        assert lp.juger("has_member", "Inconnu", t) is None
+
+    def test_une_formation_ne_se_juge_pas(self):
+        swing = lp.personne("Swing", [_alias("Siméon Zuyten", "confirmed", "Legal name")])
+        assert lp.juger("member_of", "Eric Kwok", _temoins(swing)) is None
+
+
 def test_sans_temoins_rien_ne_change():
     assert lp.juger("alias", "Qui", None) is None
+
+
+def test_la_politique_passe_par_les_noms_surs():
+    rel = SimpleNamespace(
+        related_name="Eric Kwok",
+        kind="has_member",
+        source="musicbrainz",
+        detail=None,
+        formation=None,
+    )
+    ctx = revue.contexte([], relations_proposees=[rel])
+    ctx.temoins_liens = _temoins(
+        lp.personne("Swing", [_alias("Siméon Zuyten", "confirmed", "Legal name")])
+    )
+    cas = revue.Cas(
+        "liens_proposes", None, "Eric Kwok", "", preuves={"nom": "Eric Kwok", "kind": "has_member"}
+    )
+    arbitrage = pol.politique_alias(cas, None, ctx)
+    assert arbitrage.action == "refuser_lien"
+
+
+@pytest.fixture
+def swing(data_manager):
+    a = Artist(name="Swing")
+    a.id = data_manager.save_artist(a)
+    data_manager.record_artist_relations(
+        a.id,
+        [
+            ArtistRelation(
+                related_name="Siméon Zuyten",
+                kind="alias",
+                source="musicbrainz",
+                detail="Legal name",
+            )
+        ],
+    )
+    data_manager.propose_artist_relations(
+        a.id,
+        [
+            ArtistRelation(related_name="Eric Kwok", kind="has_member", source="musicbrainz"),
+            ArtistRelation(
+                related_name="Swing Zuyten", kind="alias", source="discogs"
+            ),  # reste à l'humain
+        ],
+    )
+    a.tracks = []
+    return a
+
+
+def test_temoins_lus_en_base(data_manager, swing):
+    t = revue.temoins_des_liens(data_manager, swing)
+    assert lp.cle("Siméon Zuyten") in t.artiste.civils and not t.a_des_membres
+
+
+def test_membre_d_une_personne_refuse_par_regle_puis_retabli(data_manager, swing, monkeypatch):
+    monkeypatch.setattr(revue_auto, "REGLES_ETENDUES_BRANCHEES", True)
+    bilan = revue_auto.corriger(data_manager, swing)
+    assert any("Eric Kwok" in a for a in bilan.appliquees)
+    statuts = {r.related_name: r.status for r in data_manager.get_artist_relations(swing.id, None)}
+    assert statuts["Eric Kwok"] == "refused" and statuts["Swing Zuyten"] == "proposed"
+
+    (correction,) = [
+        c for c in data_manager.corrections_revue(swing.id) if c["detecteur"] == "liens_proposes"
+    ]
+    revue_auto.retablir(data_manager, swing, correction)
+    statuts = {r.related_name: r.status for r in data_manager.get_artist_relations(swing.id, None)}
+    assert statuts["Eric Kwok"] == "proposed"
 
 
 def test_nom_civil_garde_pour_info_par_regle_puis_retabli(data_manager, monkeypatch):

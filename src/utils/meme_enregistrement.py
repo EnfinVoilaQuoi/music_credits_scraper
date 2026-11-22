@@ -355,7 +355,10 @@ def fusions_a_decider(db_path, ids_fiches) -> dict[int, dict]:
     qui partage un identifiant (`id_partage`) n'en est pas. Depuis le
     2026-11-11 aussi : deux pages Genius au même texte (`juger_textes_identiques`,
     clé `texte`) et deux fiches d'un disque au même compteur Spotify
-    (`juger_meme_compteur`, clé `compteur`), versées de l'audit. Lecture seule."""
+    (`juger_meme_compteur`, clé `compteur`), versées de l'audit. Depuis le
+    2026-11-22 (règle 3) : deux pages aux titres liés, durées, artistes et
+    crédits compatibles (`deux_pages_a_proposer`, clé `deux_pages`). Lecture
+    seule."""
     ids = sorted(set(ids_fiches))
     if not ids:
         return {}
@@ -375,7 +378,9 @@ def fusions_a_decider(db_path, ids_fiches) -> dict[int, dict]:
             par[t["artist_id"]].append(t)
         deja = paires_deja_tranchees(c, pistes)
         durees = durees_par_identifiant(c, set(ids))
-        jugees = juger_paires(par, Identifiants(c, pistes), durees)
+        identifiants = Identifiants(c, pistes)
+        jugees = juger_paires(par, identifiants, durees)
+        deux_pages = deux_pages_a_proposer(c, par, deja, identifiants)
         au_meme_compteur = [p for ts in par.values() for p in paires_au_meme_compteur(c, ts)]
         places = places_par_fiche(c, [t["id"] for p in au_meme_compteur for t in p])
     out: dict[int, dict] = {}
@@ -402,6 +407,9 @@ def fusions_a_decider(db_path, ids_fiches) -> dict[int, dict]:
             continue
         if juger_meme_compteur(a, b, places, durees) == COMPTEUR_FUSION:
             out.setdefault(a["id"], {"autre": b["id"], "compteur": a["spotify_streams"]})
+    # Règle 3 (2026-11-22) : deux pages aux titres liés que rien ne dément.
+    for fiche, paire in deux_pages.items():
+        out.setdefault(fiche, paire)
     return out
 
 
@@ -675,3 +683,245 @@ def paires_au_meme_compteur(c, ts) -> list[tuple]:
         if not sa & sb:
             paires.append((a, b))
     return paires
+
+
+# ── Règle 3 (décision utilisateur 2026-11-22) : deux pages, un enregistrement ─
+#
+# Deux pages Genius (ou une page et une fiche sans page) aux titres liés — l'un
+# contient l'autre, ou en est le sigle (`titre_contenu_ou_sigle`), ou les deux
+# remixent le même original que Genius désigne, le remixeur que l'un nomme étant
+# crédité par l'autre — que les autres témoins ne démentent pas : durées
+# indépendantes à ± 2 s, artistes (principal et invités) d'une page tous sur
+# l'autre, aucun rôle tenu par une personne différente (un crédit peut MANQUER
+# d'un côté), paroles Genius à ≥ 90 % quand les deux en ont. Kanye « Out The
+# Game » / Consequence « Getting Out the Game », Booba « DCR (Dolce Camara
+# Remix) » / « Dolce Camara (Snight B Remix) ». Une PROPOSITION du panneau ♊ :
+# fusion ou édition, à l'humain.
+
+#: Rôles qui ne désignent pas qui a fait l'enregistrement : jamais une
+#: contradiction (le label de distribution, le fourre-tout « Other ») ; les
+#: invités sont jugés avec les artistes.
+ROLES_HORS_JUGEMENT = frozenset({"label", "other", "featured artist", "copyright", "publisher"})
+#: Sources de durée indépendantes pour la règle 3 : les catalogues lus par
+#: identifiant, et la vidéo de la page lue par son ID.
+DUREES_DEUX_PAGES = (*CATALOGUES_PAR_ID, "youtube_video")
+#: Au-delà, un mot ou un original trop partagé fabriquerait des paires sans fin.
+PORTEURS_MAX = 40
+
+
+def _remix_of(relations: str | None) -> set[str]:
+    try:
+        rels = json.loads(relations or "[]")
+    except (TypeError, ValueError):
+        return set()
+    if not isinstance(rels, list):
+        return set()
+    return {
+        str(r.get("url") or "").strip().rstrip("/").lower()
+        for r in rels
+        if isinstance(r, dict) and r.get("type") == "remix_of" and r.get("url")
+    } - {""}
+
+
+def resume_de_fiche(
+    t, credits: dict[str, set], durees: dict[str, int], identifiants: dict[str, set]
+) -> dict:
+    """La fiche telle que la règle 3 la juge (`t` : ligne `tracks` + `artiste`)."""
+    from src.utils.title_matching import normalize_name
+
+    principal = normalize_name(t["primary_artist_name"] or t["artiste"] or "")
+    invites = credits.get("featured artist", set())
+    return {
+        "id": t["id"],
+        "title": t["title"],
+        "genius_id": t["genius_id"],
+        "artistes": {principal, *invites} - {""},
+        "credits": credits,
+        "durees": durees,
+        "remix_of": _remix_of(t["relationships"]),
+        "paroles": paroles_jugeables(t),
+        "identifiants": identifiants,
+    }
+
+
+def _remixeur_credite(a: dict, b: dict) -> bool:
+    """Le remixeur que nomme le titre de l'un est-il crédité par l'autre ?"""
+    from src.utils.title_matching import normalize_name
+    from src.utils.version_descriptors import remixeur_du_titre
+
+    for x, y in ((a, b), (b, a)):
+        nom = remixeur_du_titre(x["title"])
+        if nom and any(normalize_name(nom) in noms for noms in y["credits"].values()):
+            return True
+    return False
+
+
+def credits_contradictoires(ca: dict[str, set], cb: dict[str, set]) -> str | None:
+    """PUR. Le premier rôle que les deux fiches créditent à des personnes
+    différentes (aucune liste incluse dans l'autre), ou None."""
+    for role in sorted(set(ca) & set(cb) - ROLES_HORS_JUGEMENT):
+        if ca[role] and cb[role] and not (ca[role] <= cb[role] or cb[role] <= ca[role]):
+            return role
+    return None
+
+
+def juger_deux_pages(a: dict, b: dict) -> str | None:
+    """PUR. Règle 3 : le motif qui propose la paire (`resume_de_fiche`), ou
+    None. Jamais deux lignes sœurs ; au moins une page Genius."""
+    from src.utils.version_descriptors import (
+        meme_titre_de_base,
+        porte_une_version,
+        rendition_instrumentale,
+        titre_contenu_ou_sigle,
+    )
+    from src.utils.version_heritage import famille_de
+
+    if a["genius_id"] and a["genius_id"] == b["genius_id"]:
+        return None
+    if not (a["genius_id"] or b["genius_id"]):
+        return None
+    ta, tb = a["title"], b["title"]
+    if (
+        famille_de(ta) != famille_de(tb)
+        or porte_une_version(ta) != porte_une_version(tb)
+        or rendition_instrumentale(ta) != rendition_instrumentale(tb)
+        # Les autres familles du juge des titres : parties, éditions de
+        # diffusion, titres joints (`rapproches_par_le_juge`), et la page
+        # contre la fiche sans page au même titre de base (🪞).
+        or rapproches_par_le_juge(ta, tb)
+        or meme_titre_de_base(ta, tb)
+    ):
+        return None
+    ia, ib = a["identifiants"], b["identifiants"]
+    if identifiants_communs(ia, ib):
+        return None  # un identifiant commun : `id_partage` et les autres branches
+    if ia.get("isrc") and ib.get("isrc"):
+        return None  # deux ISRC propres : deux enregistrements (*92.2012*)
+    # Le même original remixé ne prouve rien entre deux PAGES (deux mixes
+    # d'E-Smoove sur « I Want You ») : seulement pour la fiche sans page.
+    par_le_remix = (
+        not (a["genius_id"] and b["genius_id"])
+        and bool(a["remix_of"] & b["remix_of"])
+        and _remixeur_credite(a, b)
+    )
+    if not (par_le_remix or titre_contenu_ou_sigle(a["title"], b["title"])):
+        return None
+    va, vb = set(a["durees"].values()), set(b["durees"].values())
+    if va and vb:
+        ecart = min(abs(x - y) for x in va for y in vb)
+        if ecart > ECART_MEME_ENREGISTREMENT_S:
+            return None
+        duree = f"durées à {ecart} s"
+    elif par_le_remix:
+        duree = "durée d'un seul côté"
+    else:
+        return None
+    if not (a["artistes"] <= b["artistes"] or b["artistes"] <= a["artistes"]):
+        return None
+    if credits_contradictoires(a["credits"], b["credits"]):
+        return None
+    paroles = None
+    if a["paroles"] and b["paroles"]:
+        paroles = recouvrement_bigrammes(a["paroles"], b["paroles"])
+        if paroles is None or paroles < PAROLES_MEME_ENREGISTREMENT:
+            return None
+    lien = "même original remixé, remixeur crédité" if par_le_remix else "titres liés"
+    return ", ".join(
+        [lien, duree, "artistes et crédits compatibles"]
+        + ([f"paroles à {paroles:.0%}"] if paroles is not None else [])
+    )
+
+
+def paires_deux_pages(ts) -> list[tuple]:
+    """Les paires candidates de la règle 3 parmi les fiches d'un artiste : les
+    deux premiers mots d'un titre à la suite dans l'autre, un sigle, ou un même
+    original remixé (`_remix_of`). Fiche d'identifiant le plus bas d'abord."""
+    from src.utils.version_descriptors import mots_de_titre
+
+    mots = {t["id"]: mots_de_titre(t["title"]) for t in ts}
+    par_bigramme = collections.defaultdict(set)
+    par_sigle = collections.defaultdict(set)
+    par_original = collections.defaultdict(set)
+    for t in ts:
+        m = mots[t["id"]]
+        for i in range(len(m) - 1):
+            par_bigramme[m[i], m[i + 1]].add(t["id"])
+        if len(m) >= 2:
+            par_sigle["".join(x[0] for x in m)].add(t["id"])
+        for url in _remix_of(t["relationships"]):
+            par_original[url].add(t["id"])
+    paires = set()
+    for t in ts:
+        m = mots[t["id"]]
+        porteurs = set()
+        if len(m) >= 2:
+            porteurs |= par_bigramme.get((m[0], m[1]), set())
+        if len(m) == 1:
+            porteurs |= par_sigle.get(m[0], set())
+        if len(porteurs) <= PORTEURS_MAX:
+            paires |= {frozenset((t["id"], o)) for o in porteurs if o != t["id"]}
+    for porteurs in par_original.values():
+        if 1 < len(porteurs) <= PORTEURS_MAX:
+            p = sorted(porteurs)
+            paires |= {frozenset((x, y)) for i, x in enumerate(p) for y in p[i + 1 :]}
+    fiche = {t["id"]: t for t in ts}
+    return [tuple(fiche[i] for i in sorted(p)) for p in paires]
+
+
+def credits_par_fiche(c, ids) -> dict[int, dict[str, set]]:
+    """`{fiche: {rôle en minuscules: {nom normalisé}}}`."""
+    from src.utils.title_matching import normalize_name
+
+    out: dict[int, dict[str, set]] = collections.defaultdict(lambda: collections.defaultdict(set))
+    ids = list(ids)
+    for i in range(0, len(ids), 500):
+        lot = ids[i : i + 500]
+        for r in c.execute(
+            "SELECT track_id, name, role FROM credits "
+            f"WHERE track_id IN ({','.join('?' * len(lot))})",
+            lot,
+        ):
+            if r[1] and r[2]:
+                out[r[0]][str(r[2]).strip().lower()].add(normalize_name(r[1]))
+    return out
+
+
+def durees_deux_pages(c, ids) -> dict[int, dict[str, int]]:
+    """Les durées de `DUREES_DEUX_PAGES` par fiche."""
+    out: dict[int, dict[str, int]] = collections.defaultdict(dict)
+    ids = list(ids)
+    sources = ",".join("?" * len(DUREES_DEUX_PAGES))
+    for i in range(0, len(ids), 500):
+        lot = ids[i : i + 500]
+        for r in c.execute(
+            "SELECT track_id, source, value FROM observations WHERE field = 'duration' "
+            f"AND source IN ({sources}) AND track_id IN ({','.join('?' * len(lot))})",
+            (*DUREES_DEUX_PAGES, *lot),
+        ):
+            try:
+                out[r[0]][r[1]] = int(float(r[2]))
+            except (TypeError, ValueError):
+                continue
+    return out
+
+
+def deux_pages_a_proposer(c, par: dict, deja: set, ids: Identifiants) -> dict[int, dict]:
+    """`{fiche: {"autre", "deux_pages": motif}}` de la règle 3, sur les fiches
+    `par` artiste ; une paire déjà jugée par un humain (`deja`) n'en est pas."""
+    candidates = [p for ts in par.values() for p in paires_deux_pages(ts)]
+    jugees = {t["id"] for p in candidates for t in p}
+    credits, durees = credits_par_fiche(c, jugees), durees_deux_pages(c, jugees)
+    resumes: dict[int, dict] = {}
+    out: dict[int, dict] = {}
+    for a, b in sorted(candidates, key=lambda p: (p[0]["id"], p[1]["id"])):
+        if frozenset((a["id"], b["id"])) in deja:
+            continue
+        for t in (a, b):
+            if t["id"] not in resumes:
+                resumes[t["id"]] = resume_de_fiche(
+                    t, dict(credits.get(t["id"], {})), durees.get(t["id"], {}), ids.de(t["id"])
+                )
+        motif = juger_deux_pages(resumes[a["id"]], resumes[b["id"]])
+        if motif:
+            out.setdefault(a["id"], {"autre": b["id"], "deux_pages": motif})
+    return out

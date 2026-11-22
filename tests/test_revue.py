@@ -1102,6 +1102,7 @@ def test_fenetre_se_construit(racine_tk):
         get_artist_positions=lambda _id: {},
         fusions_a_decider=lambda _ids: {},
         hors_du_disque_a_decider=lambda _ids: {},
+        paroles_d_autres_artistes=lambda _aid, _textes: {},
         cas_de_projets=lambda _aid: [],
         non_music_sortis=lambda _fiches: set(),
         videos_mortes_constatees=dict,

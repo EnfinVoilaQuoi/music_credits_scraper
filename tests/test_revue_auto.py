@@ -715,7 +715,9 @@ def test_edition_a_la_duree_de_l_id_spotify_rattachee_puis_retablie(
     fiche = _charger(data_manager, artiste)["28 décembre 1977"]
     artiste.deezer_id = 77
     album = ed.AlbumDeezer(id=501, title="92.2012", artist_id=77, artist_name=artiste.name)
-    piste = ed.PisteDeezer(id=9, title="28 Décembre 1977", duration=537, isrc="FR9W11201876")
+    # Même ISRC : une édition du disque. Le vrai *92.2012* (autre ISRC, 44 s
+    # sous la page de la fiche) est un réenregistrement (règle 1, 2026-11-22).
+    piste = ed.PisteDeezer(id=9, title="28 Décembre 1977", duration=537, isrc="FRN370102110")
     bilan = ed.BilanEcarts(deezer_id=77, artiste=artiste.name)
     bilan.ecarts = [
         ed.Ecart("link_candidate", album, piste, existing_track=fiche, matched_by="title")

@@ -722,8 +722,12 @@ def _juger(
     tolerance: int,
     titres_tranches: bool = False,
     album: str | None = None,
+    exiger_preuve_si_posterieur: bool = False,
 ) -> bool:
     """Décision COMMUNE aux voies sync et async : seul le transport diffère.
+
+    `exiger_preuve_si_posterieur` : l'ID n'a pour lui que le média d'une page
+    Genius (`reenregistrement_sans_preuve`, règle 2 du 2026-11-22).
 
     Factorisée dès l'écriture, et pas après : c'est le défaut du jumeau
     Musixmatch (2026-09-05), où la logique pure était bien partagée mais où le
@@ -778,9 +782,47 @@ def _juger(
     if accepte:
         motif = motif_titre_generique(track, identite, album)
         accepte = motif is None
+    if accepte and exiger_preuve_si_posterieur:
+        motif = reenregistrement_sans_preuve(track, identite)
+        accepte = motif is None
     if not accepte:
         logger.warning(f"❌ Spotify ID {spotify_id} REFUSÉ pour « {track.title} » — {motif}")
     return accepte
+
+
+#: Règle 2 (décision utilisateur 2026-11-22) : les catalogues qui prouvent
+#: qu'un ID d'une parution POSTÉRIEURE est le même enregistrement.
+DUREES_D_UN_REENREGISTREMENT = ("manual", "deezer", "apple_music", "ytmusic")
+
+
+def _annee(valeur) -> int | None:
+    texte = str(valeur or "")[:4]
+    return int(texte) if texte.isdigit() else None
+
+
+def reenregistrement_sans_preuve(track, identite: dict | None) -> str | None:
+    """PUR. Règle 2 (décision utilisateur 2026-11-22) : l'ID que sert le média
+    d'une page Genius vient d'une parution d'une année POSTÉRIEURE à la sortie
+    de la fiche, et aucune durée indépendante de la fiche
+    (`DUREES_D_UN_REENREGISTREMENT`) ne concorde à ± 2 s : peut-être un
+    réenregistrement — quatre originaux de Kery James avaient pour principal
+    l'ID de *92.2012* (2026-11-14). Rend le motif, ou None."""
+    if not identite:
+        return None
+    servie, sortie = _annee(identite.get("release_date")), _annee(track.release_date)
+    if servie is None or sortie is None or servie <= sortie:
+        return None
+    duree = identite.get("duration")
+    observees = track.durations_observees or {}
+    if duree and any(
+        observees.get(s) and abs(int(observees[s]) - int(duree)) <= TOLERANCE_MEME_FICHIER
+        for s in DUREES_D_UN_REENREGISTREMENT
+    ):
+        return None
+    return (
+        f"parution de {servie} pour une sortie en {sortie}, sans durée indépendante "
+        f"à ± {TOLERANCE_MEME_FICHIER} s de {duree} s : peut-être un réenregistrement"
+    )
 
 
 def est_accepte(track, spotify_id: str | None) -> bool:
@@ -801,6 +843,7 @@ def valider_identite(
     tolerance=TOLERANCE_DUREE,
     titres_tranches: bool = False,
     lire_album=None,
+    exiger_preuve_si_posterieur: bool = False,
 ):
     """Vérifie qu'un ID désigne bien ce morceau avant de l'accepter (voie sync).
 
@@ -821,7 +864,15 @@ def valider_identite(
             album = track.album
         else:
             album = (lire_album or lire_album_page)(spotify_id)
-    return _juger(track, spotify_id, identite, tolerance, titres_tranches, album)
+    return _juger(
+        track,
+        spotify_id,
+        identite,
+        tolerance,
+        titres_tranches,
+        album,
+        exiger_preuve_si_posterieur=exiger_preuve_si_posterieur,
+    )
 
 
 def _disque_a_lire(track, identite) -> bool:

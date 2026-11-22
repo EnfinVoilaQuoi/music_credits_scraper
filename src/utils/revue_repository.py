@@ -256,6 +256,14 @@ class RevueRepository:
 
         return fusions_a_decider(self.db_path, ids_fiches)
 
+    def paroles_d_autres_artistes(self, artist_id: int, textes: dict) -> dict[int, list]:
+        """`{fiche: [candidate]}` : les fiches d'autres artistes dont les paroles
+        Genius contiennent un fragment de ces textes de repli (lecture seule,
+        `paroles_entre_artistes.candidates`, règle 4 du 2026-11-22)."""
+        from src.utils.paroles_entre_artistes import candidates
+
+        return candidates(self.db_path, artist_id, textes)
+
     def hors_du_disque_a_decider(self, ids_fiches) -> dict[int, dict]:
         """`{fiche: {"release_id", "parution", "album_deezer", …}}` : les fiches
         rangées sur un disque dont la liste Deezer ne les contient pas, leur

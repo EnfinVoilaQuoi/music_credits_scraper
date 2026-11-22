@@ -781,6 +781,10 @@ class Track:
     # chargement : `participation` y lit qu'un disque cosigné avec l'une d'elles est
     # celui du collectif, même pour un appelant qui ne les lui passe pas (2026-11-10).
     formations_artiste: tuple = field(default=(), repr=False)
+    # Durées des ÉDITIONS de la fiche (`track_editions`), posées par les lecteurs
+    # qui les jugent (`ecarts_deezer.discographie_de_classement`, le contexte du
+    # panneau) ; jamais en base sous cette forme.
+    durees_editions: tuple = field(default=(), repr=False)
 
     def _identity(self) -> tuple:
         """Clé d'identité métier d'un morceau.

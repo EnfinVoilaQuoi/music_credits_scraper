@@ -958,7 +958,14 @@ class GeniusAPI:
         # historique — largement du `genius_media` — désigne un artiste étranger
         # (mesuré 2026-09-08). Le contrôle coûte UNE requête légère sur l'embed,
         # sans navigateur, et seulement quand un ID est proposé.
-        if sid and not track.spotify_id and valider_identite(track, sid):
+        # Règle 2 (2026-11-22) : l'ID d'une parution postérieure (réédition,
+        # réenregistrement — *92.2012* de Kery James) exige une durée
+        # indépendante à ± 2 s.
+        if (
+            sid
+            and not track.spotify_id
+            and valider_identite(track, sid, exiger_preuve_si_posterieur=True)
+        ):
             track.spotify_id = sid
             track.add_spotify_id(sid, source="genius_media")
             track._spotify_from_api = True

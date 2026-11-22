@@ -226,6 +226,11 @@ class Contexte:
     #: leur piste Deezer sur un autre disque (`appartenance_disque.a_decider`),
     #: lues par `charger_contexte` : le détecteur reste pur.
     hors_disque: dict = field(default_factory=dict)
+    #: `{fiche: [candidate]}` : fiches d'AUTRES artistes dont les paroles
+    #: Genius contiennent un fragment de ses textes de repli
+    #: (`paroles_entre_artistes.candidates`, règle 4 du 2026-11-22), lues par
+    #: `charger_contexte` : le détecteur reste pur.
+    paroles_autres_artistes: dict = field(default_factory=dict)
     #: Regroupements d'éditions que les règles des projets ne tranchent pas
     #: (`projets_en_base.cas_de_projets`, e67), lus par `charger_contexte`.
     projets_a_trancher: list = field(default_factory=list)
@@ -1432,7 +1437,7 @@ def paroles_d_une_autre_fiche(track, ctx):
             elif part > meilleur:
                 meilleur, autre, quels = part, t, [libelle]
     if autre is None:
-        return None
+        return _paroles_d_un_autre_artiste(track, ctx)
     return (
         f"{' et '.join(sorted(set(quels)))} : ceux de « {autre.title} » ? "
         f"({meilleur:.0%} de leurs paires de mots dans ses paroles Genius)",
@@ -1443,6 +1448,49 @@ def paroles_d_une_autre_fiche(track, ctx):
             "empreinte": f"autre:{autre.genius_id or autre.id}",
         },
     )
+
+
+def _fiche_d_un_autre_artiste(x: dict) -> object:
+    """La candidate de `paroles_entre_artistes.candidates`, en fiche que
+    `_relation_legitime` sait lire."""
+    from src.models import Track
+
+    t = Track(title=x["title"] or "")
+    t.id, t.genius_id, t.genius_url = x["autre"], x["genius_id"], x["genius_url"]
+    try:
+        relations = json.loads(x["relationships"] or "[]")
+    except (TypeError, ValueError):
+        relations = []
+    t.relationships = relations if isinstance(relations, list) else []
+    return t
+
+
+def _paroles_d_un_autre_artiste(track, ctx):
+    """Règle 4 (décision utilisateur 2026-11-22) : le même juge, contre les
+    paroles Genius des fiches des AUTRES artistes (lignes sœurs exclues),
+    trouvées par la base (`ctx.paroles_autres_artistes`). Un même titre de
+    base excuse comme chez l'artiste : simulé sur toute la base, sans cette
+    excuse 7 cas sur 8 étaient le même morceau sous deux pages (Rim'K / Sefyu
+    « On va te douiller »), un remix et son solo (« Dolce Camara »)."""
+    for x in ctx.paroles_autres_artistes.get(track.id, ()):
+        if x["part"] < PAROLES_AUTRE_MIN or x["couvert"] < PAROLES_AUTRE_COUVERTES_MIN:
+            continue
+        if track.genius_id and x["genius_id"] == track.genius_id:
+            continue
+        if _relation_legitime(track, _fiche_d_un_autre_artiste(x)):
+            continue
+        return (
+            f"{x['texte']} : ceux de « {x['title']} » de {x['artiste']} ? "
+            f"({x['part']:.0%} de leurs paires de mots dans ses paroles Genius)",
+            {
+                "autre": x["autre"],
+                "artiste_autre": x["artiste"],
+                "part": round(x["part"], 2),
+                "textes": [x["texte"]],
+                "empreinte": f"autre:{x['genius_id'] or x['autre']}",
+            },
+        )
+    return None
 
 
 def page_sans_info(track, _ctx=None):
@@ -1912,6 +1960,14 @@ def meme_enregistrement(track, ctx):
             + ", servi par les deux pages, sans durée par identifiant pour les départager : "
             "doublon de pages Genius ou version que le titre ne nomme pas — fusionner ?",
             {"autres": [autre.id], "texte": True, "empreinte": empreinte},
+        )
+    if paire.get("deux_pages"):
+        # Règle 3 (décision utilisateur 2026-11-22).
+        return (
+            f"même enregistrement que « {autre.title} »"
+            + (f" ({autre.album})" if autre.album else "")
+            + f" ? {paire['deux_pages']} — fusionner, ou noter l'une en édition de l'autre ?",
+            {"autres": [autre.id], "deux_pages": paire["deux_pages"], "empreinte": empreinte},
         )
     if paire.get("compteur"):
         # Versé de `streams_double` (audit) le 2026-11-11.
@@ -4434,6 +4490,13 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
     ctx.fusions = data_manager.fusions_a_decider([t.id for t in tracks if t.id])
     ctx.hors_disque = data_manager.hors_du_disque_a_decider([t.id for t in tracks if t.id])
+    refs = _references_bigrammes(ctx)
+    textes = {
+        t.id: [(lib, texte, t.genius_id) for lib, texte in liste]
+        for t in tracks
+        if t.id and (liste := _textes_de_repli(t, refs))
+    }
+    ctx.paroles_autres_artistes = data_manager.paroles_d_autres_artistes(artiste.id, textes)
     ctx.projets_a_trancher = data_manager.cas_de_projets(artiste.id)
     ctx.non_music_sortis = data_manager.non_music_sortis(tracks)
     ctx.natures_formations = natures_des_formations(data_manager, ctx.relations_proposees)

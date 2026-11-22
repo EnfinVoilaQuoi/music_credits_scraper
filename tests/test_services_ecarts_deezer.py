@@ -8,6 +8,8 @@ versions ; Lucio Bukowski a de vrais trous et deux EP jumeaux « … » / « ...
 import asyncio
 import dataclasses
 
+import pytest
+
 from src.models import Artist, Track, TrackSpotifyId
 from src.models.track import CreditRole
 from src.services import ecarts_deezer as ed
@@ -334,6 +336,76 @@ class TestClasser:
             albums, [_track("X", "Autre")], [{"title": "Autre", "deezer_album_id": 8}], NOUS
         )
         assert ecarts[0].nature == "absent"
+
+
+class TestAutreEnregistrement:
+    """Règle 1 (décision utilisateur 2026-11-22) : une page Deezer d'un AUTRE
+    ISRC, à plus de 10 s des catalogues de la fiche lus par leur ID, est une
+    VERSION, pas une édition (*92.2012* de Kery James : « L'impasse »
+    réenregistrée, rangée en édition de l'original)."""
+
+    @staticmethod
+    def _fiche(**observees):
+        t = _track("L'impasse", "Si c'était à refaire", isrc="FRN370102111")
+        t.id, t.deezer_id, t.duration = 5, 100, 432
+        t.durations_observees = observees or {"deezer": 432, "spotify_web": 391}
+        return t
+
+    @staticmethod
+    def _classer(fiche, isrc="FR9W11201877", duree=391, titre="L'impasse"):
+        p = _piste(10, titre, isrc=isrc)
+        p.duration = duree
+        return ed.classer([_album(1, "92.2012", [p])], [fiche], [], NOUS)[0]
+
+    def test_une_version_pas_un_lien(self):
+        fiche = self._fiche()
+        (e,) = self._classer(fiche)
+        assert e.nature == "version" and e.socle is fiche and not e.coche
+        assert e.existing_track is None
+        assert any("autre enregistrement" in m for m in e.motifs)
+
+    @pytest.mark.parametrize(
+        "kw",
+        [
+            {"isrc": "FRN370102111"},  # le même ISRC : le même enregistrement
+            {"isrc": None},  # sans ISRC, rien ne se montre
+            {"duree": 425},  # à 10 s au plus
+        ],
+    )
+    def test_reste_un_lien(self, kw):
+        (e,) = self._classer(self._fiche(), **kw)
+        assert e.nature.startswith("link")
+
+    def test_l_id_spotify_ne_temoigne_pas(self):
+        """La durée Spotify peut être celle du réenregistrement : seule, elle
+        ne fait pas la règle."""
+        (e,) = self._classer(self._fiche(spotify_web=432))
+        assert e.nature.startswith("link")
+
+    def test_apple_temoigne(self):
+        fiche = self._fiche(apple_music=432)
+        fiche.deezer_id = None
+        (e,) = self._classer(fiche)
+        assert e.nature == "version"
+
+    def test_une_edition_de_diffusion_reste_une_edition(self):
+        """Radio edit, « Clean » : une fiche (décision utilisateur 2026-10-19)."""
+        (e,) = self._classer(self._fiche(), titre="L'impasse (Radio Edit)")
+        assert e.nature != "version"
+
+    def test_la_duree_d_une_edition_connue(self):
+        """Kid Cudi « Make Her Say » 216 s, ISRC propre : l'« Album Version
+        Edited » déjà notée en édition à 216 s."""
+        fiche = self._fiche()
+        fiche.durees_editions = (390,)
+        (e,) = self._classer(fiche)
+        assert e.nature.startswith("link")
+
+    def test_juge_pur(self):
+        fiche = self._fiche()
+        assert ed.autre_enregistrement("FR9W11201877", 391, 10, fiche)
+        # La page de la fiche elle-même ne témoigne pas contre elle.
+        assert ed.autre_enregistrement("FR9W11201877", 391, 100, fiche) is None
 
 
 class TestCocherParDefaut:

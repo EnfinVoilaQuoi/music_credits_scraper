@@ -37,7 +37,7 @@ class _FakeDM:
         self.ordre.append(("videos", track_id))
         return len(videos)
 
-    def recalculer_vues_ytm(self, track_id, exclues=None):
+    def recalculer_vues_ytm(self, track_id):
         self.ordre.append(("total", track_id))
         return None
 

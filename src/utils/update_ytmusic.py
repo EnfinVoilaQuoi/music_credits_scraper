@@ -1076,7 +1076,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         if not comptees and exclues:
             # Sa seule vidéo n'est pas le morceau : un ancien total la compterait
             # encore — il est recalculé (vidé s'il ne reste rien).
-            data_manager.recalculer_vues_ytm(track_id, exclues)
+            data_manager.recalculer_vues_ytm(track_id)
             continue
         if not comptees:
             # Toutes ses vidéos sont PARTAGÉES : leurs vues comptent au niveau de

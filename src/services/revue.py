@@ -1484,14 +1484,45 @@ def credits_api_seuls(track, _ctx=None):
     return None
 
 
+def _horodatage(valeur):
+    """Une date de la fiche (objet ou chaîne ISO) en `datetime` naïf, ou None."""
+    from datetime import datetime
+
+    if isinstance(valeur, str):
+        try:
+            valeur = datetime.fromisoformat(valeur)
+        except ValueError:
+            return None
+    if not isinstance(valeur, datetime):
+        return None
+    return valeur.replace(tzinfo=None)
+
+
+def page_relue_apres_l_api(track) -> bool:
+    """La page Genius a-t-elle été lue APRÈS la dernière pose possible des
+    crédits 🎫 ? Ils viennent du détail `GET /songs/{id}`, daté par
+    `genius_detail_checked_at` (e45) : une lecture de la page postérieure les a
+    eus sous les yeux et ne les a pas confirmés. Sans date du détail, on ne
+    sait pas : non."""
+    lu = _horodatage(track.last_scraped)
+    detail = _horodatage(track.genius_detail_checked_at)
+    return lu is not None and detail is not None and lu >= detail
+
+
 def nature_credits_api(track, _preuves, _ctx) -> str:
     """Sans AUCUN crédit scrapé, la section crédits n'a rien donné : l'étape
     Crédits la relira (`est_manquant(CREDITS_GENIUS)` ne regarde que la source
-    `genius`) — un run, pas une décision. À côté de crédits scrapés, ce sont
-    les compléments que la page ne montre pas, GARDÉS en 🎫 par décision
-    utilisateur (2026-09-26) : une information."""
+    `genius`) — un run, pas une décision. Sauf si la page a été lue APRÈS la
+    pose des crédits 🎫 (`page_relue_apres_l_api`) : la lecture les a vus et ne
+    les confirme pas, un nouveau run lirait la même page (Kanye « Arguing »,
+    « Liberian (Kanye West Mix) », « You Ain't No Model », relues en
+    `--force-credits` le 2026-11-15) — une décision (CORRECTIFS 2026-11-14).
+    À côté de crédits scrapés, ce sont les compléments que la page ne montre
+    pas, GARDÉS en 🎫 par décision utilisateur (2026-09-26) : une information."""
     if any(c.source == SOURCE_SCRAPE for c in track.credits):
         return INFORMATION
+    if page_relue_apres_l_api(track):
+        return DECISION
     return RUN
 
 

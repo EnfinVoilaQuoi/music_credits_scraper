@@ -706,6 +706,23 @@ class TestNatures:
         t.credits.append(Credit("Plain Pat", CreditRole.PRODUCER, source="genius"))
         assert self._nature("credits_api", t) == [revue.INFORMATION]
 
+    def test_credits_api_d_une_page_relue_apres_le_detail_sont_une_decision(self):
+        """CORRECTIFS 2026-11-14 : Kanye « Arguing », relue le 15/11 en
+        `--force-credits`, détail API lu le 16/10 — aucun run ne la règle."""
+        from datetime import datetime
+
+        t = _t("Arguing", last_scraped=datetime(2026, 11, 15, 0, 18))
+        t.credits = [Credit("Kid Cudi", CreditRole.PROGRAMMER, source="genius_api")]
+        t.genius_detail_checked_at = "2026-10-16T17:06:41"
+        assert self._nature("credits_api", t) == [revue.DECISION]
+        # Détail relu APRÈS la page (IAM « Rapline II ») : la page n'a peut-être
+        # pas vu ces crédits, un run la relira.
+        t.genius_detail_checked_at = "2026-11-20T13:22:32"
+        assert self._nature("credits_api", t) == [revue.RUN]
+        # Sans date du détail, on ne sait pas quand ils ont été posés : un run.
+        t.genius_detail_checked_at = None
+        assert self._nature("credits_api", t) == [revue.RUN]
+
     def test_video_partagee_comptee_nulle_part_ou_chez_un_seul(self):
         autre = Artist(name="Lunatic")
         autre.id, _A.id = 2, 1

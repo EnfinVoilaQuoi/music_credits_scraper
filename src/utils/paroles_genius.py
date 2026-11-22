@@ -215,10 +215,34 @@ def interprete_des_sections(
     return None
 
 
-def attribuer_sections(paroles: str, interprete: str | None) -> str:
+def noms_des_sections(paroles: str) -> set[str]:
+    """PUR. Les noms que la page elle-même donne à ses sections (« [Couplet 2 :
+    Gringe] »), sans casse ; les têtes qui ne sont pas des sections n'y entrent pas."""
+    noms: set[str] = set()
+    for etiquette in _LIGNE_DE_TETE.findall(paroles or ""):
+        if ":" not in etiquette:
+            continue
+        base, nom = etiquette.rsplit(":", 1)
+        if est_tete_de_section(base.strip()) and nom.strip():
+            noms.add(nom.strip().casefold())
+    return noms
+
+
+def une_seule_voix(paroles: str, interprete: str | None, invites: str | None = None) -> bool:
+    """PUR. La page n'a qu'une voix : la fiche n'a aucun invité et aucune section
+    n'est attribuée à un autre que `interprete`. Sur une page à plusieurs voix, une
+    section nue n'est pas forcément chantée par le principal : y mettre son nom
+    serait une supposition (6 022 têtes sur 2 274 pages, 2026-11-22)."""
+    if not interprete or (invites or "").strip():
+        return False
+    return noms_des_sections(paroles) <= {interprete.strip().casefold()}
+
+
+def attribuer_sections(paroles: str, interprete: str | None, invites: str | None = None) -> str:
     """PUR. Ajoute ` : <interprete>` aux seules têtes de section sans attribution,
-    seules sur leur ligne. Sans interprète, le texte reste celui de Genius."""
-    if not paroles or not interprete:
+    seules sur leur ligne, et seulement sur une page à une seule voix. Sans
+    interprète, ou à plusieurs voix, le texte reste celui de Genius."""
+    if not paroles or not interprete or not une_seule_voix(paroles, interprete, invites):
         return paroles
 
     def attribuer(tete: re.Match) -> str:

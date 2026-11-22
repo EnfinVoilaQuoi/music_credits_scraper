@@ -57,6 +57,7 @@ EXCEPTIONS = {
     ),
     ("scripts/ponctuels/make_her_say_originale.py", "reparer"): "décision humaine, one-shot",
     ("scripts/ponctuels/new_god_flow_1.py", "main"): "décision humaine, one-shot",
+    ("scripts/ponctuels/new_god_flow_original.py", "main"): "décision humaine, one-shot",
 }
 
 

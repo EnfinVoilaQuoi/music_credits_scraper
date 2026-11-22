@@ -162,7 +162,15 @@ def propositions_par_place(
 
 
 def rattacher_parutions_apple(
-    dm, artist, albums, *, client=None, mb=None, force: bool = False, should_stop=lambda: False
+    dm,
+    artist,
+    albums,
+    *,
+    client=None,
+    mb=None,
+    force: bool = False,
+    sans_delais: bool = False,
+    should_stop=lambda: False,
 ) -> BilanApple:
     """Pour chaque album Deezer de ce run (`BilanEcarts.albums`) : l'album Apple
     de son code-barres (départagé par MusicBrainz quand iTunes est ambigu),
@@ -193,7 +201,9 @@ def rattacher_parutions_apple(
         collection, vu = dm.etat_parution_apple(release_id)
         if collection is not None and not force:
             continue
-        if not force and not constat_perime(vu, album.release_date):
+        # `sans_delais` (option de run, 2026-11-22) : un constat daté est
+        # redemandé quel que soit son âge.
+        if not force and not constat_perime(vu, album.release_date, sans_delai=sans_delais):
             continue
         try:
             resultats = client.lookup_code_barres(album.upc)

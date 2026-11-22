@@ -59,6 +59,11 @@ class OptionsCycle:
     #: identité, crédits, enrich et streams (`--inclure-desactives`, menu
     #: « Titres désactivés » de la GUI Qt, 2026-11-22). Sans elle, rien ne change.
     inclure_desactives: bool = False
+    #: Lève les délais pour ce run (`--sans-delais`, menu « Ignorer les délais »
+    #: de Run Complet, 2026-11-22) : une absence constatée depuis moins de
+    #: `delai_absence_jours` et un « pas sur Spotify / Deezer / Apple » daté
+    #: redeviennent à traiter. Ce n'est pas forcer : ce qui est là reste là.
+    sans_delais: bool = False
     disco: discographie.OptionsDisco = discographie.OptionsDisco()
     identite: identite.OptionsIdentite = identite.OptionsIdentite()
     credits: credits.OptionsCredits = credits.OptionsCredits()
@@ -142,6 +147,17 @@ def options_identite(options: OptionsCycle) -> identite.OptionsIdentite:
     o = options.identite
     if options.inclure_desactives and not o.inclure_desactives:
         o = replace(o, inclure_desactives=True)
+    if options.sans_delais and not o.sans_delais:
+        o = replace(o, sans_delais=True)
+    return o
+
+
+def options_credits(options: OptionsCycle) -> credits.OptionsCredits:
+    """Les options de l'étape crédits, dont les phases Genius et Discogs
+    re-sélectionnent : `sans_delais` du cycle s'y ajoute."""
+    o = options.credits
+    if options.sans_delais and not o.sans_delais:
+        o = replace(o, sans_delais=True)
     return o
 
 
@@ -174,8 +190,9 @@ def executer_etape(
                 echecs=sources,
                 track_ids=options.credits.track_ids,
                 inclure_desactives=options.inclure_desactives,
+                sans_delais=options.sans_delais,
             )
-            return credits.run(runtime, artist, tracks, options.credits, hooks)
+            return credits.run(runtime, artist, tracks, options_credits(options), hooks)
         if etape == "enrich":
             par_manque, par_echec = restriction(
                 options.enrich.force_update, options.tout, options.manquants, options.echecs
@@ -189,6 +206,7 @@ def executer_etape(
                 echecs=sources,
                 track_ids=options.enrich.track_ids,
                 inclure_desactives=options.inclure_desactives,
+                sans_delais=options.sans_delais,
             )
             return enrichissement.run(runtime, artist, tracks, options.enrich, hooks)
         if etape == "streams":

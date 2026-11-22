@@ -194,13 +194,20 @@ def sans_compteur_perime(vu_le, release_date, maintenant: datetime | None = None
     return (maintenant - vu.replace(tzinfo=None)) >= timedelta(days=delai)
 
 
-def constat_perime(checked_at, release_date, maintenant: datetime | None = None) -> bool:
+def constat_perime(
+    checked_at, release_date, maintenant: datetime | None = None, *, sans_delai: bool = False
+) -> bool:
     """Un « pas sur cette plateforme » daté (`*_checked_at`) est-il à
     redemander ? Jamais constaté : oui. Sinon il expire (décision utilisateur
     2026-10-12) : `delai_constat_sortie_recente_jours` (30) si la sortie a moins
     de `fenetre_sortie_recente_jours` (un an), `delai_constat_jours` (180)
-    sinon — date inconnue comprise. Un constat illisible vaut « jamais »."""
+    sinon — date inconnue comprise. Un constat illisible vaut « jamais ».
+    `sans_delai` (option de run « ignorer les délais », 2026-11-22) : tout
+    constat est à redemander, quel que soit son âge."""
     from src.config import settings
+
+    if sans_delai:
+        return True
 
     vu = _instant(checked_at)
     if vu is None:
@@ -214,7 +221,9 @@ def constat_perime(checked_at, release_date, maintenant: datetime | None = None)
     return (maintenant - vu.replace(tzinfo=None)) >= timedelta(days=delai)
 
 
-def est_manquant(track: Track, kind: Manque) -> bool:
+def est_manquant(track: Track, kind: Manque, *, sans_delais: bool = False) -> bool:
+    """La donnée `kind` manque-t-elle à `track` ? `sans_delais` : un « pas sur
+    Spotify / Deezer » daté redevient à demander, quel que soit son âge."""
     from src.utils.contenants import contenant_sans_page
 
     # Un medley sans page Genius n'a ni crédits ni paroles à lui : ils sont sur
@@ -243,10 +252,12 @@ def est_manquant(track: Track, kind: Manque) -> bool:
         spotify = track.streams.spotify_streams is not None or bool(track.streams.compte_sur)
         return not spotify or track.streams.ytm_streams is None
     if kind is Manque.IDENTITE_DEEZER:
-        return not track.deezer_id and constat_perime(track.deezer_checked_at, track.release_date)
+        return not track.deezer_id and constat_perime(
+            track.deezer_checked_at, track.release_date, sans_delai=sans_delais
+        )
     if kind is Manque.IDENTITE_SPOTIFY:
         return not track.spotify_id and constat_perime(
-            track.spotify_id_checked_at, track.release_date
+            track.spotify_id_checked_at, track.release_date, sans_delai=sans_delais
         )
     if kind is Manque.IDENTITE_SPOTIFY_FORCE:
         return not track.spotify_id
@@ -318,6 +329,7 @@ def selection_morceaux(
     echecs: Iterable[str] = (),
     track_ids: Iterable[int] | None = None,
     inclure_desactives: bool = False,
+    sans_delais: bool = False,
 ) -> list[Track]:
     """« Tous les morceaux » d'un flux : la discographie RÉUNIE (comme la GUI),
     moins les désactivés, restreinte aux `track_ids` s'ils sont donnés, puis
@@ -328,7 +340,8 @@ def selection_morceaux(
     est pas, la source a répondu).
 
     `inclure_desactives` (option de run, `--inclure-desactives`, 2026-11-22) :
-    les fiches désactivées restent dans la sélection."""
+    les fiches désactivées restent dans la sélection ; `sans_delais`
+    (`--sans-delais`) : voir `morceaux_a_traiter`."""
     tracks = list(artist.tracks)
     if not inclure_desactives:
         desactives = runtime.disabled.load_disabled_tracks(artist.name)
@@ -336,7 +349,9 @@ def selection_morceaux(
     if track_ids is not None:
         voulus = set(track_ids)
         tracks = [t for t in tracks if t.id in voulus]
-    return morceaux_a_traiter(runtime, tracks, manquants=manquants, echecs=echecs)
+    return morceaux_a_traiter(
+        runtime, tracks, manquants=manquants, echecs=echecs, sans_delais=sans_delais
+    )
 
 
 def morceaux_a_traiter(
@@ -345,23 +360,29 @@ def morceaux_a_traiter(
     *,
     manquants: Iterable[Manque] = (),
     echecs: Iterable[str] = (),
+    sans_delais: bool = False,
 ) -> list[Track]:
     """Parmi `tracks`, ceux auxquels il manque AU MOINS UNE des données
     `manquants` OU qu'une des sources `echecs` n'a pas servis. Sans critère :
     tous. La règle « sans forcer, seulement les manquants et les échecs »
-    (décision utilisateur 2026-10-11) passe par ici, pour tous les appelants."""
+    (décision utilisateur 2026-10-11) passe par ici, pour tous les appelants.
+
+    `sans_delais` (option de run « ignorer les délais », 2026-11-22) : une
+    absence constatée récemment et un « pas sur la plateforme » daté ne font
+    plus taire la donnée — elle redevient à traiter. Ce qui est déjà là reste
+    là : ce n'est pas forcer."""
     kinds = tuple(manquants)
     sources = tuple(echecs)
     if not (kinds or sources):
         return list(tracks)
     en_echec = morceaux_en_echec(runtime, sources) if sources else set()
     couvrantes = {s for k in kinds for s in SOURCES_DU_MANQUE.get(k, ())}
-    absences = absences_recentes(runtime, couvrantes) if couvrantes else {}
+    absences = absences_recentes(runtime, couvrantes) if couvrantes and not sans_delais else {}
 
     def manque(t: Track, k: Manque) -> bool:
         # Une donnée qu'une source a récemment déclarée ABSENTE n'est plus à
         # redemander : c'est une réponse, pas un trou (2026-10-11).
-        return est_manquant(t, k) and not (
+        return est_manquant(t, k, sans_delais=sans_delais) and not (
             absences.get(t.id, set()) & set(SOURCES_DU_MANQUE.get(k, ()))
         )
 

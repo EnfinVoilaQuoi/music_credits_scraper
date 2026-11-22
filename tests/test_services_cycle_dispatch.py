@@ -201,7 +201,7 @@ class TestResumes:
         monkeypatch.setattr(enrichissement, "sources_suivies", lambda runtime, options: ())
         artist = _artist([_track(1, bpm=120)])
         rt = _rt(artist.tracks)
-        monkeypatch.setattr("src.services.runtime.est_manquant", lambda track, kind: False)
+        monkeypatch.setattr("src.services.runtime.est_manquant", lambda track, kind, **k: False)
         options = cycle.OptionsCycle()
         b = cycle.executer_etape(rt, artist, "enrich", options, Hooks())
         assert b.complete and b.motif == "rien à traiter"

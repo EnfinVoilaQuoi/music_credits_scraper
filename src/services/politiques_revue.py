@@ -1246,6 +1246,58 @@ def arbitrage_hors_disque(cas, track, _ctx, lire_discogs=None) -> Arbitrage | No
     )
 
 
+# ── Crédits 🎫 que la page ne confirme pas (2026-11-22) ────────────────────
+
+#: Décision utilisateur du 2026-11-22 : « on valide tout ce qu'on peut, mais
+#: le reste va en indécidable, car sans autre info je ne peux pas trancher,
+#: rien n'indique qu'ils sont faux ». Interrupteur :
+#: `revue_auto.REGLES_CREDITS_API_BRANCHEES`.
+REGLES_CREDITS_API = frozenset({("credits_api", "normal"), ("credits_api", "indecidable")})
+
+#: Sources de crédits INDÉPENDANTES de Genius qui confirment un crédit 🎫 :
+#: Discogs, les contributeurs Deezer, les descriptions YouTube (Topic, clip).
+#: Ni l'héritage, ni un crédit déduit d'un titre, ni Kworb.
+SOURCES_TEMOINS_CREDITS = frozenset({"discogs", "deezer", "youtube_topic", "youtube_clip"})
+
+
+def arbitrage_credits_api(cas, track, _ctx) -> Arbitrage | None:
+    """Chaque crédit 🎫 confirmé AU MÊME RÔLE (même personne au nom normalisé)
+    par une source indépendante : ✓ Normal ; sinon « indécidable » — hors du
+    panneau et du critère, le cas revient si ses crédits changent (la clé du
+    cas porte la liste des crédits). Un cas « à faire par un run » (page pas
+    relue depuis le détail API) n'est pas tranché : le run peut le régler.
+
+    Mesuré le 2026-11-22 sur une copie : 189 crédits 🎫 sur 96 cas, 1 seul
+    confirmé au même rôle, aucune fiche couverte entière — tout va en
+    indécidable. Les rôles VOISINS (« Writer » de l'API contre « Composer » /
+    « Lyricist » d'une Topic, « Producer » contre « Additional Production »
+    de la page) ne confirment pas : pas validés."""
+    from src.utils.title_matching import normalize_name
+
+    if cas.detecteur != "credits_api" or track is None or cas.nature == revue.RUN:
+        return None
+    api = [c for c in track.credits if c.source == revue.SOURCE_API]
+    if not api:
+        return None
+    temoins = {
+        (normalize_name(c.name), c.role)
+        for c in track.credits
+        if c.source in SOURCES_TEMOINS_CREDITS and c.name
+    }
+    confirmes = [c for c in api if (normalize_name(c.name), c.role) in temoins]
+    if len(confirmes) == len(api):
+        return Arbitrage(
+            "chaque crédit 🎫 est confirmé au même rôle par une autre source : ✓ Normal",
+            "normal",
+            ", ".join(f"{c.name} ({c.role.value})" for c in confirmes),
+        )
+    return Arbitrage(
+        "crédits 🎫 qu'aucune autre source ne confirme : indécidable",
+        "indecidable",
+        f"{len(confirmes)} / {len(api)} confirmé(s) au même rôle",
+    )
+
+
 # ── Vidéo ordinaire d'un autre montage (2026-10-27) ────────────────────────
 
 #: Interrupteur : `revue_auto.REGLES_VIDEO_BRANCHEES`.

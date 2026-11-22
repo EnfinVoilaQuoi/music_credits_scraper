@@ -3762,7 +3762,8 @@ def _noms_de_la_disco(ctx) -> frozenset[str]:
 #: Détecteurs dont un cas « pour information » reste ouvert aux règles du
 #: correcteur (`revue_auto`) : un alias que MusicBrainz ET Discogs donnent se
 #: confirme même sans trace dans la discographie (Q1, 2026-10-31).
-INFORMATIONS_ARBITRABLES = frozenset({"liens_proposes"})
+#: Les crédits 🎫 aussi : ✓ Normal ou indécidable par règle (2026-11-22).
+INFORMATIONS_ARBITRABLES = frozenset({"liens_proposes", "credits_api"})
 
 
 def nature_lien_propose(preuves, ctx) -> str:

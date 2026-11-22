@@ -6,8 +6,8 @@ une action jamais validée n'y entre pas en douce."""
 from src.services import politiques_revue, revue_auto
 
 #: Actions que le correcteur applique sans geste propre : `normal` pose le
-#: verdict « ✓ Normal » (`corriger`).
-_SANS_CORRECTEUR = {"normal"}
+#: verdict « ✓ Normal », `indecidable` le verdict « indécidable » (`corriger`).
+_SANS_CORRECTEUR = {"normal", "indecidable"}
 
 #: Écrites dans une politique, mais qui attendent la décision de l'utilisateur
 #: (inventaire du 2026-11-22 : « La Fin De Leur Monde - Live » proposée en

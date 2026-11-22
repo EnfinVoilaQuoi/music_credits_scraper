@@ -1185,3 +1185,65 @@ def test_deezer_isrc_d_un_membre_rattache_chez_le_membre_puis_retabli(
     (correction,) = data_manager.corrections_revue(artiste.id)
     revue_auto.retablir(data_manager, artiste, correction)
     assert "Hourvari" not in {r["title"] for r in data_manager.get_track_releases(fiche.id)}
+
+
+def test_credits_api_confirmes_normaux_le_reste_indecidable(data_manager, artiste):
+    """Décision utilisateur 2026-11-22 : un crédit 🎫 confirmé au même rôle par
+    une autre source → ✓ Normal ; sans autre info → indécidable."""
+    from datetime import datetime
+
+    from src.models.track import Credit, CreditRole
+    from src.utils.revue_repository import VERDICT_INDECIDABLE, VERDICT_NORMAL
+
+    lu = datetime(2026, 11, 15)
+    a = Track(title="Arguing", artist=artiste, genius_id=21, last_scraped=lu)
+    a.credits = [
+        Credit("Plain Pat", CreditRole.PRODUCER, source="genius"),
+        Credit("Kid Cudi", CreditRole.PROGRAMMER, source="genius_api"),
+    ]
+    data_manager.save_track(a)
+    b = Track(title="Liberian", artist=artiste, genius_id=22, last_scraped=lu)
+    b.credits = [
+        Credit("Plain Pat", CreditRole.PRODUCER, source="genius"),
+        Credit("Mike Dean", CreditRole.MIXING_ENGINEER, source="genius_api"),
+        # Autre graphie : la clé unique des crédits refuse la même (nom, rôle).
+        Credit("MIKE DEAN", CreditRole.MIXING_ENGINEER, source="discogs"),
+    ]
+    data_manager.save_track(b)
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste, seulement=frozenset({"credits_api"}))
+    assert len(bilan.appliquees) == 2
+    verdicts = {
+        v["morceau"]: v["verdict"] for v in data_manager.verdicts_revue(artiste.id).values()
+    }
+    assert verdicts == {"Arguing": VERDICT_INDECIDABLE, "Liberian": VERDICT_NORMAL}
+    actifs = revue.analyser(data_manager, artiste).actifs
+    assert not [c for c in actifs if c.detecteur == "credits_api"]
+
+    # « ↩ Rétablir » rend le cas à l'humain ; la règle ne le reprend plus.
+    corrections = {c["morceau"]: c for c in data_manager.corrections_revue(artiste.id)}
+    assert corrections["Arguing"]["action"] == "regle:indecidable"
+    revue_auto.retablir(data_manager, artiste, corrections["Arguing"])
+    assert "Arguing" not in {v["morceau"] for v in data_manager.verdicts_revue(artiste.id).values()}
+    assert (
+        revue_auto.corriger(data_manager, artiste, seulement=frozenset({"credits_api"})).appliquees
+        == []
+    )
+
+
+def test_credits_api_d_une_page_a_relire_ne_sont_pas_tranches(data_manager, artiste):
+    """Page jamais relue depuis le détail API : un run peut les confirmer."""
+    from datetime import datetime
+
+    from src.models.track import Credit, CreditRole
+
+    t = Track(title="Rapline II", artist=artiste, genius_id=23, last_scraped=datetime(2026, 11, 15))
+    t.genius_detail_checked_at = "2026-11-20T13:22:32"
+    t.credits = [Credit("Kid Cudi", CreditRole.PROGRAMMER, source="genius_api")]
+    data_manager.save_track(t)
+    _charger(data_manager, artiste)
+    assert (
+        revue_auto.corriger(data_manager, artiste, seulement=frozenset({"credits_api"})).appliquees
+        == []
+    )

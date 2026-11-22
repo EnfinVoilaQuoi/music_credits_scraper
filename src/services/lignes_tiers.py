@@ -25,6 +25,7 @@ import copy
 
 from src.models import Artist, Track
 from src.models.track import CreditRole
+from src.utils.corrections_fiches import ids_refuses
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_title
 from src.utils.version_descriptors import titres_confondus
@@ -68,7 +69,7 @@ def donner_aux_interpretes(dm, track: Track, proprietaire: Artist) -> list[str]:
         ligne.duration = track.duration
         ligne.deezer_id, ligne.deezer_url = track.deezer_id, track.deezer_url
         ligne.isrc = track.isrc
-        if track.spotify_id:
+        if track.spotify_id and track.spotify_id not in ids_refuses(ligne):
             ligne.spotify_id = track.spotify_id
             ligne.add_spotify_id(track.spotify_id, source="ligne_tiers")
         ligne.is_featuring = True

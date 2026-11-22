@@ -48,6 +48,7 @@ from src.utils import version_heritage
 from src.utils.corrections_fiches import (
     deezer_refuses,
     disques_refuses,
+    ids_refuses,
     isrcs_refuses,
     memoriser_deezer_refuse,
 )
@@ -1458,7 +1459,9 @@ def creer_lignes(
                         updated_at=entree.streams_at,
                         daily_streams=entree.daily_streams,
                     )
-                dm.update_track_spotify_id(track.id, entree.spotify_id)
+                # Une fiche recréée garde les refus de sa désignation.
+                if entree.spotify_id not in ids_refuses(track):
+                    dm.update_track_spotify_id(track.id, entree.spotify_id)
         comptes.append(
             f"« {track.title} » créé ({LIBELLES[e.nature]}"
             + (", page Genius accrochée" if e.genius else "")

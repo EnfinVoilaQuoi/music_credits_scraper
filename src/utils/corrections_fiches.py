@@ -196,42 +196,89 @@ def _lignes(track, nature: str, table: str = "refus") -> list[dict]:
     artiste = track.artist.name if track.artist else None
     if moteur is None or not artiste:
         return []
-    from sqlalchemy import text
     from sqlalchemy.exc import SQLAlchemyError
 
     try:
         with moteur.connect() as conn:
-            lignes = (
-                conn.execute(
-                    text(
-                        "SELECT genius_id, artiste, titre, album, valeur, detail"
-                        f"{', origine' if table == 'refus' else ''} FROM {table} "
-                        "WHERE nature = :n AND (artiste = :a OR genius_id = :g)"
-                    ),
-                    {"n": nature, "a": artiste, "g": track.genius_id},
-                )
-                .mappings()
-                .all()
+            return _lignes_de(
+                conn, nature, table, artiste, track.genius_id, track.title, track.album
             )
     except SQLAlchemyError as e:
         logger.warning(f"{table.capitalize()} illisibles ({nature}) : {e} — rien d'appliqué")
         return []
+
+
+def _lignes_de(conn, nature: str, table: str, artiste, genius_id, titre, album) -> list[dict]:
+    """`_lignes` dans la transaction de l'appelant, la fiche donnée par ses
+    champs (une fusion lit les refus de la fiche gardée sans seconde connexion)."""
+    from sqlalchemy import text
+
+    lignes = (
+        conn.execute(
+            text(
+                "SELECT genius_id, artiste, titre, album, valeur, detail"
+                f"{', origine' if table == 'refus' else ''} FROM {table} "
+                "WHERE nature = :n AND (artiste = :a OR genius_id = :g)"
+            ),
+            {"n": nature, "a": artiste, "g": genius_id},
+        )
+        .mappings()
+        .all()
+    )
     gardees = []
     for r in lignes:
         if r["genius_id"] is not None:
-            if track.genius_id is None or int(r["genius_id"]) != int(track.genius_id):
+            if genius_id is None or int(r["genius_id"]) != int(genius_id):
                 continue
             if r["artiste"] != artiste and nature not in PAR_ENREGISTREMENT:
                 continue
         elif r["artiste"] != artiste or not designe(
             {"titre": r["titre"], "album": r["album"]},
-            genius_id=track.genius_id,
-            titre=track.title,
-            album=track.album,
+            genius_id=genius_id,
+            titre=titre,
+            album=album,
         ):
             continue
         gardees.append(dict(r))
     return gardees
+
+
+#: Colonne d'identité → nature de son refus (`merge_tracks` ne recopie pas sur
+#: la fiche gardée un identifiant qu'elle refuse).
+NATURE_DU_REFUS_D_IDENTITE = {
+    "spotify_id": "id_spotify",
+    "deezer_id": "id_deezer",
+    "apple_music_id": "id_apple",
+    "discogs_id": "id_discogs",
+    "isrc": "isrc",
+}
+
+
+def refus_de_la_fiche(conn, track_id: int, nature: str) -> set[str]:
+    """Les CLÉS des refus de `nature` qui visent la fiche `track_id`, lues dans
+    la transaction de l'appelant. Vide si la fiche ou son artiste manquent."""
+    from sqlalchemy import text
+
+    fiche = conn.execute(
+        text(
+            "SELECT t.genius_id, t.title, t.album, a.name FROM tracks t "
+            "LEFT JOIN artists a ON a.id = t.artist_id WHERE t.id = :k"
+        ),
+        {"k": track_id},
+    ).first()
+    if fiche is None or not fiche[3]:
+        return set()
+    genius_id, titre, album, artiste = fiche
+    return {
+        str(r["valeur"])
+        for r in _lignes_de(conn, nature, "refus", artiste, genius_id, titre, album)
+    }
+
+
+def cle_de_refus(nature: str, valeur) -> str:
+    """La clé sous laquelle `valeur` serait refusée (comparaison à
+    `refus_de_la_fiche`)."""
+    return _cle(nature, valeur)
 
 
 def _memoriser(

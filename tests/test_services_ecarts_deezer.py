@@ -754,12 +754,21 @@ class TestCreerLignes:
 
     def test_la_version_nomme_le_principal_que_la_page_de_l_original_donne(self):
         artist = Artist(name="Lucio Bukowski")
-        socle = Track(title="Socle", artist=artist)
+        socle = Track(title="Socle", artist=artist, genius_id=12)
         socle.primary_artist_name = "Mani Deïz"
         assert ed.artiste_de_l_original(socle, artist) == "Mani Deïz"
         assert ed.artiste_de_l_original(Track(title="Socle", artist=artist), artist) == (
             "Lucio Bukowski"
         )
+
+    def test_sans_page_genius_le_principal_n_est_que_l_hote_du_disque(self):
+        """2026-11-22 : une fiche créée depuis Deezer porte en principal l'artiste
+        du DISQUE où elle apparaît (« Dimanche 31 » d'Anton Serra, sur un disque
+        d'Oster Lapwass) : il ne fait pas l'interprète de l'original."""
+        artist = Artist(name="Anton Serra")
+        socle = Track(title="Dimanche 31", artist=artist)
+        socle.is_featuring, socle.primary_artist_name = True, "Oster Lapwass"
+        assert ed.artiste_de_l_original(socle, artist) == "Anton Serra"
 
     def test_la_version_ne_prend_pas_un_id_kworb_refuse(self, data_manager):
         from src.utils import corrections_fiches as cf

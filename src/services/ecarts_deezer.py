@@ -1083,8 +1083,13 @@ def artiste_de_l_original(socle: Track, artist) -> str:
     """PUR. L'interprète principal de l'original d'une version créée : celui
     que sa page nomme, sinon l'artiste dont c'est la fiche — pas l'artiste qui
     crée la version (NTM « Un ange dans le ciel (Live …) », original de Kool
-    Shen #31136, disait « Suprême NTM »)."""
-    if socle.primary_artist_name:
+    Shen #31136, disait « Suprême NTM »).
+
+    Le principal ne fait foi que lu sur une page GENIUS (c'est celui que Genius
+    écrit dans ses propres relations) : une fiche sans page, créée depuis
+    Deezer, porte en principal l'artiste du DISQUE où elle apparaît, qui peut
+    n'être que son hôte (2026-11-22)."""
+    if socle.primary_artist_name and (socle.genius_id or socle.genius_url):
         return socle.primary_artist_name
     proprietaire = socle.artist.name if socle.artist is not None else None
     return proprietaire or artist.name

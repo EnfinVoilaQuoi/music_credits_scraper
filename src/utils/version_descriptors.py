@@ -241,6 +241,14 @@ def titre_generique(titre: str | None) -> bool:
     return all(m in MOTS_DE_MEME_MORCEAU or m in _NUMEROTATION or m.isdigit() for m in mots)
 
 
+def est_skit(titre: str | None) -> bool:
+    """PUR. Le titre se dit-il un skit (« Paul (Skit) », « Skit », « Steve
+    Berman Skit ») ? Un skit récurrent porte le même nom d'un disque à l'autre
+    sans être le même enregistrement (Eminem : « Paul », « Steve Berman »,
+    « Curtains Up », 2026-11-13)."""
+    return "skit" in _tokens(strip_featuring(titre or ""))
+
+
 _GROUPE_FINAL = re.compile(r"^(?P<titre>.*?)\s*[\(\[](?P<groupe>[^\(\)\[\]]+)[\)\]]\s*$")
 
 

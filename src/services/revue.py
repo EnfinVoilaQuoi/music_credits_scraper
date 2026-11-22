@@ -1717,6 +1717,23 @@ def verdict_page_et_plateforme(page, fiche) -> str:
     )
 
 
+def skits_de_deux_disques(page, fiche) -> bool:
+    """Un skit RÉCURRENT : la page se dit skit, les deux fiches sont rangées
+    sur des disques différents et leurs durées (verdicts des catalogues) diffèrent
+    au-delà d'une même prise (`MEME_PRISE_S`) — deux enregistrements, pas une édition (« Paul »
+    de *The Marshall Mathers LP*, 11 s, et « Paul (Skit) » de *The Slim Shady
+    LP*, 15 s ; décision utilisateur 2026-11-13). Un disque inconnu ne dit rien."""
+    from src.utils.version_descriptors import est_skit, meme_disque
+
+    if not (est_skit(page.title) or est_skit(fiche.title)):
+        return False
+    if not (page.album and fiche.album) or meme_disque(page.album, fiche.album):
+        return False
+    if not (page.duration and fiche.duration):
+        return False
+    return abs(page.duration - fiche.duration) > MEME_PRISE_S
+
+
 def page_et_fiche_plateforme(track, ctx):
     """Forme « Make Her Say » (WIP, demande utilisateur 2026-10-26) : une fiche
     SANS page Genius (créée depuis une plateforme) et une fiche Genius de
@@ -1744,6 +1761,7 @@ def page_et_fiche_plateforme(track, ctx):
             or _ids_de_catalogue(page) & _ids_de_catalogue(track)
             or (titre_generique(base) and cle_album(page.album) != cle_album(track.album))
             or _a_la_meme_place(page, track, ctx)
+            or skits_de_deux_disques(page, track)
         ):
             continue
         return (

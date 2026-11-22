@@ -962,6 +962,9 @@ def politique_alias(cas, _track, ctx):
     )
     if rel is None:
         return None
+    tranche = _lien_par_les_noms_surs(rel, ctx)
+    if tranche is not None:
+        return tranche
     sources = set((rel.source or "").split("+"))
     if kind == "member_of":
         return (
@@ -988,6 +991,27 @@ def politique_alias(cas, _track, ctx):
             f"fiches de l'artiste : {', '.join(creditees[:3])}…",
         )
     return None
+
+
+#: Libellé de chaque verdict de `utils.liens_proposes.juger`.
+_SENS_DES_LIENS = {
+    "taire_lien": "garder pour info, jamais proposé",
+    "refuser_lien": "refuser le lien",
+    "confirmer_formation": "confirmer le lien de membre",
+}
+
+
+def _lien_par_les_noms_surs(rel, ctx) -> Arbitrage | None:
+    """Ce que les noms SÛRS de l'artiste et de ses membres confirmés tranchent
+    (`utils.liens_proposes.juger`, 2026-11-22) : nom civil de l'artiste, autre
+    nom d'un membre connu, nom d'un membre proposé comme alias d'une formation,
+    membre proposé à une personne."""
+    from src.utils.liens_proposes import juger
+
+    verdict = juger(rel.kind, rel.related_name, ctx.temoins_liens)
+    if verdict is None:
+        return None
+    return Arbitrage(_SENS_DES_LIENS[verdict.action], verdict.action, verdict.motif)
 
 
 #: Fiches de l'artiste où Genius nomme un alias ou une formation proposés,
@@ -2760,6 +2784,11 @@ REGLES_ETENDUES = frozenset(
         ("liens_proposes", "confirmer_formation"),
         # 2026-11-13 (R4) : formation prouvée par les morceaux Genius du membre.
         ("liens_proposes", "confirmer_formation_genius"),
+        # 2026-11-22 : noms SÛRS de l'artiste et de ses membres confirmés
+        # (`utils.liens_proposes`) — nom civil, autre nom d'un membre, nom d'un
+        # membre pris pour un alias de la formation, membre d'une personne.
+        ("liens_proposes", "taire_lien"),
+        ("liens_proposes", "refuser_lien"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
         ("kworb_proposition", "kworb_tiers"),

@@ -138,6 +138,8 @@ _SANS_FICHE = frozenset(
         "confirmer_lien",
         "confirmer_formation",
         "confirmer_formation_genius",
+        "taire_lien",
+        "refuser_lien",
         "kworb_tiers",
         # Cas d'ARTISTE : ses fiches sont dans ses preuves.
         "retirer_video_partagee",
@@ -489,6 +491,20 @@ def _confirmer_lien(_dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
         "nom": cas.preuves["nom"],
         "kind": cas.preuves["kind"],
     }
+
+
+def _statut_de_regle(statut: str):
+    """Tait (`info`, le statut des états civils) ou refuse un lien proposé
+    (`utils.liens_proposes.juger`, 2026-11-22) ; rétablir le remet « proposé »."""
+
+    def corriger_lien(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+        nom, kind = cas.preuves["nom"], cas.preuves["kind"]
+        if not dm.set_relation_status(artiste.id, nom, kind, statut):
+            raise LookupError(f"lien « {nom} » introuvable")
+        geste = "gardé pour info" if statut == "info" else "refusé"
+        return f"« {nom} » {geste}", {"type": "lien", "nom": nom, "kind": kind}
+
+    return corriger_lien
 
 
 def _confirmer_formation_genius(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
@@ -972,6 +988,8 @@ _CORRECTEURS_DE_REGLE = {
     "confirmer_lien": _confirmer_lien,
     "confirmer_formation": _confirmer_formation,
     "confirmer_formation_genius": _confirmer_formation_genius,
+    "taire_lien": _statut_de_regle("info"),
+    "refuser_lien": _statut_de_regle("refused"),
     "kworb_tiers": _kworb_tiers,
     "retirer_video_partagee": _retirer_video_partagee,
     # Même geste pour UNE fiche : `track_ids` = [la fiche], refus de règle.

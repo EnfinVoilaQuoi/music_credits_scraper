@@ -1,0 +1,88 @@
+"""Liens proposés que les noms SÛRS tranchent (`utils.liens_proposes`,
+`revue:liens_proposes`, 2026-11-22) : nom civil de l'artiste, autre nom d'un
+membre confirmé, nom d'un membre proposé comme alias d'une formation, membre
+proposé à une personne."""
+
+from types import SimpleNamespace
+
+import pytest
+
+from src.models import Artist, ArtistRelation
+from src.services import revue_auto
+from src.utils import liens_proposes as lp
+
+
+def _alias(nom, status="confirmed", detail=None):
+    return SimpleNamespace(kind="alias", related_name=nom, status=status, detail=detail)
+
+
+def _temoins(artiste, membres=(), par_leur_lien=(), a_des_membres=None):
+    membres = list(membres)
+    return lp.TemoinsLiens(
+        artiste,
+        membres,
+        {lp.cle(n) for n in par_leur_lien},
+        bool(membres) if a_des_membres is None else a_des_membres,
+    )
+
+
+class TestNomCivil:
+    def test_le_realname_discogs_se_tait(self):
+        dosseh = lp.personne("Dosseh", (), {"realname": "Dosseh Dorian N'Goumou"})
+        v = lp.juger("alias", "Dosseh Dorian N'Goumou", _temoins(dosseh))
+        assert v.action == "taire_lien" and "Discogs" in v.motif
+
+    def test_sans_un_prenom_du_milieu(self):
+        swift = lp.personne("Swift Guad", (), {"realname": "François Yvan Marletta"})
+        assert lp.juger("alias", "François Marletta", _temoins(swift)).action == "taire_lien"
+
+    def test_le_legal_name_musicbrainz_garde_pour_info_compte(self):
+        nepal = lp.personne(
+            "Népal", [_alias("Clément Enzo Florent Di Fiore", "info", "Legal name")]
+        )
+        assert lp.juger("alias", "Clément Di Fiore", _temoins(nepal)).action == "taire_lien"
+
+    @pytest.mark.parametrize("nom", ["Marletta", "François Dupont", "Yvan Marletta"])
+    def test_pas_un_autre_nom(self, nom):
+        """Un seul mot, un autre nom de famille, un autre premier mot : l'humain."""
+        swift = lp.personne("Swift Guad", (), {"realname": "François Yvan Marletta"})
+        assert lp.juger("alias", nom, _temoins(swift)) is None
+
+    def test_un_nom_de_scene_reste_a_l_humain(self):
+        cudi = lp.personne("Kid Cudi", (), {"realname": "Scott Ramon Seguro Mescudi"})
+        assert lp.juger("alias", "Moon Man", _temoins(cudi)) is None
+
+
+def test_sans_temoins_rien_ne_change():
+    assert lp.juger("alias", "Qui", None) is None
+
+
+def test_nom_civil_garde_pour_info_par_regle_puis_retabli(data_manager, monkeypatch):
+    monkeypatch.setattr(revue_auto, "REGLES_ETENDUES_BRANCHEES", True)
+    a = Artist(name="Swift Guad")
+    a.id = data_manager.save_artist(a)
+    data_manager.propose_artist_relations(
+        a.id,
+        [
+            ArtistRelation(
+                related_name="François Yvan Marletta",
+                kind="alias",
+                source="musicbrainz",
+                detail="Legal name",
+            )
+        ],
+        status="info",
+    )
+    data_manager.propose_artist_relations(
+        a.id, [ArtistRelation(related_name="François Marletta", kind="alias", source="discogs")]
+    )
+    a.tracks = []
+    revue_auto.corriger(data_manager, a)
+    statuts = {r.related_name: r.status for r in data_manager.get_artist_relations(a.id, None)}
+    assert statuts["François Marletta"] == "info"
+    (correction,) = [
+        c for c in data_manager.corrections_revue(a.id) if c["detecteur"] == "liens_proposes"
+    ]
+    revue_auto.retablir(data_manager, a, correction)
+    statuts = {r.related_name: r.status for r in data_manager.get_artist_relations(a.id, None)}
+    assert statuts["François Marletta"] == "proposed"

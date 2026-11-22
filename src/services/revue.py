@@ -246,6 +246,10 @@ class Contexte:
     #: `charger_contexte` : la règle C des génériques y cherche le disque le
     #: plus ancien qui porte la même plage (2026-11-19).
     pistes_deezer_absentes: list = field(default_factory=list)
+    #: Noms sûrs de l'artiste et de ses membres confirmés (base et brut Discogs,
+    #: `temoins_des_liens`), lus par `charger_contexte` quand des liens sont
+    #: proposés : les règles des liens proposés restent pures (2026-11-22).
+    temoins_liens: object = None
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -4208,6 +4212,74 @@ def natures_des_formations(data_manager, relations) -> dict:
     return natures
 
 
+def _page_discogs(discogs_id) -> dict | None:
+    """La page d'artiste Discogs `discogs_id` lue dans le brut (lecture seule)."""
+    import json
+
+    from src.persistence import brut
+
+    if not discogs_id:
+        return None
+    adresse = f"https://api.discogs.com/artists/{int(discogs_id)}"
+    for requete, corps in brut.dernieres_lectures("discogs", adresse).items():
+        if requete.split("?")[0] != adresse:
+            continue
+        try:
+            page = json.loads(corps)
+        except ValueError:
+            return None
+        return page if isinstance(page, dict) else None
+    return None
+
+
+def temoins_des_liens(data_manager, artiste):
+    """Les noms sûrs de l'artiste et de ses membres CONFIRMÉS (alias confirmés
+    ou gardés pour info, page Discogs du brut) — les témoins des règles des
+    liens proposés (`utils.liens_proposes`). Lectures seules."""
+    from src.utils.liens_proposes import TemoinsLiens, cle, personne
+
+    def de_la_base(nom: str):
+        membre = data_manager.get_artist_by_name(nom)
+        if membre is None or not membre.id:
+            return personne(nom)
+        return personne(
+            membre.name,
+            data_manager.get_artist_relations(membre.id, status=None),
+            _page_discogs(membre.discogs_id),
+        )
+
+    relations = data_manager.get_artist_relations(artiste.id, status=None)
+    t = TemoinsLiens(personne(artiste.name, relations, _page_discogs(artiste.discogs_id)))
+    vus = set()
+    for r in relations:
+        if r.kind == "has_member" and r.status == "confirmed" and cle(r.related_name) not in vus:
+            vus.add(cle(r.related_name))
+            t.a_des_membres = True
+            t.membres.append(de_la_base(r.related_name))
+    noms_par_id = {a.id: a.name for a in data_manager.artistes_de_la_base()}
+    for lien in data_manager.liens_de_formation(artiste.name):
+        nom = noms_par_id.get(lien["artist_id"])
+        if not nom:
+            continue
+        t.membres_par_leur_lien.add(cle(nom))
+        if cle(nom) not in vus:
+            vus.add(cle(nom))
+            t.membres.append(de_la_base(nom))
+    t.membres_proposes = [
+        r.related_name for r in relations if r.kind == "has_member" and r.status == "proposed"
+    ]
+    if len(t.membres_proposes) >= 2:
+        t.personnes_de_la_base = [
+            personne(a.name, data_manager.get_artist_relations(a.id, status=None))
+            for a in data_manager.artistes_de_la_base()
+            if a.id != artiste.id
+        ]
+        # Le plus riche en noms d'abord : Mac Miller plutôt que son alias
+        # Delusional Thomas, qui porte les mêmes noms.
+        t.personnes_de_la_base.sort(key=lambda p: (-len(p.forts), p.nom))
+    return t
+
+
 def formations_prouvees_par_genius(data_manager, artiste, relations) -> dict:
     """R4 (décision utilisateur 2026-11-13) : pour chaque formation PROPOSÉE
     sans nature, l'ID que la liste Genius du membre (brut) donne en artiste
@@ -4265,6 +4337,8 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.formations_prouvees = formations_prouvees_par_genius(
         data_manager, artiste, ctx.relations_proposees
     )
+    if ctx.relations_proposees:
+        ctx.temoins_liens = temoins_des_liens(data_manager, artiste)
     ctx.pistes_deezer_absentes = [
         (s["preuves"] or {}).get("ecart") or {}
         for s in data_manager.signalements_revue(artiste.id)

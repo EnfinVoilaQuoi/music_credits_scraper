@@ -905,3 +905,58 @@ def test_un_refus_de_regle_ne_se_dit_pas_a_la_main(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger=si.logger.name):
         assert si.valider_identite(_track(), "SP", lambda s: None) is False
     assert any("retiré par la règle essai" in r.getMessage() for r in caplog.records)
+
+
+class TestReenregistrementDuMediaGenius:
+    """Règle 2 (décision utilisateur 2026-11-22) : l'ID du média d'une page
+    Genius, d'une parution POSTÉRIEURE à la sortie de la fiche, ne devient pas
+    le principal sans durée indépendante à ± 2 s (quatre originaux de Kery
+    James portaient l'ID de *92.2012*, 2026-11-14)."""
+
+    @staticmethod
+    def _juger(observees=None, sortie="2001-01-01", parution="2012-06-11", duree=391):
+        t = _track("L'impasse", "Kery James", release_date=sortie)
+        t.durations_observees = observees or {}
+        identite = {**_identite("L'impasse", ["Kery James"], duree), "release_date": parution}
+        return valider_identite(t, "SP", lambda s: identite, exiger_preuve_si_posterieur=True)
+
+    def test_parution_posterieure_sans_temoin_refusee(self):
+        assert self._juger() is False
+
+    def test_parution_posterieure_dementie_refusee(self):
+        # Booba « Le crime paie » : 281 s servis, Deezer et YTM à 294 s.
+        assert self._juger({"deezer": 432, "ytmusic": 432}) is False
+
+    def test_parution_posterieure_confirmee_acceptee(self):
+        assert self._juger({"deezer": 392}) is True
+
+    def test_la_duree_par_l_id_ne_confirme_pas(self):
+        assert self._juger({"spotify_web": 391, "reccobeats": 391}) is False
+
+    @pytest.mark.parametrize("parution", ["2001-09-01", None])
+    def test_meme_annee_ou_sans_date_acceptee(self, parution):
+        assert self._juger(parution=parution) is True
+
+    def test_sans_l_option_rien_ne_change(self):
+        t = _track("L'impasse", "Kery James", release_date="2001-01-01")
+        identite = {**_identite("L'impasse", ["Kery James"], 391), "release_date": "2012-06-11"}
+        assert valider_identite(t, "SP", lambda s: identite) is True
+
+    def test_le_media_genius_exige_la_preuve(self):
+        """Le seul producteur concerné : le média de la page Genius."""
+        source = (Path(__file__).parents[1] / "src" / "api" / "genius_api.py").read_text(
+            encoding="utf-8"
+        )
+        arbre = ast.parse(source)
+        appels = [
+            n
+            for n in ast.walk(arbre)
+            if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "valider_identite"
+        ]
+        assert appels and all(
+            any(
+                k.arg == "exiger_preuve_si_posterieur" and getattr(k.value, "value", None) is True
+                for k in a.keywords
+            )
+            for a in appels
+        )

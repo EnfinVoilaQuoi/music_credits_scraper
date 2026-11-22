@@ -347,3 +347,22 @@ def test_titre_sans_son_disque(titre, album, attendu):
     from src.utils.version_descriptors import titre_sans_son_disque
 
     assert titre_sans_son_disque(titre, album) == (attendu or titre)
+
+
+@pytest.mark.parametrize(
+    "titre, autre, attendu",
+    [
+        ("Bande organisée", "Bande organisée (Remix)", True),
+        ("Bande organisée (feat. X)", "Bande Organisee [ft. Y] (Remix)", True),
+        ("Bande organisée", "Bande organisée (feat. X)", False),  # le featuring ne compte pas
+        ("Bande organisée (Remix)", "Bande organisée", False),
+        ("Bande organisée", "Organisée bande", False),
+        ("Tchikita", "Bande organisée", False),
+    ],
+)
+def test_titre_plus_long(titre, autre, attendu):
+    """La question de l'audit des certifs (`certif_plus_long`), qui comparait
+    lui-même les mots de deux titres normalisés (`_base`, 2026-11-22)."""
+    from src.utils.version_descriptors import titre_plus_long
+
+    assert titre_plus_long(titre, autre) is attendu

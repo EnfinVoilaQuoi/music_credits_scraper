@@ -23,6 +23,7 @@ lecture seule) : rien ici n'écrit ni n'appelle le réseau.
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -77,10 +78,16 @@ def ids_principaux(chanson: dict) -> set[int]:
     return _ids(_principaux(chanson))
 
 
+#: Liste de membres que Genius met entre parenthèses après le nom d'une
+#: formation : « halfBREED (Logic & C Dot Castro) » (2026-11-23).
+_MEMBRES_ENTRE_PARENTHESES = re.compile(r"\s*\((?=[^()]*(?:&|,))[^()]*\)\s*$")
+
+
 def cle_de_nom(nom: str | None) -> str:
     """Nom comparable : sans le suffixe régional de Genius (« Soleil Noir
-    (FRA) »), normalisé."""
-    return normalize_name(display_name(nom or ""))
+    (FRA) ») ni la liste de ses membres entre parenthèses (« halfBREED (Logic &
+    C Dot Castro) »), normalisé."""
+    return normalize_name(_MEMBRES_ENTRE_PARENTHESES.sub("", display_name(nom or "")))
 
 
 @dataclass(frozen=True)

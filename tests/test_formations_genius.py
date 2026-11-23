@@ -43,6 +43,15 @@ def test_l_id_se_lit_dans_les_morceaux_du_membre_suffixe_regional_compris():
     assert (trouve.genius_id, trouve.pages) == (GROUPE_ID, 2)
 
 
+def test_la_liste_des_membres_entre_parentheses_ne_cache_pas_la_formation():
+    """Genius écrit « halfBREED (Logic & C Dot Castro) » (2026-11-23) : la
+    formation « halfBREED » restait sans ID. Une parenthèse sans « & » ni
+    virgule (« (Remix) ») n'est pas une liste de membres."""
+    chansons = [_chanson(1, "A", GROUPE_ID, "halfBREED (Logic & C Dot Castro)")]
+    assert fg.id_par_les_morceaux(chansons, "halfBREED").genius_id == GROUPE_ID
+    assert fg.cle_de_nom("Run (Remix)") != fg.cle_de_nom("Run")
+
+
 def test_deux_id_au_meme_nom_rien_n_est_pose():
     chansons = [
         _chanson(1, "A", GROUPE_ID, "Soleil Noir (FRA)"),

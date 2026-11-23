@@ -416,10 +416,17 @@ class TestCodeFige:
 
 def test_un_run_tue_qui_traine_n_est_pas_un_autre_ecrivain(tmp_path):
     """« streams Django » (2026-10-30) : tué pendant une copie calée vers le
-    disque externe, le processus traînait encore et le lot s'arrêtait (code 3)."""
+    disque externe, le processus traînait encore et le lot s'arrêtait (code 3).
+
+    Horloge et activité injectées, comme `test_un_run_fige_est_tue_et_le_lot_continue` :
+    le second run passait pour figé sur une machine chargée (`gel_s=1` en temps réel)."""
     data = tmp_path / "data"
     (data / "brut").mkdir(parents=True)
     vus = []
+    temps = itertools.count(0, 100)  # chaque lecture de l'horloge : 100 s de plus
+
+    def activite(journal):
+        return 0.0 if journal.name.startswith("run_01_") else float("inf")
 
     def tuer(proc):
         lot_runs.tuer_arbre(proc)
@@ -432,7 +439,10 @@ def test_un_run_tue_qui_traine_n_est_pas_un_autre_ecrivain(tmp_path):
         code=tmp_path,
         commande=lambda a: [sys.executable, "-c", a[0]],
         intervalle_s=0.2,
+        delai_s=float("inf"),
         gel_s=1,
+        horloge=lambda: next(temps),
+        activite=activite,
         anti_veille=False,
         processus=lambda: vus or [],
         ecrire=lambda _: vus.append((424242, "python -m src.cli streams Django")),

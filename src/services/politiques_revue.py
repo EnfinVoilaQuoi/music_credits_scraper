@@ -3011,6 +3011,12 @@ REGLES_ETENDUES = frozenset(
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
         ("kworb_proposition", "kworb_tiers"),
+        # 2026-11-23, décision utilisateur : la variante d'une fiche, sommée à
+        # ± 2 s de sa durée indépendante, sinon fiche à part
+        # (`juger_variante_kworb`) ; simulée sur les 17 propositions du panneau :
+        # 6 sommées, 2 fiches, 9 à l'humain.
+        ("kworb_proposition", "kworb_sommer"),
+        ("kworb_proposition", "kworb_version"),
         # 2026-10-27 : simulée sur toute la base (41 vidéos partagées sur 90),
         # témoins d'accord (album vu par la recherche, durées de catalogue).
         ("video_partagee", "retirer_video_partagee"),

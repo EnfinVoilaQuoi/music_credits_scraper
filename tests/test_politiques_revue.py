@@ -1068,6 +1068,8 @@ class TestVarianteKworb:
             cas, None, ctx, lire_identite=lambda _s: {"duration": 208}
         )
         assert arbitrage.action == "kworb_sommer"
+        assert ("kworb_proposition", "kworb_sommer") in pol.REGLES_ETENDUES
+        assert ("kworb_proposition", "kworb_version") in pol.REGLES_ETENDUES
 
 
 def test_id_propose_gate_et_duree_independante():

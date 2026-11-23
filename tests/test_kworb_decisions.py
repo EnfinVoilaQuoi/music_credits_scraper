@@ -191,6 +191,23 @@ class TestVersion:
         assert instru.relationships[0]["type"] == "version_of"
 
 
+class TestLigneDejaFiche:
+    def test_la_fiche_retrouvee_par_son_titre_garde_ses_faits(self, data_manager, booba):
+        """« J'appuie sur la gâchette (B.O.S.S. Remix Instrumental) » (2026-11-23) :
+        la fiche existait, relue en base (date en chaîne) ; la décision plantait
+        en reposant sa date sous `spotify_web`."""
+        artist, parent = booba
+        deja = Track(title="Dolce Camara - Snight B Remix", artist=artist)
+        deja.release_date = datetime(2024, 4, 25)
+        data_manager.save_track(deja)
+        artist.tracks = None
+        kd.appliquer(data_manager, artist, _proposition(parent), "version", _DATE)
+        fiche = _lignes(data_manager, artist)["Dolce Camara - Snight B Remix"]
+        assert fiche.streams.spotify_streams == 25_809_105
+        obs = data_manager.get_observations(fiche.id)
+        assert not [o for o in obs if o.source == "spotify_web" and o.field == "release_date"]
+
+
 class TestExistant:
     def test_le_morceau_existant_recoit_l_id_et_les_streams(self, data_manager, booba):
         artist, parent = booba

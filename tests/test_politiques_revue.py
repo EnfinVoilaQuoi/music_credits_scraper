@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import pytest
 
 from src.models import Artist, Track
+from src.models.track import Credit, CreditRole
 from src.services import politiques_revue as pol
 from src.services import revue
 from src.utils import formations_genius as fg
@@ -1058,7 +1059,45 @@ class TestVarianteKworb:
     def test_meme_version_entre_deux_et_dix_secondes_ou_sans_duree(self, duree):
         remix = _t("Quelle gratitude ? (Remix de B.O.S.S)", 2, durations_observees={"ytmusic": 202})
         ligne = "Quelle gratitude ? - B.O.S.S. Remix"
-        assert self._existant(ligne, [remix], duree, remixer="B.O.S.S.") is None
+        assert self._existant(ligne, [remix], duree) is None
+
+    @staticmethod
+    def _remix_nomme(ligne, fiche, artistes, duree):
+        preuves = {
+            "kworb_title": ligne,
+            "proposition": "existant",
+            "existants": [[fiche.id, fiche.title]],
+            "remixer": "B.O.S.S.",
+        }
+        return pol.juger_variante_kworb(
+            {"spotify_id": "SID", **preuves},
+            {fiche.id: fiche},
+            lire_identite=lambda _sid: {"duration": duree, "artists": artistes},
+        )
+
+    def test_le_meme_remix_nomme_se_somme_a_six_secondes(self):
+        """« J'appuie sur la gâchette - B.O.S.S. Remix » 188 s, fiche « (Remix de
+        B.O.S.S) » 182 s (décision utilisateur 2026-11-23)."""
+        remix = _t(
+            "J’appuie sur la gâchette (Remix de B.O.S.S)", 2, durations_observees={"deezer": 182}
+        )
+        ligne = "J'appuie sur la gâchette - B.O.S.S. Remix"
+        arbitrage = self._remix_nomme(ligne, remix, ["Suprême NTM"], 188)
+        assert arbitrage.action == "kworb_sommer"
+
+    def test_l_invite_de_la_ligne_doit_etre_credite_sur_la_fiche(self):
+        remix = _t("Quelle gratitude ? (Remix de B.O.S.S)", 2, durations_observees={"ytmusic": 202})
+        ligne = "Quelle gratitude ? (feat. Jaeyez) - B.O.S.S. Remix"
+        artistes = ["Suprême NTM", "Jaeyez"]
+        assert self._remix_nomme(ligne, remix, artistes, 206) is None
+        remix.credits = [Credit(name="Jaeyez", role=CreditRole.WRITER, source="heritage")]
+        assert self._remix_nomme(ligne, remix, artistes, 206).action == "kworb_sommer"
+
+    def test_un_mot_de_plus_dans_la_ligne_reste_a_l_humain(self):
+        """« B.O.S.S. 2000 Remix » : une autre édition du remix ?"""
+        remix = _t("Ma benz (Remix de B.O.S.S)", 2, durations_observees={"deezer": 228})
+        ligne = "Ma Benz - B.O.S.S. 2000 Remix"
+        assert self._remix_nomme(ligne, remix, ["Suprême NTM"], 224) is None
 
     def test_la_ligne_deja_fiche_par_son_id_reste_au_run(self):
         remix = _t("Seine Saint-Denis Style (IV My People Remix)", 2, durations_observees={})

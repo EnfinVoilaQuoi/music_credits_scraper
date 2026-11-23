@@ -405,6 +405,15 @@ class TestConstatDuDetail:
         assert api.apply_song_metadata(t) is False
         assert t.genius_detail_checked_at is None
 
+    def test_refus_403_date_le_constat(self):
+        """2026-11-23 : 290 / 290 pages toujours en 403 (« not allowed ») ; un
+        refus DÉFINITIF est une réponse, datée, pour ne plus le redemander."""
+        api = GeniusAPI.__new__(GeniusAPI)
+        api.genius = _FauxGenius(songs=requests.HTTPError(403, "Forbidden"))
+        t = _track()
+        assert api.apply_song_metadata(t) is False
+        assert t.genius_detail_checked_at is not None
+
 
 # ────────────────────────────────────────────── méthodes appelant l'API
 

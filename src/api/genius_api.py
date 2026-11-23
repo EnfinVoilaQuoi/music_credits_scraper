@@ -38,6 +38,16 @@ _SOURCE = "genius_api"
 #: L'API Genius n'a pas de « pas au catalogue » : un 404 y serait une rupture.
 _ABSENT: tuple[int, ...] = ()
 
+
+def _statut_http(erreur: Exception) -> int | None:
+    """Le code HTTP d'une erreur : `requests` le porte dans `response`,
+    `lyricsgenius` dans `errno` (`HTTPError(status_code, message)`)."""
+    reponse = getattr(erreur, "response", None)
+    if reponse is not None and getattr(reponse, "status_code", None):
+        return int(reponse.status_code)
+    return erreur.errno if isinstance(getattr(erreur, "errno", None), int) else None
+
+
 _DATE_ISO = re.compile(r"\d{4}-\d{2}-\d{2}")
 #: `release_date_for_display` du détail est toujours en anglais.
 _MOIS_ANGLAIS = (
@@ -917,6 +927,19 @@ class GeniusAPI:
             try:
                 with source_usage.attempt(_SOURCE):
                     data = self.genius.song(track.genius_id)
+            except requests.HTTPError as e:
+                if _statut_http(e) == 403:
+                    # Refus DÉFINITIF de Genius (« Sorry, you're not allowed to
+                    # do that ») : la page web se lit parfois, son détail
+                    # jamais. Re-testé le 2026-11-23 : 290 / 290 pages toujours
+                    # en 403. Une RÉPONSE, donc un constat daté : sans lui, chaque
+                    # run la redemandait et la journalisait en WARNING.
+                    logger.info(f"genius.song : détail refusé (403) pour '{track.title}'")
+                    obs.absent(f"morceau #{track.genius_id} : détail refusé par l'API (403)")
+                    track.genius_detail_checked_at = datetime.now().isoformat(timespec="seconds")
+                    return False
+                logger.warning(f"genius.song échec '{track.title}': {e}")
+                return False
             except (requests.RequestException, AssertionError) as e:
                 logger.warning(f"genius.song échec '{track.title}': {e}")
                 return False

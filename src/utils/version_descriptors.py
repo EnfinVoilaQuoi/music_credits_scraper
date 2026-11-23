@@ -80,6 +80,8 @@ RENDITION_WORDS = frozenset(
         "acoustic",
         "acoustique",
         "instrumental",
+        # Le français (IAM « La fin de leur monde (Instrumentale) », 2026-11-23).
+        "instrumentale",
         "demo",
         "radio",
         "edit",
@@ -427,7 +429,7 @@ def _detacher_descripteur(titre: str) -> tuple[str, list[str]]:
     # Dernier mot nu : « 5G Remix », « Décadent instrumental ». Pas « live »
     # (« Long Live » est un titre) ni les mots d'édition.
     m = re.search(
-        r"\s+(remix|rmx|instrumental|acoustic|acoustique|unplugged)$", titre, re.IGNORECASE
+        r"\s+(remix|rmx|instrumentale?|acoustic|acoustique|unplugged)$", titre, re.IGNORECASE
     )
     if m and titre[: m.start()].strip():
         groupes.append(m.group(1))
@@ -539,7 +541,7 @@ _FAMILLES_RENDITION = {
     # Le beat seul et la voix seule sont deux enregistrements DIFFÉRENTS
     # (2026-09-27 : ils partageaient une famille « sans voix », si bien qu'une
     # a cappella héritait du BPM et d'un constat « instrumental »).
-    "instrumental": frozenset({"instrumental"}),
+    "instrumental": frozenset({"instrumental", "instrumentale"}),
     "a_cappella": frozenset({"cappella", "acapella"}),
     "demo": frozenset({"demo"}),
     # Chantée par un AUTRE pour l'artiste (« Kendrick Lamar Reference ») : autre
@@ -1358,7 +1360,7 @@ def studio_sur_disque_live(
 #: Mots d'un titre AMBIGU (version, prise, titre générique) — en mots entiers.
 _MOTS_AMBIGUS = re.compile(
     r"\b(?:intro|outro|interlude|skit|prelude|prélude|remix|rmx|mix|live|edit|version|"
-    r"demo|démo|acoustic|acoustique|instrumental|chopped|screwed|slowed|sped|reprise|"
+    r"demo|démo|acoustic|acoustique|instrumentale?|chopped|screwed|slowed|sped|reprise|"
     r"freestyle|session|snippet|extended|radio)\b",
     re.IGNORECASE,
 )

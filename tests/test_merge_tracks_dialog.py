@@ -51,3 +51,53 @@ def test_fill_only_paths_valides():
     t = Track(title="Solo")
     for path in _FILL_ONLY:
         _get(t, path)  # ne doit pas lever
+
+
+def test_la_fusion_du_dialogue_est_consignee(monkeypatch):
+    # Règle « une fusion se consigne » (2026-11-19) : le dialogue CTk notait une
+    # suppression (`add_deleted`) au lieu de la fusion.
+    from types import SimpleNamespace
+
+    import src.utils.corrections_fiches as corrections_fiches
+    import src.utils.database_backup as database_backup
+    from src.gui.dialogs import merge_tracks
+
+    class _Backup:
+        def __init__(self, **_):
+            pass
+
+        def create_backup(self, _nom):
+            return None
+
+    consignees = []
+    monkeypatch.setattr(database_backup, "DatabaseBackupManager", _Backup)
+    monkeypatch.setattr(
+        corrections_fiches, "memoriser_fusion", lambda *args: consignees.append(args)
+    )
+    artiste = Artist(name="X")
+    gardee = Track(title="Solo", artist=artiste, genius_id=1)
+    gardee.id = 10
+    absorbee = Track(title="Solo (Clean)", artist=artiste, genius_id=2)
+    absorbee.id = 11
+    artiste.tracks = [gardee, absorbee]
+    fusions = []
+    app = SimpleNamespace(
+        current_artist=artiste,
+        data_manager=SimpleNamespace(
+            db_path="base.db",
+            save_track=lambda _t: None,
+            merge_tracks=lambda garde, absorbe: fusions.append((garde, absorbe)) or True,
+        ),
+        deleted_tracks_manager=SimpleNamespace(
+            add_deleted=lambda *_: (_ for _ in ()).throw(AssertionError("suppression notée"))
+        ),
+        selected_tracks=set(),
+        _populate_tracks_table=lambda: None,
+        _update_artist_info=lambda: None,
+    )
+
+    merge_tracks._do_merge(app, gardee, absorbee)
+
+    assert fusions == [(10, 11)]
+    assert consignees == [("X", {"genius_id": 2}, {"genius_id": 1})]
+    assert artiste.tracks == [gardee]

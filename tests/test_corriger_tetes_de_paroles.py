@@ -47,6 +47,21 @@ class TestPlan:
         f = _fiche(s, paroles, est_feat=True)
         assert s.plan_de_la_fiche(f, {"Couplet 2 : Booba"}, "Niro") == (paroles, [])
 
+    def test_une_page_a_plusieurs_voix_perd_le_nom_du_principal(self, s):
+        """Le brut montre les têtes nues ; une autre voix nommée par la page : le
+        nom du principal n'est qu'une supposition (2026-11-22)."""
+        f = _fiche(s, "[Couplet 1 : Niro]\nun\n[Couplet 2 : Gringe]\ndeux")
+        texte, changements = s.plan_de_la_fiche(f, {"Couplet 1", "Couplet 2 : Gringe"}, "Niro")
+        assert texte == "[Couplet 1]\nun\n[Couplet 2 : Gringe]\ndeux"
+        assert [(c.classe, c.temoin) for c in changements] == [(s.NOM_FAUX, s.TEMOIN_BRUT)]
+
+    def test_une_fiche_a_invites_perd_le_nom_du_principal(self, s):
+        f = _fiche(s, "[Couplet 1 : Niro]\nun")
+        f.invites = "Gringe"
+        texte, _ = s.plan_de_la_fiche(f, {"Couplet 1"}, "Niro")
+        assert texte == "[Couplet 1]\nun"
+        assert s.a_examiner(f, "Niro")
+
     def test_une_page_changee_ne_montre_rien(self, s):
         paroles = "[Couplet 2 : Booba]\nun"
         assert s.plan_de_la_fiche(_fiche(s, paroles), {"Refrain"}, "Niro") == (paroles, [])

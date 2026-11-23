@@ -98,9 +98,12 @@ def relier_par_parution(
     lire_albums=None,
     valider=None,
     force: bool = False,
+    sans_delais: bool = False,
     should_stop=lambda: False,
 ) -> BilanSpotifyParutions:
-    """① puis ② pour les albums Deezer de ce run (`BilanEcarts.albums`)."""
+    """① puis ② pour les albums Deezer de ce run (`BilanEcarts.albums`).
+    `sans_delais` : un constat « pas d'album Spotify » daté est redemandé
+    quel que soit son âge (option de run, 2026-11-22)."""
     from src.services.runtime import constat_perime
 
     bilan = BilanSpotifyParutions()
@@ -124,7 +127,9 @@ def relier_par_parution(
         if release_id is None:
             continue
         spotify_album, vu = dm.etat_parution_spotify(release_id)
-        if spotify_album is None and (force or constat_perime(vu, album.release_date)):
+        if spotify_album is None and (
+            force or constat_perime(vu, album.release_date, sans_delai=sans_delais)
+        ):
             try:
                 parutions = mb.parutions_par_code_barres(album.upc)
             except Exception as e:  # noqa: BLE001 — une panne ne date rien

@@ -35,7 +35,10 @@ class OptionsDisco:
     include_features: bool = True
     prefill: bool = True
     update_only: bool = False
-    include_secondary: bool = False
+    #: Les autres rôles secondaires (écriture, composition, chœurs…) : par
+    #: défaut aussi (décision utilisateur 2026-11-22 — sans eux, un rôle
+    #: d'auteur ne crée pas la fiche : Shurik'n, « Revoir un printemps »).
+    include_secondary: bool = True
     #: Les PRODS de l'artiste pour d'autres : un statut à part entière
     #: (`participation.PROD`), donc gardées par défaut (décision 2026-09-26).
     include_prods: bool = True
@@ -228,6 +231,13 @@ def fusionner(
             track.credits = unir_credits(existant.credits, track.credits)
         if not track.certs.entries and existant.certs.entries:
             track.certs.entries = existant.certs.entries
+        # L'album de la base, quand la page n'a pas été relue (MàJ : pas de
+        # prefill des fiches connues). `save_track` le garde déjà (COALESCE),
+        # mais la pose des certifs, AVANT le save, lit l'objet : sans album,
+        # elle vidait les certifs d'album (2026-11-22, lot `disco --maj` :
+        # Dosseh 68 fiches → 0, OrelSan 108 → 0, Travis Scott 170 → 2).
+        if not track.album and existant.album:
+            track.album = existant.album
         if track.genius_id and not existant.genius_id:
             adoptees.add(existant.id)
         track.id = existant.id
@@ -345,6 +355,30 @@ def _filtrer_non_musique(nouveaux: list[Track]) -> tuple[list[Track], list[str]]
 
 
 @etape_de_flux("Discographie")
+def regrouper_projets(dm, artist: Artist) -> None:
+    """Réunit les éditions de l'artiste en projets (e67) en fin d'étape. Un
+    échec ne coûte pas l'étape : les projets seront refaits à la suivante.
+
+    D'abord, deux parutions au même code-barres n'en font qu'une
+    (`fusionner_parutions_meme_upc`) : un doublon né d'un run (Sadek « Nique le
+    Casino 2 », 2026-10-22) attendait sinon le script de réparation."""
+    try:
+        for fusion in dm.fusionner_parutions_meme_upc(appliquer=True, artist_id=artist.id):
+            logger.info(
+                f"💿 Parutions au même code-barres réunies dans « {fusion['titre']} » "
+                f"(#{fusion['garde']}) : "
+                + ", ".join(f"« {t} » (#{i})" for i, t in fusion["absorbees"])
+            )
+        b = dm.regrouper_projets(artist.id)
+        logger.info(
+            f"💿 Projets : {b.projets} ({b.reunis} à plusieurs éditions, {b.crees} créé(s), "
+            f"{b.retires} retiré(s), {b.deplacees} édition(s) déplacée(s), "
+            f"{len(b.a_trancher)} à trancher)"
+        )
+    except Exception:
+        logger.exception(f"Regroupement des projets de {artist.name} échoué")
+
+
 def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -> BilanDisco:
     """Récupère, fusionne, rematch les certifs, télécharge les images, sauve.
 
@@ -435,12 +469,22 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
 
         alias = runtime.data_manager.noms_de_lartiste(artist.id, artist.name) - {artist.name}
         formations = runtime.data_manager.noms_des_formations(artist.id)
+        # Les GROUPES aussi, comme l'étape certifs (`certifs._rematcher`) : sans
+        # eux, la discographie retirait les certifs d'album d'un groupe que
+        # l'étape certifs venait de poser (Casseurs Flowters chez OrelSan,
+        # 2026-11-22).
+        groupes = {
+            rel.related_name
+            for rel in runtime.data_manager.get_artist_relations(artist.id)
+            if rel.kind == "member_of" and rel.formation == "groupe" and rel.related_name
+        }
         apply_certifications(
             artist,
             nouveaux,
             get_cert_matcher(),
             alias=tuple(sorted(alias)),
             formations=tuple(sorted(formations)),
+            groupes=tuple(sorted(groupes & formations)),
         )
     except Exception:
         logger.exception("Rematch certifications échoué")
@@ -547,6 +591,8 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
 
     if runtime.disabled is not None:
         bilan.pages_reactivees = reactiver_pages_remplies(runtime.disabled, artist, artist.tracks)
+    # Les éditions vues par ce run rejoignent leur projet (e67).
+    regrouper_projets(dm, artist)
     bilan.total_en_base = len(artist.tracks)
     bilan.featurings_total = sum(1 for t in artist.tracks if t.is_featuring)
     bilan.albums_api = sum(1 for t in nouveaux if t.album)

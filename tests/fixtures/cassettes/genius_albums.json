@@ -1,0 +1,271 @@
+[
+ {
+  "album": {
+   "id": 876733,
+   "name": "M.A.N (Black Roses & Lost Feelings)",
+   "performance_groups": [
+    {
+     "label": "Artwork",
+     "artists": [
+      {
+       "id": 3077419,
+       "name": "Dorian Feraud"
+      },
+      {
+       "id": 690708,
+       "name": "Marius Gonzalez"
+      }
+     ]
+    }
+   ]
+  },
+  "attendu": [
+   [
+    "Dorian Feraud",
+    "Artwork",
+    null,
+    "Artwork",
+    3077419
+   ],
+   [
+    "Marius Gonzalez",
+    "Artwork",
+    null,
+    "Artwork",
+    690708
+   ]
+  ]
+ },
+ {
+  "album": {
+   "id": 4345,
+   "name": "Graduation",
+   "performance_groups": [
+    {
+     "label": "Mastering Engineer",
+     "artists": [
+      {
+       "id": 653564,
+       "name": "Vlado Meller"
+      }
+     ]
+    },
+    {
+     "label": "Label",
+     "artists": [
+      {
+       "id": 79113,
+       "name": "Def Jam Recordings"
+      },
+      {
+       "id": 650491,
+       "name": "Roc-A-Fella Records"
+      }
+     ]
+    },
+    {
+     "label": "Graphic Design",
+     "artists": [
+      {
+       "id": 1257919,
+       "name": "Kazuhiro Mizuno"
+      }
+     ]
+    },
+    {
+     "label": "Artwork",
+     "artists": [
+      {
+       "id": 1026327,
+       "name": "Takashi Murakami"
+      }
+     ]
+    },
+    {
+     "label": "Sample Clearance",
+     "artists": [
+      {
+       "id": 1200259,
+       "name": "Eric Weissman Music Licensing, Inc"
+      }
+     ]
+    },
+    {
+     "label": "Legal",
+     "artists": [
+      {
+       "id": 1225551,
+       "name": "Alison K. Finley"
+      }
+     ]
+    },
+    {
+     "label": "A&R Administrator",
+     "artists": [
+      {
+       "id": 1031607,
+       "name": "Terese Joseph"
+      }
+     ]
+    },
+    {
+     "label": "Executive Producer",
+     "artists": [
+      {
+       "id": 642971,
+       "name": "Kyambo “Hip Hop” Joshua"
+      },
+      {
+       "id": 1034830,
+       "name": "Gee Roberson"
+      },
+      {
+       "id": 72,
+       "name": "Kanye West"
+      },
+      {
+       "id": 2,
+       "name": "JAŸ-Z"
+      }
+     ]
+    }
+   ]
+  },
+  "attendu": [
+   [
+    "Vlado Meller",
+    "Mastering Engineer",
+    null,
+    "Mastering Engineer",
+    653564
+   ],
+   [
+    "Def Jam Recordings",
+    "Label",
+    null,
+    "Label",
+    79113
+   ],
+   [
+    "Roc-A-Fella Records",
+    "Label",
+    null,
+    "Label",
+    650491
+   ],
+   [
+    "Kazuhiro Mizuno",
+    "Graphic Design",
+    null,
+    "Graphic Design",
+    1257919
+   ],
+   [
+    "Takashi Murakami",
+    "Artwork",
+    null,
+    "Artwork",
+    1026327
+   ],
+   [
+    "Eric Weissman Music Licensing, Inc",
+    "Other",
+    "Sample Clearance",
+    "Sample Clearance",
+    1200259
+   ],
+   [
+    "Alison K. Finley",
+    "Other",
+    "Legal",
+    "Legal",
+    1225551
+   ],
+   [
+    "Terese Joseph",
+    "Other",
+    "A&R Administrator",
+    "A&R Administrator",
+    1031607
+   ],
+   [
+    "Kyambo “Hip Hop” Joshua",
+    "Executive Producer",
+    null,
+    "Executive Producer",
+    642971
+   ],
+   [
+    "Gee Roberson",
+    "Executive Producer",
+    null,
+    "Executive Producer",
+    1034830
+   ],
+   [
+    "Kanye West",
+    "Executive Producer",
+    null,
+    "Executive Producer",
+    72
+   ],
+   [
+    "JAŸ-Z",
+    "Executive Producer",
+    null,
+    "Executive Producer",
+    2
+   ]
+  ]
+ },
+ {
+  "album": {
+   "id": 726527,
+   "name": "MYSTR J.O.$",
+   "performance_groups": [
+    {
+     "label": "Producer",
+     "artists": [
+      {
+       "id": 2110174,
+       "name": "Sideline"
+      }
+     ]
+    },
+    {
+     "label": "Artwork",
+     "artists": [
+      {
+       "id": 1004738,
+       "name": "Helmi"
+      }
+     ]
+    }
+   ]
+  },
+  "attendu": [
+   [
+    "Sideline",
+    "Producer",
+    null,
+    "Producer",
+    2110174
+   ],
+   [
+    "Helmi",
+    "Artwork",
+    null,
+    "Artwork",
+    1004738
+   ]
+  ]
+ },
+ {
+  "album": {
+   "id": 785510,
+   "name": "HHHH",
+   "performance_groups": []
+  },
+  "attendu": []
+ }
+]

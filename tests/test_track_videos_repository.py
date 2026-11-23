@@ -720,3 +720,90 @@ class TestCompteursYtmSansMesure:
         assert not [
             o for o in data_manager.get_observations(track.id) if o.field == "ytm_compteurs"
         ]
+
+
+def test_la_fusion_ne_repose_pas_un_id_spotify_refuse_par_la_fiche_gardee(data_manager):
+    """« New God Flow » (2026-11-11) : une fiche Deezer reçoit de
+    `relier_par_isrc` l'ID que « New God Flow.1 » refuse à la main ; la fusion
+    consignée la verse dans la page et y repose l'ID refusé, avec sa ligne
+    `track_spotify_ids` (source `reccobeats_isrc`) et les mesures de ReccoBeats."""
+    from sqlalchemy import text
+
+    from src.models import Artist, Track
+    from src.utils import corrections_fiches as cf
+
+    a = Artist(name="Kanye West")
+    a.id = data_manager.save_artist(a)
+    page = Track(title="New God Flow.1", artist=a, genius_id=79864)
+    deezer = Track(title="New God Flow", artist=a)
+    for t in (page, deezer):
+        data_manager.save_track(t)
+    refuse = "1" * 22
+    assert data_manager.update_track_spotify_id(deezer.id, refuse, source="reccobeats_isrc")
+    data_manager.record_duration_observation(deezer.id, 200, "reccobeats")
+    cf.memoriser_id_refuse(page, refuse)
+
+    assert data_manager.merge_tracks(page.id, deezer.id)
+
+    with data_manager.engine.connect() as conn:
+        colonne = conn.execute(
+            text("SELECT spotify_id FROM tracks WHERE id = :i"), {"i": page.id}
+        ).scalar()
+        lignes = conn.execute(
+            text("SELECT spotify_id FROM track_spotify_ids WHERE track_id = :i"), {"i": page.id}
+        ).all()
+        mesures = conn.execute(
+            text("SELECT COUNT(*) FROM observations WHERE track_id = :i AND source = 'reccobeats'"),
+            {"i": page.id},
+        ).scalar()
+    assert colonne is None
+    assert lignes == []
+    assert mesures == 0
+
+
+def test_la_fusion_garde_un_id_spotify_non_refuse(data_manager):
+    from sqlalchemy import text
+
+    from src.models import Artist, Track
+    from src.utils import corrections_fiches as cf
+
+    a = Artist(name="Kanye West")
+    a.id = data_manager.save_artist(a)
+    page = Track(title="New God Flow.1", artist=a, genius_id=79864)
+    deezer = Track(title="New God Flow", artist=a)
+    for t in (page, deezer):
+        data_manager.save_track(t)
+    assert data_manager.update_track_spotify_id(deezer.id, "2" * 22, source="reccobeats_isrc")
+    cf.memoriser_id_refuse(page, "1" * 22)
+
+    assert data_manager.merge_tracks(page.id, deezer.id)
+
+    with data_manager.engine.connect() as conn:
+        colonne = conn.execute(
+            text("SELECT spotify_id FROM tracks WHERE id = :i"), {"i": page.id}
+        ).scalar()
+    assert colonne == "2" * 22
+
+
+def test_la_fusion_ne_repose_pas_un_id_deezer_refuse(data_manager):
+    from sqlalchemy import text
+
+    from src.models import Artist, Track
+    from src.utils import corrections_fiches as cf
+
+    a = Artist(name="A2H")
+    a.id = data_manager.save_artist(a)
+    page = Track(title="Titre", artist=a, genius_id=1234)
+    deezer = Track(title="Titre (Deezer)", artist=a)
+    deezer.deezer_id = 76807198
+    for t in (page, deezer):
+        data_manager.save_track(t)
+    cf.memoriser_deezer_refuse(page, 76807198)
+
+    assert data_manager.merge_tracks(page.id, deezer.id)
+
+    with data_manager.engine.connect() as conn:
+        ligne = conn.execute(
+            text("SELECT deezer_id, deezer_url FROM tracks WHERE id = :i"), {"i": page.id}
+        ).one()
+    assert tuple(ligne) == (None, None)

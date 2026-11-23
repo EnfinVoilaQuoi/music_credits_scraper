@@ -133,7 +133,7 @@ class TestExecuterEtape:
 
     def test_streams_intersecte_manquants_et_track_ids(self, monkeypatch):
         vus = {}
-        monkeypatch.setattr(cycle.streams, "track_ids_actifs", lambda rt, a, ids: ids)
+        monkeypatch.setattr(cycle.streams, "track_ids_actifs", lambda rt, a, ids, **k: ids)
         monkeypatch.setattr(
             cycle.streams, "run", lambda rt, a, o, h: vus.update(ids=o.track_ids) or Bilan()
         )
@@ -146,7 +146,7 @@ class TestExecuterEtape:
 
     def test_streams_sans_manquants_transmet_les_ids_tels_quels(self, monkeypatch):
         vus = {}
-        monkeypatch.setattr(cycle.streams, "track_ids_actifs", lambda rt, a, ids: ids)
+        monkeypatch.setattr(cycle.streams, "track_ids_actifs", lambda rt, a, ids, **k: ids)
         monkeypatch.setattr(cycle.streams, "run", lambda rt, a, o, h: vus.update(o=o) or Bilan())
         opts = cycle.OptionsCycle(streams=streams.OptionsStreams(kworb=False, ytm_channel="@x"))
         cycle.executer_etape(_rt([]), _artist([]), "streams", opts, Hooks())
@@ -201,7 +201,7 @@ class TestResumes:
         monkeypatch.setattr(enrichissement, "sources_suivies", lambda runtime, options: ())
         artist = _artist([_track(1, bpm=120)])
         rt = _rt(artist.tracks)
-        monkeypatch.setattr("src.services.runtime.est_manquant", lambda track, kind: False)
+        monkeypatch.setattr("src.services.runtime.est_manquant", lambda track, kind, **k: False)
         options = cycle.OptionsCycle()
         b = cycle.executer_etape(rt, artist, "enrich", options, Hooks())
         assert b.complete and b.motif == "rien à traiter"

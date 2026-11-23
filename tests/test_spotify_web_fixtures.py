@@ -106,6 +106,24 @@ def test_page_artiste_donne_son_identite(page_artiste):
     assert parse.parse_page_artist_name(page_artiste) == "ISHA"
 
 
+@pytest.mark.parametrize(
+    "titre, nom",
+    [
+        ("Écoutez les titres de 5 Majeur | Spotify", "5 Majeur"),
+        ("Écoutez les titres de Caballero &amp; JeanJass | Spotify", "Caballero & JeanJass"),
+        ("Écoutez les titres d’Orelsan | Spotify", "Orelsan"),
+        ("ISHA | Spotify", "ISHA"),
+    ],
+)
+def test_le_prefixe_de_la_locale_n_est_pas_le_nom(titre, nom):
+    """Run du 2026-11-22 : « Écoutez les titres de 5 Majeur » ≠ « 5 Majeur », le
+    gate d'identité refusait d'écrire les streams et auditeurs de l'artiste."""
+    from src.utils.update_spotify_streams import _identity_ok
+
+    lu = parse.parse_page_artist_name(f"<html><head><title>{titre}</title></head></html>")
+    assert lu == nom and _identity_ok(lu, nom)
+
+
 def test_page_artiste_porte_la_discographie(page_artiste):
     """La page artiste liste les albums : la route `/discography/album` ne rend
     aucune carte (vérifié en session live), elle est inutile."""

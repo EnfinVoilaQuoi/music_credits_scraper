@@ -215,6 +215,19 @@ class TestRelations:
     def test_aucune_relation(self, api):
         assert api._extract_relationships({}) == []
 
+    def test_annee_du_morceau_vise(self, api):
+        """La page « Samples / Reprises » de l'Analyse montre l'année de l'original
+        (2026-11-20) ; Genius la sert dans `release_date_components`."""
+        song = self._rel(
+            "samples",
+            [{"title": "Poppin' My Collar", "url": "u", "release_date_components": {"year": 2005}}],
+        )
+        assert api._extract_relationships(song)[0]["year"] == 2005
+
+    def test_sans_annee_la_cle_n_est_pas_posee(self, api):
+        song = self._rel("samples", [{"title": "X", "release_date_components": None}])
+        assert "year" not in api._extract_relationships(song)[0]
+
 
 class TestMetadonneesSupplementaires:
     def test_album_et_marqueur(self, api):
@@ -422,6 +435,26 @@ class TestApplicationDesMetadonnees:
         assert t.youtube_url == "https://youtu.be/xyz"
         assert t.youtube_url_source == "genius_media"
         assert len(t.relationships) == 1
+
+    def test_relations_posees_recoivent_seulement_l_annee(self):
+        """Le producteur est ADDITIF : une relation déjà posée n'était jamais
+        relue, son année manquait pour toujours (2026-11-20)."""
+        api = self._api_avec(
+            {
+                "song_relationships": [
+                    {
+                        "relationship_type": "samples",
+                        "songs": [
+                            {"title": "Neuf", "url": "u", "release_date_components": {"year": 1997}}
+                        ],
+                    }
+                ]
+            }
+        )
+        t = _track(relationships=[{"type": "samples", "title": "Gardé", "url": "u"}])
+        assert api.apply_song_metadata(t) is True
+        assert t.relationships == [{"type": "samples", "title": "Gardé", "url": "u", "year": 1997}]
+        assert t._relationships_pending is True
 
     def test_marqueur_d_inedit_retire_de_la_fiche_comme_de_la_parution(self):
         """« H1* » : l'observation était nettoyée, pas `track.album` — le même

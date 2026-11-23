@@ -189,6 +189,9 @@ def _pick_best_candidate(api, candidates, db_norm_albums) -> tuple:
     infos = [(cid, cname, api.get_artist_info(cid)) for cid, cname in candidates]
     if not infos:
         return (None, None)
+    # Une chaîne YouTube sans page artiste n'est pas un candidat, sauf s'il n'y a
+    # qu'elles (l'appelant se replie alors sur la recherche par nom).
+    infos = [i for i in infos if not i[2].get("sans_page_artiste")] or infos
 
     if db_norm_albums:
         scored = sorted(
@@ -1076,7 +1079,7 @@ def update_ytmusic_streams(artist, data_manager, api=None, track_ids=None) -> di
         if not comptees and exclues:
             # Sa seule vidéo n'est pas le morceau : un ancien total la compterait
             # encore — il est recalculé (vidé s'il ne reste rien).
-            data_manager.recalculer_vues_ytm(track_id, exclues)
+            data_manager.recalculer_vues_ytm(track_id)
             continue
         if not comptees:
             # Toutes ses vidéos sont PARTAGÉES : leurs vues comptent au niveau de

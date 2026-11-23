@@ -266,11 +266,12 @@ class ArtistRepository:
                 COUNT(DISTINCT t.id) AS tracks_count,
                 COUNT(DISTINCT c.id) AS credits_count,
                 MAX(t.updated_at) AS last_update,
-                a.created_at
+                a.created_at,
+                a.image_path
             FROM artists a
             LEFT JOIN tracks t ON a.id = t.artist_id
             LEFT JOIN credits c ON t.id = c.track_id
-            GROUP BY a.id, a.name, a.created_at
+            GROUP BY a.id, a.name, a.created_at, a.image_path
             ORDER BY a.name
         """)
         with self.engine.connect() as conn:
@@ -282,6 +283,7 @@ class ArtistRepository:
                 "credits_count": row[2] or 0,
                 "last_update": str(row[3])[:10] if row[3] else None,
                 "created_at": str(row[4])[:10] if row[4] else None,
+                "image_path": row[5],
             }
             for row in rows
         ]
@@ -441,7 +443,7 @@ class ArtistRepository:
                     "DELETE FROM release_identifiers WHERE artist_id = :aid "
                     "OR release_id IN (SELECT id FROM releases WHERE artist_id = :aid)",
                     "DELETE FROM releases WHERE artist_id = :aid",
-                    "DELETE FROM albums WHERE artist_id = :aid",
+                    "DELETE FROM projets WHERE artist_id = :aid",
                     "DELETE FROM monthly_listeners_history WHERE artist_id = :aid",
                     "DELETE FROM artist_spotify_ids WHERE artist_id = :aid",
                     "DELETE FROM revue_verdicts WHERE artist_id = :aid",
@@ -457,6 +459,11 @@ class ArtistRepository:
                         text(sql.format(morceaux="(SELECT id FROM tracks WHERE artist_id = :aid)")),
                         {"aid": artist_id},
                     )
+                # Crédits d'album Genius (e66), clé = ID d'album : partent ceux
+                # dont plus aucune parution (d'aucun artiste) ne porte l'ID.
+                from src.utils.track_repository import TrackRepository
+
+                TrackRepository._purger_credits_album_sans_parution(conn)
 
                 # 3. Supprimer les morceaux
                 deleted_tracks = conn.execute(

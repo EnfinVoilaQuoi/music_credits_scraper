@@ -36,6 +36,8 @@ class Fiche:
     url: str | None
     genius_id: int | None
     paroles: str
+    #: `tracks.featured_artists` : une fiche à invités n'a pas une seule voix.
+    invites: str | None = None
 
 
 @dataclass(frozen=True)
@@ -107,9 +109,25 @@ def plan_de_la_fiche(
 ) -> tuple[str, list[Changement]]:
     """PUR. `(texte corrigé, changements)` d'une fiche. `tetes_du_brut` : les
     étiquettes de la page gardée, sans espaces autour ; None = pas de brut."""
-    from src.utils.paroles_genius import _LIGNE_DE_TETE, attribuer_sections, est_tete_de_section
+    from src.utils.paroles_genius import (
+        _LIGNE_DE_TETE,
+        attribuer_sections,
+        est_tete_de_section,
+        une_seule_voix,
+    )
 
     changements: list[Changement] = []
+
+    # Une page à plusieurs voix ne reçoit aucun nom (2026-11-22) : la voix unique se
+    # juge sur les têtes que le plan LAISSE, pas sur celles qu'il corrige.
+    def fabriquee(tete) -> bool:
+        coupee = _couper(tete.group(1))
+        return bool(coupee) and bool(
+            temoin_de_la_tete(fiche, coupee[0].strip(), coupee[1], tetes_du_brut)
+        )
+
+    gardees = _LIGNE_DE_TETE.sub(lambda t: "" if fabriquee(t) else t.group(0), fiche.paroles)
+    une_voix = une_seule_voix(gardees, interprete, fiche.invites)
 
     def corriger(tete) -> str:
         complete = tete.group(0)
@@ -120,7 +138,7 @@ def plan_de_la_fiche(
         temoin = temoin_de_la_tete(fiche, base.strip(), nom, tetes_du_brut)
         if not temoin:
             return complete
-        nouvelle = attribuer_sections(f"[{base}]", interprete)
+        nouvelle = attribuer_sections(f"[{base}]", interprete) if une_voix else f"[{base}]"
         if nouvelle.strip() == complete.strip():
             return complete
         classe = NOM_FAUX if est_tete_de_section(base) else HORS_SECTION
@@ -135,11 +153,14 @@ def a_examiner(fiche: Fiche, interprete: str | None) -> bool:
     """Une tête nommée que ni son nom ni sa nature ne mettent hors de cause. Les
     autres (une section au nom de l'interprète) resteraient telles quelles : la
     page n'a pas à être relue pour elles."""
-    from src.utils.paroles_genius import _LIGNE_DE_TETE, est_tete_de_section
+    from src.utils.paroles_genius import _LIGNE_DE_TETE, est_tete_de_section, une_seule_voix
 
+    une_voix = une_seule_voix(fiche.paroles, interprete, fiche.invites)
     for etiquette in _LIGNE_DE_TETE.findall(fiche.paroles):
         coupee = _couper(etiquette)
-        if coupee and not (_meme_nom(coupee[1], interprete) and est_tete_de_section(coupee[0])):
+        if coupee and not (
+            une_voix and _meme_nom(coupee[1], interprete) and est_tete_de_section(coupee[0])
+        ):
             return True
     return False
 
@@ -148,7 +169,7 @@ def a_examiner(fiche: Fiche, interprete: str | None) -> bool:
 #: Colonnes dans l'ordre de `Fiche` (après l'ID) ; `artiste` = nom de la ligne.
 COLONNES_DES_FICHES = (
     "t.id, t.title, a.name, t.primary_artist_name, t.is_featuring, "
-    "t.secondary_role, t.genius_url, t.genius_id, t.lyrics"
+    "t.secondary_role, t.genius_url, t.genius_id, t.lyrics, t.featured_artists"
 )
 FICHES_A_TETES = "t.lyrics_source = 'genius' AND t.lyrics LIKE '%[%'"
 
@@ -165,6 +186,7 @@ def fiche_depuis(r) -> Fiche:
         url=r[6],
         genius_id=r[7],
         paroles=r[8],
+        invites=r[9],
     )
 
 

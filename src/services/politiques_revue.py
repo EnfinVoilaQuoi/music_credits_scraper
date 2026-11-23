@@ -962,6 +962,9 @@ def politique_alias(cas, _track, ctx):
     )
     if rel is None:
         return None
+    tranche = _lien_par_les_noms_surs(rel, ctx)
+    if tranche is not None:
+        return tranche
     sources = set((rel.source or "").split("+"))
     if kind == "member_of":
         return (
@@ -988,6 +991,27 @@ def politique_alias(cas, _track, ctx):
             f"fiches de l'artiste : {', '.join(creditees[:3])}…",
         )
     return None
+
+
+#: Libellé de chaque verdict de `utils.liens_proposes.juger`.
+_SENS_DES_LIENS = {
+    "taire_lien": "garder pour info, jamais proposé",
+    "refuser_lien": "refuser le lien",
+    "confirmer_formation": "confirmer le lien de membre",
+}
+
+
+def _lien_par_les_noms_surs(rel, ctx) -> Arbitrage | None:
+    """Ce que les noms SÛRS de l'artiste et de ses membres confirmés tranchent
+    (`utils.liens_proposes.juger`, 2026-11-22) : nom civil de l'artiste, autre
+    nom d'un membre connu, nom d'un membre proposé comme alias d'une formation,
+    membre proposé à une personne."""
+    from src.utils.liens_proposes import juger
+
+    verdict = juger(rel.kind, rel.related_name, ctx.temoins_liens)
+    if verdict is None:
+        return None
+    return Arbitrage(_SENS_DES_LIENS[verdict.action], verdict.action, verdict.motif)
 
 
 #: Fiches de l'artiste où Genius nomme un alias ou une formation proposés,
@@ -1243,6 +1267,63 @@ def arbitrage_hors_disque(cas, track, _ctx, lire_discogs=None) -> Arbitrage | No
         "une édition physique du disque la contient : ✓ Normal",
         "normal",
         f"Discogs {track.discogs_id} « {d.get('title')} » liste « {track.title} »",
+    )
+
+
+# ── Crédits 🎫 que la page ne confirme pas (2026-11-22) ────────────────────
+
+#: Décision utilisateur du 2026-11-22 : « on valide tout ce qu'on peut, mais
+#: le reste va en indécidable, car sans autre info je ne peux pas trancher,
+#: rien n'indique qu'ils sont faux ». Interrupteur :
+#: `revue_auto.REGLES_CREDITS_API_BRANCHEES`.
+REGLES_CREDITS_API = frozenset({("credits_api", "normal"), ("credits_api", "indecidable")})
+
+#: Sources de crédits INDÉPENDANTES de Genius qui confirment un crédit 🎫 :
+#: Discogs, les contributeurs Deezer, les descriptions YouTube (Topic, clip).
+#: Ni l'héritage, ni un crédit déduit d'un titre, ni Kworb.
+SOURCES_TEMOINS_CREDITS = frozenset({"discogs", "deezer", "youtube_topic", "youtube_clip"})
+
+
+def arbitrage_credits_api(cas, track, _ctx) -> Arbitrage | None:
+    """Chaque crédit 🎫 confirmé AU MÊME RÔLE (même personne au nom normalisé)
+    par une source indépendante : ✓ Normal ; sinon « indécidable » — hors du
+    panneau et du critère, le cas revient si ses crédits changent (la clé du
+    cas porte la liste des crédits). Un cas « à faire par un run » (page pas
+    relue depuis le détail API) n'est pas tranché : le run peut le régler.
+
+    Mesuré le 2026-11-22 sur une copie : 189 crédits 🎫 sur 96 cas, 1 seul
+    confirmé au même rôle, aucune fiche couverte entière — tout va en
+    indécidable : la table ne gardait qu'une source par crédit. Depuis e70
+    (2026-11-23), un crédit 🎫 que Discogs, Deezer ou YouTube redonne À LA MÊME
+    CLÉ porte cette source en confirmation, et elle compte ici. Les rôles VOISINS (« Writer » de l'API contre « Composer » /
+    « Lyricist » d'une Topic, « Producer » contre « Additional Production »
+    de la page) ne confirment pas : pas validés."""
+    from src.utils.title_matching import normalize_name
+
+    if cas.detecteur != "credits_api" or track is None or cas.nature == revue.RUN:
+        return None
+    api = [c for c in track.credits if c.source == revue.SOURCE_API]
+    if not api:
+        return None
+    # Toutes les sources d'un crédit comptent, pas seulement celle de sa ligne
+    # (`Credit.confirmations`, 2026-11-23) : la table n'a qu'une ligne par clé,
+    # la seconde source qui donnait le même crédit était perdue.
+    temoins = {
+        (normalize_name(c.name), c.role)
+        for c in track.credits
+        if c.sources & SOURCES_TEMOINS_CREDITS and c.name
+    }
+    confirmes = [c for c in api if (normalize_name(c.name), c.role) in temoins]
+    if len(confirmes) == len(api):
+        return Arbitrage(
+            "chaque crédit 🎫 est confirmé au même rôle par une autre source : ✓ Normal",
+            "normal",
+            ", ".join(f"{c.name} ({c.role.value})" for c in confirmes),
+        )
+    return Arbitrage(
+        "crédits 🎫 qu'aucune autre source ne confirme : indécidable",
+        "indecidable",
+        f"{len(confirmes)} / {len(api)} confirmé(s) au même rôle",
     )
 
 
@@ -1745,10 +1826,13 @@ def _edition_a_la_duree_de_l_id_spotify(cas, track) -> Arbitrage | None:
     """Une AUTRE page Deezer, au même titre, a la durée de l'ID Spotify de la
     fiche à ± 2 s : les deux catalogues ont la même édition du disque, dont la
     durée diffère de la page principale de la fiche. Elle se note en édition, et
-    `duree_spotify` tombe seul : le vote lit les durées d'édition (Kery James,
-    *92.2012* : « 28 Décembre 1977 » à 537 s chez Spotify et Deezer, la fiche à
-    581 s). Un rapprochement ambigu ou un titre générique reste à l'humain, une
-    page refusée n'est jamais rattachée."""
+    `duree_spotify` tombe seul : le vote lit les durées d'édition. Un
+    rapprochement ambigu ou un titre générique reste à l'humain, une page
+    refusée n'est jamais rattachée, ni un AUTRE enregistrement
+    (`ecarts_deezer.autre_enregistrement`, règle 1 du 2026-11-22) : le cas qui
+    l'avait fait écrire, « 28 Décembre 1977 » de *92.2012* (537 s, la fiche à
+    581 s), était un réenregistrement à l'ISRC neuf, et l'ID Spotify de la
+    fiche celui de *92.2012* (Kery James, 2026-11-14)."""
     from src.utils.corrections_fiches import deezer_refuses
     from src.utils.version_descriptors import meme_titre_normalise
 
@@ -1766,6 +1850,13 @@ def _edition_a_la_duree_de_l_id_spotify(cas, track) -> Arbitrage | None:
     if not meme_titre_normalise(piste.get("title"), track.title) or titre_generique(track.title):
         return None
     if int(piste.get("id") or 0) in deezer_refuses(track):
+        return None
+    # Règle 1 (2026-11-22) : l'ID Spotify peut être celui du réenregistrement
+    # (le cas même de *92.2012*) ; la page Deezer et Apple de la fiche, eux,
+    # disent si la piste est un autre enregistrement.
+    from src.services.ecarts_deezer import autre_enregistrement
+
+    if autre_enregistrement(piste.get("isrc"), duree, piste.get("id"), track):
         return None
     disque = (ecart.get("album") or {}).get("title")
     return Arbitrage(
@@ -2760,6 +2851,11 @@ REGLES_ETENDUES = frozenset(
         ("liens_proposes", "confirmer_formation"),
         # 2026-11-13 (R4) : formation prouvée par les morceaux Genius du membre.
         ("liens_proposes", "confirmer_formation_genius"),
+        # 2026-11-22 : noms SÛRS de l'artiste et de ses membres confirmés
+        # (`utils.liens_proposes`) — nom civil, autre nom d'un membre, nom d'un
+        # membre pris pour un alias de la formation, membre d'une personne.
+        ("liens_proposes", "taire_lien"),
+        ("liens_proposes", "refuser_lien"),
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
         ("kworb_proposition", "kworb_tiers"),
@@ -2903,6 +2999,128 @@ def politique_video_partagee(cas, _track, _ctx):
         "retirer_video_partagee",
         preuves.get("temoin") or f"interprète principal de la vidéo : {preuves.get('principal')}",
     )
+
+
+#: Familles de version dont la page ne garde pas le clip de sa page
+#: principale (décision utilisateur 2026-11-22 : démo, freestyle, édition).
+#: Ni un live, ni un instrumental, ni un remix nommé par son titre : leur
+#: vidéo peut être la leur.
+FAMILLES_SANS_LE_CLIP = frozenset({"demo", "alternate", "snippet"})
+
+#: « Dinos x Adidas / NMD_V3 » : une série ou une publicité, nommée avant le
+#: titre du morceau.
+_PREFIXE_DE_SERIE = re.compile(r"^(?P<serie>[^/]+?)\s+/\s+(?P<titre>\S.*)$")
+
+
+def _version_de(q, p, fiches) -> bool:
+    """PUR. La page `q` est-elle une VERSION de la page principale `p`, au sens
+    du juge des titres : l'original que Genius lui désigne (`socle_designe`) ;
+    une démo, une prise alternative ou un extrait au même socle
+    (« - Clean(Ish) ») ; une édition de diffusion (« (Clean) ») ou un
+    freestyle au même titre de base ; ou « <série de l'artiste> / <titre> »."""
+    from src.utils.title_matching import contains_as_words, normalize_name
+    from src.utils.version_descriptors import (
+        edition_de_diffusion,
+        meme_titre_de_base,
+        meme_titre_normalise,
+        porte_une_version,
+        socle_du_titre,
+    )
+    from src.utils.version_heritage import famille_de_fiche, socle_designe
+
+    if meme_titre_normalise(q.title, p.title):
+        return False  # homonymes : rien ne les départage ici
+    designe = socle_designe(q, fiches)
+    if designe is not None:
+        return revue._page(designe) == revue._page(p)
+    if porte_une_version(q.title):
+        return (
+            meme_titre_normalise(socle_du_titre(q.title), p.title)
+            and famille_de_fiche(q.title, q.relationships) in FAMILLES_SANS_LE_CLIP
+        )
+    if meme_titre_de_base(q.title, p.title):
+        # Un sous-titre quelconque (« 530 (Haikou LP) ») peut nommer une autre
+        # prise : seuls l'édition de diffusion et le freestyle comptent.
+        return bool(edition_de_diffusion(q.title) or revue._FREESTYLE_RE.search(q.title or ""))
+    m = _PREFIXE_DE_SERIE.match(q.title or "")
+    if m is None or not meme_titre_normalise(m["titre"], p.title):
+        return False
+    serie = normalize_name(m["serie"])
+    noms = [q.primary_artist_name, q.artist.name if q.artist else None]
+    return any(n and contains_as_words(normalize_name(n), serie) for n in noms)
+
+
+#: Part des mots d'un sous-titre que le titre de la vidéo doit porter pour le
+#: NOMMER (graphies du distributeur : « 50cent » pour « 50 Cent »).
+_PART_DU_SOUS_TITRE = 0.6
+
+
+def _video_nomme_le_sous_titre(q, v) -> bool:
+    """PUR. Le titre de la vidéo porte-t-il le SOUS-TITRE qui distingue la page
+    `q` (« The Game: My Bitch (Dissin 50cent,Jay-Z,Suge Knight) » : la vidéo
+    est celle de « My Bitch (Dissin’ 50 Cent, Jay-Z, Suge Knight) ») ?"""
+    from src.utils.title_matching import normalize_name
+    from src.utils.version_descriptors import sous_titres
+
+    vus = set(normalize_name(v.title or "").split())
+    for sous_titre in sous_titres(q.title):
+        mots = [m for m in normalize_name(sous_titre).split() if len(m) >= 3]
+        if mots and sum(m in vus for m in mots) / len(mots) >= _PART_DU_SOUS_TITRE:
+            return True
+    return False
+
+
+def versions_de_la_page_principale(fiches, v):
+    """PUR. `(page principale, [fiches de ses versions])` quand une vidéo que
+    plusieurs PAGES portent est le clip d'une page principale que ses autres
+    porteuses déclinent — démo, freestyle, édition (décision utilisateur
+    2026-11-22 : Dinos « NMD_V3 » et « Dinos x Adidas / NMD_V3 », Eminem « The
+    Real Slim Shady » et sa « - Clean(Ish) », Kid Cudi « Day ’N’ Nite
+    (Nightmare) » et le remix « Day ‘N’ Nite » que Genius lui rattache). Le
+    clip revient à la page principale, jamais à la démo. Sinon None.
+
+    La page principale n'est pas elle-même une version : titre d'original
+    (`titre_d_original`) ou original que Genius désigne pour une porteuse.
+    Elle doit être UNIQUE, et la vidéo la nommer (`revue.video_nomme`) ; une
+    vidéo qui EST la version d'une porteuse (« … (Demo) » posé sur la démo)
+    reste à cette porteuse."""
+    from src.utils.version_descriptors import meme_version_publiee, porte_une_version
+    from src.utils.version_heritage import socle_designe
+
+    pages: dict = {}
+    for t in fiches:
+        pages.setdefault(revue._page(t), []).append(t)
+    if len(pages) < 2:
+        return None
+    reps = {page: lignes[0] for page, lignes in pages.items()}
+    designes = {
+        revue._page(d) for t in reps.values() if (d := socle_designe(t, fiches)) is not None
+    }
+    candidates = [
+        p
+        for page, p in reps.items()
+        if socle_designe(p, fiches) is None
+        and not porte_une_version(p.title)
+        and (titre_d_original(p.title) or page in designes)
+    ]
+    trouves = []
+    for p in candidates:
+        versions = [
+            q for page, q in reps.items() if page != revue._page(p) and _version_de(q, p, fiches)
+        ]
+        if versions:
+            trouves.append((p, versions))
+    if len(trouves) != 1:
+        return None
+    p, versions = trouves[0]
+    if not revue.video_nomme(p, v):
+        return None
+    if porte_une_version(v.title) and any(meme_version_publiee(q.title, v.title) for q in versions):
+        return None
+    if any(_video_nomme_le_sous_titre(q, v) for q in versions):
+        return None
+    retirees = {revue._page(q) for q in versions}
+    return p, [t for t in fiches if revue._page(t) in retirees]
 
 
 def politique_kworb_tiers(cas, _track, ctx):

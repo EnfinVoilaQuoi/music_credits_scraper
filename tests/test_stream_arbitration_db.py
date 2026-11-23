@@ -17,6 +17,7 @@ import pytest
 from sqlalchemy import text
 
 from src.models import Artist, Track
+from tests.aide_disques import poser_disque
 
 _KWORB_DATE = datetime(2020, 1, 15)
 
@@ -139,8 +140,10 @@ def _album(dm, artist_id, titre="Mon Album"):
         return (
             conn.execute(
                 text(
-                    "SELECT spotify_streams, spotify_daily_streams, spotify_streams_source "
-                    "FROM albums WHERE artist_id = :aid AND title = :t"
+                    # e68 : le total vit sur le PROJET du disque.
+                    "SELECT p.spotify_streams, p.spotify_daily_streams, p.spotify_streams_source "
+                    "FROM projets p JOIN releases r ON r.projet_id = p.id "
+                    "WHERE p.artist_id = :aid AND r.title = :t"
                 ),
                 {"aid": artist_id, "t": titre},
             )
@@ -153,6 +156,7 @@ def test_la_provenance_du_total_est_enregistree(data_manager):
     """Sans elle, la colonne porterait deux sémantiques en silence : la part de
     l'artiste (Kworb) et le total du disque (Spotify)."""
     artist = _artiste(data_manager)
+    poser_disque(data_manager, artist.id, "Mon Album")
     data_manager.upsert_album(artist.id, "Mon Album", 100, 5, source="kworb")
     assert _album(data_manager, artist.id)["spotify_streams_source"] == "kworb"
 
@@ -162,6 +166,7 @@ def test_un_total_kworb_n_ecrase_jamais_un_total_spotify(data_manager):
     album commun, son total est INCOMPLET. Un run Kworb postérieur ramènerait
     donc silencieusement la valeur à la somme partielle."""
     artist = _artiste(data_manager)
+    poser_disque(data_manager, artist.id, "Mon Album")
     data_manager.upsert_album(artist.id, "Mon Album", 1000, None, source="spotify_web")
     data_manager.upsert_album(artist.id, "Mon Album", 300, 7, source="kworb")
 
@@ -173,6 +178,7 @@ def test_un_total_kworb_n_ecrase_jamais_un_total_spotify(data_manager):
 def test_un_total_spotify_remplace_un_total_kworb(data_manager):
     """L'inverse est permis : le total réel vaut mieux que la part de l'artiste."""
     artist = _artiste(data_manager)
+    poser_disque(data_manager, artist.id, "Mon Album")
     data_manager.upsert_album(artist.id, "Mon Album", 300, 7, source="kworb")
     data_manager.upsert_album(artist.id, "Mon Album", 1000, None, source="spotify_web")
 
@@ -184,6 +190,7 @@ def test_un_total_spotify_remplace_un_total_kworb(data_manager):
 def test_spotify_n_efface_pas_le_quotidien_d_album_de_kworb(data_manager):
     """Spotify n'en publie pas et passe None : sans COALESCE, il effacerait."""
     artist = _artiste(data_manager)
+    poser_disque(data_manager, artist.id, "Mon Album")
     data_manager.upsert_album(artist.id, "Mon Album", 300, 7, source="kworb")
     data_manager.upsert_album(artist.id, "Mon Album", 1000, None, source="spotify_web")
     assert _album(data_manager, artist.id)["spotify_daily_streams"] == 7
@@ -193,6 +200,7 @@ def test_kworb_reste_maitre_entre_deux_passages_kworb(data_manager):
     """Le garde ne doit pas figer la valeur : deux runs Kworb successifs se
     mettent bien à jour l'un l'autre."""
     artist = _artiste(data_manager)
+    poser_disque(data_manager, artist.id, "Mon Album")
     data_manager.upsert_album(artist.id, "Mon Album", 300, 7, source="kworb")
     data_manager.upsert_album(artist.id, "Mon Album", 350, 8, source="kworb")
     assert _album(data_manager, artist.id)["spotify_streams"] == 350
@@ -203,12 +211,13 @@ def test_les_ids_d_edition_FUSIONNENT_au_lieu_de_s_ecraser(data_manager):
     Spotify n'en liste qu'une là où Kworb en a deux. Remplacer perdrait
     silencieusement l'autre — or c'est précisément la donnée à garder."""
     artist = _artiste(data_manager)
+    poser_disque(data_manager, artist.id, "Mon Album")
     data_manager.upsert_album(artist.id, "Mon Album", 300, 7, "AL1,AL2", source="kworb")
     data_manager.upsert_album(artist.id, "Mon Album", 1000, None, "AL1", source="spotify_web")
 
     with data_manager.engine.connect() as conn:
         ids = conn.execute(
-            text("SELECT spotify_album_ids FROM albums WHERE artist_id = :a"),
+            text("SELECT spotify_album_ids FROM projets WHERE artist_id = :a"),
             {"a": artist.id},
         ).scalar()
     assert set(ids.split(",")) == {"AL1", "AL2"}
@@ -218,6 +227,7 @@ def test_kworb_peut_completer_les_ids_d_un_album_arbitre_par_spotify(data_manage
     """Le garde ne porte que sur le TOTAL : Kworb reste utile pour enrichir les
     IDs d'édition, même quand Spotify possède le total du disque."""
     artist = _artiste(data_manager)
+    poser_disque(data_manager, artist.id, "Mon Album")
     data_manager.upsert_album(artist.id, "Mon Album", 1000, None, "AL1", source="spotify_web")
     data_manager.upsert_album(artist.id, "Mon Album", 300, 7, "AL2", source="kworb")
 
@@ -225,7 +235,7 @@ def test_kworb_peut_completer_les_ids_d_un_album_arbitre_par_spotify(data_manage
     assert ligne["spotify_streams"] == 1000, "le total Spotify reste maître"
     with data_manager.engine.connect() as conn:
         ids = conn.execute(
-            text("SELECT spotify_album_ids FROM albums WHERE artist_id = :a"),
+            text("SELECT spotify_album_ids FROM projets WHERE artist_id = :a"),
             {"a": artist.id},
         ).scalar()
     assert set(ids.split(",")) == {"AL1", "AL2"}

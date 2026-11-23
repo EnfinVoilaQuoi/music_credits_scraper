@@ -1,13 +1,19 @@
-"""Le centre des tâches : les runs de la session, leur progression, leur étape,
-leur durée, leur état final (« partiel » dit en clair), le RÉCIT live et
-l'arrêt (entre deux morceaux, jamais au milieu d'un enregistrement).
+"""La liste de tâches (icône ☰✓ de la barre du haut) : le HUB de ce que fait
+l'application — en cours, en attente, planifié, terminé dans la session
+(décision utilisateur 2026-11-22).
 
-La planification persistante (file d'attente, icône `list-check`) est V2.
+En cours : progression, étape, temps restant estimé, RÉCIT live, arrêt (entre
+deux morceaux, jamais au milieu d'un enregistrement). En attente : les runs
+demandés pendant qu'un autre tournait (runs, certifs), lancés l'un après
+l'autre (un seul écrivain à la fois). Planifié : rien encore (la MàJ des certifs viendra).
 """
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
+from collections.abc import Callable
+from dataclasses import dataclass
+
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -23,6 +29,16 @@ from PyQt6.QtWidgets import (
 from src.gui_qt.pont import Etat, Tache, Taches
 
 
+@dataclass(frozen=True)
+class EnAttente:
+    """Un traitement demandé pendant qu'un autre tournait : run d'artiste,
+    mise à jour des certifs… `corps(hooks)` est ce que `Taches.lancer` lancera."""
+
+    cle: str
+    titre: str
+    corps: Callable
+
+
 def _duree(secondes: float) -> str:
     m, s = divmod(int(secondes), 60)
     h, m = divmod(m, 60)
@@ -30,17 +46,33 @@ def _duree(secondes: float) -> str:
 
 
 def resume_tache(t: Tache) -> str:
-    pct = f" — {t.pourcentage} %" if t.pourcentage is not None and t.active else ""
-    return f"{t.titre} · {t.etat.value}{pct} · {_duree(t.duree)}"
+    morceaux = [t.titre, t.etat.value]
+    if t.active and t.pourcentage is not None:
+        morceaux.append(f"{t.pourcentage} %")
+    morceaux.append(_duree(t.duree))
+    if t.restant is not None:
+        morceaux.append(f"reste ~{_duree(t.restant)}")
+    return " · ".join(morceaux)
+
+
+_ROLE_CLE = Qt.ItemDataRole.UserRole
+_ROLE_ATTENTE = Qt.ItemDataRole.UserRole + 1
 
 
 class CentreTaches(QDialog):
-    def __init__(self, taches: Taches, parent=None) -> None:
+    """`retirer(index)` : retirer un run de la file d'attente."""
+
+    retirer = pyqtSignal(int)
+
+    def __init__(self, taches: Taches, parent=None, file_attente=None) -> None:
         super().__init__(parent)
         self.taches = taches
-        self.setWindowTitle("Tâches de la session")
-        self.resize(720, 520)
+        #: Liste PARTAGÉE avec la fenêtre principale (lue, jamais écrite ici).
+        self.file_attente: list[EnAttente] = file_attente if file_attente is not None else []
+        self.setWindowTitle("Liste de tâches")
+        self.resize(760, 600)
         self.liste = QListWidget()
+        self.liste.setObjectName("liste")
         self.liste.currentItemChanged.connect(lambda *_: self._afficher_courante())
         self.etape = QLabel()
         self.etape.setWordWrap(True)
@@ -55,44 +87,103 @@ class CentreTaches(QDialog):
         self.arreter = QPushButton("Arrêter")
         self.arreter.setToolTip("Arrêt ENTRE deux morceaux : le morceau en cours se termine.")
         self.arreter.clicked.connect(self._arreter)
+        self.b_retirer = QPushButton("Retirer de la file")
+        self.b_retirer.clicked.connect(self._retirer)
         bas = QHBoxLayout()
         bas.addWidget(self.etape, 1)
+        bas.addWidget(self.b_retirer)
         bas.addWidget(self.arreter)
         couche = QVBoxLayout(self)
-        couche.addWidget(self.liste, 1)
+        couche.addWidget(self.liste, 2)
         couche.addLayout(bas)
         couche.addWidget(self.barre)
         couche.addWidget(self.message)
-        couche.addWidget(QLabel("Récit du run"))
+        titre = QLabel("Récit du run")
+        titre.setObjectName("discret")
+        couche.addWidget(titre)
         couche.addWidget(self.recit, 2)
         taches.changee.connect(self._rafraichir)
+        taches.terminee.connect(self._rafraichir)
         taches.recit.connect(self._ajouter_recit)
         self._rafraichir()
 
+    # ── liste ──
+    def _section(self, titre: str) -> None:
+        item = QListWidgetItem(titre)
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        police = item.font()
+        police.setBold(True)
+        item.setFont(police)
+        self.liste.addItem(item)
+
+    def _vide(self, texte: str) -> None:
+        item = QListWidgetItem(f"   {texte}")
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        self.liste.addItem(item)
+
     def _cle_courante(self) -> str | None:
         item = self.liste.currentItem()
-        return item.data(Qt.ItemDataRole.UserRole) if item else None
+        return item.data(_ROLE_CLE) if item else None
+
+    def _attente_courante(self) -> int | None:
+        item = self.liste.currentItem()
+        return item.data(_ROLE_ATTENTE) if item else None
 
     def _rafraichir(self, *_) -> None:
-        courante = self._cle_courante()
+        courante, attente = self._cle_courante(), self._attente_courante()
         self.liste.blockSignals(True)
         self.liste.clear()
-        for t in sorted(self.taches.taches.values(), key=lambda t: -t.debut):
-            item = QListWidgetItem(resume_tache(t))
-            item.setData(Qt.ItemDataRole.UserRole, t.cle)
+        toutes = sorted(self.taches.taches.values(), key=lambda t: -t.debut)
+        groupes = (
+            ("En cours", [t for t in toutes if t.active], "Aucun run en cours."),
+            ("Terminées dans la session", [t for t in toutes if not t.active], ""),
+        )
+        premier = None
+        for titre, taches, vide in groupes[:1]:
+            self._section(titre)
+            if not taches:
+                self._vide(vide)
+            for t in taches:
+                premier = premier or self._item_tache(t, courante)
+        self._section("En attente")
+        if not self.file_attente:
+            self._vide("Rien en attente.")
+        for i, e in enumerate(self.file_attente):
+            item = QListWidgetItem(e.titre)
+            item.setData(_ROLE_ATTENTE, i)
             self.liste.addItem(item)
-            if t.cle == courante or (courante is None and self.liste.count() == 1):
+            if attente == i:
                 self.liste.setCurrentItem(item)
+        self._section("Planifiées")
+        self._vide("Aucune tâche planifiée (la MàJ des bases de certifs viendra ici).")
+        titre, taches, _ = groupes[1]
+        if taches:
+            self._section(titre)
+            for t in taches:
+                premier = premier or self._item_tache(t, courante)
+        if self.liste.currentItem() is None and premier is not None:
+            self.liste.setCurrentItem(premier)
         self.liste.blockSignals(False)
         self._afficher_courante()
 
+    def _item_tache(self, t: Tache, courante: str | None) -> QListWidgetItem:
+        item = QListWidgetItem(resume_tache(t))
+        item.setData(_ROLE_CLE, t.cle)
+        self.liste.addItem(item)
+        if t.cle == courante:
+            self.liste.setCurrentItem(item)
+        return item
+
+    # ── détail ──
     def _afficher_courante(self) -> None:
         t = self.taches.tache(self._cle_courante() or "")
         self.arreter.setEnabled(bool(t and t.active and not t.arret_demande))
+        self.b_retirer.setEnabled(self._attente_courante() is not None)
         if t is None:
-            self.etape.setText("Aucun run dans cette session.")
+            self.etape.setText("" if self.taches.taches else "Aucun run dans cette session.")
             self.barre.setVisible(False)
             self.message.setText("")
+            self.recit.clear()
             return
         self.etape.setText(" — ".join(x for x in (t.etape, t.libelle) if x))
         pct = t.pourcentage
@@ -114,3 +205,8 @@ class CentreTaches(QDialog):
         cle = self._cle_courante()
         if cle:
             self.taches.demander_arret(cle)
+
+    def _retirer(self) -> None:
+        i = self._attente_courante()
+        if i is not None:
+            self.retirer.emit(i)

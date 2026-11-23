@@ -153,3 +153,58 @@ class TestProvenanceDuTotalSpotify:
         """Rien plutôt qu'un libellé inventé : une provenance qu'on ne sait pas
         nommer ne doit pas passer pour une source connue."""
         assert ag.streams_source_label(source, somme_de_morceaux=False) == ""
+
+
+class TestClassementVisuel:
+    """Préférences 👁 (`data/album_view/<artiste>.json`) : enregistrées sous le
+    TITRE normalisé, elles doivent s'appliquer aussi aux groupes de parution,
+    dont la clé est `release:<id>` (bug du 2026-11-20)."""
+
+    @staticmethod
+    def _norm(titre):
+        return titre.strip().lower()
+
+    def test_groupe_de_parution_classe_par_son_libelle(self):
+        a, b = _track("2020-01-01"), _track("2020-01-01")
+        groups = {"release:42": ["Iron Mic", [a, b]]}
+        prefs = {"iron mic": {"target": "feat", "label": "Iron Mic"}}
+        restants, feats, singles = ag.classer_visuellement(groups, prefs, self._norm)
+        assert restants == {}
+        assert feats == [a, b]
+        assert singles == []
+
+    def test_groupe_de_secours_classe_par_sa_cle(self):
+        a = _track("2020-01-01")
+        groups = {"jukebox vol. 2": ["Jukebox Vol. 2", [a]]}
+        prefs = {"jukebox vol. 2": {"target": "single", "label": "Jukebox Vol. 2"}}
+        restants, feats, singles = ag.classer_visuellement(groups, prefs, self._norm)
+        assert restants == {}
+        assert feats == []
+        assert singles == [a]
+
+    def test_groupe_sans_preference_intact(self):
+        a, b = _track("2020-01-01"), _track("2021-01-01")
+        groups = {"release:7": ["Album", [a]], "autre": ["Autre", [b]]}
+        prefs = {"iron mic": {"target": "feat", "label": "Iron Mic"}}
+        restants, feats, singles = ag.classer_visuellement(groups, prefs, self._norm)
+        assert restants == groups
+        assert feats == singles == []
+
+    def test_editions_homonymes_toutes_classees(self):
+        """Une préférence vaut pour toutes les éditions du même titre : voulu,
+        une fusion par UPC changeant l'ID ne doit pas la perdre."""
+        a, b = _track("2020-01-01"), _track("2021-01-01")
+        groups = {"release:1": ["Iron Mic", [a]], "release:2": ["Iron Mic", [b]]}
+        prefs = {"iron mic": {"target": "feat", "label": "Iron Mic"}}
+        restants, feats, _ = ag.classer_visuellement(groups, prefs, self._norm)
+        assert restants == {}
+        assert feats == [a, b]
+
+    def test_normaliseur_par_defaut_de_la_vue(self):
+        a = _track("2020-01-01")
+        groups = {"release:3": ["Next Up France - S1", [a]]}
+        from src.gui.helpers import normalize_album_title
+
+        prefs = {normalize_album_title("Next Up France - S1"): {"target": "feat"}}
+        restants, feats, _ = ag.classer_visuellement(groups, prefs)
+        assert restants == {} and feats == [a]

@@ -113,8 +113,10 @@ _SOURCES_PAR_ID_SPOTIFY = ("spotify_web", "reccobeats")
 #: Sources qui ne mesurent rien (reprise, héritage, saisie) : hors des votes.
 _SOURCES_NON_MESUREES = frozenset({"legacy", "heritage", "manual"})
 
-#: Tolérance d'accord entre deux BPM, après correction d'octave.
-TOLERANCE_BPM = 0.03
+#: Tolérance d'accord entre deux BPM, après correction d'octave. 5 % (2026-11-22,
+#: simulé sur la base : 34 des 133 cas BPM partent, tous le même tempo arrondi par
+#: deux analyseurs — 71/74, 133/138 — ; un demi-ton de vitesse fait 5,9 %).
+TOLERANCE_BPM = 0.05
 
 #: Vues YouTube au-delà desquelles un écart avec Spotify devient suspect, et
 #: rapport qui le rend anormal (Booba « Cruella » : 5,5 M contre 316 k).
@@ -226,6 +228,14 @@ class Contexte:
     #: leur piste Deezer sur un autre disque (`appartenance_disque.a_decider`),
     #: lues par `charger_contexte` : le détecteur reste pur.
     hors_disque: dict = field(default_factory=dict)
+    #: `{fiche: [candidate]}` : fiches d'AUTRES artistes dont les paroles
+    #: Genius contiennent un fragment de ses textes de repli
+    #: (`paroles_entre_artistes.candidates`, règle 4 du 2026-11-22), lues par
+    #: `charger_contexte` : le détecteur reste pur.
+    paroles_autres_artistes: dict = field(default_factory=dict)
+    #: Regroupements d'éditions que les règles des projets ne tranchent pas
+    #: (`projets_en_base.cas_de_projets`, e67), lus par `charger_contexte`.
+    projets_a_trancher: list = field(default_factory=list)
     #: Pages « Non-Music » sans identifiant que la liste Deezer de leur album
     #: contient (`sortie_officielle.sorties_par_leur_disque`), lues par
     #: `charger_contexte` : le détecteur `annotee` reste pur.
@@ -243,6 +253,15 @@ class Contexte:
     #: `charger_contexte` : la règle C des génériques y cherche le disque le
     #: plus ancien qui porte la même plage (2026-11-19).
     pistes_deezer_absentes: list = field(default_factory=list)
+    #: Noms sûrs de l'artiste et de ses membres confirmés (base et brut Discogs,
+    #: `temoins_des_liens`), lus par `charger_contexte` quand des liens sont
+    #: proposés : les règles des liens proposés restent pures (2026-11-22).
+    temoins_liens: object = None
+    #: `{track_id: {"correction", "detecteur", "le"}}` des fiches qu'une
+    #: correction de RÈGLE a créées (`revue_corrections`, non rétablie), lues
+    #: par `charger_contexte` (`fiches_creees_par_regle`) : le détecteur
+    #: `creee_sans_trace` reste pur.
+    creees_par_regle: dict = field(default_factory=dict)
     #: Index calculés UNE fois par ouverture (un détecteur qui compare chaque
     #: fiche à toute la discographie coûtait des minutes chez Kanye).
     _memo: dict = field(default_factory=dict, repr=False)
@@ -1420,7 +1439,7 @@ def paroles_d_une_autre_fiche(track, ctx):
             elif part > meilleur:
                 meilleur, autre, quels = part, t, [libelle]
     if autre is None:
-        return None
+        return _paroles_d_un_autre_artiste(track, ctx)
     return (
         f"{' et '.join(sorted(set(quels)))} : ceux de « {autre.title} » ? "
         f"({meilleur:.0%} de leurs paires de mots dans ses paroles Genius)",
@@ -1431,6 +1450,49 @@ def paroles_d_une_autre_fiche(track, ctx):
             "empreinte": f"autre:{autre.genius_id or autre.id}",
         },
     )
+
+
+def _fiche_d_un_autre_artiste(x: dict) -> object:
+    """La candidate de `paroles_entre_artistes.candidates`, en fiche que
+    `_relation_legitime` sait lire."""
+    from src.models import Track
+
+    t = Track(title=x["title"] or "")
+    t.id, t.genius_id, t.genius_url = x["autre"], x["genius_id"], x["genius_url"]
+    try:
+        relations = json.loads(x["relationships"] or "[]")
+    except (TypeError, ValueError):
+        relations = []
+    t.relationships = relations if isinstance(relations, list) else []
+    return t
+
+
+def _paroles_d_un_autre_artiste(track, ctx):
+    """Règle 4 (décision utilisateur 2026-11-22) : le même juge, contre les
+    paroles Genius des fiches des AUTRES artistes (lignes sœurs exclues),
+    trouvées par la base (`ctx.paroles_autres_artistes`). Un même titre de
+    base excuse comme chez l'artiste : simulé sur toute la base, sans cette
+    excuse 7 cas sur 8 étaient le même morceau sous deux pages (Rim'K / Sefyu
+    « On va te douiller »), un remix et son solo (« Dolce Camara »)."""
+    for x in ctx.paroles_autres_artistes.get(track.id, ()):
+        if x["part"] < PAROLES_AUTRE_MIN or x["couvert"] < PAROLES_AUTRE_COUVERTES_MIN:
+            continue
+        if track.genius_id and x["genius_id"] == track.genius_id:
+            continue
+        if _relation_legitime(track, _fiche_d_un_autre_artiste(x)):
+            continue
+        return (
+            f"{x['texte']} : ceux de « {x['title']} » de {x['artiste']} ? "
+            f"({x['part']:.0%} de leurs paires de mots dans ses paroles Genius)",
+            {
+                "autre": x["autre"],
+                "artiste_autre": x["artiste"],
+                "part": round(x["part"], 2),
+                "textes": [x["texte"]],
+                "empreinte": f"autre:{x['genius_id'] or x['autre']}",
+            },
+        )
+    return None
 
 
 def page_sans_info(track, _ctx=None):
@@ -1481,15 +1543,106 @@ def credits_api_seuls(track, _ctx=None):
     return None
 
 
+def _horodatage(valeur):
+    """Une date de la fiche (objet ou chaîne ISO) en `datetime` naïf, ou None."""
+    from datetime import datetime
+
+    if isinstance(valeur, str):
+        try:
+            valeur = datetime.fromisoformat(valeur)
+        except ValueError:
+            return None
+    if not isinstance(valeur, datetime):
+        return None
+    return valeur.replace(tzinfo=None)
+
+
+def page_relue_apres_l_api(track) -> bool:
+    """La page Genius a-t-elle été lue APRÈS la dernière pose possible des
+    crédits 🎫 ? Ils viennent du détail `GET /songs/{id}`, daté par
+    `genius_detail_checked_at` (e45) : une lecture de la page postérieure les a
+    eus sous les yeux et ne les a pas confirmés. Sans date du détail, on ne
+    sait pas : non."""
+    lu = _horodatage(track.last_scraped)
+    detail = _horodatage(track.genius_detail_checked_at)
+    return lu is not None and detail is not None and lu >= detail
+
+
 def nature_credits_api(track, _preuves, _ctx) -> str:
     """Sans AUCUN crédit scrapé, la section crédits n'a rien donné : l'étape
     Crédits la relira (`est_manquant(CREDITS_GENIUS)` ne regarde que la source
-    `genius`) — un run, pas une décision. À côté de crédits scrapés, ce sont
-    les compléments que la page ne montre pas, GARDÉS en 🎫 par décision
-    utilisateur (2026-09-26) : une information."""
+    `genius`) — un run, pas une décision. Sauf si la page a été lue APRÈS la
+    pose des crédits 🎫 (`page_relue_apres_l_api`) : la lecture les a vus et ne
+    les confirme pas, un nouveau run lirait la même page (Kanye « Arguing »,
+    « Liberian (Kanye West Mix) », « You Ain't No Model », relues en
+    `--force-credits` le 2026-11-15) — une décision (CORRECTIFS 2026-11-14).
+    À côté de crédits scrapés, ce sont les compléments que la page ne montre
+    pas, GARDÉS en 🎫 par décision utilisateur (2026-09-26) : une information."""
     if any(c.source == SOURCE_SCRAPE for c in track.credits):
         return INFORMATION
+    if page_relue_apres_l_api(track):
+        return DECISION
     return RUN
+
+
+#: Les corrections de règle qui CRÉENT une fiche (`revue_auto`, type de
+#: l'annulation) : une piste Deezer « absente » (règle C, DA1, A1, R1…) ou un
+#: remix d'un tiers venu de Kworb.
+_ANNULATIONS_CREATRICES = ("fiche_deezer", "fiche_kworb")
+
+
+def fiches_creees_par_regle(corrections, tracks) -> dict[int, dict]:
+    """PUR. `{track_id: {"correction", "detecteur", "le"}}` des fiches de
+    `tracks` créées par une correction de règle encore en vigueur
+    (`corrections` : `corrections_revue`, annulation décodée). La fiche d'une
+    piste Deezer se retrouve par son `deezer_id` (ce que « ↩ Rétablir » relit
+    aussi), celle de Kworb par l'ID noté à la création."""
+    par_deezer = {}
+    for t in tracks:
+        if t.id and t.deezer_id:
+            par_deezer.setdefault(str(t.deezer_id), t.id)
+    ids = {t.id for t in tracks if t.id}
+    creees: dict[int, dict] = {}
+    for c in corrections:
+        if c.get("retablie_at"):
+            continue
+        annulation = c.get("annulation") or {}
+        genre = annulation.get("type")
+        if genre not in _ANNULATIONS_CREATRICES:
+            continue
+        if genre == "fiche_deezer":
+            tid = par_deezer.get(str(annulation.get("deezer_id")))
+        else:
+            tid = annulation.get("creee") if annulation.get("creee") in ids else None
+        if tid is None:
+            continue
+        creees.setdefault(
+            tid,
+            {"correction": c.get("id"), "detecteur": c.get("detecteur"), "le": c.get("applied_at")},
+        )
+    return creees
+
+
+def creee_sans_trace(track, ctx=None):
+    """Fiche CRÉÉE par une règle (règle C, DA1, A1, Kworb…) qui, une fois son
+    étape identité passée, n'a ni ID Spotify ni vidéo : rien d'autre que la
+    piste qui l'a fait naître ne la confirme — l'humain (CORRECTIFS, règle C,
+    décision du 2026-11-19). « Passée » = Spotify a répondu « pas là » APRÈS
+    la création (`spotify_id_checked_at`) ; avant, c'est un run qui manque,
+    pas une décision."""
+    if ctx is None or track.id not in ctx.creees_par_regle:
+        return None
+    if track.spotify_id or track.youtube_url or track.videos:
+        return None
+    origine = ctx.creees_par_regle[track.id]
+    cree, verifie = _horodatage(origine.get("le")), _horodatage(track.spotify_id_checked_at)
+    if cree is None or verifie is None or verifie < cree:
+        return None
+    return (
+        f"fiche créée par règle ({origine.get('detecteur')}) le {cree:%Y-%m-%d}, "
+        "sans ID Spotify ni vidéo après l'étape identité",
+        {"correction": origine.get("correction"), "empreinte": f"cree:{origine.get('correction')}"},
+    )
 
 
 def cle_doublon(titre: str | None) -> str:
@@ -1714,6 +1867,23 @@ def verdict_page_et_plateforme(page, fiche) -> str:
     )
 
 
+def skits_de_deux_disques(page, fiche) -> bool:
+    """Un skit RÉCURRENT : la page se dit skit, les deux fiches sont rangées
+    sur des disques différents et leurs durées (verdicts des catalogues) diffèrent
+    au-delà d'une même prise (`MEME_PRISE_S`) — deux enregistrements, pas une édition (« Paul »
+    de *The Marshall Mathers LP*, 11 s, et « Paul (Skit) » de *The Slim Shady
+    LP*, 15 s ; décision utilisateur 2026-11-13). Un disque inconnu ne dit rien."""
+    from src.utils.version_descriptors import est_skit, meme_disque
+
+    if not (est_skit(page.title) or est_skit(fiche.title)):
+        return False
+    if not (page.album and fiche.album) or meme_disque(page.album, fiche.album):
+        return False
+    if not (page.duration and fiche.duration):
+        return False
+    return abs(page.duration - fiche.duration) > MEME_PRISE_S
+
+
 def page_et_fiche_plateforme(track, ctx):
     """Forme « Make Her Say » (WIP, demande utilisateur 2026-10-26) : une fiche
     SANS page Genius (créée depuis une plateforme) et une fiche Genius de
@@ -1741,6 +1911,7 @@ def page_et_fiche_plateforme(track, ctx):
             or _ids_de_catalogue(page) & _ids_de_catalogue(track)
             or (titre_generique(base) and cle_album(page.album) != cle_album(track.album))
             or _a_la_meme_place(page, track, ctx)
+            or skits_de_deux_disques(page, track)
         ):
             continue
         return (
@@ -1767,7 +1938,9 @@ def meme_enregistrement(track, ctx):
     Versé de l'audit le 2026-11-10 : une suspicion d'audit n'avait ni action ni
     mémoire, le « non » de l'utilisateur ne se retenait nulle part. À l'humain :
     la fusion n'est pas réversible ; « ✓ Normal » retient que ce sont deux
-    fiches. UN cas par paire, porté par la fiche d'identifiant le plus bas."""
+    fiches ; « 📎 Noter en édition » garde l'une, l'autre devient son édition
+    (`titre_autre` : le sens que les titres désignent). UN cas par paire, porté
+    par la fiche d'identifiant le plus bas."""
     paire = ctx.fusions.get(track.id)
     if paire is None:
         return None
@@ -1781,7 +1954,12 @@ def meme_enregistrement(track, ctx):
             f"même ISRC {paire['isrc']} que « {autre.title} », dont le titre est joint à "
             "celui-ci, durées par identifiant à ± 2 s : le même enregistrement sous deux "
             "pages — fusionner ?",
-            {"autres": [autre.id], "isrc": paire["isrc"], "empreinte": empreinte},
+            {
+                "autres": [autre.id],
+                "titre_autre": autre.title,
+                "isrc": paire["isrc"],
+                "empreinte": empreinte,
+            },
         )
     if paire.get("texte"):
         # Versé de `paroles_identiques` (audit) le 2026-11-11.
@@ -1790,7 +1968,25 @@ def meme_enregistrement(track, ctx):
             + (f" ({autre.album})" if autre.album else "")
             + ", servi par les deux pages, sans durée par identifiant pour les départager : "
             "doublon de pages Genius ou version que le titre ne nomme pas — fusionner ?",
-            {"autres": [autre.id], "texte": True, "empreinte": empreinte},
+            {
+                "autres": [autre.id],
+                "titre_autre": autre.title,
+                "texte": True,
+                "empreinte": empreinte,
+            },
+        )
+    if paire.get("deux_pages"):
+        # Règle 3 (décision utilisateur 2026-11-22).
+        return (
+            f"même enregistrement que « {autre.title} »"
+            + (f" ({autre.album})" if autre.album else "")
+            + f" ? {paire['deux_pages']} — fusionner, ou noter l'une en édition de l'autre ?",
+            {
+                "autres": [autre.id],
+                "titre_autre": autre.title,
+                "deux_pages": paire["deux_pages"],
+                "empreinte": empreinte,
+            },
         )
     if paire.get("compteur"):
         # Versé de `streams_double` (audit) le 2026-11-11.
@@ -1798,7 +1994,12 @@ def meme_enregistrement(track, ctx):
             f"même compteur Spotify ({paire['compteur']:,}) que « {autre.title} », sur le même "
             "disque, sans ID Spotify commun ni durées contraires : le même enregistrement "
             "sous deux fiches — fusionner ?",
-            {"autres": [autre.id], "compteur": paire["compteur"], "empreinte": empreinte},
+            {
+                "autres": [autre.id],
+                "titre_autre": autre.title,
+                "compteur": paire["compteur"],
+                "empreinte": empreinte,
+            },
         )
     return (
         f"mêmes paroles Genius que « {autre.title} »"
@@ -1807,6 +2008,7 @@ def meme_enregistrement(track, ctx):
         "le même enregistrement sous deux pages — fusionner ?",
         {
             "autres": [autre.id],
+            "titre_autre": autre.title,
             "paroles": paire["paroles"],
             "empreinte": empreinte,
         },
@@ -2865,6 +3067,35 @@ def proprietaire_de_la_video(fiches, v):
     return proprietaire_et_temoin(fiches, v)[0]
 
 
+def meme_projet(ctx):
+    """Deux éditions (ou plus) que les règles des projets (`utils/projets_disques`,
+    e67) ne réunissent ni ne séparent avec assurance : une édition qui en
+    cumule d'autres (« Abysses & Ivresse des profondeurs »), un même nom de
+    disque à moins de 80 % de fiches communes, deux noms différents à 80 % et
+    plus (doublons d'édition, « HHHH » / « HHHH² »). Décision utilisateur
+    2026-11-20 : au panneau. « 💽 Même projet » réunit et retient la décision
+    (`acceptations`, nature `projet`) ; « ✓ Normal » les laisse séparées. Une
+    SUITE qui reprend les précédentes est un autre projet et n'arrive pas ici."""
+    cas = []
+    for c in ctx.projets_a_trancher:
+        eds = c["editions"]
+        noms = " / ".join(
+            f"« {e['titre']} » ({e['fiches']} fiches, {e['date'] or '?'})" for e in eds
+        )
+        cas.append(
+            (
+                " / ".join(e["titre"] for e in eds),
+                f"{noms} — {c['motif']}",
+                {
+                    "release_ids": [e["release_id"] for e in eds],
+                    "titres": [e["titre"] for e in eds],
+                    "empreinte": "p" + "|".join(sorted(e["cle"] for e in eds)),
+                },
+            )
+        )
+    return cas
+
+
 def video_partagee(ctx):
     """Une vidéo portée par PLUSIEURS fiches qui n'en nomme pas au moins une
     (album entier, EP complet, film, freestyle collectif mal rattaché) : UN
@@ -2890,9 +3121,19 @@ def video_partagee(ctx):
             (x for t in fiches for x in t.videos or [] if x.video_id == video_id and x.recherche),
             v,
         )
-        gagnante, temoin = proprietaire_et_temoin(fiches, vue)
+        # Le clip d'une page principale que ses autres porteuses déclinent
+        # (démo, freestyle, édition) lui revient, quels que soient les autres
+        # témoins (décision utilisateur 2026-11-22 : jamais à la démo).
+        from src.services.politiques_revue import versions_de_la_page_principale
+
+        principale = versions_de_la_page_principale(fiches, vue)
+        if principale is not None:
+            gagnante, autres = principale
+            temoin = "page principale, les autres porteuses en sont des versions"
+        else:
+            gagnante, temoin = proprietaire_et_temoin(fiches, vue)
+            autres = [t for t in fiches if gagnante is not None and _page(t) != _page(gagnante)]
         if gagnante is not None:
-            autres = [t for t in fiches if _page(t) != _page(gagnante)]
             noms = ", ".join(f"« {t.title} » (#{t.id})" for t in autres)
             cas.append(
                 (
@@ -3634,7 +3875,8 @@ def _noms_de_la_disco(ctx) -> frozenset[str]:
 #: Détecteurs dont un cas « pour information » reste ouvert aux règles du
 #: correcteur (`revue_auto`) : un alias que MusicBrainz ET Discogs donnent se
 #: confirme même sans trace dans la discographie (Q1, 2026-10-31).
-INFORMATIONS_ARBITRABLES = frozenset({"liens_proposes"})
+#: Les crédits 🎫 aussi : ✓ Normal ou indécidable par règle (2026-11-22).
+INFORMATIONS_ARBITRABLES = frozenset({"liens_proposes", "credits_api"})
 
 
 def nature_lien_propose(preuves, ctx) -> str:
@@ -3767,6 +4009,12 @@ DETECTEURS: tuple[Detecteur, ...] = (
         nature_du_cas=nature_credits_api,
     ),
     Detecteur(
+        "creee_sans_trace",
+        "Fiche créée par règle, ni sur Spotify ni en vidéo",
+        "🌱",
+        creee_sans_trace,
+    ),
+    Detecteur(
         "annotee", "Page « Non-Music » sans sortie officielle", "🏷️", page_annotee_sans_trace
     ),
     Detecteur(
@@ -3832,6 +4080,7 @@ DETECTEURS_ARTISTE: tuple[DetecteurArtiste, ...] = (
     DetecteurArtiste(
         "soeurs_identite", "Lignes sœurs : identité divergente", "🧬", soeurs_identite_divergente
     ),
+    DetecteurArtiste("meme_projet", "Éditions : un même projet ?", "💽", meme_projet),
 )
 
 
@@ -4157,6 +4406,74 @@ def natures_des_formations(data_manager, relations) -> dict:
     return natures
 
 
+def _page_discogs(discogs_id) -> dict | None:
+    """La page d'artiste Discogs `discogs_id` lue dans le brut (lecture seule)."""
+    import json
+
+    from src.persistence import brut
+
+    if not discogs_id:
+        return None
+    adresse = f"https://api.discogs.com/artists/{int(discogs_id)}"
+    for requete, corps in brut.dernieres_lectures("discogs", adresse).items():
+        if requete.split("?")[0] != adresse:
+            continue
+        try:
+            page = json.loads(corps)
+        except ValueError:
+            return None
+        return page if isinstance(page, dict) else None
+    return None
+
+
+def temoins_des_liens(data_manager, artiste):
+    """Les noms sûrs de l'artiste et de ses membres CONFIRMÉS (alias confirmés
+    ou gardés pour info, page Discogs du brut) — les témoins des règles des
+    liens proposés (`utils.liens_proposes`). Lectures seules."""
+    from src.utils.liens_proposes import TemoinsLiens, cle, personne
+
+    def de_la_base(nom: str):
+        membre = data_manager.get_artist_by_name(nom)
+        if membre is None or not membre.id:
+            return personne(nom)
+        return personne(
+            membre.name,
+            data_manager.get_artist_relations(membre.id, status=None),
+            _page_discogs(membre.discogs_id),
+        )
+
+    relations = data_manager.get_artist_relations(artiste.id, status=None)
+    t = TemoinsLiens(personne(artiste.name, relations, _page_discogs(artiste.discogs_id)))
+    vus = set()
+    for r in relations:
+        if r.kind == "has_member" and r.status == "confirmed" and cle(r.related_name) not in vus:
+            vus.add(cle(r.related_name))
+            t.a_des_membres = True
+            t.membres.append(de_la_base(r.related_name))
+    noms_par_id = {a.id: a.name for a in data_manager.artistes_de_la_base()}
+    for lien in data_manager.liens_de_formation(artiste.name):
+        nom = noms_par_id.get(lien["artist_id"])
+        if not nom:
+            continue
+        t.membres_par_leur_lien.add(cle(nom))
+        if cle(nom) not in vus:
+            vus.add(cle(nom))
+            t.membres.append(de_la_base(nom))
+    t.membres_proposes = [
+        r.related_name for r in relations if r.kind == "has_member" and r.status == "proposed"
+    ]
+    if len(t.membres_proposes) >= 2:
+        t.personnes_de_la_base = [
+            personne(a.name, data_manager.get_artist_relations(a.id, status=None))
+            for a in data_manager.artistes_de_la_base()
+            if a.id != artiste.id
+        ]
+        # Le plus riche en noms d'abord : Mac Miller plutôt que son alias
+        # Delusional Thomas, qui porte les mêmes noms.
+        t.personnes_de_la_base.sort(key=lambda p: (-len(p.forts), p.nom))
+    return t
+
+
 def formations_prouvees_par_genius(data_manager, artiste, relations) -> dict:
     """R4 (décision utilisateur 2026-11-13) : pour chaque formation PROPOSÉE
     sans nature, l'ID que la liste Genius du membre (brut) donne en artiste
@@ -4208,16 +4525,29 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
     ctx.fusions = data_manager.fusions_a_decider([t.id for t in tracks if t.id])
     ctx.hors_disque = data_manager.hors_du_disque_a_decider([t.id for t in tracks if t.id])
+    refs = _references_bigrammes(ctx)
+    textes = {
+        t.id: [(lib, texte, t.genius_id) for lib, texte in liste]
+        for t in tracks
+        if t.id and (liste := _textes_de_repli(t, refs))
+    }
+    ctx.paroles_autres_artistes = data_manager.paroles_d_autres_artistes(artiste.id, textes)
+    ctx.projets_a_trancher = data_manager.cas_de_projets(artiste.id)
     ctx.non_music_sortis = data_manager.non_music_sortis(tracks)
     ctx.natures_formations = natures_des_formations(data_manager, ctx.relations_proposees)
     ctx.formations_prouvees = formations_prouvees_par_genius(
         data_manager, artiste, ctx.relations_proposees
     )
+    if ctx.relations_proposees:
+        ctx.temoins_liens = temoins_des_liens(data_manager, artiste)
     ctx.pistes_deezer_absentes = [
         (s["preuves"] or {}).get("ecart") or {}
         for s in data_manager.signalements_revue(artiste.id)
         if s["detecteur"] in ("deezer_absent", "deezer_album_absent")
     ]
+    ctx.creees_par_regle = fiches_creees_par_regle(
+        data_manager.corrections_revue(artiste.id), tracks
+    )
     if VIDEOS_MORTES_BRANCHEES:
         ctx.videos_mortes = data_manager.videos_mortes_constatees()
     return ctx

@@ -96,6 +96,58 @@ class TestProvenanceLegacy:
         assert data_manager.declarer_provenance_legacy("release_date", lignes) == 1
         assert data_manager.declarer_provenance_legacy("release_date", lignes) == 0
 
+    def test_une_transaction_et_un_recalcul_par_fiche(self, data_manager, monkeypatch):
+        """Chantier A (2026-11-22) : une transaction PAR FICHE, par `_ecrire`,
+        et seule la fiche qui reçoit une observation est recalculée (une seule
+        transaction pour le lot tenait le verrou pendant 6 201 fiches)."""
+        a = _artiste(data_manager)
+        une, deux, deja = (_track(data_manager, a, t) for t in ("Une", "Deux", "Déjà"))
+        for tid in (une, deux, deja):
+            self._colonne_nue(data_manager, tid, "2018-05-14")
+        data_manager.declarer_provenance_legacy("release_date", [(deja, "2018-05-14")])
+
+        ouvertures, recalculees = [], []
+        ecrire, remat = data_manager._ecrire, data_manager._rematerialiser_fiche
+
+        def espion_ecrire():
+            ouvertures.append(1)
+            return ecrire()
+
+        def espion_remat(conn, tid):
+            recalculees.append(tid)
+            return remat(conn, tid)
+
+        monkeypatch.setattr(data_manager, "_ecrire", espion_ecrire)
+        monkeypatch.setattr(data_manager, "_rematerialiser_fiche", espion_remat)
+        lignes = [(une, "2018-05-14"), (deux, "2018-05-14"), (deja, "2018-05-14")]
+        assert data_manager.declarer_provenance_legacy("release_date", lignes) == 2
+        assert len(ouvertures) == 3
+        assert sorted(recalculees) == sorted([une, deux])
+
+    def test_une_fiche_en_erreur_n_arrete_pas_les_suivantes(self, data_manager, monkeypatch):
+        from contextlib import contextmanager
+
+        from sqlalchemy.exc import OperationalError
+
+        a = _artiste(data_manager)
+        une, deux = _track(data_manager, a, "Une"), _track(data_manager, a, "Deux")
+        for tid in (une, deux):
+            self._colonne_nue(data_manager, tid, "2018-05-14")
+        ecrire, appels = data_manager._ecrire, []
+
+        @contextmanager
+        def premiere_en_erreur():
+            appels.append(1)
+            if len(appels) == 1:
+                raise OperationalError("INSERT", {}, Exception("database is locked"))
+            with ecrire() as conn:
+                yield conn
+
+        monkeypatch.setattr(data_manager, "_ecrire", premiere_en_erreur)
+        lignes = [(une, "2018-05-14"), (deux, "2018-05-14")]
+        assert data_manager.declarer_provenance_legacy("release_date", lignes) == 1
+        assert [t for t, _ in data_manager.colonnes_sans_provenance("release_date")] == [une]
+
     def test_valeurs_vides_ecartees(self, data_manager):
         assert data_manager.declarer_provenance_legacy("release_date", [(1, None), (2, "")]) == 0
 

@@ -133,7 +133,7 @@ def resolve_track_synced_lyrics(
         return motif is not None
 
     def _retenu(lrc, source):
-        if lrc and lrc_dementi(paroles, lrc):
+        if lrc and lrc_dementi(paroles, lrc, track.duration):
             logger.info(f"⏭ {track.title}: LRC {source} écarté — démenti par les paroles Genius")
             return None
         if lrc and refuses and empreinte_lrc(lrc) in refuses:

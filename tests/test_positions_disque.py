@@ -12,6 +12,7 @@ from src.api.deezer_api import DeezerAPI
 from src.models import Artist, ReleaseObservation, Track
 from src.services import revue
 from src.utils.positions_disque import appoint_emplacement, position_retenue
+from tests.aides_parutions import parution_sans_piste
 
 
 class TestPositionRetenue:
@@ -113,18 +114,17 @@ def _lien(dm, track_id):
 def test_un_numero_genius_n_ecrase_pas_celui_de_deezer(data_manager):
     _, track = _fiche(data_manager)
     data_manager.record_release_observations(track.id, [_obs("deezer", 13, 1)])
-    release_id = data_manager.get_track_releases(track.id)[0]["id"]
-    data_manager.link_track_to_release(release_id, track.id, track_number=12, source="genius")
+    # Genius, qui n'identifie pas encore ce disque, adopte la parution au même titre.
+    data_manager.record_release_observations(track.id, [_obs("genius", 12)])
+    assert len(data_manager.get_track_releases(track.id)) == 1
     assert tuple(_lien(data_manager, track.id)) == (1, 13, "deezer")
 
 
 def test_une_source_sure_remplace_un_numero_legacy(data_manager):
     _, track = _fiche(data_manager)
-    release_id = data_manager.ensure_release(track.artist.id, "Art de vivre", scope="own")
-    data_manager.link_track_to_release(
-        release_id, track.id, track_number=12, source="legacy", matched_by="legacy"
-    )
-    data_manager.link_track_to_release(release_id, track.id, disc_number=1, track_number=13)
+    data_manager.record_release_observations(track.id, [_obs("legacy", 12)])
+    data_manager.record_release_observations(track.id, [_obs("manual", 13, 1)])
+    assert len(data_manager.get_track_releases(track.id)) == 1
     assert tuple(_lien(data_manager, track.id)) == (1, 13, "manual")
 
 
@@ -172,7 +172,7 @@ def test_la_reprise_e52_est_conservatrice(data_manager):
     hors.id = data_manager.save_track(hors)
     sans = Track(title="Sans numéro", artist=track.artist)
     sans.id = data_manager.save_track(sans)
-    release_id = data_manager.ensure_release(track.artist.id, "Art de vivre", scope="own")
+    release_id = parution_sans_piste(data_manager, track.artist.id, "Art de vivre")
     with data_manager.engine.begin() as conn:
         for tid, numero, source in (
             (track.id, 12, "legacy"),

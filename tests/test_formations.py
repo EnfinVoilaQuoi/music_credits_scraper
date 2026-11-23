@@ -97,10 +97,11 @@ class _FauxMB:
         self._boum = boum
         self.albums_recus = None
 
-    def resoudre_artiste(self, nom, nos_albums):
+    def resoudre_artiste(self, nom, nos_albums, **preuves):
         if self._boum:
             raise RuntimeError("503")
         self.albums_recus = nos_albums
+        self.preuves_recues = preuves
         if not self._retenu:
             return None
         return SimpleNamespace(
@@ -176,6 +177,22 @@ class TestRecherche:
             discogs=_FauxDiscogs(),
         )
         assert mb.albums_recus == {"alt f4"}
+
+    def test_les_preuves_du_candidat_seul_sont_passees(self):
+        """Titres des morceaux et profils connus : un candidat SEUL s'y prouve
+        (2026-11-22, Swing relié à un duo de Hong Kong)."""
+        mb = _FauxMB()
+        artiste = Artist(
+            id=1, name="Swing", spotify_id="0OQMxt6l70FM2YlLwYDiEn", discogs_id=4741178
+        )
+        chercher_formations(
+            artiste, _FauxDM(tracks=[_track("ALT F4")]), mb=mb, discogs=_FauxDiscogs()
+        )
+        assert mb.preuves_recues == {
+            "nos_titres": {"x"},
+            "profils_spotify": {"0OQMxt6l70FM2YlLwYDiEn"},
+            "profils_discogs": {4741178},
+        }
 
     def test_sans_album_en_base_le_diagnostic_le_dit(self):
         """L'oracle a besoin de la discographie : sans elle « Swing » est

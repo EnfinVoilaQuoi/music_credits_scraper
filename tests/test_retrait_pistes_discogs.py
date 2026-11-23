@@ -26,6 +26,7 @@ from src.utils.corrections_fiches import (
 )
 from src.utils.discogs_durees import Fiche, Verdict, pistes_a_retirer
 from tests import test_discogs_api as _tda
+from tests.aides_parutions import parution_sans_piste
 
 _DISQUE = 13319609
 _GENIUS = 4242
@@ -144,7 +145,7 @@ class TestEcrivain:
         """Seule preuve du lien : il part. Lien prouvé ailleurs : sa place
         Discogs se vide, le lien reste."""
         parutions = [
-            data_manager.ensure_release(remix.artist.id, titre)
+            parution_sans_piste(data_manager, remix.artist.id, titre)
             for titre in ("Compilation", "Man on the Moon")
         ]
         with data_manager.engine.begin() as conn:

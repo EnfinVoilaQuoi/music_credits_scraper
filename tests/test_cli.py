@@ -19,7 +19,7 @@ class TestParsingDisco:
     def test_defauts_gui(self):
         o = cli.options_disco(_parse("disco", "Swing"))
         assert o.max_songs is None and o.include_features and o.prefill and o.download_images
-        assert not o.update_only and not o.include_secondary and o.respect_deleted
+        assert not o.update_only and o.include_secondary and o.respect_deleted
 
     def test_chaque_case(self):
         o = cli.options_disco(
@@ -30,14 +30,14 @@ class TestParsingDisco:
                 "10",
                 "--no-features",
                 "--no-prefill",
-                "--secondaires",
+                "--no-secondaires",
                 "--no-respecter-supprimes",
                 "--no-images",
                 "--maj",
             )
         )
         assert o.max_songs == 10 and not o.include_features and not o.prefill
-        assert o.include_secondary and not o.respect_deleted and not o.download_images
+        assert not o.include_secondary and not o.respect_deleted and not o.download_images
         assert o.update_only
 
 

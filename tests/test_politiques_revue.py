@@ -836,9 +836,16 @@ class TestEditionALaDureeDeLIdSpotify:
         return _t("28 décembre 1977", duration=581, album="Si c'était à refaire", **kw)
 
     @staticmethod
-    def _juger(track, titre="28 Décembre 1977", duree=537, matched_by="title", deezer_id=9):
+    def _juger(
+        track,
+        titre="28 Décembre 1977",
+        duree=537,
+        matched_by="title",
+        deezer_id=9,
+        isrc="FRN370102110",
+    ):
         ecart = {
-            "piste": {"id": deezer_id, "title": titre, "isrc": "FR9W11201876", "duration": duree},
+            "piste": {"id": deezer_id, "title": titre, "isrc": isrc, "duration": duree},
             "album": {"id": 5, "title": "92.2012", "artist_id": 7, "artist_name": "Kery James"},
             "existing_track_id": track.id,
             "matched_by": matched_by,
@@ -890,6 +897,19 @@ class TestEditionALaDureeDeLIdSpotify:
 
     def test_regle_listee(self):
         assert ("deezer_link_candidate", "deezer_rattacher_edition") in pol.REGLES_DEEZER
+
+    def test_un_autre_isrc_loin_de_la_page_de_la_fiche_n_est_pas_une_edition(self):
+        """Règle 1 (décision utilisateur 2026-11-22) : la page de *92.2012*
+        (ISRC FR9W11201876) est un RÉENREGISTREMENT, 44 s sous la page Deezer
+        de la fiche ; l'ID Spotify à sa durée était lui-même celui de
+        *92.2012* (JOURNAL 2026-11-14 (9))."""
+        arbitrage = self._juger(self._fiche(), isrc="FR9W11201876")
+        assert arbitrage is None or arbitrage.action != "deezer_rattacher_edition"
+
+    def test_un_autre_isrc_a_dix_secondes_reste_une_edition(self):
+        fiche = self._fiche(durations_observees={"deezer": 545, "spotify_web": 537, "youtube": 546})
+        arbitrage = self._juger(fiche, isrc="FR9W11201876")
+        assert arbitrage.action == "deezer_rattacher_edition"
 
 
 def test_kworb_seules_les_voies_qui_ne_creent_rien():
@@ -1070,7 +1090,11 @@ class TestFormationMbEtDiscogs:
         )
         natures = {"Sniper": nature} if nature else {}
         ctx = SimpleNamespace(
-            relations_proposees=[rel], disco=[], natures_formations=natures, formations_prouvees={}
+            relations_proposees=[rel],
+            disco=[],
+            natures_formations=natures,
+            formations_prouvees={},
+            temoins_liens=None,
         )
         cas = _cas("liens_proposes", None, {"nom": "Sniper", "kind": kind})
         return pol.politique_alias(cas, None, ctx)

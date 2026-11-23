@@ -27,8 +27,12 @@ _PARUTIONS = (
     "tables de parutions (`releases*`, `release_tracks`) : aucune colonne de fiche, "
     "aucun verdict n'en dépend"
 )
-_ALBUMS = "table `albums` (streams et nature du disque) : aucune colonne de fiche"
+_ALBUMS = "projets (e68 : streams et nature du disque) : aucune colonne de fiche"
 _CREDITS = "table `credits` : aucune colonne dérivée n'en dépend"
+_CREDITS_ALBUM = (
+    "tables `genius_album_*` (crédits d'album, clé = ID d'album Genius) : aucune "
+    "colonne de fiche, aucun verdict n'en dépend"
+)
 _LIGNE = "donnée PROPRE à la ligne d'un artiste (hors `COLONNES_PARTAGEES`), sans verdict dérivé"
 _RECALCUL = "c'est lui-même un RECALCUL (écrit des verdicts depuis les faits, n'en déplace aucun)"
 
@@ -39,10 +43,12 @@ EXCEPTIONS: dict[str, str] = {
     "_ecrire": "le mécanisme lui-même",
     # ── Parutions ──
     "confirm_release_suggestion": _PARUTIONS,
-    "ensure_release": _PARUTIONS,
     "fusionner_parutions_meme_upc": _PARUTIONS + " (réparation par lots, passage à blanc)",
-    "link_track_to_release": _PARUTIONS,
     "marquer_parutions_live": _PARUTIONS,
+    "memoriser_meme_projet": _PARUTIONS + " (décision « même projet » + projets refaits)",
+    "oublier_meme_projet": _PARUTIONS + " (rétablit la décision « même projet »)",
+    "regrouper_projets": _PARUTIONS
+    + " (projets e67 : `releases.projet_id` et `projets` seulement)",
     "singles_fondus": _PARUTIONS + " (réparation par lots, passage à blanc)",
     "noter_parution_apple": _PARUTIONS,
     "noter_parution_musicbrainz": _PARUTIONS,
@@ -50,11 +56,12 @@ EXCEPTIONS: dict[str, str] = {
     "poser_upc_parution": _PARUTIONS,
     "record_release_observations": _PARUTIONS,
     # ── Albums ──
-    "retirer_albums_de_disques": _ALBUMS + " (lignes de disques refusés, sans fiche)",
     "set_album_record_type": _ALBUMS,
     "update_album_ytm_streams": _ALBUMS,
     "upsert_album": _ALBUMS,
     # ── Crédits ──
+    "enregistrer_credits_album": _CREDITS_ALBUM,
+    "ajouter_confirmations_credits": _CREDITS + " (confirmations, rattrapage par lots)",
     "forget_credit": _CREDITS,
     "forget_discogs_credits": _CREDITS,
     "remplacer_credits_youtube": _CREDITS,
@@ -75,16 +82,8 @@ EXCEPTIONS: dict[str, str] = {
     "realigner_soeurs": (
         _RECALCUL + " (pilote le mécanisme à la main, une transaction par famille, passage à blanc)"
     ),
-    "recalculer_vues_ytm": (
-        _RECALCUL + " — avec les exclusions de l'APPELANT (`vues_comptees`), que le "
-        "recalcul générique (exclusions relues en base) défairait"
-    ),
-    # ── Décisions documentées (CORRECTIFS, chantier A lot 2) ──
-    "declarer_provenance_legacy": (
-        "par lots ; déclare `legacy` la valeur DÉJÀ en colonne, et `legacy` ne sert que "
-        "seul — aucun verdict ne change. Le convertir recalculerait des milliers de "
-        "fiches (6 201 datées après e24) en UNE transaction, verrou tenu d'autant"
-    ),
+    # (`recalculer_vues_ytm` et `declarer_provenance_legacy` passent par `_ecrire`
+    # depuis le 2026-11-22 : exclusions relues en base, une transaction par fiche.)
 }
 
 

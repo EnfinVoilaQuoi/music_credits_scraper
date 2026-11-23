@@ -4,6 +4,7 @@ from sqlalchemy import text
 
 from src.models import Artist, ReleaseObservation, Track
 from src.services import ecarts_deezer as ed
+from tests.aides_parutions import parution_sans_piste, poser_parution
 
 
 def _artist(dm, name="Diam's", deezer_id=123):
@@ -21,13 +22,15 @@ def _track(dm, artist, title="Car tu portes mon nom", **kwargs):
 def test_un_morceau_peut_etre_lie_a_trois_parutions_sans_dupliquer_sa_fiche(data_manager):
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="Dans ma bulle")
-    original = data_manager.ensure_release(artist.id, "Dans ma bulle", scope="own")
-    deluxe = data_manager.ensure_release(artist.id, "Dans ma bulle — Deluxe", scope="own")
-    compil = data_manager.ensure_release(
-        artist.id, "Hits 2007", credited_artist_name="Compilation", scope="appearance"
+    poser_parution(data_manager, track.id, "Dans ma bulle")
+    poser_parution(data_manager, track.id, "Dans ma bulle — Deluxe")
+    poser_parution(
+        data_manager,
+        track.id,
+        "Hits 2007",
+        credited_artist_name="Compilation",
+        scope="appearance",
     )
-    for release_id in (original, deluxe, compil):
-        assert data_manager.link_track_to_release(release_id, track.id)
 
     assert len(data_manager.get_artist_tracks(artist.id)) == 1
     assert [r["title"] for r in data_manager.get_track_releases(track.id)] == [
@@ -46,10 +49,8 @@ def test_le_repere_se_reconnait_malgre_la_graphie_du_distributeur(data_manager):
     en base où l'égalité exacte ne voyait pas le repère (2026-09-24)."""
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="Don’t Panik Tape ")
-    original = data_manager.ensure_release(artist.id, "Don't Panik Tape", scope="own")
-    deluxe = data_manager.ensure_release(artist.id, "Deluxe", scope="own")
-    data_manager.link_track_to_release(original, track.id)
-    data_manager.link_track_to_release(deluxe, track.id)
+    original = poser_parution(data_manager, track.id, "Don't Panik Tape")
+    poser_parution(data_manager, track.id, "Deluxe")
 
     assert data_manager.unlink_track_from_release(original, track.id) == "needs_replacement"
     assert (
@@ -62,7 +63,7 @@ def test_le_repere_se_reconnait_malgre_la_graphie_du_distributeur(data_manager):
 def test_delier_un_lien_absent(data_manager):
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="A")
-    release = data_manager.ensure_release(artist.id, "B", scope="own")
+    release = parution_sans_piste(data_manager, artist.id, "B")
     assert data_manager.unlink_track_from_release(release, track.id) == "missing"
 
 
@@ -71,9 +72,8 @@ def test_remplacant_qui_ne_contient_pas_le_morceau_refuse(data_manager):
 
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="A")
-    a = data_manager.ensure_release(artist.id, "A", scope="own")
-    ailleurs = data_manager.ensure_release(artist.id, "Ailleurs", scope="own")
-    data_manager.link_track_to_release(a, track.id)
+    a = poser_parution(data_manager, track.id, "A")
+    ailleurs = parution_sans_piste(data_manager, artist.id, "Ailleurs")
     with pytest.raises(ValueError):
         data_manager.unlink_track_from_release(a, track.id, replacement_release_id=ailleurs)
     assert [r["title"] for r in data_manager.get_track_releases(track.id)] == ["A"]
@@ -82,10 +82,8 @@ def test_remplacant_qui_ne_contient_pas_le_morceau_refuse(data_manager):
 def test_retrait_de_l_album_de_reference_exige_un_choix_explicite(data_manager):
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="Original")
-    original = data_manager.ensure_release(artist.id, "Original", scope="own")
-    deluxe = data_manager.ensure_release(artist.id, "Deluxe", scope="own")
-    data_manager.link_track_to_release(original, track.id)
-    data_manager.link_track_to_release(deluxe, track.id)
+    original = poser_parution(data_manager, track.id, "Original")
+    deluxe = poser_parution(data_manager, track.id, "Deluxe")
 
     assert data_manager.unlink_track_from_release(original, track.id) == "needs_replacement"
     assert (
@@ -105,10 +103,8 @@ def test_lien_idempotent_et_fusion_reunit_les_parutions(data_manager):
             "INSERT INTO tracks (title, artist_id) VALUES ('Titre bis', ?)", (artist.id,)
         )
         duplicate_id = conn.exec_driver_sql("SELECT last_insert_rowid()").scalar_one()
-    r1 = data_manager.ensure_release(artist.id, "Album A", scope="own")
-    r2 = data_manager.ensure_release(artist.id, "Album B", scope="own")
-    assert data_manager.link_track_to_release(r1, keep.id)
-    assert data_manager.link_track_to_release(r2, duplicate_id)
+    poser_parution(data_manager, keep.id, "Album A")
+    poser_parution(data_manager, duplicate_id, "Album B")
     assert data_manager.merge_tracks(keep.id, duplicate_id)
     assert {r["title"] for r in data_manager.get_track_releases(keep.id)} == {"Album A", "Album B"}
 
@@ -188,8 +184,9 @@ def test_une_observation_deezer_adopte_la_parution_heritee(data_manager):
     Une seconde édition Deezer du même titre reste une parution distincte."""
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="Dans ma bulle")
-    heritee = data_manager.ensure_release(artist.id, "Dans Ma Bulle", scope="own")
-    data_manager.link_track_to_release(heritee, track.id, source="legacy", matched_by="legacy")
+    heritee = poser_parution(
+        data_manager, track.id, "Dans Ma Bulle", source="legacy", confidence="legacy"
+    )
 
     data_manager.record_release_observations(
         track.id,
@@ -255,10 +252,8 @@ def test_observations_multi_sources_partagent_la_parution_sans_modifier_le_reper
 def test_changer_album_repere_ne_supprime_aucun_lien(data_manager):
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="Original")
-    original = data_manager.ensure_release(artist.id, "Original")
-    deluxe = data_manager.ensure_release(artist.id, "Deluxe")
-    data_manager.link_track_to_release(original, track.id)
-    data_manager.link_track_to_release(deluxe, track.id)
+    poser_parution(data_manager, track.id, "Original")
+    deluxe = poser_parution(data_manager, track.id, "Deluxe")
 
     assert data_manager.set_track_reference_release(track.id, deluxe)
     assert data_manager.get_artist_tracks(artist.id)[0].album == "Deluxe"
@@ -842,20 +837,30 @@ def test_fusion_des_parutions_d_avant_e54_au_meme_upc(data_manager):
     artist = _artist(data_manager, name="SDM")
     a = _track(data_manager, artist, title="A V L D")
     b = _track(data_manager, artist, title="AVLD")
-    r1 = data_manager.ensure_release(artist.id, "A V L D", scope="own")
-    r2 = data_manager.ensure_release(artist.id, "AVLD", scope="own")
+    r1 = poser_parution(data_manager, a.id, "A V L D", source="genius", track_number=1)
+    # Avant e54, rien ne rapprochait les deux livraisons : l'UPC et l'ID Deezer
+    # de la première sont posés à la main, la seconde s'ouvre sous son propre ID
+    # (la première, déjà identifiée par Deezer, n'est pas « héritée »).
     with data_manager.engine.begin() as conn:
         conn.exec_driver_sql("UPDATE releases SET upc = '859733291991' WHERE id = ?", (r1,))
+        conn.exec_driver_sql(
+            "INSERT INTO release_identifiers (release_id, artist_id, source, external_id) "
+            "VALUES (?, ?, 'deezer', '102768632')",
+            (r1, artist.id),
+        )
+    r2 = poser_parution(
+        data_manager,
+        a.id,
+        "AVLD",
+        source="deezer",
+        ident=230952762,
+        disc_number=1,
+        track_number=1,
+    )
+    assert r2 != r1
+    poser_parution(data_manager, b.id, "AVLD", source="deezer", ident=230952762)
+    with data_manager.engine.begin() as conn:
         conn.exec_driver_sql("UPDATE releases SET upc = '0859733291991' WHERE id = ?", (r2,))
-        for rid, ext in ((r1, "102768632"), (r2, "230952762")):
-            conn.exec_driver_sql(
-                "INSERT INTO release_identifiers (release_id, artist_id, source, external_id) "
-                "VALUES (?, ?, 'deezer', ?)",
-                (rid, artist.id, ext),
-            )
-    data_manager.link_track_to_release(r1, a.id, track_number=1, source="genius")
-    data_manager.link_track_to_release(r2, a.id, disc_number=1, track_number=1, source="deezer")
-    data_manager.link_track_to_release(r2, b.id, source="deezer")
 
     (plan,) = data_manager.fusionner_parutions_meme_upc()
     assert (plan["garde"], plan["absorbees"]) == (r1, [(r2, "AVLD")])
@@ -869,10 +874,47 @@ def test_fusion_des_parutions_d_avant_e54_au_meme_upc(data_manager):
     ]
     with data_manager.engine.connect() as conn:
         ids = conn.exec_driver_sql(
-            "SELECT external_id FROM release_identifiers WHERE release_id = ? ORDER BY 1", (r1,)
+            "SELECT external_id FROM release_identifiers WHERE release_id = ? "
+            "AND source = 'deezer' ORDER BY 1",
+            (r1,),
         ).fetchall()
     assert ids == [("102768632",), ("230952762",)]
     assert data_manager.fusionner_parutions_meme_upc() == []
+
+
+def _deux_parutions_au_meme_upc(dm, nom, deezer_id, idents):
+    artist = _artist(dm, name=nom, deezer_id=deezer_id)
+    track = _track(dm, artist, title=f"Titre de {nom}")
+    parutions = [
+        poser_parution(dm, track.id, "Nique le Casino 2", source="deezer", ident=ident)
+        for ident in idents
+    ]
+    with dm.engine.begin() as conn:
+        for r in parutions:
+            conn.exec_driver_sql("UPDATE releases SET upc = '3617052941532' WHERE id = ?", (r,))
+    return artist, parutions
+
+
+def test_la_fin_de_discographie_reunit_les_parutions_au_meme_upc(data_manager):
+    """Sadek « Nique le Casino 2 » (2026-10-22) : un doublon au même code-barres né
+    d'un run attendait `scripts/fusionner_parutions_upc.py`. La fin d'étape
+    discographie le réunit, pour l'artiste du run seulement."""
+    from src.services.discographie import regrouper_projets
+
+    sadek, (r1, r2) = _deux_parutions_au_meme_upc(data_manager, "Sadek", 11, (501, 502))
+    autre, _ = _deux_parutions_au_meme_upc(data_manager, "Autre", 12, (601, 602))
+
+    regrouper_projets(data_manager, sadek)
+
+    assert _nb_parutions(data_manager, sadek.id) == 1
+    assert _nb_parutions(data_manager, autre.id) == 2
+    with data_manager.engine.connect() as conn:
+        ids = conn.exec_driver_sql(
+            "SELECT external_id FROM release_identifiers WHERE release_id = ? "
+            "AND source = 'deezer' ORDER BY 1",
+            (r1,),
+        ).fetchall()
+    assert ids == [("501",), ("502",)]
 
 
 class TestSingleFonduAvecLAlbum:
@@ -943,8 +985,9 @@ class TestSingleFonduAvecLAlbum:
     def test_un_single_adopte_la_parution_heritee_d_une_piste(self, data_manager):
         artist = _artist(data_manager)
         track = _track(data_manager, artist, album="Ma chanson")
-        heritee = data_manager.ensure_release(artist.id, "Ma chanson", scope="own")
-        data_manager.link_track_to_release(heritee, track.id, source="legacy", matched_by="legacy")
+        heritee = poser_parution(
+            data_manager, track.id, "Ma chanson", source="legacy", confidence="legacy"
+        )
         data_manager.record_release_observations(
             track.id,
             [

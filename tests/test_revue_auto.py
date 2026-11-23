@@ -715,7 +715,9 @@ def test_edition_a_la_duree_de_l_id_spotify_rattachee_puis_retablie(
     fiche = _charger(data_manager, artiste)["28 décembre 1977"]
     artiste.deezer_id = 77
     album = ed.AlbumDeezer(id=501, title="92.2012", artist_id=77, artist_name=artiste.name)
-    piste = ed.PisteDeezer(id=9, title="28 Décembre 1977", duration=537, isrc="FR9W11201876")
+    # Même ISRC : une édition du disque. Le vrai *92.2012* (autre ISRC, 44 s
+    # sous la page de la fiche) est un réenregistrement (règle 1, 2026-11-22).
+    piste = ed.PisteDeezer(id=9, title="28 Décembre 1977", duration=537, isrc="FRN370102110")
     bilan = ed.BilanEcarts(deezer_id=77, artiste=artiste.name)
     bilan.ecarts = [
         ed.Ecart("link_candidate", album, piste, existing_track=fiche, matched_by="title")
@@ -961,6 +963,49 @@ def test_video_d_un_homonyme_retiree_par_regle_puis_retablie(data_manager, artis
     assert fiche.durations_observees.get("youtube") == 225
 
 
+def test_le_clip_quitte_l_edition_de_la_page_principale_puis_revient(
+    data_manager, artiste, monkeypatch
+):
+    """Décision utilisateur 2026-11-22 : le clip de « The Real Slim Shady »,
+    porté aussi par sa page « - Clean(Ish) », quitte l'édition (refus de
+    règle `regle:video_partagee`) ; rétablir le rend."""
+    from src.models.track import TrackVideo
+    from src.utils.corrections_fiches import origine_du_refus, videos_refusees
+
+    monkeypatch.setattr(revue_auto, "REGLES_ETENDUES_BRANCHEES", True)
+    clip = TrackVideo(
+        video_id="eJO5HU_7_1w",
+        url="https://www.youtube.com/watch?v=eJO5HU_7_1w",
+        source="genius_media",
+        views=1_203_887_972,
+        title="Eminem - The Real Slim Shady (Official Video - Clean Version)",
+    )
+    page = Track(title="The Real Slim Shady", artist=artiste, genius_id=531)
+    clean = Track(title="The Real Slim Shady - Clean(Ish)", artist=artiste, genius_id=6614924)
+    for t in (page, clean):
+        data_manager.save_track(t)
+        data_manager.record_track_videos(t.id, [clip])
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste)
+    assert any("gardée par « The Real Slim Shady »" in a for a in bilan.appliquees), bilan
+    fiches = {t.id: t for t in data_manager.get_artist_tracks(artiste.id)}
+    assert [v.video_id for v in fiches[page.id].videos] == ["eJO5HU_7_1w"]
+    assert fiches[clean.id].videos == []
+    assert origine_du_refus(fiches[clean.id], "video", "eJO5HU_7_1w") == "regle:video_partagee"
+
+    (correction,) = [
+        c
+        for c in data_manager.corrections_revue(artiste.id)
+        if c["action"] == "regle:retirer_video_partagee"
+    ]
+    _charger(data_manager, artiste)
+    revue_auto.retablir(data_manager, artiste, correction)
+    fiche = {t.id: t for t in data_manager.get_artist_tracks(artiste.id)}[clean.id]
+    assert [v.video_id for v in fiche.videos] == ["eJO5HU_7_1w"]
+    assert "eJO5HU_7_1w" not in videos_refusees(fiche)
+
+
 def test_video_de_recherche_d_un_autre_artiste_retiree_puis_retablie(
     data_manager, artiste, monkeypatch
 ):
@@ -1185,3 +1230,65 @@ def test_deezer_isrc_d_un_membre_rattache_chez_le_membre_puis_retabli(
     (correction,) = data_manager.corrections_revue(artiste.id)
     revue_auto.retablir(data_manager, artiste, correction)
     assert "Hourvari" not in {r["title"] for r in data_manager.get_track_releases(fiche.id)}
+
+
+def test_credits_api_confirmes_normaux_le_reste_indecidable(data_manager, artiste):
+    """Décision utilisateur 2026-11-22 : un crédit 🎫 confirmé au même rôle par
+    une autre source → ✓ Normal ; sans autre info → indécidable."""
+    from datetime import datetime
+
+    from src.models.track import Credit, CreditRole
+    from src.utils.revue_repository import VERDICT_INDECIDABLE, VERDICT_NORMAL
+
+    lu = datetime(2026, 11, 15)
+    a = Track(title="Arguing", artist=artiste, genius_id=21, last_scraped=lu)
+    a.credits = [
+        Credit("Plain Pat", CreditRole.PRODUCER, source="genius"),
+        Credit("Kid Cudi", CreditRole.PROGRAMMER, source="genius_api"),
+    ]
+    data_manager.save_track(a)
+    b = Track(title="Liberian", artist=artiste, genius_id=22, last_scraped=lu)
+    b.credits = [
+        Credit("Plain Pat", CreditRole.PRODUCER, source="genius"),
+        Credit("Mike Dean", CreditRole.MIXING_ENGINEER, source="genius_api"),
+        # Autre graphie : la clé unique des crédits refuse la même (nom, rôle).
+        Credit("MIKE DEAN", CreditRole.MIXING_ENGINEER, source="discogs"),
+    ]
+    data_manager.save_track(b)
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste, seulement=frozenset({"credits_api"}))
+    assert len(bilan.appliquees) == 2
+    verdicts = {
+        v["morceau"]: v["verdict"] for v in data_manager.verdicts_revue(artiste.id).values()
+    }
+    assert verdicts == {"Arguing": VERDICT_INDECIDABLE, "Liberian": VERDICT_NORMAL}
+    actifs = revue.analyser(data_manager, artiste).actifs
+    assert not [c for c in actifs if c.detecteur == "credits_api"]
+
+    # « ↩ Rétablir » rend le cas à l'humain ; la règle ne le reprend plus.
+    corrections = {c["morceau"]: c for c in data_manager.corrections_revue(artiste.id)}
+    assert corrections["Arguing"]["action"] == "regle:indecidable"
+    revue_auto.retablir(data_manager, artiste, corrections["Arguing"])
+    assert "Arguing" not in {v["morceau"] for v in data_manager.verdicts_revue(artiste.id).values()}
+    assert (
+        revue_auto.corriger(data_manager, artiste, seulement=frozenset({"credits_api"})).appliquees
+        == []
+    )
+
+
+def test_credits_api_d_une_page_a_relire_ne_sont_pas_tranches(data_manager, artiste):
+    """Page jamais relue depuis le détail API : un run peut les confirmer."""
+    from datetime import datetime
+
+    from src.models.track import Credit, CreditRole
+
+    t = Track(title="Rapline II", artist=artiste, genius_id=23, last_scraped=datetime(2026, 11, 15))
+    t.genius_detail_checked_at = "2026-11-20T13:22:32"
+    t.credits = [Credit("Kid Cudi", CreditRole.PROGRAMMER, source="genius_api")]
+    data_manager.save_track(t)
+    _charger(data_manager, artiste)
+    assert (
+        revue_auto.corriger(data_manager, artiste, seulement=frozenset({"credits_api"})).appliquees
+        == []
+    )

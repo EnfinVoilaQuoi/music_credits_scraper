@@ -241,6 +241,14 @@ def titre_generique(titre: str | None) -> bool:
     return all(m in MOTS_DE_MEME_MORCEAU or m in _NUMEROTATION or m.isdigit() for m in mots)
 
 
+def est_skit(titre: str | None) -> bool:
+    """PUR. Le titre se dit-il un skit (« Paul (Skit) », « Skit », « Steve
+    Berman Skit ») ? Un skit récurrent porte le même nom d'un disque à l'autre
+    sans être le même enregistrement (Eminem : « Paul », « Steve Berman »,
+    « Curtains Up », 2026-11-13)."""
+    return "skit" in _tokens(strip_featuring(titre or ""))
+
+
 _GROUPE_FINAL = re.compile(r"^(?P<titre>.*?)\s*[\(\[](?P<groupe>[^\(\)\[\]]+)[\)\]]\s*$")
 
 
@@ -1580,6 +1588,13 @@ def meme_disque(a: str | None, b: str | None) -> bool:
         return False
     if meme_album(a, b):
         return True
+    # « Vol. 2 », « Volume 2 », « Vol.2 » et « 2 » numérotent le même tome :
+    # 11 doublons d'édition legacy / Deezer (« Kushtape Volume 2 » / « Kushtape,
+    # Vol. 2 », « ASADACHI TAPE Vol. 3 » / « ASADACHI TAPE 3 ») restaient deux
+    # disques (2026-11-20) ; deux NUMÉROS différents restent deux disques.
+    va, vb = _volume_nu(a), _volume_nu(b)
+    if (va, vb) != (a, b) and meme_disque(va, vb):
+        return True
     if any(meme_disque(t, b) for t in _tomes_du_disque_double(a)) or any(
         meme_disque(a, t) for t in _tomes_du_disque_double(b)
     ):
@@ -1594,6 +1609,170 @@ def meme_disque(a: str | None, b: str | None) -> bool:
     ):
         return True
     return either_contains_as_words(nus[0], nus[1])
+
+
+#: Un nombre DÉTACHÉ du mot qui le précède fait partie du NOM du disque (« The
+#: Marshall Mathers LP 2 » = « … LP2 ») — sauf après un mot de partie ou de
+#: volume, où il numérote la suite (« Or Noir Part 2 », « Untold Story Vol 2 »).
+_NOMBRE_DU_NOM = re.compile(
+    r"\b(?!(?:part|pt|partie|vol|volume|tome|chapitre|chapter|saison|season|episode)\b)"
+    r"([^\W\d_]{2,}) (?=\d+\b)",
+    re.IGNORECASE,
+)
+
+
+def memes_parties_de_disque(a: str | None, b: str | None) -> bool:
+    """PUR. Deux titres de DISQUE désignent-ils la même partie (ou aucune) ?
+    `memes_parties` lu sur des noms d'album, où un nombre détaché peut
+    appartenir au nom (« LP 2 » / « LP2 » : 8 paires d'éditions de *The Marshall
+    Mathers LP 2* tenues pour des suites, simulé le 2026-11-20). Sert à séparer
+    une SUITE qui reprend les précédentes (« Chambre 140 (Part. 3) »,
+    « HHHH² ») d'une réédition (décision utilisateur 2026-11-20)."""
+    a, b = a or "", b or ""
+    # Deux lectures d'un nombre détaché, la même pour les deux titres :
+    # (1) il fait partie du NOM (« LP 2 » = « LP2 »), un « Vol. N » reste un
+    #     tome ; (2) c'est le numéro du TOME que Deezer écrit sans « Vol. »
+    #     (« ASADACHI TAPE 3 » = « ASADACHI TAPE Vol. 3 »). Même partie si l'une
+    #     des deux lectures les accorde ; deux numéros différents, jamais.
+    nom = [_NOMBRE_DU_NOM.sub(r"\1", _MARQUEUR_DE_VOLUME.sub(" part ", x)) for x in (a, b)]
+    tome = [_volume_nu(x) for x in (a, b)]
+    return memes_parties(*nom) or memes_parties(*tome)
+
+
+def meme_disque_edition(a: str | None, b: str | None) -> bool:
+    """PUR. Deux noms désignent-ils le même disque À UN MARQUEUR D'ÉDITION PRÈS
+    (« Temps mort » / « Temps mort (Réédition) », « Kushtape, Vol. 2 » /
+    « Kushtape Volume 2 ») et la même partie ? Plus strict que `meme_disque`,
+    qui accepte un nom CONTENU dans l'autre : c'est le juge qui RÉUNIT deux
+    éditions en un projet sans l'humain. Décision utilisateur 2026-11-20 :
+    « dans le doute je préfère séparer qu'assembler » — un tome contenu dans
+    son double album (« Vertu, vol. 3 » / « Vice & Vertu Vol.3 »), une partie
+    d'un tome (« … 2 (Partie 2) » / « …, Vol. 2 ») restent séparés et vont au
+    panneau « même projet ? »."""
+    from src.utils.title_matching import meme_album
+
+    if not a or not b or not memes_parties_de_disque(a, b):
+        return False
+    if meme_album(a, b) or meme_album(_volume_nu(a), _volume_nu(b)):
+        return True
+    ca, cb = _coeur_de_disque(a), _coeur_de_disque(b)
+    return bool(ca) and ca == cb
+
+
+#: Mots sans poids dans un nom de disque : liaisons et articles (« Vice et
+#: vertu » / « Vice & vertu », « Le pont de la reine » / « Pont de la reine »).
+_MOTS_VIDES_DU_NOM = frozenset(["et", "and", "le", "la", "les", "l", "the", "a", "an", "un", "une"])
+#: Suffixes d'ordinal, séparés du nombre par le découpage (« 20 eme », « 10 th »).
+_ORDINAUX = frozenset(["st", "nd", "rd", "th", "e", "eme", "er"])
+
+
+def _mot_d_edition(mot: str) -> bool:
+    return mot in _MOTS_D_EDITION or mot in _ORDINAUX or mot.isdigit()
+
+
+def _coeur_de_disque(titre: str) -> str:
+    """Le CŒUR d'un nom de disque : sans ses groupes d'édition, sans « Vol. »,
+    sans une fin faite de mots d'édition (« Infinite EP », « Sol Invictus
+    Version 2002 », « Inglourious Bastardz CD1 » — jamais un numéro seul :
+    « Summer Crack 2 » garde son 2), sans liaisons ni articles, lettres et
+    chiffres collés (« Shady XV » = « SHADYXV », « Take ’Em » = « Take'Em »).
+    Deux cœurs égaux : la même graphie d'un même disque ; un mot de titre en
+    plus (« Vice & Vertu » / « Vertu », « (Partie 2) », « Refill ») : non."""
+    mots = re.findall(r"[a-z]+|\d+", normalize_title(_volume_nu(_sans_groupes_d_edition(titre))))
+    fin = len(mots)
+    while fin > 0 and _mot_d_edition(mots[fin - 1]):
+        fin -= 1
+    if fin > 0 and any(m in _MOTS_D_EDITION for m in mots[fin:]):
+        mots = mots[:fin]
+    return "".join(m for m in mots if m not in _MOTS_VIDES_DU_NOM)
+
+
+#: Mots d'un groupe d'ÉDITION de disque (« (Expanded Edition) », « (10th
+#: Anniversary) », « [Deluxe] », « - Int'l Version ») : liste FERMÉE, comparée
+#: après `normalize_title`. Un groupe qui contient un autre mot (« Refill »,
+#: « Boost », « les inachevés ») n'est pas une édition sûre : panneau.
+_MOTS_D_EDITION = frozenset(
+    [
+        "deluxe",
+        "luxe",
+        "de",
+        "edition",
+        "version",
+        "bonus",
+        "track",
+        "tracks",
+        "expanded",
+        "anniversary",
+        "anniversaire",
+        "remaster",
+        "remastered",
+        "remasterise",
+        "remasterisee",
+        "reissue",
+        "reedition",
+        "collector",
+        "collectors",
+        "special",
+        "speciale",
+        "limited",
+        "platinum",
+        "gold",
+        "explicit",
+        "clean",
+        "intl",
+        "int",
+        "l",
+        "international",
+        "digital",
+        "ans",
+        "years",
+        "the",
+        "super",
+        "ultimate",
+        "complete",
+        "integrale",
+        "tour",
+        # Graphies de plateforme (Apple, iTunes, support) — 2026-11-20.
+        "ep",
+        "single",
+        "itunes",
+        "edited",
+        "extended",
+        "preluxe",
+        "re",
+        "us",
+        "u",
+        "s",
+        "release",
+        "cd",
+        "disc",
+    ]
+)
+_GROUPE_D_EDITION = re.compile(r"\s*(?:[\(\[]([^\)\]]*)[\)\]]|\s[-–]\s(.*)$)")
+
+
+def _sans_groupes_d_edition(titre: str) -> str:
+    """Le nom du disque sans ses groupes d'édition (parenthèses, crochets ou
+    « - … » final faits des seuls `_MOTS_D_EDITION` et de nombres)."""
+
+    def retirer(m: re.Match) -> str:
+        # Lettres et chiffres séparés : `normalize_title` colle l'espace avant
+        # un chiffre (« Édition 20ème » → « edition20eme »).
+        mots = re.findall(r"[a-z]+|\d+", normalize_title(m.group(1) or m.group(2) or ""))
+        sur = all(_mot_d_edition(w) for w in mots)
+        return "" if mots and sur else m.group(0)
+
+    return _GROUPE_D_EDITION.sub(retirer, titre)
+
+
+#: Marqueur de tome d'un nom de DISQUE : « Vol. 2 », « Volume 2 », « Vol.2 ».
+_MARQUEUR_DE_VOLUME = re.compile(r"[,\s]*\b(?:volume|vol)\b\.?\s*(?=\d)", re.IGNORECASE)
+
+
+def _volume_nu(titre: str) -> str:
+    """« Kushtape, Vol. 2 » → « Kushtape 2 » : le numéro du tome sans son
+    marqueur, la forme qu'écrit Deezer (« ASADACHI TAPE 3 »)."""
+    return _MARQUEUR_DE_VOLUME.sub(" ", titre)
 
 
 def edition_de_diffusion(titre: str | None) -> str | None:
@@ -1615,6 +1794,17 @@ def meme_titre_normalise(a: str | None, b: str | None) -> bool:
     sans version ni graphie équivalente (`titres_equivalents` est plus large).
     Un nom de disque se compare de même. Deux vides sont égaux."""
     return normalize_title(a or "") == normalize_title(b or "")
+
+
+def titre_plus_long(titre: str | None, autre: str | None) -> bool:
+    """PUR. `autre` porte tous les mots normalisés de `titre` (featurings
+    retirés, `normalize_title`) et d'autres en plus : « Bande organisée » /
+    « Bande organisée (Remix) », un titre que la source a complété. Mots pris
+    comme ensembles, ordre ignoré."""
+    mots, mots_autre = set(normalize_title(titre or "").split()), set(
+        normalize_title(autre or "").split()
+    )
+    return bool(mots_autre - mots) and mots <= mots_autre
 
 
 def est_un_remix(titre: str | None) -> bool:
@@ -1942,3 +2132,38 @@ def indice_meme_morceau(titre_kworb: str, titre_base: str) -> tuple[str, bool]:
     if mots & MOTS_DE_MEME_MORCEAU:
         return "✓ même morceau probable", True
     return "à vérifier", False
+
+
+def mots_de_titre(titre: str | None) -> list[str]:
+    """PUR. Les mots du titre, sans les invités (règle 3)."""
+    return _tokens(strip_featuring(titre or ""))
+
+
+def titre_contenu_ou_sigle(a: str | None, b: str | None) -> bool:
+    """PUR. L'un des titres est-il l'autre en plus court — ses mots, deux au
+    moins, à la suite dans l'autre (« Out The Game » / « Getting Out the Game »)
+    — ou son SIGLE (« JW » / « James Worthy », « DCR » / « Dolce Camara
+    Remix ») ? Jamais un titre générique (« Intro » se trouve partout). La
+    question des règle 3 (2026-11-22) : deux pages, un même enregistrement ;
+    le titre seul ne prouve rien, d'autres témoins sont exigés."""
+    if titre_generique(a) or titre_generique(b):
+        return False
+    ma, mb = mots_de_titre(a), mots_de_titre(b)
+    if not ma or not mb or ma == mb:
+        return False
+    for court, long_ in ((ma, mb), (mb, ma)):
+        n = len(court)
+        if (
+            n >= 2
+            and n < len(long_)
+            and any(long_[i : i + n] == court for i in range(len(long_) - n + 1))
+        ):
+            return True
+        if (
+            n == 1
+            and len(court[0]) >= 2
+            and len(long_) == len(court[0])
+            and "".join(m[0] for m in long_) == court[0]
+        ):
+            return True
+    return False

@@ -14,6 +14,9 @@ script de fusion des fiches existantes :
 
 from __future__ import annotations
 
+import re
+
+from src.utils.corrections_fiches import designation_de, memoriser_fusion
 from src.utils.logger import get_logger
 from src.utils.title_matching import normalize_title
 from src.utils.version_descriptors import (
@@ -94,6 +97,33 @@ def libelle(titre: str) -> str:
     return edition_de_diffusion(titre) or titre
 
 
+def _mots_du_titre(titre: str | None) -> frozenset[str]:
+    """PUR. Les mots d'un titre tel quel (invités et descripteurs compris :
+    `normalize_title` retirerait le « ft. » qui distingue un remix)."""
+    return frozenset(re.findall(r"\w+", (titre or "").casefold()))
+
+
+def gardee_par_le_titre(titre_a: str | None, titre_b: str | None) -> int | None:
+    """PUR. Entre deux fiches d'un MÊME enregistrement, laquelle garder quand
+    l'autre devient son édition : 0 pour `titre_a`, 1 pour `titre_b`, None si
+    les titres ne le disent pas (l'humain choisit le sens).
+
+    Une édition de DIFFUSION (« (Clean) », « (Radio Edit) ») va toujours sur
+    l'original (« une fusion d'édition garde l'ORIGINAL ») ; sinon la gardée est
+    celle dont le titre porte l'INDICE qui la distingue — tous les mots de
+    l'autre, et d'autres en plus : l'invité d'un remix, l'année d'un live
+    (décision utilisateur 2026-11-19, « W.T.P. (ft. Yelawolf) (Remix) »)."""
+    diff_a, diff_b = bool(edition_de_diffusion(titre_a)), bool(edition_de_diffusion(titre_b))
+    if diff_a != diff_b:
+        return 1 if diff_a else 0
+    mots_a, mots_b = _mots_du_titre(titre_a), _mots_du_titre(titre_b)
+    if mots_a > mots_b:
+        return 0
+    if mots_b > mots_a:
+        return 1
+    return None
+
+
 def absorber(dm, socle, fiche) -> bool:
     """La fiche d'édition rejoint l'original : ligne d'édition (identifiants,
     durée, page Genius — qui ne sera donc pas recréée), observations propres à
@@ -111,7 +141,16 @@ def absorber(dm, socle, fiche) -> bool:
     )
     for champ in CHAMPS_D_EDITION:
         dm.delete_observations(fiche.id, champ)
-    return dm.merge_tracks(socle.id, fiche.id)
+    absorbee, gardee = designation_de(fiche), designation_de(socle)
+    if not dm.merge_tracks(socle.id, fiche.id):
+        return False
+    # Une fusion se CONSIGNE (`fusionner_dans`) : sans elle, ni l'export des
+    # décisions ni les juges des fusions (`genius_ids_absorbes`,
+    # `titres_absorbes`) ne la connaissent — 130 fusions d'édition sans ligne
+    # le 2026-11-22 (fin d'étape discographie, `fusions_20261110`).
+    if socle.artist is not None and socle.artist.name and absorbee != gardee:
+        memoriser_fusion(socle.artist.name, absorbee, gardee)
+    return True
 
 
 def absorber_les_editions(dm, fiches, *, appliquer: bool = True) -> tuple[list, list]:

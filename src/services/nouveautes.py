@@ -79,15 +79,17 @@ def _depuis_le_cache(entree: dict) -> Verification:
 
 
 def _ids_connus(dm, artist) -> set[int]:
-    """`genius_id` des morceaux déjà en base pour cet artiste.
+    """`genius_id` des morceaux déjà en base pour cet artiste, formations comprises.
 
-    Lus sur l'objet quand la discographie est chargée (cas du GUI), en base
-    sinon — la vérification tombe souvent AVANT le chargement des morceaux.
+    Les morceaux chargés sur l'objet, PLUS la discographie RÉUNIE lue en base
+    (`discographie_reunie` : groupes entiers, part dans les collectifs). Les
+    chargés seuls ne suffisent pas : `get_artist_by_name` ne charge que les
+    lignes propres de l'artiste, et un morceau de groupe (IAM « Eldorado », en
+    base chez IAM) passait pour une nouveauté chez son membre (Shurik'n,
+    2026-11-22). Une lecture par jour au plus (cache) : le coût est nul.
     """
     charges = {t.genius_id for t in (getattr(artist, "tracks", None) or []) if t.genius_id}
-    if charges:
-        return charges
-    return {t.genius_id for t in (dm.get_artist_tracks(artist.id) or []) if t.genius_id}
+    return charges | {t.genius_id for t in (dm.discographie_reunie(artist) or []) if t.genius_id}
 
 
 @etape_de_flux("Nouveautés")

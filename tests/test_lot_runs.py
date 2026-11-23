@@ -3,6 +3,7 @@ en fond » de PROJET.md (2026-10-21 : un run figé, 10 h perdues). Les runs des
 tests sont de petits `python -c`, jamais la CLI ; aucune base réelle."""
 
 import importlib.util
+import itertools
 import sys
 from pathlib import Path
 
@@ -39,6 +40,9 @@ class TestRunsCibles:
             'disco SCH --maj\ncycle "IAM" --genius-id 1770\n'
         )
         assert lot_runs.runs_non_cibles(runs) == ["credits Kanye West"]
+
+    def test_albums_seuls_est_cible(self):
+        assert lot_runs.runs_non_cibles([["credits", "IAM", "--albums-seuls"]]) == []
 
     def test_la_marque_rend_l_artiste_entier_voulu_et_part_avant_l_appel(self):
         run = ["streams", "Booba", "--artiste-entier"]
@@ -116,11 +120,25 @@ def _executer(tmp_path, codes_python, **kw):
 
 
 def test_un_run_fige_est_tue_et_le_lot_continue(tmp_path):
+    """Horloge et activité injectées : le premier run ne bouge plus jamais, le
+    second est toujours actif, quel que soit le temps qu'il met à démarrer (il
+    passait pour figé, `gel_s=1` en temps réel, sur une machine chargée)."""
+    temps = itertools.count(0, 100)  # chaque lecture de l'horloge : 100 s de plus
+
+    def activite(journal):
+        return 0.0 if journal.name.startswith("run_01_") else float("inf")
+
     lot = _executer(
-        tmp_path, ["import time; time.sleep(60)", "print('suivant')"], delai_s=600, gel_s=1
+        tmp_path,
+        ["import time; time.sleep(60)", "print('suivant')"],
+        delai_s=float("inf"),
+        gel_s=1,
+        horloge=lambda: next(temps),
+        activite=activite,
     )
-    assert [r.statut for r in lot.resultats] == ["figé", "ok"]
-    assert lot.resultats[0].duree_s < 30 and lot.code == 1
+    assert [r.statut for r in lot.resultats] == ["figé", "ok"] and lot.code == 1
+    # Tué au premier relevé (une lecture pour le début, une pour le verdict).
+    assert lot.resultats[0].duree_s == 200
     assert "FIN (figé" in (tmp_path / "sortie" / "lot.log").read_text(encoding="utf-8")
 
 
@@ -398,10 +416,17 @@ class TestCodeFige:
 
 def test_un_run_tue_qui_traine_n_est_pas_un_autre_ecrivain(tmp_path):
     """« streams Django » (2026-10-30) : tué pendant une copie calée vers le
-    disque externe, le processus traînait encore et le lot s'arrêtait (code 3)."""
+    disque externe, le processus traînait encore et le lot s'arrêtait (code 3).
+
+    Horloge et activité injectées, comme `test_un_run_fige_est_tue_et_le_lot_continue` :
+    le second run passait pour figé sur une machine chargée (`gel_s=1` en temps réel)."""
     data = tmp_path / "data"
     (data / "brut").mkdir(parents=True)
     vus = []
+    temps = itertools.count(0, 100)  # chaque lecture de l'horloge : 100 s de plus
+
+    def activite(journal):
+        return 0.0 if journal.name.startswith("run_01_") else float("inf")
 
     def tuer(proc):
         lot_runs.tuer_arbre(proc)
@@ -414,7 +439,10 @@ def test_un_run_tue_qui_traine_n_est_pas_un_autre_ecrivain(tmp_path):
         code=tmp_path,
         commande=lambda a: [sys.executable, "-c", a[0]],
         intervalle_s=0.2,
+        delai_s=float("inf"),
         gel_s=1,
+        horloge=lambda: next(temps),
+        activite=activite,
         anti_veille=False,
         processus=lambda: vus or [],
         ecrire=lambda _: vus.append((424242, "python -m src.cli streams Django")),

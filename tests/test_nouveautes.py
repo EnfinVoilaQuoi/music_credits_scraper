@@ -43,7 +43,7 @@ def _runtime(genius, tracks=(), supprimes=(), editions=()):
     return SimpleNamespace(
         genius_api=SimpleNamespace(genius=genius),
         data_manager=SimpleNamespace(
-            get_artist_tracks=lambda aid: list(tracks),
+            discographie_reunie=lambda artist: list(tracks),
             get_artist_edition_genius_ids=lambda aid: set(editions),
         ),
         deleted=SimpleNamespace(load_deleted_ids=lambda nom: set(supprimes)),
@@ -94,6 +94,25 @@ def test_une_page_fusionnee_n_est_pas_une_nouveaute(monkeypatch):
     )
     v = nouveautes.verifier(_runtime(_Genius([_song(5, "Doublon")])), _artist())
     assert v.nouveautes == ()
+
+
+def test_un_morceau_du_groupe_en_base_n_est_pas_une_nouveaute():
+    """Shurik'n (2026-11-22) : « Eldorado » d'IAM, en base chez IAM, sortait en
+    nouveauté chez son membre — la base se lit par la discographie RÉUNIE."""
+    genius = _Genius([_song(5007547, "Eldorado"), _song(9, "Vrai inédit")])
+    vus = []
+
+    def reunie(artist):
+        vus.append(artist.id)
+        return [SimpleNamespace(genius_id=5007547)]  # ligne d'IAM
+
+    rt = _runtime(genius)
+    rt.data_manager.discographie_reunie = reunie
+    # Comme `get_artist_by_name` : les seules lignes PROPRES sont chargées.
+    propres = [SimpleNamespace(genius_id=42)]
+    v = nouveautes.verifier(rt, _artist(tracks=propres))
+    assert [n.titre for n in v.nouveautes] == ["Vrai inédit"]
+    assert vus == [7]
 
 
 def test_rien_a_signaler_rend_une_liste_vide():

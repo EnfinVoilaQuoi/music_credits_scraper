@@ -30,12 +30,17 @@ from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from src.config import DATA_DIR
+from src.utils import donnees_lues
+from src.utils.donnees_lues import DonneesAbsentes
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
 
 #: Le fichier du magasin. Redirigé par les tests (`conftest`).
 CHEMIN = Path(DATA_DIR) / "brut" / "brut.db"
+#: Le chemin de la configuration : seul celui-là passe par la garde du worktree
+#: sans données (`donnees_lues`) ; un `CHEMIN` redirigé (tests, `--brut`) non.
+_CHEMIN_CONFIG = CHEMIN
 #: Les sources dont le brut est gardé — on en ajoute une à la fois.
 SOURCES_ACTIVES: frozenset[str] = frozenset(
     {
@@ -113,10 +118,29 @@ def _requete(source: str | None, url: str, params=None) -> str:
     return url_sans_secret(url, params, _VOLATILS.get(source or "", frozenset()))
 
 
+def chemin_lu(chemin: str | Path | None = None) -> Path:
+    """Le brut à LIRE : `chemin` s'il est donné, `CHEMIN` s'il a été redirigé ;
+    sinon celui du `data/` à lire (`donnees_lues`) — qui LÈVE `DonneesAbsentes`
+    dans un worktree dont `data/` n'a pas le brut, au lieu de lire un brut vide
+    en silence, et suit `DONNEES_LUES_DIR` (lecture seule)."""
+    if chemin is not None:
+        return Path(chemin)
+    if CHEMIN != _CHEMIN_CONFIG:
+        return CHEMIN
+    dossier, _ = donnees_lues.dossier_des_donnees()
+    return dossier / donnees_lues.MARQUEUR
+
+
 def _ouvrir() -> sqlite3.Connection:
     global _connexion, _chemin_ouvert
     if _connexion is not None and _chemin_ouvert == CHEMIN:
         return _connexion
+    if CHEMIN == _CHEMIN_CONFIG:
+        # Jamais un brut vide CRÉÉ dans un worktree (il ferait taire la garde),
+        # jamais une écriture dans le brut réel lu par `DONNEES_LUES_DIR`.
+        _, lecture_seule = donnees_lues.dossier_des_donnees()
+        if lecture_seule:
+            raise DonneesAbsentes("brut lu par DONNEES_LUES_DIR : lecture seule, pas d'écriture")
     CHEMIN.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(CHEMIN), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
@@ -193,7 +217,7 @@ def consigner(source: str, url: str, statut: int | None, corps: bytes, params=No
                     (source, requete, source, requete, LECTURES_GARDEES),
                 )
             conn.commit()
-    except (sqlite3.Error, OSError) as e:
+    except (sqlite3.Error, OSError, DonneesAbsentes) as e:
         if not _erreur_dite:
             logger.warning(f"Brut des sources non écrit ({CHEMIN}) : {e}")
             _erreur_dite = True
@@ -203,13 +227,21 @@ def lectures(source: str, url: str, params=None) -> list[dict]:
     """Les lectures gardées d'une requête, la plus récente d'abord :
     `[{statut, corps (bytes), premiere_lecture, derniere_lecture}]`."""
     requete = _requete(source, url, params)
-    with _verrou:
-        conn = _ouvrir()
-        lignes = conn.execute(
-            "SELECT statut, corps, premiere_lecture, derniere_lecture FROM brut "
-            "WHERE source = ? AND requete = ? ORDER BY derniere_lecture DESC, id DESC",
-            (source, requete),
-        ).fetchall()
+    sql = (
+        "SELECT statut, corps, premiere_lecture, derniere_lecture FROM brut "
+        "WHERE source = ? AND requete = ? ORDER BY derniere_lecture DESC, id DESC"
+    )
+    chemin = chemin_lu()
+    if chemin != CHEMIN:
+        # Le brut réel lu depuis un worktree (`DONNEES_LUES_DIR`) : lecture seule.
+        if not chemin.exists():
+            return []
+        with closing(sqlite3.connect(f"file:{chemin.as_posix()}?mode=ro", uri=True)) as conn:
+            lignes = conn.execute(sql, (source, requete)).fetchall()
+    else:
+        with _verrou:
+            conn = _ouvrir()
+            lignes = conn.execute(sql, (source, requete)).fetchall()
     return [
         {
             "statut": s,
@@ -226,7 +258,7 @@ def parcourir(source: str, chemin: Path | None = None):
     ouverte `mode=ro`, à part de la connexion d'écriture) : `(requete, corps
     (bytes), premiere_lecture, derniere_lecture)`. Pour les rattrapages qui
     cherchent une réponse par son CONTENU, pas par sa requête."""
-    chemin = Path(chemin or CHEMIN)
+    chemin = chemin_lu(chemin)
     if not chemin.exists():
         return
     with closing(sqlite3.connect(f"file:{chemin.as_posix()}?mode=ro", uri=True)) as conn:
@@ -240,7 +272,7 @@ def parcourir(source: str, chemin: Path | None = None):
 
 def requetes_gardees(source: str, chemin: str | Path | None = None) -> set[str]:
     """Les requêtes de `source` gardées, EN LECTURE SEULE."""
-    chemin = Path(chemin or CHEMIN)
+    chemin = chemin_lu(chemin)
     if not chemin.exists():
         return set()
     with closing(sqlite3.connect(f"file:{chemin.as_posix()}?mode=ro", uri=True)) as conn:
@@ -253,7 +285,7 @@ def requetes_gardees(source: str, chemin: str | Path | None = None) -> set[str]:
 def corps_gardes(source: str, requete: str, chemin: str | Path | None = None) -> list[bytes]:
     """Les lectures gardées d'une requête, EN LECTURE SEULE : plusieurs processus
     peuvent les lire à côté d'un run, sans la connexion d'écriture de `lectures`."""
-    chemin = Path(chemin or CHEMIN)
+    chemin = chemin_lu(chemin)
     if not chemin.exists():
         return []
     with closing(sqlite3.connect(f"file:{chemin.as_posix()}?mode=ro", uri=True)) as conn:
@@ -271,7 +303,7 @@ def dernieres_lectures(
     """`{requête: corps}` de la lecture LA PLUS RÉCENTE de chaque requête de
     `source` qui commence par `prefixe`, EN LECTURE SEULE (les pages d'une
     liste paginée, lues d'un coup)."""
-    chemin = Path(chemin or CHEMIN)
+    chemin = chemin_lu(chemin)
     if not chemin.exists():
         return {}
     motif = prefixe.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"

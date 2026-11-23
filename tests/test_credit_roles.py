@@ -194,8 +194,15 @@ class TestReplisParMots:
             ("Video Stylist", CreditRole.OTHER),
             # Un sample n'est pas une voix (2026-09-26).
             ("Vocal Samples", CreditRole.SAMPLE),
-            ("Sample Programmer", CreditRole.SAMPLE),
+            ("Voice Samples", CreditRole.SAMPLE),
+            ("Additional Vocal Samples", CreditRole.SAMPLE),
             ("Sampling", CreditRole.SAMPLE),
+            # …mais pas tout ce qui commence par « sampl » (2026-11-20).
+            ("Sample Clearance", CreditRole.OTHER),
+            ("Sample Licensing", CreditRole.OTHER),
+            ("Sampler", CreditRole.OTHER),
+            ("Sample Programmer", CreditRole.PROGRAMMER),
+            ("Sample Arranger", CreditRole.ARRANGER),
             ("Decorator", CreditRole.OTHER),
         ],
     )

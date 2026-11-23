@@ -29,6 +29,17 @@ class TestFusionner:
         f = disco.fusionner([nouveau], [exist])
         assert (f.nouveaux, f.mis_a_jour) == (0, 1) and nouveau.id == 1
 
+    def test_l_album_de_la_base_revient_a_la_page_non_relue(self):
+        """MàJ (2026-11-22) : sans album sur l'objet, la pose des certifs
+        avant le save vidait les certifs d'album (Dosseh 68 → 0)."""
+        exist = _t("Milli'", gid=10, album="YURI", tid=1)
+        nouveau = _t("Milli'", gid=10)
+        disco.fusionner([nouveau], [exist])
+        assert nouveau.album == "YURI"
+        relu = _t("Milli'", gid=10, album="YURI (Réédition)")
+        disco.fusionner([relu], [exist])
+        assert relu.album == "YURI (Réédition)"
+
     def test_niveau_2_titre_album(self):
         exist = _t("Mood", album="Album", tid=2)
         nouveau = _t("mood ", gid=99, album="ALBUM")
@@ -283,6 +294,31 @@ class TestRun:
             Hooks(),
         )
         assert bilan.supprimes_ignores == 1 and [j[1] for j in dm.journal] == ["x", "x"]
+
+    def test_la_pose_des_certifs_recoit_les_groupes(self, monkeypatch):
+        """Comme l'étape certifs : sans les groupes, la discographie retirait
+        les certifs d'album de Casseurs Flowters chez OrelSan (2026-11-22)."""
+        recu = {}
+        monkeypatch.setattr(
+            "src.utils.certification_enricher.apply_certifications",
+            lambda *a, **k: recu.update(k) or 0,
+        )
+        artist = Artist(name="OrelSan")
+        artist.id = 1
+        artist.tracks = []
+        dm = _DM([])
+        dm.noms_des_formations = lambda aid: {"Casseurs Flowters", "Collectif X"}
+        dm.get_artist_relations = lambda aid, status="confirmed": [
+            SimpleNamespace(kind="member_of", formation="groupe", related_name="Casseurs Flowters"),
+            SimpleNamespace(kind="member_of", formation="collectif", related_name="Collectif X"),
+        ]
+        disco.run(
+            _runtime(dm, [_t("x", gid=1)]),
+            artist,
+            disco.OptionsDisco(download_images=False),
+            Hooks(),
+        )
+        assert recu["groupes"] == ("Casseurs Flowters",)
 
     def test_aucun_morceau_rend_un_bilan_incomplet(self):
         artist = Artist(name="A")

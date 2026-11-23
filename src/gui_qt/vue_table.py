@@ -341,15 +341,17 @@ class VueMorceaux(QTableView):
         return super().viewportEvent(event)
 
     # ── préférences ──
+    # Clés « v2 » : l'ordre des colonnes a changé (Producteurs entre l'artiste
+    # et l'album, 2026-11-22) ; un état d'en-tête d'avant les rangerait de travers.
     def sauver(self, reglages: QSettings) -> None:
-        reglages.setValue("table/masquees", self.entete.colonnes_masquees())
-        reglages.setValue("table/etat_entete", self.entete.saveState())
+        reglages.setValue("table/v2/masquees", self.entete.colonnes_masquees())
+        reglages.setValue("table/v2/etat_entete", self.entete.saveState())
 
     def restaurer(self, reglages: QSettings) -> None:
-        etat = reglages.value("table/etat_entete")
+        etat = reglages.value("table/v2/etat_entete")
         if etat is not None:
             self.entete.restoreState(etat)
-        masquees = reglages.value("table/masquees")
+        masquees = reglages.value("table/v2/masquees")
         if masquees is not None:
             self.entete.masquer(list(masquees) if isinstance(masquees, list) else [masquees])
 

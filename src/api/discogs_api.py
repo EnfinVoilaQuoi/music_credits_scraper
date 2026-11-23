@@ -15,6 +15,7 @@ from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.utils.codes_barres import code_barres_discogs
 from src.utils.corrections_fiches import discogs_refuses
+from src.utils.credit_sources import retirer_source
 from src.utils.discogs_identity import (
     homonymes_de,
     nom_sans_suffixe,
@@ -896,7 +897,7 @@ class DiscogsClient:
             if force_update:
                 # Disque TROUVÉ : en mode forcé il fait foi, même sans crédits
                 # (jamais avant la recherche — un échec effacerait des crédits justes).
-                track.credits = [c for c in track.credits if c.source != "discogs"]
+                track.credits = retirer_source(track.credits, "discogs")
 
             # Discogs ID
             if track_data.get("discogs_id") and (force_update or not track.discogs_id):
@@ -968,7 +969,7 @@ class DiscogsClient:
                 # pas touchés (Discogs est additif, il ne confirme pas Genius —
                 # mesuré le 2026-09-03 : 818 paires propres à Discogs contre 22
                 # concordantes).
-                track.credits = [c for c in track.credits if c.source != "discogs"]
+                track.credits = retirer_source(track.credits, "discogs")
                 track._credits_discogs_frais = True
 
                 # Discogs crédite au niveau du DISQUE et dit à quelles PISTES
@@ -1012,7 +1013,9 @@ class DiscogsClient:
 
                         # Un crédit HÉRITÉ à la même clé cède la place : sinon
                         # `add_credit` le garde et jette celui de Discogs (même
-                        # défaut que le scrape Genius, 2026-10-20).
+                        # défaut que le scrape Genius, 2026-10-20). Un crédit
+                        # d'une autre source à la même clé GARDE sa ligne et
+                        # note Discogs en confirmation (`add_credit`).
                         track.credits = [
                             c
                             for c in track.credits

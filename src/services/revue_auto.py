@@ -124,6 +124,12 @@ REGLES_TEMOIN_BRANCHEES = True
 #: écartée : 6 erreurs sur 19).
 REGLES_HORS_DISQUE_BRANCHEES = True
 
+#: Famille « crédits 🎫 non confirmés » (`politiques_revue.REGLES_CREDITS_API`) :
+#: levé le 2026-11-22, décision utilisateur — confirmés au même rôle par une
+#: autre source : ✓ Normal ; le reste : indécidable (simulé : 96 cas, tous
+#: indécidables, 1 crédit confirmé sur 189).
+REGLES_CREDITS_API_BRANCHEES = True
+
 #: Actions qui n'ont pas de fiche à elles : la piste Deezer « absente » n'est
 #: encore sur aucune.
 _SANS_FICHE = frozenset(
@@ -138,6 +144,8 @@ _SANS_FICHE = frozenset(
         "confirmer_lien",
         "confirmer_formation",
         "confirmer_formation_genius",
+        "taire_lien",
+        "refuser_lien",
         "kworb_tiers",
         # Cas d'ARTISTE : ses fiches sont dans ses preuves.
         "retirer_video_partagee",
@@ -195,12 +203,14 @@ def cas_par_regle(
     video: bool = False,
     temoin: bool = False,
     hors_disque: bool = False,
+    credits_api: bool = False,
 ) -> list[tuple[Cas, object]]:
     """`[(cas, arbitrage)]` que tranche une règle (décisions seules) : les
     durées VALIDÉES, et la famille « ID Spotify proposé » si demandée."""
     from src.services.politiques_revue import (
         arbitrage_catalogue,
         arbitrage_compteur,
+        arbitrage_credits_api,
         arbitrage_deezer,
         arbitrage_etendu,
         arbitrage_hors_disque,
@@ -242,6 +252,8 @@ def cas_par_regle(
             arbitrage = arbitrage_temoin_hors_colonne(c, track, ctx)
         if arbitrage is None and hors_disque:
             arbitrage = arbitrage_hors_disque(c, track, ctx)
+        if arbitrage is None and credits_api:
+            arbitrage = arbitrage_credits_api(c, track, ctx)
         if arbitrage is not None:
             sortie.append((c, arbitrage))
     return sortie
@@ -447,6 +459,24 @@ def _marquer_normal(dm, artist_id: int, cas: Cas) -> tuple[str, dict]:
     return (f"« {cas.morceau} » marqué normal par règle — {cas.motif}", {"type": "verdict"})
 
 
+def _marquer_indecidable(dm, artist_id: int, cas: Cas) -> tuple[str, dict]:
+    """Verdict « indécidable » posé par une règle (aucune donnée ne tranche,
+    décision utilisateur) : hors du panneau et du critère, compté parmi les
+    indécidables ; « ↩ Rétablir » le rend à l'humain (type `verdict`)."""
+    from src.utils.revue_repository import VERDICT_INDECIDABLE
+
+    dm.trancher_cas(
+        artist_id,
+        cas.detecteur,
+        cas.cle,
+        verdict=VERDICT_INDECIDABLE,
+        morceau=cas.morceau,
+        motif=cas.motif,
+        note=f"{PREFIXE_REGLE}{cas.detecteur}",
+    )
+    return (f"« {cas.morceau} » indécidable par règle — {cas.motif}", {"type": "verdict"})
+
+
 def _poser_id(dm, track, cas: Cas) -> tuple[str, dict]:
     from src.utils.spotify_identity import valider_identite
 
@@ -489,6 +519,20 @@ def _confirmer_lien(_dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
         "nom": cas.preuves["nom"],
         "kind": cas.preuves["kind"],
     }
+
+
+def _statut_de_regle(statut: str):
+    """Tait (`info`, le statut des états civils) ou refuse un lien proposé
+    (`utils.liens_proposes.juger`, 2026-11-22) ; rétablir le remet « proposé »."""
+
+    def corriger_lien(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+        nom, kind = cas.preuves["nom"], cas.preuves["kind"]
+        if not dm.set_relation_status(artiste.id, nom, kind, statut):
+            raise LookupError(f"lien « {nom} » introuvable")
+        geste = "gardé pour info" if statut == "info" else "refusé"
+        return f"« {nom} » {geste}", {"type": "lien", "nom": nom, "kind": kind}
+
+    return corriger_lien
 
 
 def _confirmer_formation_genius(dm, track, cas: Cas, *, artiste) -> tuple[str, dict]:
@@ -972,6 +1016,8 @@ _CORRECTEURS_DE_REGLE = {
     "confirmer_lien": _confirmer_lien,
     "confirmer_formation": _confirmer_formation,
     "confirmer_formation_genius": _confirmer_formation_genius,
+    "taire_lien": _statut_de_regle("info"),
+    "refuser_lien": _statut_de_regle("refused"),
     "kworb_tiers": _kworb_tiers,
     "retirer_video_partagee": _retirer_video_partagee,
     # Même geste pour UNE fiche : `track_ids` = [la fiche], refus de règle.
@@ -1022,6 +1068,7 @@ def a_corriger(dm, artiste, revue, ctx, tracks) -> list[tuple]:
         or REGLES_VIDEO_BRANCHEES
         or REGLES_TEMOIN_BRANCHEES
         or REGLES_HORS_DISQUE_BRANCHEES
+        or REGLES_CREDITS_API_BRANCHEES
     ):
         rendus = _rendus_a_l_humain(dm, artiste.id)
         a_faire += [
@@ -1041,6 +1088,7 @@ def a_corriger(dm, artiste, revue, ctx, tracks) -> list[tuple]:
                 video=REGLES_VIDEO_BRANCHEES,
                 temoin=REGLES_TEMOIN_BRANCHEES,
                 hors_disque=REGLES_HORS_DISQUE_BRANCHEES,
+                credits_api=REGLES_CREDITS_API_BRANCHEES,
             )
             if (c.detecteur, c.cle) not in rendus
         ]
@@ -1103,6 +1151,12 @@ def corriger(dm, artiste, seulement: frozenset[str] | None = None) -> BilanCorre
 
                 def corriger_cas(_dm, _track, c):
                     return _marquer_normal(_dm, artiste.id, c)
+
+            elif arbitrage.action == "indecidable":
+                action = f"{PREFIXE_REGLE}indecidable"
+
+                def corriger_cas(_dm, _track, c):
+                    return _marquer_indecidable(_dm, artiste.id, c)
 
             else:
                 action = f"{PREFIXE_REGLE}{arbitrage.action}"

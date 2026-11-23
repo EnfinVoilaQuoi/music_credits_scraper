@@ -102,12 +102,31 @@ def _echecs_arg(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _desactives_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--inclure-desactives",
+        action="store_true",
+        help="traiter aussi les morceaux désactivés (par défaut : écartés)",
+    )
+
+
+def _delais_arg(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--sans-delais",
+        action="store_true",
+        help=(
+            "ignorer les délais : une absence constatée récemment et un « pas sur "
+            "Spotify / Deezer / Apple » daté redeviennent à traiter (sans forcer)"
+        ),
+    )
+
+
 def _disco_args(p: argparse.ArgumentParser) -> None:
     p.add_argument("--max-songs", type=int, help="plafond DUR (debug) ; défaut = illimité")
     _bool_flags(p, "features", True, "inclure les featurings")
     _bool_flags(p, "prefill", True, "appel API détail (album, Spotify ID, YouTube)")
     _bool_flags(p, "prods", True, "morceaux produits pour d'autres (vérif détail)")
-    _bool_flags(p, "secondaires", False, "autres rôles secondaires (vérif détail)")
+    _bool_flags(p, "secondaires", True, "autres rôles secondaires (vérif détail)")
     _bool_flags(p, "respecter-supprimes", True, "ne pas réajouter les morceaux supprimés")
     _bool_flags(p, "images", True, "télécharger photos, pochettes, vignettes")
     p.add_argument("--maj", action="store_true", help="mode MàJ : prefill des seuls nouveaux")
@@ -194,6 +213,12 @@ def _credits_args(p: argparse.ArgumentParser) -> None:
         action="store_true",
         help="seulement les fiches dont le LRC LRCLIB n'a pas la durée de son audio",
     )
+    p.add_argument(
+        "--albums-seuls",
+        action="store_true",
+        help="seulement les crédits d'ALBUM Genius (une requête par album jamais lu ou en "
+        "échec), aucune fiche relue",
+    )
 
 
 def _fiches_arg(p: argparse.ArgumentParser) -> None:
@@ -259,6 +284,8 @@ def build_parser() -> argparse.ArgumentParser:
     _artiste_args(i)
     _identite_args(i, etape_seule=True)
     _fiches_arg(i)
+    _desactives_arg(i)
+    _delais_arg(i)
 
     _deezer_args(
         sub.add_parser(
@@ -281,6 +308,8 @@ def build_parser() -> argparse.ArgumentParser:
     _tout_arg(c)
     _credits_args(c)
     _fiches_arg(c)
+    _desactives_arg(c)
+    _delais_arg(c)
 
     e = sub.add_parser("enrich", help="BPM/key/durée (sans forcer : manquants et échecs)")
     _artiste_args(e)
@@ -289,6 +318,8 @@ def build_parser() -> argparse.ArgumentParser:
     _tout_arg(e)
     _enrich_args(e)
     _fiches_arg(e)
+    _desactives_arg(e)
+    _delais_arg(e)
     _anciens_drapeaux(e, "enrich")
 
     s = sub.add_parser("streams", help="streams Spotify / YouTube Music")
@@ -296,6 +327,7 @@ def build_parser() -> argparse.ArgumentParser:
     _manquants_arg(s)
     _streams_args(s)
     _fiches_arg(s)
+    _desactives_arg(s)
 
     ce = sub.add_parser("certifs", help="certifications")
     ce_sub = ce.add_subparsers(dest="action", required=True)
@@ -338,6 +370,8 @@ def build_parser() -> argparse.ArgumentParser:
     _manquants_arg(cy)
     _echecs_arg(cy)
     _tout_arg(cy)
+    _desactives_arg(cy)
+    _delais_arg(cy)
     g = cy.add_mutually_exclusive_group()
     g.add_argument("--only", help=f"étapes à lancer, parmi {','.join(cycle.ETAPES)}")
     g.add_argument("--skip", help="étapes à sauter")
@@ -405,6 +439,7 @@ def options_credits(a: argparse.Namespace) -> credits.OptionsCredits:
         sync_musixmatch=a.musixmatch,
         force_sync=a.force_sync,
         lrc_sans_duree_audio=getattr(a, "lrc_sans_duree_audio", False),
+        albums_seuls=getattr(a, "albums_seuls", False),
         track_ids=_ids_de_fiches(getattr(a, "fiches", None)),
     )
 
@@ -449,6 +484,8 @@ def options_cycle(a: argparse.Namespace) -> cycle.OptionsCycle:
         manquants=a.manquants,
         echecs=a.echecs,
         tout=a.tout,
+        inclure_desactives=a.inclure_desactives,
+        sans_delais=a.sans_delais,
         disco=options_disco(a),
         identite=options_identite(a),
         credits=options_credits(a),
@@ -465,6 +502,8 @@ def options_etape_seule(a: argparse.Namespace, etape: str) -> cycle.OptionsCycle
         manquants=getattr(a, "manquants", False),
         echecs=getattr(a, "echecs", False),
         tout=getattr(a, "tout", False),
+        inclure_desactives=getattr(a, "inclure_desactives", False),
+        sans_delais=getattr(a, "sans_delais", False),
         disco=options_disco(a) if etape == "disco" else discographie.OptionsDisco(),
         identite=options_identite(a) if etape == "identite" else identite.OptionsIdentite(),
         credits=options_credits(a) if etape == "credits" else credits.OptionsCredits(),

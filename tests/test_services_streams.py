@@ -39,6 +39,14 @@ class TestTrackIdsActifs:
     def test_desactives_sans_restriction_donne_les_actifs(self):
         assert streams.track_ids_actifs(_rt({3}), _artist(), None) == frozenset({1, 2})
 
+    def test_inclure_les_desactives_ne_filtre_rien(self):
+        """Option de run « Titres désactivés » (2026-11-22)."""
+        rt = _rt({2, 3})
+        assert streams.track_ids_actifs(rt, _artist(), None, inclure_desactives=True) is None
+        assert streams.track_ids_actifs(
+            rt, _artist(), [1, 2], inclure_desactives=True
+        ) == frozenset({1, 2})
+
 
 class _Provider:
     def __init__(self, spotify):

@@ -231,7 +231,7 @@ class TestModele:
 # ── fiche ────────────────────────────────────────────────────────────────────
 
 
-def test_fiche_six_onglets(qtbot):
+def test_fiche_sept_onglets(qtbot):
     from src.gui_qt.fiche import VueFiche
 
     vue = VueFiche()
@@ -243,13 +243,14 @@ def test_fiche_six_onglets(qtbot):
         "Crédits",
         "Paroles",
         "Samples",
+        "Versions",
         "Certifs",
         "Streams",
         "Technique",
     ]
-    vue.onglets.setCurrentIndex(4)
+    vue.onglets.setCurrentIndex(5)
     vue.afficher(ligne)  # l'onglet choisi survit au changement de morceau
-    assert vue.onglets.currentIndex() == 4
+    assert vue.onglets.currentIndex() == 5
     vue.afficher(None)
     assert vue.vide.isVisibleTo(vue) and not vue.onglets.isVisibleTo(vue)
 
@@ -258,9 +259,16 @@ def test_fiche_six_onglets(qtbot):
 
 
 @pytest.fixture
-def fenetre(qtbot, data_manager, tmp_path):
+def fenetre(qtbot, data_manager, tmp_path, monkeypatch):
     from src.gui_qt.fenetre import FenetrePrincipale
+    from src.services import revue
     from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+    # Le panneau Décisions lit les pages désactivées du dossier RÉEL : jamais
+    # dans un test.
+    monkeypatch.setattr(revue, "fiches_actives", lambda artiste: list(artiste.tracks or []))
+    # Ni les bases de certifs réelles (pastille au démarrage).
+    monkeypatch.setattr(FenetrePrincipale, "_compter_certifs", lambda self: None)
 
     desactives = DisabledTracksManager()
     desactives.disabled_tracks_dir = tmp_path
@@ -342,3 +350,390 @@ def test_auto_completion_insere_le_nom_seul(qtbot, fenetre):
     assert item.data(ROLE_NOM) == "Isha"
     assert item.text().startswith("Isha") and "titre" in item.text()
     assert fenetre.completion.completionRole() == ROLE_NOM
+
+
+# ── barres des maquettes du 2026-11-21 ───────────────────────────────────────
+
+
+def test_barre_des_flux_sans_bouton_certifs(fenetre):
+    assert list(fenetre.boutons_flux) == [
+        "cycle",
+        "disco",
+        "identite",
+        "credits",
+        "enrich",
+        "streams",
+    ]
+    assert all(b.menu() is not None for b in fenetre.boutons_flux.values())
+
+
+def test_titres_uniques_retire_les_versions(qtbot, fenetre):
+    _charger(qtbot, fenetre)
+    a = fenetre._actions_filtre["version_alt"]
+    assert a.text() == "Titres uniques" and not a.isChecked()
+    a.setChecked(True)
+    assert fenetre.proxy.filtre.version_alt is False
+    a.setChecked(False)
+    assert fenetre.proxy.filtre.version_alt is True
+
+
+def test_portee_memorisee(fenetre):
+    from src.gui_qt.fenetre import FenetrePrincipale
+
+    fenetre._actions_portee["credits"]["selection"].setChecked(True)
+    fenetre._actions_portee["credits"]["tout"].setChecked(True)
+    assert not fenetre._actions_portee["credits"]["manquants"].isChecked()
+    autre = FenetrePrincipale(fenetre.runtime, fenetre.reglages)
+    assert autre.portees["credits"].selection and autre.portees["credits"].tout
+    autre.close()
+
+
+def test_titres_selectionnes_sans_coche_ne_lance_rien(qtbot, fenetre, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    _charger(qtbot, fenetre)
+    messages = []
+    monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: messages.append(a[2]))
+    fenetre._actions_portee["credits"]["selection"].setChecked(True)
+    fenetre.boutons_flux["credits"].click()
+    assert messages and "Aucun titre sélectionné" in messages[0]
+    assert not fenetre.taches.occupe
+
+
+def test_pastille(qtbot):
+    from src.gui_qt.widgets import BoutonPastille
+
+    b = BoutonPastille("alert-triangle", "Décisions")
+    qtbot.addWidget(b)
+    b.poser_pastille("!")
+    assert b.pastille == "!"
+    b.poser_pastille(0)
+    assert b.pastille == ""
+
+
+def test_vue_album(qtbot, fenetre):
+    _charger(qtbot, fenetre)
+    fenetre.b_album.click()
+    assert fenetre.en_vue_album and fenetre.b_album.isChecked() and not fenetre.b_titre.isChecked()
+    qtbot.waitUntil(lambda: fenetre.projets is not None, timeout=10_000)
+    titres = [a.titre for a in fenetre.vue_albums.albums]
+    assert titres  # les 3 titres de test, sans parution : dans « Singles »
+    assert fenetre.reglages.value("vue") == "album"
+    fenetre.b_titre.click()
+    assert not fenetre.en_vue_album
+
+
+# ── Alias • Formations ───────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def formations(qtbot, fenetre):
+    from src.models.artist import ArtistRelation
+
+    _charger(qtbot, fenetre)
+    dm = fenetre.runtime.data_manager
+    aid = fenetre.chargement.artist.id
+    dm.propose_artist_relations(
+        aid,
+        [
+            ArtistRelation(related_name="PsMaker", kind="alias", source="discogs"),
+            ArtistRelation(related_name="L'Animalerie", kind="member_of", source="musicbrainz"),
+        ],
+    )
+    return fenetre
+
+
+def test_pastille_formations(qtbot, formations):
+    formations._compter_formations()
+    qtbot.waitUntil(lambda: formations.b_formations.pastille == "!", timeout=10_000)
+
+
+def test_confirmer_refuser_retablir(qtbot, formations):
+    from src.gui_qt.formations import FenetreFormations
+    from src.presentation import formations as pf
+
+    d = FenetreFormations(formations.runtime, formations.chargement.artist)
+    qtbot.addWidget(d)
+    cartes = pf.cartes(d.candidats)
+    (alias,) = cartes[pf.CARTE_ALIAS]
+    (groupe,) = cartes[pf.CARTE_FORMATIONS]
+    assert alias.decision is pf.Decision.A_DECIDER
+    d.confirmer(alias)
+    d.choisir_nature(groupe, "collectif")  # attend le ✓
+    d.confirmer(pf.cartes(d.candidats)[pf.CARTE_FORMATIONS][0])
+    cartes = pf.cartes(d.candidats)
+    assert cartes[pf.CARTE_ALIAS][0].decision is pf.Decision.CONFIRME
+    assert cartes[pf.CARTE_FORMATIONS][0].decision is pf.Decision.CONFIRME
+    assert cartes[pf.CARTE_FORMATIONS][0].nature == "collectif"
+    d.choisir_nature(cartes[pf.CARTE_FORMATIONS][0], "groupe")  # écrit tout de suite
+    assert pf.cartes(d.candidats)[pf.CARTE_FORMATIONS][0].nature == "groupe"
+    d.retablir(pf.cartes(d.candidats)[pf.CARTE_ALIAS][0])
+    assert pf.cartes(d.candidats)[pf.CARTE_ALIAS][0].decision is pf.Decision.A_DECIDER
+    d.refuser(pf.cartes(d.candidats)[pf.CARTE_ALIAS][0])
+    assert pf.cartes(d.candidats)[pf.CARTE_ALIAS][0].decision is pf.Decision.REFUSE
+
+
+# ── Base de données • Artistes ───────────────────────────────────────────────
+
+
+def test_lettre_d_index():
+    from src.presentation.artistes import lettre_d_index
+
+    assert [lettre_d_index(n) for n in ("Écorchée", "isha", "1507", "¥$")] == ["E", "I", "#", "#"]
+
+
+def test_cle_de_reglage_d_un_nom():
+    from src.gui_qt.fenetre import _cle_de_nom, _nom_de_cle
+
+    for nom in ("AC/DC", r"A\B", "100%"):
+        assert "/" not in _cle_de_nom(nom) and _nom_de_cle(_cle_de_nom(nom)) == nom
+
+
+def test_fenetre_artistes_supprime_apres_sauvegarde(qtbot, fenetre, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from src.gui_qt.artistes import FenetreArtistes
+
+    _charger(qtbot, fenetre)
+    qtbot.waitUntil(lambda: bool(fenetre.artistes), timeout=10_000)
+    assert fenetre._pourcentages()["Isha"].endswith("%")
+    sauvegardes = []
+    d = FenetreArtistes(
+        fenetre.runtime,
+        fenetre.artistes,
+        fenetre._pourcentages(),
+        lambda nom: sauvegardes.append(nom) or "copie.db",
+    )
+    qtbot.addWidget(d)
+    assert list(d.cartes) == ["Isha"]
+    assert d.lettres["I"].isEnabled() and not d.lettres["A"].isEnabled()
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    d._supprimer("Isha")
+    assert sauvegardes == ["Isha"]
+    assert d.cartes == {}
+    assert fenetre.runtime.data_manager.get_artist_by_name("Isha") is None
+
+
+def test_suppression_sans_sauvegarde_ne_fait_rien(qtbot, fenetre, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    from src.gui_qt.artistes import FenetreArtistes
+
+    qtbot.waitUntil(lambda: bool(fenetre.artistes), timeout=10_000)
+    d = FenetreArtistes(fenetre.runtime, fenetre.artistes, {}, lambda nom: None)
+    qtbot.addWidget(d)
+    monkeypatch.setattr(QMessageBox, "warning", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: None)
+    d._supprimer("Isha")
+    assert list(d.cartes) == ["Isha"]
+
+
+# ── Ajout d'artiste ──────────────────────────────────────────────────────────
+
+
+def test_ajout_liste_la_base_puis_filtre(qtbot, fenetre):
+    from src.gui_qt.dialogues import DialogueAjout
+    from src.presentation.artistes import ResumeArtiste
+
+    base = [ResumeArtiste(n) for n in ("ISHA", "Jazzy Bazz", "JeanJass", "Josman")]
+    d = DialogueAjout(fenetre.runtime, base)
+    qtbot.addWidget(d)
+    assert d.en_base.count() == 4
+    d._suggerer("jean")
+    assert [d.en_base.item(i).text() for i in range(d.en_base.count())] == ["JeanJass"]
+
+
+def test_ajout_homonymes_choix_obligatoire(qtbot, fenetre, monkeypatch):
+    from src.gui_qt.dialogues import DialogueAjout
+    from src.services import artiste as artiste_service
+
+    candidats = [Artist(name="Sniper", genius_id=1), Artist(name="Sniper", genius_id=2)]
+
+    def ambigu(runtime, nom):
+        raise artiste_service.ArtisteAmbigu(nom, candidats)
+
+    monkeypatch.setattr(artiste_service, "resoudre", ambigu)
+    d = DialogueAjout(fenetre.runtime, [])
+    qtbot.addWidget(d)
+    ajoutes = []
+    d.ajoute.connect(ajoutes.append)
+    d.saisie.setText("Sniper")
+    d._chercher()
+    qtbot.waitUntil(lambda: d.proposes.count() == 2, timeout=10_000)
+    assert not d.bouton_ajouter.isEnabled()  # jamais un homonyme choisi à notre place
+    d.proposes.setCurrentRow(1)
+    d.bouton_ajouter.click()
+    assert ajoutes == ["Sniper"]
+    assert fenetre.runtime.data_manager.get_artist_by_name("Sniper").genius_id == 2
+
+
+# ── liste de tâches (hub) ────────────────────────────────────────────────────
+
+
+def test_temps_restant_estime():
+    from src.gui_qt.pont import Tache
+
+    t = Tache("x", "X", debut=time.monotonic() - 100, courant=25, total=100)
+    assert 290 < t.restant < 310  # 25 % en 100 s : ~300 s restantes
+    assert Tache("y", "Y", courant=0, total=100).restant is None
+
+
+def test_run_mis_en_attente_puis_lance(qtbot, fenetre, monkeypatch):
+    import threading
+
+    from PyQt6.QtWidgets import QMessageBox
+
+    from src.services import cycle
+
+    _charger(qtbot, fenetre)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "show", lambda self: None)
+    libere = threading.Event()
+    lances = []
+
+    def faux_run(runtime, nom, options, hooks):
+        lances.append(options.only)
+        if len(lances) == 1:
+            libere.wait(5)
+        return SimpleNamespace(complete=True, resume=lambda: "ok")
+
+    monkeypatch.setattr(cycle, "run", faux_run)
+    monkeypatch.setattr(fenetre, "_recharger", lambda nom: None)
+    fenetre.boutons_flux["enrich"].click()
+    qtbot.waitUntil(lambda: fenetre.taches.occupe, timeout=5_000)
+    assert fenetre.boutons_flux["streams"].isEnabled()
+    fenetre.boutons_flux["streams"].click()
+    assert [e.cle for e in fenetre.file_attente] == ["streams"]
+    assert fenetre.b_file.pastille == "2"
+    fenetre._ouvrir_centre()
+    textes = [fenetre._centre.liste.item(i).text() for i in range(fenetre._centre.liste.count())]
+    assert "En attente" in textes and "Streams — Isha" in textes
+    libere.set()
+    qtbot.waitUntil(lambda: lances == [("enrich",), ("streams",)], timeout=10_000)
+    qtbot.waitUntil(lambda: not fenetre.taches.occupe, timeout=10_000)
+    assert fenetre.file_attente == []
+    fenetre.taches.fermer()
+
+
+# ── Décisions • Erreurs ──────────────────────────────────────────────────────
+
+
+def test_panneau_decisions(qtbot, fenetre):
+    from src.gui_qt.decisions import FenetreDecisions
+    from src.presentation.decisions import Vue
+
+    _charger(qtbot, fenetre)
+    d = FenetreDecisions(fenetre.runtime, fenetre.chargement.artist, {})
+    qtbot.addWidget(d)
+    assert d.boutons_vue[Vue.DECISIONS].isChecked()
+    assert d.titre.text().endswith("triés par impact")
+    tous = d.revue.actifs
+    if tous:
+        c = next(iter(tous))
+        d.vue = Vue(
+            next(
+                v
+                for v, n in __import__(
+                    "src.presentation.decisions", fromlist=["NATURE_DE_LA_VUE"]
+                ).NATURE_DE_LA_VUE.items()
+                if n == c.nature
+            )
+        )
+        d.normal(c)
+        assert c in d.revue.masques
+        d.retablir(c)
+        assert c in d.revue.actifs
+    d.changer_vue(Vue.JOURNAL)
+    assert d.filtre.count() == 1
+
+
+def test_format_impact():
+    from src.presentation.decisions import format_impact
+
+    assert [format_impact(n) for n in (0, 999, 12_000, 2_500_000)] == ["—", "999", "12 k", "2.5 M"]
+
+
+# ── Certifications ───────────────────────────────────────────────────────────
+
+
+def test_base_a_mettre_a_jour():
+    from datetime import datetime
+
+    from src.presentation.certifs import a_mettre_a_jour, ligne
+
+    now = datetime(2026, 11, 22)
+    frais = {"available": True, "last_global": "2026-11-01T10:00", "count": 12345}
+    assert not a_mettre_a_jour(frais, now)
+    assert a_mettre_a_jour({**frais, "last_global": "2026-09-01T10:00"}, now)
+    assert a_mettre_a_jour({**frais, "partial": "RIAA coupée"}, now)
+    assert a_mettre_a_jour({"available": False}, now)
+    lg = ligne("SNEP", frais, {"gaps": ["2024-03"]}, now)
+    assert (lg.etat, lg.certifications, lg.trous) == (
+        "À jour",
+        "12 345",
+        "1 période(s) manquante(s)",
+    )
+    assert "France" in lg.libelle
+
+
+def test_fenetre_certifs_met_a_jour_par_la_liste_de_taches(qtbot, monkeypatch):
+    from src.gui_qt import certifs as fenetre_certifs
+    from src.services import certifs as service
+
+    taches = Taches()
+    etats = [("SNEP", {"available": True, "last_global": "2020-01-01T00:00"})]
+    monkeypatch.setattr(service, "executer_maj", lambda nom, progres: (0, "ok"))
+    d = fenetre_certifs.FenetreCertifs(None, taches, None, lambda: etats, lambda s: {})
+    qtbot.addWidget(d)
+    with qtbot.waitSignal(d.a_jour, timeout=10_000) as signal:
+        d.relire()
+    assert signal.args == [1]  # base de 2020 : à mettre à jour
+    assert d.arbre.topLevelItemCount() == 1
+    with qtbot.waitSignal(taches.terminee, timeout=10_000):
+        d.mettre_a_jour("SNEP")
+    assert taches.tache("certifs:SNEP").etat is Etat.COMPLET
+    assert not d.b_appliquer.isEnabled()  # aucun artiste chargé
+    taches.fermer()
+
+
+def test_maj_des_certifs_mise_en_attente_pendant_un_run(qtbot, fenetre, monkeypatch):
+    import threading
+
+    from PyQt6.QtWidgets import QMessageBox
+
+    from src.gui_qt.certifs import FenetreCertifs
+    from src.services import certifs as service
+    from src.services import cycle
+
+    _charger(qtbot, fenetre)
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    monkeypatch.setattr(QMessageBox, "show", lambda self: None)
+    monkeypatch.setattr(fenetre, "_recharger", lambda nom: None)
+    libere = threading.Event()
+    ordre = []
+
+    def faux_run(runtime, nom, options, hooks):
+        ordre.append("run")
+        libere.wait(5)
+        return SimpleNamespace(complete=True, resume=lambda: "ok")
+
+    def fausse_maj(nom, progres):
+        ordre.append(f"maj {nom}")
+        return 0, "ok"
+
+    monkeypatch.setattr(cycle, "run", faux_run)
+    monkeypatch.setattr(service, "executer_maj", fausse_maj)
+    fenetre.boutons_flux["enrich"].click()
+    qtbot.waitUntil(lambda: fenetre.taches.occupe, timeout=5_000)
+    d = FenetreCertifs(
+        fenetre.runtime, fenetre.taches, None, lambda: [], lambda s: {}, fenetre.demander_tache
+    )
+    qtbot.addWidget(d)
+    d.mettre_a_jour("SNEP")
+    assert [e.titre for e in fenetre.file_attente] == ["Mise à jour SNEP"]
+    assert "mis en attente" in d.etat.text()
+    libere.set()
+    qtbot.waitUntil(lambda: ordre == ["run", "maj SNEP"], timeout=10_000)
+    qtbot.waitUntil(lambda: not fenetre.taches.occupe, timeout=10_000)
+    assert fenetre.file_attente == []
+    fenetre.taches.fermer()

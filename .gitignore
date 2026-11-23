@@ -112,6 +112,7 @@ scripts/*
 !scripts/cassette_deezer.py
 !scripts/cassette_kworb.py
 !scripts/cassette_songbpm.py
+!scripts/cassette_genius_albums.py
 !scripts/invariants_apres_rejeu.py
 !scripts/simuler_priorites.py
 !scripts/simuler_regles_audit.py
@@ -190,6 +191,8 @@ scripts/*
 !scripts/realigner_soeurs.py
 !scripts/constater_videos_mortes.py
 !scripts/corriger_tetes_de_paroles.py
+!scripts/corriger_artiste_des_versions.py
+!scripts/consigner_fusions_d_editions.py
 !scripts/retirer_cles_locales_relations.py
 # Mesures hors ligne (2026-10-14) : places sur les disques, champs du brut.
 !scripts/mesurer_positions.py
@@ -209,6 +212,7 @@ scripts/*
 !scripts/retirer_disque_homonyme.py
 !scripts/refuser_profil_deezer.py
 !scripts/refuser_profil_spotify.py
+!scripts/retirer_homonyme_musicbrainz.py
 !scripts/rattraper_colonnes_sans_provenance.py
 !scripts/dissocier_echecs_orphelins.py
 !scripts/rouvrir_dv1.py
@@ -220,6 +224,7 @@ scripts/*
 !scripts/retirer_credits_youtube_doublons.py
 # Invités d'un album posés sur une piste par le correcteur (2026-11-06).
 !scripts/retirer_feats_d_album.py
+!scripts/rattraper_confirmations_credits.py
 !scripts/fusionner_copies_de_groupe.py
 !scripts/recalculer_heritage.py
 !scripts/reparer_encodage_genius.py
@@ -228,6 +233,7 @@ scripts/*
 !scripts/retirer_paroles_factices.py
 # Titre de la page Spotify relu dans le brut (2026-10-31).
 !scripts/rafraichir_titres_spotify.py
+!scripts/dater_relations_genius.py
 !scripts/marquer_parutions_live.py
 !scripts/separer_singles_fondus.py
 !scripts/poser_ids_genius_formations.py
@@ -236,6 +242,10 @@ scripts/*
 !scripts/remplacer_photos_homonymes.py
 # Échantillon témoin : ce que l'audit rate, vérifié à la main (2026-11-09).
 !scripts/echantillon_temoin.py
+# Scripts ponctuels (une réparation datée, nommée) : le dossier, puis chacun.
+!scripts/ponctuels/
+scripts/ponctuels/*
+!scripts/ponctuels/chip_douglas_version.py
 # Scripts Illustrator : NON VERSIONNÉS (décision 2026-08-30). Ils décrivent la
 # méthode de mise en page de bout en bout — c'est le savoir-faire, pas l'outil.
 # `scripts/*` les exclut déjà : ne PAS ajouter de négation ici.

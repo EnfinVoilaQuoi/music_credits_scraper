@@ -8,6 +8,8 @@ versions ; Lucio Bukowski a de vrais trous et deux EP jumeaux « … » / « ...
 import asyncio
 import dataclasses
 
+import pytest
+
 from src.models import Artist, Track, TrackSpotifyId
 from src.models.track import CreditRole
 from src.services import ecarts_deezer as ed
@@ -65,6 +67,27 @@ class TestClasser:
         albums = [_album(1, "LM$ (Chopped & $crewed)", [p], artist_id=9)]
         (e,) = ed.classer(albums, base, [], NOUS)[0]
         assert e.nature == "apparition" and e.socle is base[0]
+
+    def test_le_socle_n_est_pas_la_fiche_ou_l_artiste_n_est_que_producteur(self):
+        """2026-11-22 : la démo de « The Return of Chip Douglas » de Kid Cudi
+        visait « The Return Of Chip Douglas » de Nuevo (USA), qu'il produit
+        (#3960), et non le sien (#3638) — quel que soit l'ordre de la base."""
+        nuevo = _track("The Return Of Chip Douglas", "God’s Experiment")
+        nuevo.secondary_role = "Producer"
+        cudi = _track("The Return of Chip Douglas", "Speedin’ Bullet 2 Heaven")
+        p = _piste(
+            10,
+            "The Return of Chip Douglas (Demo)",
+            short="The Return of Chip Douglas",
+            version="(Demo)",
+        )
+        for base in ([nuevo, cudi], [cudi, nuevo]):
+            albums = [_album(1, "Speedin' Bullet 2 Heaven", [p])]
+            (e,) = ed.classer(albums, base, [], NOUS)[0]
+            assert e.socle is cudi
+        # Sans autre fiche, celle du producteur reste l'original.
+        (e,) = ed.classer([_album(1, "Speedin' Bullet 2 Heaven", [p])], [nuevo], [], NOUS)[0]
+        assert e.socle is nuevo
 
     def test_une_partie_seule_n_est_le_socle_de_personne(self):
         base = [_track("Part 2", "A")]
@@ -336,6 +359,76 @@ class TestClasser:
         assert ecarts[0].nature == "absent"
 
 
+class TestAutreEnregistrement:
+    """Règle 1 (décision utilisateur 2026-11-22) : une page Deezer d'un AUTRE
+    ISRC, à plus de 10 s des catalogues de la fiche lus par leur ID, est une
+    VERSION, pas une édition (*92.2012* de Kery James : « L'impasse »
+    réenregistrée, rangée en édition de l'original)."""
+
+    @staticmethod
+    def _fiche(**observees):
+        t = _track("L'impasse", "Si c'était à refaire", isrc="FRN370102111")
+        t.id, t.deezer_id, t.duration = 5, 100, 432
+        t.durations_observees = observees or {"deezer": 432, "spotify_web": 391}
+        return t
+
+    @staticmethod
+    def _classer(fiche, isrc="FR9W11201877", duree=391, titre="L'impasse"):
+        p = _piste(10, titre, isrc=isrc)
+        p.duration = duree
+        return ed.classer([_album(1, "92.2012", [p])], [fiche], [], NOUS)[0]
+
+    def test_une_version_pas_un_lien(self):
+        fiche = self._fiche()
+        (e,) = self._classer(fiche)
+        assert e.nature == "version" and e.socle is fiche and not e.coche
+        assert e.existing_track is None
+        assert any("autre enregistrement" in m for m in e.motifs)
+
+    @pytest.mark.parametrize(
+        "kw",
+        [
+            {"isrc": "FRN370102111"},  # le même ISRC : le même enregistrement
+            {"isrc": None},  # sans ISRC, rien ne se montre
+            {"duree": 425},  # à 10 s au plus
+        ],
+    )
+    def test_reste_un_lien(self, kw):
+        (e,) = self._classer(self._fiche(), **kw)
+        assert e.nature.startswith("link")
+
+    def test_l_id_spotify_ne_temoigne_pas(self):
+        """La durée Spotify peut être celle du réenregistrement : seule, elle
+        ne fait pas la règle."""
+        (e,) = self._classer(self._fiche(spotify_web=432))
+        assert e.nature.startswith("link")
+
+    def test_apple_temoigne(self):
+        fiche = self._fiche(apple_music=432)
+        fiche.deezer_id = None
+        (e,) = self._classer(fiche)
+        assert e.nature == "version"
+
+    def test_une_edition_de_diffusion_reste_une_edition(self):
+        """Radio edit, « Clean » : une fiche (décision utilisateur 2026-10-19)."""
+        (e,) = self._classer(self._fiche(), titre="L'impasse (Radio Edit)")
+        assert e.nature != "version"
+
+    def test_la_duree_d_une_edition_connue(self):
+        """Kid Cudi « Make Her Say » 216 s, ISRC propre : l'« Album Version
+        Edited » déjà notée en édition à 216 s."""
+        fiche = self._fiche()
+        fiche.durees_editions = (390,)
+        (e,) = self._classer(fiche)
+        assert e.nature.startswith("link")
+
+    def test_juge_pur(self):
+        fiche = self._fiche()
+        assert ed.autre_enregistrement("FR9W11201877", 391, 10, fiche)
+        # La page de la fiche elle-même ne témoigne pas contre elle.
+        assert ed.autre_enregistrement("FR9W11201877", 391, 100, fiche) is None
+
+
 class TestCocherParDefaut:
     def test_version_cochee_si_kworb_la_connait(self):
         socle = _track("DKR")
@@ -510,6 +603,9 @@ class TestCreerLignes:
 
     def test_une_ligne_complete_depuis_deezer(self, data_manager):
         artist = self._artiste(data_manager)
+        # Son profil Deezer : le disque est le SIEN (`own`), donc un de ses
+        # albums — depuis e68, la nature vit sur le projet de cette parution.
+        artist.deezer_id = NOUS
         piste = _piste(
             70,
             "Coal lla",
@@ -634,6 +730,66 @@ class TestCreerLignes:
             fiche.relationships[0]["type"] == "version_of"
             and fiche.relationships[0]["track_id"] == socle.id
         )
+
+    def test_la_version_nomme_l_interprete_de_l_original(self, data_manager):
+        """NTM « Un ange dans le ciel (Live …) » #34979 (2026-11-22) : l'original
+        est la fiche de Kool Shen #31136 ; la relation disait « Suprême NTM »,
+        l'artiste qui créait la version."""
+        groupe = Artist(name="Suprême NTM")
+        groupe.id = data_manager.save_artist(groupe)
+        membre = Artist(name="Kool Shen")
+        membre.id = data_manager.save_artist(membre)
+        socle = Track(title="Un ange dans le ciel", artist=membre)
+        data_manager.save_track(socle)
+        (socle,) = data_manager.get_artist_tracks(membre.id)
+        piste = _piste(81, "Un ange dans le ciel (Live)", "Un ange dans le ciel", "(Live)")
+        e = ed.Ecart("version", _album(9, "Live", [piste]), piste, socle=socle)
+        e.coche = True
+
+        ed.creer_lignes(data_manager, groupe, [e])
+
+        (fiche,) = data_manager.get_artist_tracks(groupe.id)
+        relation = fiche.relationships[0]
+        assert (relation["artist"], relation["track_id"]) == ("Kool Shen", socle.id)
+
+    def test_la_version_nomme_le_principal_que_la_page_de_l_original_donne(self):
+        artist = Artist(name="Lucio Bukowski")
+        socle = Track(title="Socle", artist=artist, genius_id=12)
+        socle.primary_artist_name = "Mani Deïz"
+        assert ed.artiste_de_l_original(socle, artist) == "Mani Deïz"
+        assert ed.artiste_de_l_original(Track(title="Socle", artist=artist), artist) == (
+            "Lucio Bukowski"
+        )
+
+    def test_sans_page_genius_le_principal_n_est_que_l_hote_du_disque(self):
+        """2026-11-22 : une fiche créée depuis Deezer porte en principal l'artiste
+        du DISQUE où elle apparaît (« Dimanche 31 » d'Anton Serra, sur un disque
+        d'Oster Lapwass) : il ne fait pas l'interprète de l'original."""
+        artist = Artist(name="Anton Serra")
+        socle = Track(title="Dimanche 31", artist=artist)
+        socle.is_featuring, socle.primary_artist_name = True, "Oster Lapwass"
+        assert ed.artiste_de_l_original(socle, artist) == "Anton Serra"
+
+    def test_la_version_ne_prend_pas_un_id_kworb_refuse(self, data_manager):
+        from src.utils import corrections_fiches as cf
+
+        artist = self._artiste(data_manager)
+        socle = Track(title="DKR", artist=artist)
+        socle.spotify_id = "0QLjm2PNqKRJfWsxDPa9Ra"
+        data_manager.save_track(socle)
+        data_manager.record_variant_streams(socle.id, "SPBONUS", 108, 3, None, label="DKR - Live")
+        (socle,) = data_manager.get_artist_tracks(artist.id)
+        piste = _piste(80, "DKR (Live)", "DKR", "(Live)")
+        e = ed.Ecart("version", _album(8, "Ultra (Bonus)", [piste]), piste, socle=socle)
+        ed.cocher_par_defaut([e], [socle])
+        cf.memoriser_id_refuse(
+            Track(title="DKR (Live)", artist=artist, album="Ultra (Bonus)"), "SPBONUS"
+        )
+
+        ed.creer_lignes(data_manager, artist, [e])
+
+        fiche = {t.title: t for t in data_manager.get_artist_tracks(artist.id)}["DKR (Live)"]
+        assert fiche.spotify_id is None
 
     def test_heritage_injecte(self, data_manager):
         artist = self._artiste(data_manager)

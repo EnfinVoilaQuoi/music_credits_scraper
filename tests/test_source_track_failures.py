@@ -326,7 +326,7 @@ class TestSelection:
     def test_le_cycle_passe_les_sources_du_flux(self, monkeypatch):
         vus = {}
 
-        def selection(runtime, artist, *, manquants=(), echecs=(), track_ids=None):
+        def selection(runtime, artist, *, manquants=(), echecs=(), track_ids=None, **options):
             vus["echecs"] = tuple(echecs)
             return []
 

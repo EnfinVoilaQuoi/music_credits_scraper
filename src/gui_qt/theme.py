@@ -50,9 +50,9 @@ SOMBRE = MappingProxyType(
         "spotify": "#1ed760",
         "youtube": "#ff3d3d",
         "genius": "#ffff64",
-        # Jauge de run (ébauche) : fond accent, progression foncée.
-        "jauge_fond": "#895ecc",
-        "jauge_progression": "#442f66",
+        # Jauge de run (maquette du 2026-11-21) : fond foncé, progression accent.
+        "jauge_fond": "#442f66",
+        "jauge_progression": "#895ecc",
     }
 )
 
@@ -123,9 +123,42 @@ def feuille_de_style(t=TOKENS) -> str:
         background: {t['accent']};
         color: {t['texte_sur_accent']};
     }}
+    /* Un bouton dont le menu est ouvert, ou qui est actif, change de couleur
+       (maquettes du 2026-11-21 : Menu, Filtre). */
+    QToolButton:open, QToolButton#actif {{ background: {t['accent_fonce']}; }}
+    /* Bouton de flux à flèche : la flèche est séparée de la partie qui lance. */
+    QToolButton[popupMode="1"] {{ padding-right: 30px; }}
+    QToolButton::menu-button {{
+        border: none;
+        border-left: 1px solid {t['survol']};
+        width: 24px;
+        border-top-right-radius: 6px;
+        border-bottom-right-radius: 6px;
+    }}
+    QToolButton::menu-button:hover {{ background: {t['survol']}; }}
+    QToolButton::menu-indicator {{ image: none; width: 0; }}
+    /* Décisions (convention commune, 2026-11-22) : plein = à décider,
+       contour = décidé (un clic rétablit). */
+    QToolButton#oui[plein="true"] {{ background: {t['ok']}; }}
+    QToolButton#non[plein="true"] {{ background: {t['erreur']}; }}
+    QToolButton#oui[plein="false"] {{ background: transparent; border: 2px solid {t['ok']}; }}
+    QToolButton#non[plein="false"] {{ background: transparent; border: 2px solid {t['erreur']}; }}
+    /* Bouton sans fond (gestes d'une carte, index alphabétique). */
+    QToolButton#discret {{ background: transparent; padding: 2px 6px; }}
+    QToolButton#discret:hover {{ background: {t['survol']}; }}
+    QLineEdit#grand {{ font-size: 16pt; padding: 10px 14px; }}
+    QListWidget#liste {{
+        background: transparent;
+        border: none;
+        font-family: "{POLICE_SEMIGRAS}";
+        font-size: 15pt;
+    }}
+    QListWidget#liste::item {{ padding: 4px 0; }}
+    QListWidget#liste::item:selected {{ background: {t['selection']}; }}
+    QLabel#titreCarte {{ font-family: "{POLICE_SEMIGRAS}"; font-size: 15pt; }}
     QToolButton#bascule {{ background: {t['onglet_inactif']}; color: {t['texte_doux']}; }}
     QToolButton#bascule:checked {{ background: {t['accent']}; color: {t['texte_sur_accent']}; }}
-    QTableView {{
+    QTableView, QTreeView {{
         background: {t['table']};
         alternate-background-color: {t['table_alterne']};
         gridline-color: {t['grille']};

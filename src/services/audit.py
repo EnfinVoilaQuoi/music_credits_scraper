@@ -81,9 +81,11 @@ from src.utils.track_mapper import recherche_de_ligne
 from src.utils.track_repository import CHAMP_COMPTEURS_YTM, lire_compteurs_ytm, total_ytm
 from src.utils.version_descriptors import (
     meme_socle,
+    meme_titre_normalise,
     porte_une_version,
     studio_sur_disque_live,
     titre_generique,
+    titre_plus_long,
     titres_equivalents,
 )
 from src.utils.version_heritage import est_instrumental
@@ -263,14 +265,6 @@ INVARIANTS = (
     "photo_par_defaut",
     "heritage_sans_source",
 )
-
-_FEAT = re.compile(r"[\(\[]\s*(?:feat|ft)\b[^\)\]]*[\)\]]", re.IGNORECASE)
-
-
-def _base(titre: str | None) -> str:
-    """Titre normalisé SANS featuring, mots conservés (la clé de doublon de
-    `revue` colle les mots : inutilisable pour comparer des ensembles de mots)."""
-    return normalize_title(_FEAT.sub("", titre or ""))
 
 
 def _connexion(db_path) -> sqlite3.Connection:
@@ -819,10 +813,9 @@ def certifs(pistes) -> list[Cas]:
             if e.get("category") == "album":
                 cas.append(Cas("certif_album", t["artiste"], [t["id"]], lib))
                 continue
-            if _base(t["title"]) == _base(ct) or titres_equivalents(t["title"], ct):
+            if meme_titre_normalise(t["title"], ct) or titres_equivalents(t["title"], ct):
                 continue
-            mots_t, mots_c = set(_base(t["title"]).split()), set(_base(ct).split())
-            if mots_c - mots_t and mots_t <= mots_c:
+            if titre_plus_long(t["title"], ct):
                 famille = "certif_plus_long"
             elif version and not porte_une_version(ct) and meme_socle(t["title"], ct):
                 famille = "certif_version"
@@ -1499,6 +1492,8 @@ CIBLES_DES_LIENS = {
     "variant_track_id": "tracks",
     "related_artist_id": "artists",
     "release_track_id": "release_tracks",
+    "projet_id": "projets",
+    "edition_reference_id": "releases",
 }
 
 #: Lignes qui ne désignent légitimement plus rien : `(table, colonne)` → clause
@@ -1557,11 +1552,35 @@ def orphelins(c) -> list[Cas]:
                 "artists": "artiste",
                 "releases": "parution",
                 "release_tracks": "piste de parution",
+                "projets": "projet",
             }[cible]
             libelle = f"{table} : {n} ligne(s) sans {quoi}"
             if col != "track_id":
                 libelle = f"{table}.{col} : {n} ligne(s) sans {quoi}"
             cas.append(Cas("orphelin", "—", [], libelle))
+    cas += _credits_album_orphelins(c)
+    return cas
+
+
+def _credits_album_orphelins(c) -> list[Cas]:
+    """Crédits d'album Genius (e66) dont plus aucune parution ne porte l'ID
+    d'album : leur clé est un ID de SOURCE, que `colonnes_liees` ne voit pas.
+    `delete_artist` les purge (`_purger_credits_album_sans_parution`)."""
+    cas = []
+    for table in ("genius_album_credits", "genius_album_lectures"):
+        existe = c.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)
+        ).fetchone()
+        if not existe:
+            continue
+        n = c.execute(
+            # IN non corrélé : l'ensemble des ID Genius n'est lu qu'une fois.
+            f"SELECT COUNT(*) FROM {table} WHERE genius_album_id NOT IN ("  # noqa: S608 — liste fermée
+            "SELECT CAST(external_id AS INTEGER) FROM release_identifiers "
+            "WHERE source = 'genius')"
+        ).fetchone()[0]
+        if n:
+            cas.append(Cas("orphelin", "—", [], f"{table} : {n} ligne(s) sans parution"))
     return cas
 
 
@@ -2383,7 +2402,7 @@ def pochettes_photo(c, pistes, chemin_brut: Path | None = None) -> list[Cas]:
     from src.persistence import brut
     from src.utils.pochettes_photo import pages_a_photo, pochettes_a_photo
 
-    pages = pages_a_photo(chemin_brut or brut.CHEMIN)
+    pages = pages_a_photo(brut.chemin_lu(chemin_brut))
     isoles = [
         (t["artiste"], t["title"], t["genius_id"], t)
         for t in pistes
@@ -2435,7 +2454,7 @@ def hors_du_disque(
     from src.persistence import brut
     from src.utils import appartenance_disque as ad
 
-    cat = ad.CatalogueDuBrut(chemin_brut or brut.CHEMIN)
+    cat = ad.CatalogueDuBrut(brut.chemin_lu(chemin_brut))
     jugees = [t for t in pistes if t["id"] not in desactivees]
     cas = []
     for x in ad.liens_hors_liste(c, cat, jugees):

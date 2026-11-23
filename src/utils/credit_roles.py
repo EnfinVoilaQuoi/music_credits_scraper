@@ -210,10 +210,21 @@ def map_role(label: str) -> CreditRole:
             )
         return CreditRole.ASSISTANT_ENGINEER if assistant else CreditRole.ENGINEER
 
-    # « Vocal Samples », « Sample Programmer », « Sampling » : un SAMPLE, pas une
+    # « Vocal Samples », « Voice Samples », « Sampling » : un SAMPLE, pas une
     # voix — sans ce test « Vocal Samples » tombait en VOCALS, et
     # `participation` en faisait un feat (10 fiches, 2026-09-26).
+    # Mais un libellé qui commence par « sampl » ne nomme pas toujours ce qui est
+    # samplé (2026-11-20, 19 crédits sur 294) : « Sample Clearance » est la
+    # société qui négocie les droits (Kanye, *Graduation* : « Eric Weissman Music
+    # Licensing, Inc »), « Sampler » qui en JOUE (Frank Ocean, *White Ferrari*),
+    # « Sample Programmer » / « Sample Arranger » un métier de production.
     if _commence(mots, "sampl"):
+        if "sampler" in mots or _commence(mots, "clearance", "licens"):
+            return CreditRole.OTHER
+        if _commence(mots, "programm"):
+            return CreditRole.PROGRAMMER
+        if _commence(mots, "arrang"):
+            return CreditRole.ARRANGER
         return CreditRole.SAMPLE
 
     if _commence(mots, "vocal"):

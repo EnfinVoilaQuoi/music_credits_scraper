@@ -54,8 +54,8 @@ def main(argv=None) -> int:
         print("❌ Backup impossible — abandon (règle projet : jamais d'écriture sans backup).")
         return 1
     print(f"💾 Backup : {backup}")
-    for _nom, t, exclues, _vues in faits:
-        dm.recalculer_vues_ytm(t.id, exclues)
+    for _nom, t, _exclues, _vues in faits:
+        dm.recalculer_vues_ytm(t.id)
     print(f"✅ {len(faits)} total(aux) YouTube Music recalculé(s)")
     return 0
 

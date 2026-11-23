@@ -47,6 +47,13 @@ SEUIL_FAUX_BIGRAMMES = 0.1
 SEUIL_JUSTE_BIGRAMMES = 0.6
 #: Mots distincts exigés de CHAQUE côté pour conclure.
 MOTS_MIN = 8
+#: Un LRC aux mots surtout étrangers aux paroles qui court au-delà de ce
+#: multiple de la durée de la fiche est celui d'un autre enregistrement
+#: (2026-11-22). Simulé : à 1,5, aucun LRC dont la durée vient d'une seule
+#: vidéo plus courte que le morceau (« Ennemi d'État » de Kaaris : 145 s de
+#: clip, LRC juste de 3 min 02) ; au-delà de la durée + 5 s seulement, ces
+#: deux-là tombaient à tort.
+RAPPORT_DEBORDEMENT = 1.5
 
 _ENTETE = re.compile(r"\[[^\]]*\]")
 _MOT = re.compile(r"[a-z0-9']+")
@@ -100,15 +107,52 @@ def paroles_de_reference(texte: str | None, source: str | None) -> str | None:
     return texte if s.startswith("genius") or s.startswith("heritage") else None
 
 
-def lrc_dementi(paroles: str | None, lrc: str | None) -> bool:
+def part_du_lrc_dans_les_paroles(paroles: str | None, lrc: str | None) -> float | None:
+    """Part des mots du LRC que portent les paroles (un seul sens) ; None si
+    non jugeable."""
+    mg, ml = mots(paroles), mots(lrc)
+    if len(mg) < MOTS_MIN or len(ml) < MOTS_MIN:
+        return None
+    return round(len(mg & ml) / len(ml), 2)
+
+
+def lrc_dementi(paroles: str | None, lrc: str | None, duree=None) -> bool:
     """Les paroles Genius DÉMENTENT ce LRC : c'est celui d'un autre morceau.
 
     Sous 0,4 de mots communs OU sous 0,1 de bigrammes communs. False quand on ne
-    peut pas juger — seul un démenti écarte une source."""
+    peut pas juger — seul un démenti écarte une source.
+
+    Le recouvrement prend le MAXIMUM des deux sens, pour des paroles Genius
+    partielles. Mais des paroles CONTENUES dans le LRC d'un enregistrement plus
+    long passent ainsi à 1,0 : Kanye « Intro (Graduation Day) », le couplet
+    de John Legend (19 s), portait le LRC de « Graduation Day » (le sketch
+    puis le couplet, 70 s). Avec la `duree` de la fiche (2026-11-22) : un LRC
+    dont les mots sont surtout étrangers aux paroles (moins de 0,4 des mots
+    du LRC dans les paroles) ET qui court au-delà de `RAPPORT_DEBORDEMENT` fois
+    la durée de la fiche est démenti — deux indices faibles d'accord, quand
+    une durée isolée ne tranche pas seule (`lrc_garde.limite_du_lrc`)."""
     score = recouvrement(paroles, lrc)
     if score is None:
         return False
     if score < SEUIL_FAUX:
         return True
     paires = recouvrement_bigrammes(paroles, lrc)
-    return paires is not None and paires < SEUIL_FAUX_BIGRAMMES
+    if paires is not None and paires < SEUIL_FAUX_BIGRAMMES:
+        return True
+    return _deborde_en_etranger(paroles, lrc, duree)
+
+
+def _deborde_en_etranger(paroles: str | None, lrc: str | None, duree) -> bool:
+    try:
+        limite = int(duree) if duree else None
+    except (TypeError, ValueError):
+        return False
+    if not limite or limite <= 0:
+        return False
+    part = part_du_lrc_dans_les_paroles(paroles, lrc)
+    if part is None or part >= SEUIL_FAUX:
+        return False
+    from src.utils.lrc_garde import fin_du_lrc
+
+    fin = fin_du_lrc(lrc)
+    return bool(fin) and fin > limite * RAPPORT_DEBORDEMENT

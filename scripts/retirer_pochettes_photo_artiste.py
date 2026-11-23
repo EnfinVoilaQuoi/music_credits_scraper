@@ -54,7 +54,7 @@ def main(argv: list[str] | None = None) -> int:
     from src.utils.data_manager import DataManager
 
     dm = DataManager()
-    pages = pages_a_photo(brut.CHEMIN)
+    pages = pages_a_photo(brut.chemin_lu())
     prouves, laisses = candidats(dm, pages)
     print(f"{len(pages)} pages Genius servent la photo d'un artiste en guise de pochette")
     print(

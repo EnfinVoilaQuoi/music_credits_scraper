@@ -467,3 +467,50 @@ def test_retirer_songbpm_a_la_main_refuse_la_page_sans_origine(data_manager, art
     relue = data_manager.get_artist_tracks(artiste.id)[0]
     assert pages_songbpm_refusees(relue) == {"/@kid-cudi/dangerous"}
     assert origine_du_refus(relue, "page_songbpm", "/@kid-cudi/dangerous") is None
+
+
+class TestNoterEnEdition:
+    """♊ `meme_enregistrement` : même enregistrement, deux sorties = une fiche
+    et son ÉDITION (décision utilisateur), par `editions.absorber`, qui consigne
+    la fusion."""
+
+    def test_le_sens_que_le_titre_designe(self):
+        cas = _cas(
+            "meme_enregistrement", preuves={"autres": [2], "titre_autre": "Morceau (Live 2006)"}
+        )
+        assert _codes(cas) == ["fusionner", "noter_en_edition_autre"]
+        _, edition = revue_actions.actions_pour(cas)
+        assert "« Morceau » en édition de « Morceau (Live 2006) »" in edition.libelle
+        assert edition.confirmation and edition.resout
+
+    def test_sans_indice_les_deux_sens(self):
+        cas = _cas("meme_enregistrement", preuves={"autres": [2], "titre_autre": "Morceaux"})
+        assert _codes(cas) == ["fusionner", "noter_en_edition", "noter_en_edition_autre"]
+
+    def test_sans_titre_de_l_autre_la_fusion_seule(self):
+        assert _codes(_cas("meme_enregistrement", preuves={"autres": [2]})) == ["fusionner"]
+
+    def test_l_edition_rejoint_la_fiche_gardee_et_la_fusion_est_consignee(
+        self, data_manager, artiste
+    ):
+        from src.utils import corrections_fiches as cf
+
+        live = Track(title="Suzy (Live)", artist=artiste, duration=200)
+        live.genius_id = 11
+        live.id = data_manager.save_track(live)
+        annee = Track(title="Suzy (Live 2006)", artist=artiste, duration=201)
+        annee.genius_id = 12
+        annee.id = data_manager.save_track(annee)
+        preuves = {"autres": [annee.id], "titre_autre": "Suzy (Live 2006)"}
+        cas = revue.Cas("meme_enregistrement", live.id, "Suzy (Live)", "m", 0, preuves, "k")
+        (action,) = [a for a in revue_actions.actions_pour(cas) if a.code.startswith("noter")]
+        ctx = _ctx(data_manager, artiste)
+        compte_rendu = revue_actions.executer(action, ctx, cas)
+
+        assert compte_rendu == "« Suzy (Live) » notée en édition de « Suzy (Live 2006) »"
+        (fiche,) = data_manager.get_artist_tracks(artiste.id)
+        assert fiche.id == annee.id and fiche.duration == 201
+        (e,) = data_manager.get_track_editions(annee.id)
+        assert (e["duration"], e["genius_id"]) == (200, 11)
+        assert cf.genius_ids_absorbes("Booba") == {11}
+        assert live.id not in ctx.tracks

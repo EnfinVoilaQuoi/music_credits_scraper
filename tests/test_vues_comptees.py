@@ -40,7 +40,13 @@ def test_un_verdict_normal_la_fait_compter():
     assert vue_comptee(fiche, *PUB, "genius_media", {cle})
 
 
-def test_le_recalcul_en_base_ecarte_la_pub(data_manager):
+def test_le_recalcul_calcule_lui_meme_les_exclusions(data_manager):
+    """Chantier A (2026-11-22) : les exclusions `vues_comptees` ne viennent
+    plus de l'appelant. Un ensemble passé à la main donnait un total que le
+    verdict de la colonne (`_rematerialiser_fiche`) défaisait ensuite."""
+    import inspect
+
+    assert list(inspect.signature(data_manager.recalculer_vues_ytm).parameters) == ["track_id"]
     a = Artist(name="Médine")
     a.id = data_manager.save_artist(a)
     t = Track(title="Skit - Limits", artist=a, genius_id=42)
@@ -54,13 +60,9 @@ def test_le_recalcul_en_base_ecarte_la_pub(data_manager):
             ),
         ],
     )
-    assert data_manager.recalculer_vues_ytm(t.id, {PUB[0]}) == 52_583
-    assert data_manager.recalculer_vues_ytm(t.id, {PUB[0], "ZmVqva48lmE"}) is None
-    with data_manager.engine.connect() as conn:
-        assert (
-            conn.exec_driver_sql("SELECT ytm_streams FROM tracks WHERE id = ?", (t.id,)).scalar()
-            is None
-        )
+    assert data_manager.recalculer_vues_ytm(t.id) == 52_583
+    # Le total écrit est celui du verdict : un recalcul de la fiche ne le change pas.
+    assert data_manager.rematerialiser(appliquer=False) == {}
 
 
 def _fiche_en_base(data_manager):
@@ -103,14 +105,15 @@ def test_valider_le_lien_genius_le_fait_compter_aussitot(data_manager):
 
 
 def test_rejeter_une_video_mesuree_la_retire_du_total(data_manager):
-    from src.utils.youtube_integration import reject_youtube_link
+    from src.utils.youtube_integration import reject_youtube_link, set_youtube_link
 
     class _Chercheur:
         def forget(self, *_):
             return True
 
     t = _fiche_en_base(data_manager)
-    data_manager.recalculer_vues_ytm(t.id, set())
+    # Validée (✔️, `manual`) : la vidéo compte — puis elle est rejetée.
+    set_youtube_link(data_manager, t, f"https://www.youtube.com/watch?v={PUB[0]}")
     assert _ytm(data_manager, t.id) == 2_842_605 + 52_583
     t = next(x for x in data_manager.get_artist_tracks(t.artist.id) if x.id == t.id)
     reject_youtube_link(

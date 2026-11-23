@@ -241,18 +241,20 @@ def test_forme_inverse_l_album_greffe_sur_la_parution_du_single(data_manager):
     )
     with dm.engine.begin() as conn:
         (single,) = conn.execute(text("SELECT id FROM releases")).one()
+    # La page Genius de l'album (id 42), qui n'identifiait pas encore ce disque,
+    # adopte la parution au même titre — celle du single — et s'y greffe.
     for i in range(4):
         t = Track(title=f"Piste {i}", artist=artist, album="BULLY")
         t.id = dm.save_track(t)
-        dm.link_track_to_release(single, t.id, source="genius", matched_by="genius")
-    with dm.engine.begin() as conn:
-        conn.execute(
-            text(
-                "INSERT INTO release_identifiers (release_id, artist_id, source, external_id) "
-                "VALUES (:r, :a, 'genius', '42')"
-            ),
-            {"r": single, "a": artist.id},
+        dm.record_release_observations(
+            t.id,
+            [
+                ReleaseObservation(
+                    title="BULLY", source="genius", external_release_id=42, confidence="genius"
+                )
+            ],
         )
+        assert [r["id"] for r in dm.get_track_releases(t.id)] == [single]
     (cas,) = dm.singles_fondus()
     assert cas["album_deezer"] is None
     dm.singles_fondus(appliquer=True)

@@ -6,19 +6,58 @@ from datetime import datetime
 from pathlib import Path
 
 from src.config import DATA_DIR
+from src.utils import donnees_lues
+from src.utils.donnees_lues import DonneesAbsentes
 from src.utils.fichiers_json import ecrire_atomique
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+#: Le `data/` de la configuration : seul celui-là passe par la garde du
+#: worktree sans données (`donnees_lues`) ; un `DATA_DIR` redirigé (tests,
+#: `--donnees`) non.
+_DATA_DIR_CONFIG = DATA_DIR
 
 
 class DisabledTracksManager:
     """Gère la persistance des morceaux désactivés pour chaque artiste"""
 
     def __init__(self):
-        self.disabled_tracks_dir = DATA_DIR / "disabled_tracks"
-        self.disabled_tracks_dir.mkdir(exist_ok=True)
-        logger.info(f"Manager des morceaux désactivés initialisé: {self.disabled_tracks_dir}")
+        self._dossier: Path | None = None
+        self._lecture_seule = False
+        try:
+            self.disabled_tracks_dir  # noqa: B018 — résolu (et créé) d'emblée
+        except DonneesAbsentes:
+            # Levée à la première LECTURE, pas ici : la fabrique des
+            # dépendances (`runtime`) crée le gestionnaire même pour une
+            # étape qui ne le lit pas.
+            pass
+
+    @property
+    def disabled_tracks_dir(self) -> Path:
+        """Le dossier des désactivations. Depuis un worktree dont `data/` n'a
+        pas le brut, LÈVE `DonneesAbsentes` (une mesure n'y verrait aucune page
+        désactivée) ; `DONNEES_LUES_DIR` le fait lire, sans écriture."""
+        if self._dossier is None:
+            if Path(DATA_DIR) == Path(_DATA_DIR_CONFIG):
+                racine, self._lecture_seule = donnees_lues.dossier_des_donnees()
+            else:
+                racine = Path(DATA_DIR)
+            self._dossier = racine / "disabled_tracks"
+            if not self._lecture_seule:
+                self._dossier.mkdir(exist_ok=True)
+            logger.info(f"Manager des morceaux désactivés initialisé: {self._dossier}")
+        return self._dossier
+
+    @disabled_tracks_dir.setter
+    def disabled_tracks_dir(self, dossier: Path) -> None:
+        self._dossier, self._lecture_seule = Path(dossier), False
+
+    def _exiger_ecriture(self) -> None:
+        if self.disabled_tracks_dir and self._lecture_seule:
+            raise DonneesAbsentes(
+                f"{self._dossier} lu par DONNEES_LUES_DIR : lecture seule, pas d'écriture"
+            )
 
     def _get_artist_file(self, artist_name: str) -> Path:
         """Retourne le chemin du fichier pour un artiste donné"""
@@ -43,6 +82,7 @@ class DisabledTracksManager:
         Returns:
             bool: True si la sauvegarde a réussi
         """
+        self._exiger_ecriture()
         try:
             file_path = self._get_artist_file(artist_name)
 
@@ -198,6 +238,7 @@ class DisabledTracksManager:
         Returns:
             int: Nombre de fichiers supprimés
         """
+        self._exiger_ecriture()
         attendus = {self._get_artist_file(nom).name for nom in artist_names}
         cleaned_count = 0
 

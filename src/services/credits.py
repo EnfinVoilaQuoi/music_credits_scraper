@@ -52,10 +52,18 @@ class OptionsCredits:
     #: (lus avant le 2026-10-27) : avec `force_sync`, la relecture qui la pose
     #: sans refaire toute la discographie (Kanye : 2 h ne suffisaient pas).
     lrc_sans_duree_audio: bool = False
+    #: Seulement les crédits d'ALBUM Genius, aucune fiche relue (`credits
+    #: --albums-seuls`) : le rattrapage des albums jamais lus, une requête chacun
+    #: (2026-11-20 : 1 720 albums, 105 artistes).
+    albums_seuls: bool = False
     #: Ne traiter que ces fiches (ID de base, `credits --fiches`) : relire trois
     #: pages sans relancer toute la discographie (2026-10-31, crédits Genius de
     #: versions lues avant le correctif de l'héritage).
     track_ids: frozenset[int] | None = None
+    #: Une absence constatée récemment (page lue sans crédit, Discogs « rien »)
+    #: ne fait plus taire la donnée (option de run « ignorer les délais »,
+    #: `--sans-delais`, 2026-11-22) ; ce qui est là n'est pas relu.
+    sans_delais: bool = False
 
     @property
     def paroles(self) -> bool:
@@ -67,6 +75,8 @@ class OptionsCredits:
 
     def taches(self) -> list[str]:
         """Libellés des phases actives (confirmation GUI, en-tête CLI)."""
+        if self.albums_seuls:
+            return ["Crédits d'album Genius"]
         out = []
         if self.genius or self.discogs:
             srcs = [n for n, on in (("Genius", self.genius), ("Discogs", self.discogs)) if on]
@@ -137,6 +147,8 @@ class BilanCredits(Bilan):
     genius_sans_credit: int = 0
     #: Morceaux non redemandés à Discogs : crédits déjà là, ou « rien » récent.
     discogs_ignores: int = 0
+    #: Phase des crédits d'ALBUM Genius (`credits_album.BilanAlbums`).
+    albums: object | None = None
 
 
 #: Une page Genius lue depuis moins longtemps n'est pas relue, sauf crédits
@@ -161,7 +173,9 @@ def avec_page_genius(tracks, phase: str) -> list:
 LECTURE_GENIUS = "genius_scrape"
 
 
-def pages_genius_utiles(runtime: Runtime, tracks, *, force: bool) -> list:
+def pages_genius_utiles(
+    runtime: Runtime, tracks, *, force: bool, sans_delais: bool = False
+) -> list:
     """Les morceaux dont la page Genius a quelque chose à apporter à la phase
     crédits : crédits Genius manquants (constat d'absence récent compris, comme
     partout), ou dernière lecture en échec. Forcé : tous.
@@ -175,7 +189,11 @@ def pages_genius_utiles(runtime: Runtime, tracks, *, force: bool) -> list:
     if force:
         return list(tracks)
     return morceaux_a_traiter(
-        runtime, tracks, manquants=(Manque.CREDITS_GENIUS,), echecs=(LECTURE_GENIUS,)
+        runtime,
+        tracks,
+        manquants=(Manque.CREDITS_GENIUS,),
+        echecs=(LECTURE_GENIUS,),
+        sans_delais=sans_delais,
     )
 
 
@@ -267,6 +285,9 @@ class Clients:
     discogs: Callable[[], object] = _discogs_client
     lyrics: Callable[[OptionsCredits], object] = _lyrics_provider
     ytmusic_meta: Callable[[], object] = _ytmusic_api
+    #: Client de l'API Genius (`fiche_album`) : phase des crédits d'album.
+    #: None = celui du runtime, sinon un neuf.
+    genius_api: Callable[[], object] | None = None
 
 
 def _manque_production(track: Track) -> bool:
@@ -351,7 +372,9 @@ def _phase_youtube(
             canaux[vid] = info.get("channel")
 
     topic_count = clip_count = 0
-    existing_credits: dict[int, set[tuple[str, str]]] = {}
+    # Clé « même personne, même rôle » → le crédit qui la porte : une
+    # description qui redonne un crédit connu le CONFIRME (`credit_sources`).
+    existing_credits: dict[int, dict[tuple[str, str], object]] = {}
 
     for vid, (track, kind) in track_by_vid.items():
         if hooks.should_stop():
@@ -364,7 +387,7 @@ def _phase_youtube(
 
         tid = track.id or id(track)
         if tid not in existing_credits:
-            existing_credits[tid] = {_cle_youtube(c) for c in track.credits}
+            existing_credits[tid] = {_cle_youtube(c): c for c in track.credits}
         seen = existing_credits[tid]
 
         new_credits = []
@@ -378,8 +401,10 @@ def _phase_youtube(
                 for c in parsed:
                     key = _cle_youtube(c)
                     if key not in seen:
-                        seen.add(key)
+                        seen[key] = c
                         new_credits.append(c)
+                    else:
+                        seen[key].confirmer_par(c)
                 if new_credits:
                     topic_count += 1
 
@@ -394,8 +419,10 @@ def _phase_youtube(
                 for c in parsed_clip:
                     key = _cle_youtube(c)
                     if key not in seen:
-                        seen.add(key)
+                        seen[key] = c
                         new_credits.append(c)
+                    else:
+                        seen[key].confirmer_par(c)
                 if new_credits and not any(nc.source == "youtube_topic" for nc in new_credits):
                     clip_count += 1
 
@@ -535,6 +562,10 @@ def run(
     """Les trois phases puis la sauvegarde. À appeler HORS de la boucle asyncio
     (les crawls Genius passent par `run_sync`), sous `run_scope(Flow.ENRICHMENT)`."""
     clients = clients or Clients()
+    if options.albums_seuls:
+        bilan = BilanCredits(morceaux=0)
+        _phase_albums(runtime, artist, options, hooks, bilan, clients)
+        return bilan
     if options.lrc_sans_duree_audio:
         tracks = [
             t
@@ -544,6 +575,9 @@ def run(
     bilan = BilanCredits(morceaux=len(tracks))
     if not tracks:
         conclure_sans_morceau(bilan, artist, options.track_ids)
+        # Les crédits d'ALBUM ne dépendent pas des fiches à relire : un album
+        # aux fiches complètes peut n'avoir jamais été lu (*M.A.N*, 2026-11-20).
+        _phase_albums(runtime, artist, options, hooks, bilan, clients)
         # Rien à lire, mais l'héritage se recalcule quand même : un original
         # désigné à la main (`version_de`) change sans qu'aucune page ne soit
         # relue (live « Come Again (feat. Big Red) », fiche sans page, 2026-11-19).
@@ -561,7 +595,9 @@ def run(
             # remplace les crédits `genius` d'un morceau quand SA page est lue,
             # et seulement alors — un échec de page n'efface rien.
             avec_page = avec_page_genius(tracks, "Genius")
-            besoin = pages_genius_utiles(runtime, avec_page, force=options.force_credits)
+            besoin = pages_genius_utiles(
+                runtime, avec_page, force=options.force_credits, sans_delais=options.sans_delais
+            )
             bilan.genius_complets = len(avec_page) - len(besoin)
             if bilan.genius_complets:
                 logger.info(
@@ -582,6 +618,7 @@ def run(
             # crédit : une RÉPONSE de Genius, datée — sans ce constat, la
             # sélection les comptait « manquantes » pour toujours (2026-10-29).
             bilan.genius_sans_credit = constater_pages_sans_credits(runtime, avec_page)
+            _phase_albums(runtime, artist, options, hooks, bilan, clients)
         if hooks.should_stop():
             bilan.interrompu("arrêt demandé après les crédits Genius")
             return _sauver(runtime, artist, tracks, bilan)
@@ -600,7 +637,12 @@ def run(
             a_lire = (
                 tracks
                 if options.force_credits
-                else morceaux_a_traiter(runtime, tracks, manquants=(Manque.CREDITS_DISCOGS,))
+                else morceaux_a_traiter(
+                    runtime,
+                    tracks,
+                    manquants=(Manque.CREDITS_DISCOGS,),
+                    sans_delais=options.sans_delais,
+                )
             )
             bilan.discogs_ignores = len(tracks) - len(a_lire)
             ok = ko = 0
@@ -766,6 +808,44 @@ def run(
                 logger.warning("Fermeture scraper Genius échouée", exc_info=True)
 
 
+def _phase_albums(
+    runtime: Runtime,
+    artist: Artist,
+    options: OptionsCredits,
+    hooks: Hooks,
+    bilan: BilanCredits,
+    clients: Clients,
+) -> None:
+    """Crédits d'ALBUM Genius (`services.credits_album`) : une lecture par
+    album de l'artiste, pas par morceau ; avec `--fiches`, les albums de ces
+    seules fiches. Une panne ici n'arrête pas l'étape."""
+    if not options.genius or not artist.id or hooks.should_stop():
+        return
+    from src.services import credits_album
+
+    try:
+        bilan.albums = credits_album.lire_credits_albums(
+            runtime.data_manager,
+            artist.id,
+            force=options.force_credits,
+            track_ids=options.track_ids,
+            should_stop=hooks.should_stop,
+            progress=lambda c, tot, nom: hooks.progress(c, tot, nom, "Crédits d'album"),
+            client_factory=clients.genius_api or (lambda: _client_genius_api(runtime)),
+        )
+    except Exception:
+        logger.exception("Phase des crédits d'album Genius échouée")
+        bilan.erreurs.append("crédits d'album")
+
+
+def _client_genius_api(runtime: Runtime):
+    if getattr(runtime, "genius_api", None) is not None:
+        return runtime.genius_api
+    from src.api.genius_api import GeniusAPI
+
+    return GeniusAPI()
+
+
 def _sauver(
     runtime: Runtime, artist: Artist, tracks: list[Track], bilan: BilanCredits
 ) -> BilanCredits:
@@ -814,6 +894,17 @@ def resume(bilan: BilanCredits, options: OptionsCredits, desactives: int = 0) ->
                 f"  - 🎫 Crédits que seule l'API donne, gardés, sur "
                 f"{len(bilan.genius['api_ecarts'])} morceau(x) (détail au log) : {titres}\n"
             )
+        msg += "\n"
+    if bilan.albums is not None and bilan.albums.albums:
+        a = bilan.albums
+        msg += "🖼️ Crédits d'album Genius:\n"
+        msg += (
+            f"  - Albums lus : {a.lus} ({a.credits} crédit(s)) • sans crédit d'album : "
+            f"{a.absents} • échecs : {a.echecs}\n"
+            f"  - Déjà lus, non relus : {a.albums - a.a_lire}\n"
+        )
+        if a.quota:
+            msg += "  - ⚠️ Quota de l'API Genius épuisé : le reste au prochain run\n"
         msg += "\n"
     if bilan.discogs:
         msg += "💿 Crédits Discogs:\n"

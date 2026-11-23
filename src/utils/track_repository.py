@@ -8,6 +8,7 @@ constant vs l'ancien `data_manager.py` (refonte 1.5 puis bascule Core phase E2).
 
 import json
 import time
+from collections.abc import Iterable
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Any
@@ -20,7 +21,7 @@ from src.enrichment.observation import Observation
 from src.models import Credit, ReleaseObservation, Track, TrackSpotifyId, TrackVideo
 from src.models.track import SOURCE_NON_TRANSCRITES, CreditRole
 from src.persistence.binding import date_bind
-from src.persistence.schema import albums, artists, credits, tracks
+from src.persistence.schema import artists, credits, tracks
 from src.utils.codes_barres import cle_upc
 from src.utils.corrections_fiches import (
     comptes_ailleurs,
@@ -29,6 +30,13 @@ from src.utils.corrections_fiches import (
     parutions_refusees_de,
     refus_videos_a_la_fusion,
     videos_refusees,
+)
+from src.utils.credit_sources import ecrire as ecrire_confirmations
+from src.utils.credit_sources import lire as lire_confirmations
+from src.utils.credit_sources import (
+    retirer_source,
+    retirer_source_en_base,
+    unir_confirmations_en_base,
 )
 from src.utils.credits_genius_api import (
     purger_provisoires_couverts,
@@ -43,6 +51,18 @@ from src.utils.logger import get_logger
 from src.utils.paroles_genius import a_des_paroles, paroles_factices
 from src.utils.participation import SQL_SIGNATURES_DE_DISQUES
 from src.utils.positions_disque import position_retenue
+from src.utils.projets_en_base import (
+    BilanProjets,
+    cas_de_projets,
+    memoriser_meme_projet,
+    oublier_meme_projet,
+    poser_nature_edition,
+    poser_nature_manuelle,
+    poser_streams_spotify,
+    poser_streams_ytm,
+    projet_de,
+    regrouper_en_base,
+)
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
 from src.utils.track_mapper import (
     _clean_duration,
@@ -138,26 +158,6 @@ def ecart_spotify_principal(colonne: str | None, lignes: dict[str, bool]) -> str
     else:
         return None
     return motif + (f" (principale : {', '.join(autres)})" if autres else "")
-
-
-def release_identity_key(
-    title: str,
-    scope: str,
-    deezer_album_id: int | None = None,
-    credited_artist_name: str | None = None,
-) -> str:
-    """Clé stable d'une parution dans le catalogue d'un artiste.
-
-    Un identifiant Deezer désigne une parution précise, là où son titre ne le
-    fait pas (deluxe, homonymes, compilations). Sans ID, la clé manuelle reste
-    volontairement étroite : elle ne rapproche jamais deux auteurs crédités
-    différents sous un même titre.
-    """
-    if deezer_album_id:
-        return f"deezer:{int(deezer_album_id)}"
-    return ":".join(
-        ("manual", scope, normalize_title(title), normalize_title(credited_artist_name or ""))
-    )
 
 
 def source_lien_retenue(ancienne: str | None, nouvelle: str | None) -> str | None:
@@ -367,9 +367,9 @@ class TrackRepository:
                         )
                         if frais
                     }
-                    en_base = [
-                        c for c in self._get_track_credits(conn, track.id) if c.source not in relues
-                    ]
+                    en_base = self._get_track_credits(conn, track.id)
+                    for source in relues:
+                        en_base = retirer_source(en_base, source)
                     track.credits = unir_credits(en_base, track.credits)
                 self._signaler_identites_concurrentes(track, existing_track)
                 if track.is_featuring is None:
@@ -700,12 +700,13 @@ class TrackRepository:
                 ):
                     if not getattr(track, frais):
                         continue
+                    # La source relue se RETIRE (`credit_sources`) : un crédit
+                    # qu'une autre source confirme reste, porté par elle.
                     effacer_chez_les_soeurs(
                         conn,
                         track.id,
-                        lambda jumelle, source=source: conn.execute(
-                            text("DELETE FROM credits WHERE track_id = :tid AND source = :src"),
-                            {"tid": jumelle, "src": source},
+                        lambda jumelle, source=source: retirer_source_en_base(
+                            conn, jumelle, source
                         ),
                     )
                     setattr(track, frais, False)
@@ -771,8 +772,9 @@ class TrackRepository:
             conn.execute(
                 text(
                     "INSERT INTO credits "
-                    "(track_id, name, role, role_detail, tracks, source) "
-                    "VALUES (:track_id, :name, :role, :role_detail, :tracks, :source)"
+                    "(track_id, name, role, role_detail, tracks, source, confirme_par) "
+                    "VALUES (:track_id, :name, :role, :role_detail, :tracks, :source, "
+                    ":confirme_par)"
                 ),
                 {
                     "track_id": track_id,
@@ -781,6 +783,7 @@ class TrackRepository:
                     "role_detail": credit.role_detail,
                     "tracks": credit.tracks,
                     "source": credit.source,
+                    "confirme_par": ecrire_confirmations(credit.confirmations, credit.source),
                 },
             )
         except SQLAlchemyError as e:
@@ -1030,6 +1033,7 @@ class TrackRepository:
             # s'invente pas (un rescrape Genius purgerait la ligne
             # comme la sienne). 0 ligne concernée au 2026-09-24.
             source=str(row["source"] or "legacy"),
+            confirmations=lire_confirmations(row.get("confirme_par")),
         )
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1279,6 +1283,13 @@ class TrackRepository:
         colonne, et inventer une source serait pire que d'avouer qu'on l'ignore.
         Le moteur l'écarte dès qu'une source réelle existe, exactement comme il
         faut. N'écrase jamais une observation existante.
+
+        UNE transaction par fiche, par `_ecrire` (2026-11-22, chantier A) : la
+        fiche qui reçoit son observation est recalculée avec ses sœurs avant le
+        commit, et le verrou d'écriture ne dure que le temps d'une fiche (une
+        seule transaction pour tout le lot — 6 201 fiches datées après e24 — le
+        tenait d'autant, sans aucun recalcul). Une fiche en erreur n'arrête pas
+        les suivantes.
         """
         if field not in self.COLONNES_DISCOGRAPHIE:
             raise ValueError(f"champ non arbitrable : {field!r}")
@@ -1286,10 +1297,10 @@ class TrackRepository:
         if not lignes:
             return 0
         maintenant = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        try:
-            posees = 0
-            with self.engine.begin() as conn:
-                for track_id, valeur in lignes:
+        posees = 0
+        for track_id, valeur in lignes:
+            try:
+                with self._ecrire() as conn:
                     res = conn.execute(
                         text(
                             "INSERT OR IGNORE INTO observations "
@@ -1305,12 +1316,13 @@ class TrackRepository:
                     )
                     # Compter ce qui est POSÉ, pas ce qui est demandé : rejoué,
                     # le script annonçait N déclarations sans rien écrire.
-                    posees += int(res.rowcount or 0)
-            logger.info(f"🧾 {posees} colonne(s) {field} déclarée(s) `legacy`")
-            return posees
-        except SQLAlchemyError as e:
-            logger.error(f"Erreur declarer_provenance_legacy({field}): {e}")
-            return 0
+                    if res.rowcount:
+                        self._toucher(conn, int(track_id))
+                        posees += int(res.rowcount)
+            except SQLAlchemyError as e:
+                logger.error(f"Erreur declarer_provenance_legacy({field}, #{track_id}): {e}")
+        logger.info(f"🧾 {posees} colonne(s) {field} déclarée(s) `legacy`")
+        return posees
 
     def _upsert_observations(self, conn, track_id: int, observations) -> None:
         if observations:
@@ -1463,6 +1475,7 @@ class TrackRepository:
                 )
                 # Parutions (e31/e32) : pas de cascade SQLite, les preuves
                 # (`release_track_sources`) partent AVANT le lien qu'elles portent.
+                artistes_des_parutions = self._artistes_des_parutions(conn, track_id)
                 conn.execute(
                     text(
                         "DELETE FROM release_track_sources WHERE release_track_id IN "
@@ -1473,6 +1486,9 @@ class TrackRepository:
                 conn.execute(
                     text("DELETE FROM release_tracks WHERE track_id = :tid"), {"tid": track_id}
                 )
+                # Les éditions ont perdu une fiche : leurs projets se refont (e67).
+                for artiste in artistes_des_parutions:
+                    regrouper_en_base(conn, artiste)
                 # Une variante pointée vers ce morceau (e29) n'a plus de fiche ;
                 # les cas et le journal de la revue ne désignent plus rien
                 # (2026-10-11 : 16 signalements pointaient des fiches supprimées).
@@ -1516,6 +1532,65 @@ class TrackRepository:
         "apple_music_checked_at",
     )
 
+    #: Colonne dépendante → l'identifiant qu'elle décrit : refusé, il ne passe
+    #: pas non plus.
+    _COLONNE_DE_L_ID = {
+        "spotify_url": "spotify_id",
+        "spotify_page_title": "spotify_id",
+        "spotify_id_checked_at": "spotify_id",
+        "deezer_url": "deezer_id",
+        "deezer_checked_at": "deezer_id",
+        "apple_music_checked_at": "apple_music_id",
+    }
+
+    @staticmethod
+    def _identites_refusees_a_la_fusion(conn, keep_id: int, delete_id: int) -> set[str]:
+        """Les colonnes d'identité de `delete_id` dont la valeur est refusée pour
+        `keep_id` (refus à la main ou d'une règle : l'identifiant a été jugé
+        faux pour cet enregistrement, la fusion n'y change rien)."""
+        from src.utils.corrections_fiches import (
+            NATURE_DU_REFUS_D_IDENTITE,
+            cle_de_refus,
+            refus_de_la_fiche,
+        )
+
+        colonnes = list(NATURE_DU_REFUS_D_IDENTITE)
+        ligne = (
+            conn.execute(
+                text(f"SELECT {', '.join(colonnes)} FROM tracks WHERE id = :d"),  # noqa: S608
+                {"d": delete_id},
+            )
+            .mappings()
+            .first()
+        )
+        if ligne is None:
+            return set()
+        refusees = set()
+        for col, nature in NATURE_DU_REFUS_D_IDENTITE.items():
+            valeur = ligne[col]
+            if valeur in (None, ""):
+                continue
+            if cle_de_refus(nature, valeur) in refus_de_la_fiche(conn, keep_id, nature):
+                refusees.add(col)
+        return refusees
+
+    @staticmethod
+    def _spotify_refuses_de(conn, keep_id: int, delete_id: int) -> list[str]:
+        """Les ID de `track_spotify_ids` de `delete_id` que `keep_id` refuse."""
+        from src.utils.corrections_fiches import refus_de_la_fiche
+
+        refuses = refus_de_la_fiche(conn, keep_id, "id_spotify")
+        if not refuses:
+            return []
+        return [
+            r[0]
+            for r in conn.execute(
+                text("SELECT spotify_id FROM track_spotify_ids WHERE track_id = :d"),
+                {"d": delete_id},
+            )
+            if r[0] in refuses
+        ]
+
     def merge_tracks(self, keep_id: int, delete_id: int) -> bool:
         """Fusionne delete_id dans keep_id : transfère les crédits (en écartant
         ceux déjà présents à l'identique sur le morceau conservé) et les erreurs
@@ -1549,7 +1624,14 @@ class TrackRepository:
                 # fusions du lot 1.1 l'avaient perdu ; le dialogue de l'app ne le
                 # recopiait pas non plus). Avant `track_spotify_ids` : `is_primary`
                 # se recale sur la colonne.
+                # Un identifiant que la fiche GARDÉE refuse ne passe pas, ni sa
+                # ligne `track_spotify_ids` : « New God Flow » (fiche Deezer,
+                # ID posé par `relier_par_isrc` le 2026-11-11) fusionnée dans
+                # « New God Flow.1 » y remettait l'ID refusé à la main le 31/10.
+                refuses = self._identites_refusees_a_la_fusion(conn, keep_id, delete_id)
                 for col in self._COLONNES_IDENTITE_FUSION:
+                    if self._COLONNE_DE_L_ID.get(col, col) in refuses:
+                        continue
                     conn.execute(
                         text(
                             f"UPDATE tracks SET {col} = "
@@ -1562,6 +1644,9 @@ class TrackRepository:
                 # provisoires de l'API partent AVANT la dédup, sinon l'un d'eux
                 # écarterait le crédit scrapé identique de l'autre fiche.
                 purger_provisoires_couverts(conn, (keep_id, delete_id))
+                # Les sources d'un crédit que les deux fiches portent restent
+                # sur la ligne conservée (`credit_sources`), avant la dédup.
+                unir_confirmations_en_base(conn, delete_id, keep_id)
                 # Crédits : ne transférer que ceux absents du morceau conservé
                 conn.execute(
                     text("""
@@ -1603,6 +1688,16 @@ class TrackRepository:
                     {"delete_id": delete_id},
                 )
                 self._unir_compteurs_ytm(conn, keep_id, delete_id)
+                if "spotify_id" in refuses:
+                    # Ce que les sources liées à l'ID ont dit de la fiche absorbée
+                    # décrit l'ID refusé : il ne passe pas non plus.
+                    sources = bindparam("sources", expanding=True)
+                    conn.execute(
+                        text(
+                            "DELETE FROM observations WHERE track_id = :d AND source IN :sources"
+                        ).bindparams(sources),
+                        {"d": delete_id, "sources": list(self.SOURCES_LIEES_A_L_ID_SPOTIFY)},
+                    )
                 # Observations : dédup par la clé unique (field, source) — le keep
                 # gagne (on écarte celles du doublon déjà couvertes) — puis
                 # réaffectation du reste. Pas de cascade FK (E4).
@@ -1700,6 +1795,15 @@ class TrackRepository:
                 # doublons portent souvent chacun une édition différente (le
                 # single d'un côté, l'album de l'autre) : en faire choisir une
                 # perdrait la reconnaissance de l'autre à la récolte croisée.
+                # Sauf les ID que la fiche gardée refuse.
+                for sid in self._spotify_refuses_de(conn, keep_id, delete_id):
+                    conn.execute(
+                        text(
+                            "DELETE FROM track_spotify_ids "
+                            "WHERE track_id = :d AND spotify_id = :s"
+                        ),
+                        {"d": delete_id, "s": sid},
+                    )
                 conn.execute(
                     text("""
                     DELETE FROM track_spotify_ids WHERE track_id = :delete_id AND EXISTS (
@@ -1752,6 +1856,10 @@ class TrackRepository:
                     ),
                     {"keep_id": keep_id, "delete_id": delete_id},
                 )
+                # Deux éditions peuvent désormais partager la fiche gardée :
+                # leurs projets se refont (e67).
+                for artiste in self._artistes_des_parutions(conn, keep_id):
+                    regrouper_en_base(conn, artiste)
                 # Les colonnes ARBITRÉES doivent suivre les observations qu'on
                 # vient de déplacer. Sans ça, le morceau conservé porte les
                 # observations du doublon et une colonne restée VIDE — constaté
@@ -2267,7 +2375,9 @@ class TrackRepository:
             ).mappings()
             return [dict(ligne) for ligne in lignes]
 
-    def reclasser_credits(self, roles: dict, suppressions=()) -> tuple[int, int]:
+    def reclasser_credits(
+        self, roles: dict, suppressions=(), details: dict | None = None
+    ) -> tuple[int, int]:
         """Change le rôle de crédits existants et en retire d'autres.
 
         Écrivain dédié, comme `purger_credits_relations_deguisees` : un script
@@ -2279,6 +2389,10 @@ class TrackRepository:
 
         `suppressions` sert les doublons intra-source (Genius nomme la même
         personne sous « Writer » ET sous « Writers » resté en `Other`).
+
+        `details` ({id: libellé}) pose AUSSI le `role_detail` des crédits qui y
+        figurent : un crédit qui DEVIENT `Other` doit porter son libellé, sans
+        quoi rien ne dirait plus ce qu'il est (« Sample Clearance », 2026-11-20).
 
         Rend (rôles changés, lignes retirées).
         """
@@ -2296,11 +2410,21 @@ class TrackRepository:
                     )
                     retires += int(res.rowcount or 0)
                 changes = 0
+                details = details or {}
                 for credit_id, role in roles.items():
-                    res = conn.execute(
-                        text("UPDATE credits SET role = :role WHERE id = :id"),
-                        {"role": role, "id": int(credit_id)},
-                    )
+                    if credit_id in details:
+                        res = conn.execute(
+                            text(
+                                "UPDATE credits SET role = :role, role_detail = :detail "
+                                "WHERE id = :id"
+                            ),
+                            {"role": role, "detail": details[credit_id], "id": int(credit_id)},
+                        )
+                    else:
+                        res = conn.execute(
+                            text("UPDATE credits SET role = :role WHERE id = :id"),
+                            {"role": role, "id": int(credit_id)},
+                        )
                     changes += int(res.rowcount or 0)
             logger.info(f"🔁 {changes} crédit(s) reclassé(s), {retires} doublon(s) retiré(s)")
             return changes, retires
@@ -2379,15 +2503,11 @@ class TrackRepository:
                     ),
                     {"id": track_id},
                 )
-                conn.execute(
-                    # Provisoires de l'API compris : ils viennent de la même
-                    # page mélangée.
-                    text(
-                        "DELETE FROM credits WHERE track_id = :id "
-                        "AND source IN ('genius', 'genius_api')"
-                    ),
-                    {"id": track_id},
-                )
+                # Provisoires de l'API compris : ils viennent de la même page
+                # mélangée. La page se RETIRE (`credit_sources`) : un crédit
+                # qu'une autre source donne aussi garde sa ligne.
+                for source in ("genius", "genius_api"):
+                    retirer_source_en_base(conn, track_id, source)
                 conn.execute(
                     text("DELETE FROM observations WHERE track_id = :id AND source = 'genius'"),
                     {"id": track_id},
@@ -3006,6 +3126,40 @@ class TrackRepository:
             return len(ids)
         except SQLAlchemyError as e:
             logger.error(f"Erreur forget_credit({track_id}, {name}, {role}): {e}")
+            return 0
+
+    def ajouter_confirmations_credits(self, confirmations: dict[int, set[str]]) -> int:
+        """Ajoute des sources en CONFIRMATION de crédits existants
+        (`{credit_id: sources}`, `credits.confirme_par`, e70) — union, jamais
+        retrait ; la source de la ligne et un héritage n'y entrent pas. Écrivain
+        du rattrapage `scripts/rattraper_confirmations_credits.py`. Rend le
+        nombre de lignes changées."""
+        from src.utils.credit_sources import ecrire, lire
+        from src.utils.version_heritage import est_herite
+
+        changees = 0
+        try:
+            with self.engine.begin() as conn:
+                for credit_id, sources in confirmations.items():
+                    ligne = conn.execute(
+                        text("SELECT source, confirme_par FROM credits WHERE id = :i"),
+                        {"i": int(credit_id)},
+                    ).first()
+                    if ligne is None:
+                        continue
+                    avant = lire(ligne[1])
+                    apres = avant | {s for s in sources if s and not est_herite(s)}
+                    apres -= {ligne[0]}
+                    if apres == avant:
+                        continue
+                    conn.execute(
+                        text("UPDATE credits SET confirme_par = :c WHERE id = :i"),
+                        {"c": ecrire(apres, ligne[0]), "i": int(credit_id)},
+                    )
+                    changees += 1
+            return changees
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur ajouter_confirmations_credits: {e}")
             return 0
 
     def forget_discogs_credits(self, track_id: int, cles) -> int:
@@ -4486,6 +4640,153 @@ class TrackRepository:
             )
             return None
 
+    # ── Crédits d'ALBUM Genius (e66) ─────────────────────────────────────────
+    # Clé = l'ID d'album Genius ; l'album se relie à ses parutions par
+    # `release_identifiers` (source `genius`). Aucune colonne de fiche n'en
+    # dépend : écrivain hors `_ecrire`.
+
+    def albums_genius_de_l_artiste(
+        self, artist_id: int, track_ids: Iterable[int] | None = None
+    ) -> list[int]:
+        """Les ID d'album Genius des parutions À l'artiste (`scope='own'`),
+        restreintes à celles qui portent l'une des `track_ids` si elles sont
+        données. Triés, sans doublon."""
+        sql = (
+            "SELECT DISTINCT CAST(ri.external_id AS INTEGER) FROM release_identifiers ri "
+            "JOIN releases r ON r.id = ri.release_id "
+            "WHERE ri.source = 'genius' AND r.artist_id = :aid AND r.scope = 'own'"
+        )
+        params: dict[str, Any] = {"aid": artist_id}
+        if track_ids is not None:
+            ids = sorted({int(t) for t in track_ids})
+            if not ids:
+                return []
+            sql += (
+                " AND EXISTS (SELECT 1 FROM release_tracks rt WHERE rt.release_id = r.id "
+                "AND rt.track_id IN :tids)"
+            )
+            params["tids"] = ids
+        stmt = text(sql)
+        if track_ids is not None:
+            stmt = stmt.bindparams(bindparam("tids", expanding=True))
+        with self.engine.connect() as conn:
+            return sorted(int(r[0]) for r in conn.execute(stmt, params) if r[0])
+
+    def lectures_credits_album(self, genius_album_ids: Iterable[int]) -> dict[int, dict]:
+        """`{id: {issue, nb_credits, detail, lu_le}}` — la dernière lecture des
+        crédits d'album de chaque ID connu."""
+        ids = sorted({int(i) for i in genius_album_ids})
+        if not ids:
+            return {}
+        stmt = text(
+            "SELECT genius_album_id, issue, nb_credits, detail, lu_le "
+            "FROM genius_album_lectures WHERE genius_album_id IN :ids"
+        ).bindparams(bindparam("ids", expanding=True))
+        with self.engine.connect() as conn:
+            return {
+                int(r["genius_album_id"]): {
+                    "issue": r["issue"],
+                    "nb_credits": r["nb_credits"],
+                    "detail": r["detail"],
+                    "lu_le": r["lu_le"],
+                }
+                for r in conn.execute(stmt, {"ids": ids}).mappings()
+            }
+
+    def enregistrer_credits_album(
+        self,
+        genius_album_id: int,
+        issue: str,
+        credits_album: list | None = None,
+        *,
+        detail: str | None = None,
+        lu_le: datetime | None = None,
+    ) -> None:
+        """Écrivain DÉDIÉ des crédits d'album (une transaction par album).
+
+        `issue` « lu » ou « absent » : Genius a répondu, ses crédits REMPLACENT
+        ceux de l'album (aucun pour « absent »). « echec » : pas de réponse,
+        les crédits d'avant restent, seule la lecture est notée."""
+        from src.utils.credits_album_genius import ABSENT, ECHEC, LU
+
+        if issue not in (LU, ABSENT, ECHEC):
+            raise ValueError(f"issue de lecture inconnue : {issue!r}")
+        aid = int(genius_album_id)
+        credits_album = list(credits_album or []) if issue == LU else []
+        lu_le = (lu_le or datetime.now()).replace(microsecond=0)
+        with self.engine.begin() as conn:
+            if issue != ECHEC:
+                conn.execute(
+                    text("DELETE FROM genius_album_credits WHERE genius_album_id = :a"),
+                    {"a": aid},
+                )
+                for c in credits_album:
+                    conn.execute(
+                        text(
+                            "INSERT OR IGNORE INTO genius_album_credits "
+                            "(genius_album_id, name, role, role_detail, libelle, "
+                            "genius_artist_id) VALUES (:a, :n, :r, :d, :l, :g)"
+                        ),
+                        {
+                            "a": aid,
+                            "n": c.name,
+                            "r": c.role,
+                            "d": c.role_detail,
+                            "l": c.libelle,
+                            "g": c.genius_artist_id,
+                        },
+                    )
+            nb = conn.execute(
+                text("SELECT COUNT(*) FROM genius_album_credits WHERE genius_album_id = :a"),
+                {"a": aid},
+            ).scalar()
+            conn.execute(
+                text(
+                    "INSERT INTO genius_album_lectures "
+                    "(genius_album_id, issue, nb_credits, detail, lu_le) "
+                    "VALUES (:a, :i, :n, :d, :lu) ON CONFLICT(genius_album_id) DO UPDATE SET "
+                    "issue = excluded.issue, nb_credits = excluded.nb_credits, "
+                    "detail = excluded.detail, lu_le = excluded.lu_le"
+                ),
+                {"a": aid, "i": issue, "n": int(nb or 0), "d": detail, "lu": lu_le},
+            )
+
+    def credits_album(self, release_id: int) -> list[dict[str, Any]]:
+        """Les crédits d'album d'une parution, par son ID d'album Genius :
+        `[{name, role, role_detail, libelle, genius_artist_id, genius_album_id}]`,
+        dans l'ordre de Genius. Vide si la parution n'a pas d'ID Genius ou si
+        l'album n'a pas encore été lu (voir `lectures_credits_album`)."""
+        with self.engine.connect() as conn:
+            return [
+                dict(r)
+                for r in conn.execute(
+                    text(
+                        "SELECT c.name, c.role, c.role_detail, c.libelle, "
+                        "c.genius_artist_id, c.genius_album_id "
+                        "FROM genius_album_credits c "
+                        "WHERE c.genius_album_id IN (SELECT CAST(ri.external_id AS INTEGER) "
+                        "FROM release_identifiers ri WHERE ri.release_id = :r "
+                        "AND ri.source = 'genius') ORDER BY c.genius_album_id, c.id"
+                    ),
+                    {"r": release_id},
+                ).mappings()
+            ]
+
+    @staticmethod
+    def _purger_credits_album_sans_parution(conn) -> int:
+        """Retire les crédits et lectures d'album dont plus AUCUNE parution ne
+        porte l'ID Genius (dernière parution supprimée avec son artiste).
+        Dans la transaction de l'appelant."""
+        sans = (
+            "genius_album_id NOT IN (SELECT CAST(external_id AS INTEGER) "
+            "FROM release_identifiers WHERE source = 'genius')"
+        )
+        n = conn.execute(
+            text(f"DELETE FROM genius_album_credits WHERE {sans}")
+        ).rowcount  # noqa: S608
+        conn.execute(text(f"DELETE FROM genius_album_lectures WHERE {sans}"))  # noqa: S608
+        return n or 0
+
     def _retirer_mesures_par_isrc(self, conn, track_id: int) -> list[tuple[str, str]]:
         """Troisième geste, une fois l'ISRC retiré : ce que ReccoBeats en a
         tiré part avec lui.
@@ -4787,10 +5088,9 @@ class TrackRepository:
                 conn, track_id, self._arbitrer_discographie(conn, track_id, touches)
             )
 
-        rapport["credits_retires"] += conn.execute(
-            text("DELETE FROM credits WHERE track_id = :tid AND source = 'discogs'"),
-            {"tid": track_id},
-        ).rowcount
+        # Discogs se RETIRE (`credit_sources`) : un crédit qu'une autre source
+        # donne aussi garde sa ligne, Discogs quitte ses confirmations.
+        rapport["credits_retires"] += retirer_source_en_base(conn, track_id, "discogs")
 
         # La place Discogs sur une parution de la base (même code-barres) : la
         # preuve part ; le lien aussi s'il n'en a plus d'autre (sauf l'album
@@ -5246,6 +5546,22 @@ class TrackRepository:
                 # un autre titre (SCH « Loup noir (A COLORS SHOW) », 2026-11-14).
                 continue
             self._link_track_to_release_conn(conn, release_id, track_id, observation)
+        # Une parution confirmée encore sans projet (née à l'instant) : les
+        # projets se refont tout de suite, sinon sa nature et ses streams,
+        # écrits plus loin dans l'étape, n'auraient où aller (e68).
+        if (
+            observations
+            and conn.execute(
+                text(
+                    "SELECT 1 FROM releases r JOIN release_tracks rt ON rt.release_id = r.id "
+                    "WHERE rt.track_id = :t AND r.status = 'confirmed' AND r.projet_id IS NULL "
+                    "LIMIT 1"
+                ),
+                {"t": track_id},
+            ).first()
+        ):
+            for artiste in self._artistes_des_parutions(conn, track_id):
+                regrouper_en_base(conn, artiste)
 
     @staticmethod
     def _titre_de_parution(conn, release_id: int) -> str:
@@ -5459,7 +5775,9 @@ class TrackRepository:
         )
         return release_id
 
-    def fusionner_parutions_meme_upc(self, *, appliquer: bool = False) -> list[dict[str, Any]]:
+    def fusionner_parutions_meme_upc(
+        self, *, appliquer: bool = False, artist_id: int | None = None
+    ) -> list[dict[str, Any]]:
         """Réunit les parutions d'un artiste qui portent le MÊME code-barres.
 
         e54 empêche les nouveaux doublons ; ceux d'avant restent deux parutions
@@ -5471,14 +5789,17 @@ class TrackRepository:
         plus ancienne ; l'autre disparaît. Comparé par clé (`cle_upc`).
 
         Rend `[{artist_id, garde, absorbees: [(id, titre)], titre}]` ; n'écrit
-        qu'avec `appliquer`, en une transaction."""
+        qu'avec `appliquer`, en une transaction. `artist_id` : ce seul artiste
+        (fin d'étape discographie, `discographie.regrouper_projets`)."""
         with self.engine.begin() as conn:
             rows = (
                 conn.execute(
                     text(
                         "SELECT id, artist_id, title, upc FROM releases "
-                        "WHERE upc IS NOT NULL AND status = 'confirmed' ORDER BY artist_id, id"
-                    )
+                        "WHERE upc IS NOT NULL AND status = 'confirmed' "
+                        "AND (:artiste IS NULL OR artist_id = :artiste) ORDER BY artist_id, id"
+                    ),
+                    {"artiste": artist_id},
                 )
                 .mappings()
                 .all()
@@ -5609,7 +5930,50 @@ class TrackRepository:
                 upc=a["upc"],
             ),
         )
+        artiste = conn.execute(
+            text("SELECT artist_id FROM releases WHERE id = :a"), {"a": absorbee}
+        ).scalar()
         conn.execute(text("DELETE FROM releases WHERE id = :a"), {"a": absorbee})
+        # L'édition absorbée pouvait être la référence d'un projet (e67).
+        if artiste is not None:
+            regrouper_en_base(conn, artiste)
+
+    def cas_de_projets(self, artist_id: int) -> list[dict]:
+        """Les cas du panneau « même projet ? » (`projets_en_base.cas_de_projets`)."""
+        with self.engine.connect() as conn:
+            return cas_de_projets(conn, artist_id)
+
+    def memoriser_meme_projet(self, artist_id: int, release_ids) -> BilanProjets:
+        """Geste du panneau : ces éditions sont du même projet (décision gardée)."""
+        with self.engine.begin() as conn:
+            return memoriser_meme_projet(conn, artist_id, release_ids)
+
+    def oublier_meme_projet(self, artist_id: int, release_ids) -> BilanProjets:
+        """« ↩ Rétablir » du geste : les règles reprennent la main."""
+        with self.engine.begin() as conn:
+            return oublier_meme_projet(conn, artist_id, release_ids)
+
+    @staticmethod
+    def _artistes_des_parutions(conn, track_id: int) -> list[int]:
+        """Les artistes dont une parution porte la fiche (projets à refaire)."""
+        return [
+            a
+            for (a,) in conn.execute(
+                text(
+                    "SELECT DISTINCT r.artist_id FROM release_tracks rt "
+                    "JOIN releases r ON r.id = rt.release_id WHERE rt.track_id = :t ORDER BY 1"
+                ),
+                {"t": track_id},
+            )
+        ]
+
+    def regrouper_projets(self, artist_id: int) -> BilanProjets:
+        """Réunit les éditions de l'artiste en projets (e67, `utils/projets_disques`).
+        Idempotent ; appelé en fin des étapes qui écrivent des parutions
+        (discographie, identité) et par les gestes qui en créent ou en
+        suppriment. Écrivain par lots, hors `_ecrire` (aucune fiche touchée)."""
+        with self.engine.begin() as conn:
+            return regrouper_en_base(conn, artist_id)
 
     def singles_fondus(self, *, appliquer: bool = False) -> list[dict[str, Any]]:
         """Sépare les parutions d'album fondues avec le single de leur titre.
@@ -5810,6 +6174,9 @@ class TrackRepository:
         )
         if cas["album_deezer"] is not None:
             self._absorber_parution(conn, cas["album_deezer"], rid)
+        else:
+            # La parution du single est née ou a changé de nature (e67).
+            regrouper_en_base(conn, r["artist_id"])
 
     @staticmethod
     def _rendre_la_piste_au_single(
@@ -6087,91 +6454,6 @@ class TrackRepository:
             },
         )
 
-    def ensure_release(
-        self,
-        artist_id: int,
-        title: str,
-        *,
-        credited_artist_name: str | None = None,
-        release_date=None,
-        record_type: str | None = None,
-        deezer_album_id: int | None = None,
-        scope: str = "own",
-    ) -> int:
-        """Crée ou retrouve une parution sans déduire son identité du titre.
-
-        `scope` vaut `own` pour la discographie et `appearance` pour un disque
-        tiers. La clé Deezer prévaut toujours ; le chemin manuel ne fusionne que
-        la même saisie normalisée dans le même périmètre.
-        """
-        if scope not in ("own", "appearance"):
-            raise ValueError(f"scope de parution inconnu: {scope!r}")
-        title = clean_stored_title(title)
-        if not title:
-            raise ValueError("Une parution doit avoir un titre")
-        identity = release_identity_key(title, scope, deezer_album_id, credited_artist_name)
-        params = {
-            "artist_id": artist_id,
-            "title": title,
-            "credited_artist_name": credited_artist_name,
-            "release_date": release_date,
-            "record_type": record_type,
-            "deezer_album_id": deezer_album_id,
-            "scope": scope,
-            "identity_key": identity,
-            "now": datetime.now(),
-        }
-        try:
-            with self.engine.begin() as conn:
-                row = (
-                    conn.execute(
-                        text(
-                            "SELECT id FROM releases WHERE artist_id = :artist_id "
-                            "AND identity_key = :identity_key"
-                        ),
-                        params,
-                    )
-                    .mappings()
-                    .first()
-                )
-                if row is None and deezer_album_id is None:
-                    row = (
-                        conn.execute(
-                            text(
-                                "SELECT id FROM releases WHERE artist_id = :artist_id AND title = :title "
-                                "AND scope = :scope AND COALESCE(credited_artist_name, '') "
-                                "= COALESCE(:credited_artist_name, '')"
-                            ),
-                            params,
-                        )
-                        .mappings()
-                        .first()
-                    )
-                if row:
-                    conn.execute(
-                        text(
-                            "UPDATE releases SET credited_artist_name = COALESCE(:credited_artist_name, credited_artist_name), "
-                            "release_date = COALESCE(:release_date, release_date), "
-                            "record_type = COALESCE(:record_type, record_type), updated_at = :now "
-                            "WHERE id = :id"
-                        ),
-                        {**params, "id": row["id"]},
-                    )
-                    return int(row["id"])
-                result = conn.execute(
-                    text(
-                        "INSERT INTO releases (artist_id, title, credited_artist_name, release_date, "
-                        "record_type, deezer_album_id, scope, identity_key, created_at, updated_at) "
-                        "VALUES (:artist_id, :title, :credited_artist_name, :release_date, :record_type, "
-                        ":deezer_album_id, :scope, :identity_key, :now, :now)"
-                    ),
-                    params,
-                )
-                return int(result.lastrowid)
-        except SQLAlchemyError as e:
-            logger.error(f"Erreur ensure_release({artist_id}, {title!r}): {e}")
-            raise
-
     def record_release_observations(
         self, track_id: int, observations: list[ReleaseObservation]
     ) -> None:
@@ -6241,58 +6523,6 @@ class TrackRepository:
                 return result.rowcount == 1
         except SQLAlchemyError as e:
             logger.error(f"Erreur confirm_release_suggestion({release_id}): {e}")
-            return False
-
-    def link_track_to_release(
-        self,
-        release_id: int,
-        track_id: int,
-        *,
-        disc_number: int | None = None,
-        track_number: int | None = None,
-        source_track_id: int | None = None,
-        source: str = "manual",
-        matched_by: str = "manual",
-    ) -> bool:
-        """Ajoute une appartenance, idempotente et sans écraser un choix manuel."""
-        try:
-            with self.engine.begin() as conn:
-                numero_observe = track_number
-                disc_number, track_number, position_source = self._position_du_lien(
-                    conn, release_id, track_id, (disc_number, track_number, source)
-                )
-                conn.execute(
-                    text(
-                        "INSERT INTO release_tracks (release_id, track_id, disc_number, track_number, "
-                        "source_track_id, source, matched_by, position_source, created_at, updated_at) "
-                        "VALUES (:release_id, :track_id, :disc_number, :track_number, :source_track_id, "
-                        ":source, :matched_by, :position_source, :now, :now) "
-                        "ON CONFLICT(release_id, track_id) DO UPDATE SET "
-                        "disc_number = excluded.disc_number, track_number = excluded.track_number, "
-                        "position_source = excluded.position_source, "
-                        "position_brute = CASE WHEN :remplace THEN NULL "
-                        "ELSE release_tracks.position_brute END, "
-                        "source_track_id = COALESCE(excluded.source_track_id, release_tracks.source_track_id), "
-                        "source = CASE WHEN release_tracks.source = 'manual' THEN 'manual' ELSE excluded.source END, "
-                        "matched_by = CASE WHEN release_tracks.matched_by = 'manual' THEN 'manual' ELSE excluded.matched_by END, "
-                        "updated_at = excluded.updated_at"
-                    ),
-                    {
-                        "release_id": release_id,
-                        "track_id": track_id,
-                        "disc_number": disc_number,
-                        "track_number": track_number,
-                        "position_source": position_source,
-                        "remplace": int(numero_observe is not None and position_source == source),
-                        "source_track_id": source_track_id,
-                        "source": source,
-                        "matched_by": matched_by,
-                        "now": datetime.now(),
-                    },
-                )
-            return True
-        except SQLAlchemyError as e:
-            logger.error(f"Erreur link_track_to_release({release_id}, {track_id}): {e}")
             return False
 
     def get_track_releases(self, track_id: int) -> list[dict[str, Any]]:
@@ -6392,8 +6622,12 @@ class TrackRepository:
                     conn.execute(
                         text(
                             "SELECT r.id AS release_id, r.title, r.credited_artist_name, r.release_date, "
-                            "r.record_type, r.deezer_album_id, r.scope, r.status, rt.track_id, rt.disc_number, rt.track_number "
+                            "r.record_type, r.deezer_album_id, r.scope, r.status, rt.track_id, rt.disc_number, rt.track_number, "
+                            # (e67) Le projet de l'édition : la vue Albums montre
+                            # un disque, pas chacune de ses éditions.
+                            "r.projet_id, p.titre AS projet_titre "
                             "FROM releases r JOIN release_tracks rt ON rt.release_id = r.id "
+                            "LEFT JOIN projets p ON p.id = r.projet_id "
                             "WHERE r.artist_id = :artist_id AND r.scope = :scope AND r.status = 'confirmed' "
                             "ORDER BY r.release_date, r.title, rt.disc_number, rt.track_number"
                         ),
@@ -6498,118 +6732,39 @@ class TrackRepository:
         source: str = "kworb",
         editions_json: str = None,
     ) -> bool:
-        """Insère ou met à jour le total de streams d'un album.
-
-        spotify_album_ids : IDs Spotify des éditions agrégées, séparés par des
-        virgules (un même titre peut couvrir plusieurs éditions — streams sommés
-        par l'appelant).
+        """Le total Spotify d'un album, posé sur son PROJET (e68) — celui que
+        désignent ses ID d'album Spotify, sinon son titre (`projet_de`). Rend
+        False si aucun projet n'est désigné : un total sans disque n'a pas de
+        lecteur (la table `albums`, clé : le titre, est retirée en e69).
 
         `source` dit QUI a calculé le total, et les deux ne mesurent pas la même
-        chose : Kworb ne somme que les morceaux DE L'ARTISTE, Spotify somme
-        **toutes** les pistes du disque. Sur un album commun ou de groupe — la
-        majorité des cas ici — le total de Kworb est donc incomplet.
-
-        D'où la seule règle d'arbitrage de cette table : **un total Kworb
-        n'écrase jamais un total Spotify**. L'inverse est permis (Spotify est
-        complet par construction : l'appelant ne l'écrit que s'il a TOUTES les
-        pistes). Sans ce garde, un run Kworb postérieur ramènerait silencieusement
-        la valeur à la somme partielle.
-        """
+        chose : Kworb ne somme que les morceaux DE L'ARTISTE, Spotify **toutes**
+        les pistes du disque. D'où la seule règle d'arbitrage : **un total Kworb
+        n'écrase jamais un total Spotify** ; les ID d'édition fusionnent
+        toujours ; le total de chaque édition (`editions_json`) va sur
+        l'édition (`projets_en_base.poser_streams_spotify`)."""
         try:
             with self.engine.begin() as conn:
-                existant = (
-                    conn.execute(
-                        text(
-                            "SELECT spotify_streams, spotify_daily_streams, spotify_album_ids, "
-                            "spotify_streams_source, spotify_editions_json, "
-                            "spotify_streams_updated FROM albums "
-                            "WHERE title = :t AND artist_id = :a"
-                        ),
-                        {"t": title, "a": artist_id},
-                    )
-                    .mappings()
-                    .first()
+                projet = projet_de(
+                    conn, artist_id, spotify_album_ids=spotify_album_ids, titre=title
                 )
-                valeurs = self._valeurs_album(
-                    existant,
-                    streams,
-                    daily_streams,
-                    spotify_album_ids,
-                    updated_at,
-                    source,
-                    editions_json,
+                if projet is None:
+                    logger.info(f"💿 « {title} » : aucun disque en base, total Spotify non posé")
+                    return False
+                poser_streams_spotify(
+                    conn,
+                    projet,
+                    streams=streams,
+                    daily_streams=daily_streams,
+                    spotify_album_ids=spotify_album_ids,
+                    updated_at=date_bind(updated_at or datetime.now()),
+                    source=source,
+                    editions_json=editions_json,
                 )
-                if existant:
-                    conn.execute(
-                        update(albums)
-                        .where(albums.c.title == title, albums.c.artist_id == artist_id)
-                        .values(**valeurs)
-                    )
-                else:
-                    conn.execute(
-                        albums.insert().values(title=title, artist_id=artist_id, **valeurs)
-                    )
             return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur upsert_album (artist_id={artist_id}, title={title!r}): {e}")
             return False
-
-    @staticmethod
-    def _fusion_ids(ancien: str | None, nouveau: str | None) -> str | None:
-        """Union des IDs d'édition, ordre d'apparition conservé.
-
-        Une FUSION, pas un remplacement : chaque source ne connaît que les
-        éditions qu'elle a vues — la page artiste Spotify n'en liste qu'une là où
-        Kworb en a deux. Remplacer perdrait silencieusement l'autre, alors que
-        c'est précisément la donnée qu'on veut garder pour plus tard.
-        """
-        vus: dict[str, None] = {}
-        for source_ids in (ancien, nouveau):
-            for identifiant in (source_ids or "").split(","):
-                if identifiant.strip():
-                    vus.setdefault(identifiant.strip(), None)
-        return ",".join(vus) or None
-
-    def _valeurs_album(
-        self,
-        existant,
-        streams,
-        daily_streams,
-        spotify_album_ids,
-        updated_at,
-        source,
-        editions_json,
-    ) -> dict:
-        """Colonnes à écrire pour un album, provenance arbitrée.
-
-        Le total de Kworb n'écrase JAMAIS celui de Spotify : Kworb ne somme que
-        les morceaux de l'artiste, Spotify toutes les pistes du disque. Mais ce
-        garde ne porte QUE sur le total — les IDs d'édition, eux, fusionnent
-        toujours, quelle que soit la source qui écrit.
-        """
-        valeurs = {
-            "spotify_album_ids": self._fusion_ids(
-                existant["spotify_album_ids"] if existant else None, spotify_album_ids
-            ),
-        }
-        garde = (
-            existant is not None
-            and existant["spotify_streams_source"] == "spotify_web"
-            and source != "spotify_web"
-        )
-        if garde:
-            return valeurs
-
-        valeurs["spotify_streams"] = streams
-        valeurs["spotify_streams_updated"] = date_bind(updated_at or datetime.now())
-        valeurs["spotify_streams_source"] = source
-        # Spotify ne publie aucun chiffre quotidien et passe None : sans ce
-        # garde, il effacerait celui de Kworb, seule source à en donner.
-        if daily_streams is not None:
-            valeurs["spotify_daily_streams"] = daily_streams
-        if editions_json is not None:
-            valeurs["spotify_editions_json"] = editions_json
-        return valeurs
 
     RECORD_TYPES = ("album", "ep", "single", "compile")
 
@@ -6624,12 +6779,9 @@ class TrackRepository:
     ) -> bool:
         """Pose la nature du disque (e26), SOURCÉE : `deezer` ou `manual`.
 
-        La ligne d'album est créée si elle manque — avec la nature SEULEMENT,
-        jamais une colonne de streams (l'arbitrage Kworb/Spotify d'`upsert_album`
-        reste seul maître). Clé = `(title, artist_id)` BRUT, comme le reste de
-        la table : la ligne créée depuis `track.album` (Genius) peut donc
-        cohabiter avec celle de Kworb si les graphies diffèrent — les lecteurs
-        rapprochent par titre normalisé, on ne fusionne pas ici.
+        Depuis e68 la nature vit sur l'ÉDITION (Deezer, par son ID d'album) et
+        son verdict sur le PROJET (`projets_en_base`) ; un titre que ne porte
+        aucune parution n'a nulle part où la ranger (rend False).
 
         **Une valeur `manual` n'est jamais écrasée par `deezer`** (même règle
         que Kworb face à Spotify) ; `record_type=None` avec `source="manual"`
@@ -6645,137 +6797,198 @@ class TrackRepository:
         title = (title or "").strip()
         if not title:
             return False
-        params = {
-            "aid": artist_id,
-            "title": title,
-            "rt": record_type,
-            "src": source if record_type is not None else None,
-            "quand": date_bind(datetime.now()),
-            "did": deezer_album_id,
-        }
         try:
             with self.engine.begin() as conn:
-                deja = conn.execute(
-                    text(
-                        "SELECT record_type_source FROM albums "
-                        "WHERE artist_id = :aid AND title = :title"
-                    ),
-                    params,
-                ).first()
-                if deja is None:
-                    conn.execute(
-                        text(
-                            "INSERT INTO albums (title, artist_id, record_type, "
-                            "record_type_source, record_type_updated, deezer_album_id) "
-                            "VALUES (:title, :aid, :rt, :src, :quand, :did)"
-                        ),
-                        params,
-                    )
-                    return True
-                if deja[0] == "manual" and source == "deezer":
-                    # La main a tranché : Deezer ne retient que sa fiche.
-                    conn.execute(
-                        text(
-                            "UPDATE albums SET deezer_album_id = COALESCE(:did, deezer_album_id) "
-                            "WHERE artist_id = :aid AND title = :title"
-                        ),
-                        params,
-                    )
+                # (e68) Deezer décrit UNE édition : sa nature va sur les
+                # parutions de cet ID, et leur projet se recalcule (une nature
+                # `manual` du projet ne bouge pas) ; une saisie à la main va au
+                # projet que désigne le titre.
+                if source == "deezer" and deezer_album_id is not None:
+                    return poser_nature_edition(conn, artist_id, deezer_album_id, record_type) > 0
+                projet = projet_de(conn, artist_id, deezer_album_id=deezer_album_id, titre=title)
+                if projet is None:
                     return False
-                conn.execute(
-                    text(
-                        "UPDATE albums SET record_type = :rt, record_type_source = :src, "
-                        "record_type_updated = :quand, "
-                        "deezer_album_id = COALESCE(:did, deezer_album_id) "
-                        "WHERE artist_id = :aid AND title = :title"
-                    ),
-                    params,
+                if source == "manual":
+                    poser_nature_manuelle(conn, projet, record_type)
+                    return True
+                # Deezer sans ID d'album : la nature au projet du titre, sauf
+                # saisie manuelle.
+                return bool(
+                    conn.execute(
+                        text(
+                            "UPDATE projets SET nature = :n, nature_source = 'deezer', "
+                            "nature_maj = :q WHERE id = :p AND nature_source IS NOT 'manual' "
+                            "AND nature IS NOT :n"
+                        ),
+                        {"n": record_type, "q": datetime.now(), "p": projet},
+                    ).rowcount
                 )
-                return True
         except SQLAlchemyError as e:
             logger.error(f"Erreur set_album_record_type({artist_id}, {title!r}): {e}")
             return False
 
-    def retirer_albums_de_disques(self, artist_id: int, deezer_album_ids: set[int]) -> int:
-        """Retire les lignes `albums` de l'artiste posées pour ces disques Deezer
-        (refusés : un homonyme sur le même profil) quand plus aucune de ses
-        fiches ne porte leur titre. Restées après le retrait des fiches, elles
-        faisaient « connaître » le disque à l'oracle d'identité Deezer
-        (`deezer_identite`, vote ①) et au classement des écarts (WZRD, CFR,
-        The Graduates : 43 lignes le 2026-11-13). Rend le nombre retiré."""
-        if not deezer_album_ids:
-            return 0
-        retirees = 0
-        try:
-            with self.engine.begin() as conn:
-                for did in sorted(int(i) for i in deezer_album_ids):
-                    retirees += conn.execute(
-                        text(
-                            "DELETE FROM albums WHERE artist_id = :a AND deezer_album_id = :d "
-                            "AND NOT EXISTS (SELECT 1 FROM tracks t WHERE t.artist_id = :a "
-                            "AND t.album = albums.title)"
-                        ),
-                        {"a": artist_id, "d": did},
-                    ).rowcount
-        except SQLAlchemyError as e:
-            logger.error(f"Erreur retirer_albums_de_disques({artist_id}): {e}")
-            return 0
-        return retirees
-
     def get_albums_for_artist(self, artist_id: int) -> list[dict[str, Any]]:
-        """Retourne les albums d'un artiste triés par streams décroissants."""
+        """Les disques de l'artiste, lus dans les PROJETS (e68) : une ligne par
+        TITRE d'édition (titre normalisé distinct) d'un projet qui a au moins
+        une fiche, portant la nature et les streams du PROJET, l'ID Deezer de
+        cette édition, `projet_id` et `projet_titre`. Les lecteurs qui
+        cherchent un disque par son titre (vue Albums, Timeline du studio,
+        identité, écarts Deezer, validation) le trouvent sous chacun de ses
+        titres ; ceux qui AGISSENT par disque dédoublonnent par `projet_id`.
+        Triés par streams Spotify décroissants.
+
+        Le disque d'un autre artiste (apparition) n'y est que s'il porte des
+        streams d'album ou une nature saisie. Un projet sans fiche (disque d'un
+        homonyme dont les fiches ont été retirées) n'y est pas : l'oracle d'identité Deezer le compterait comme
+        connu (WZRD, CFR, The Graduates : 43 lignes `albums`, 2026-11-13)."""
         try:
-            # `text()` brut : `spotify_streams_updated` (TIMESTAMP) doit revenir
-            # en STRING verbatim comme au temps du legacy sqlite3 — un `select()`
-            # typé la parserait en datetime (cf. get_artist_tracks / piège E2).
+            # `text()` brut : les TIMESTAMP reviennent en chaînes verbatim
+            # (piège E2), comme du temps de la table `albums`.
             with self.engine.connect() as conn:
                 rows = (
                     conn.execute(
                         text(
-                            "SELECT title, spotify_streams, spotify_daily_streams, "
-                            "spotify_streams_updated, spotify_streams_source, spotify_editions_json, "
-                            "spotify_album_ids, ytm_streams, "
-                            "record_type, record_type_source, record_type_updated, "
-                            "deezer_album_id FROM albums "
-                            "WHERE artist_id = :aid ORDER BY spotify_streams DESC"
+                            "SELECT p.id AS projet_id, p.titre AS projet_titre, r.title, "
+                            "r.deezer_album_id, r.release_date, r.id AS release_id, "
+                            "p.spotify_streams, p.spotify_daily_streams, "
+                            "p.spotify_streams_updated, p.spotify_streams_source, "
+                            "p.spotify_album_ids, p.ytm_streams, p.nature, p.nature_source, "
+                            "p.nature_maj FROM projets p JOIN releases r ON r.projet_id = p.id "
+                            "WHERE p.artist_id = :aid AND EXISTS (SELECT 1 FROM release_tracks rt "
+                            "WHERE rt.release_id = r.id) "
+                            # Le disque d'un AUTRE (apparition) n'est un album de
+                            # l'artiste que s'il porte ses streams d'album, comme
+                            # du temps de `albums` (Kworb et YTM seuls y écrivaient).
+                            "AND (r.scope = 'own' OR p.spotify_streams IS NOT NULL "
+                            "OR p.ytm_streams IS NOT NULL OR p.nature_source = 'manual') "
+                            "ORDER BY p.spotify_streams DESC, p.id, r.id = p.edition_reference_id "
+                            "DESC, r.deezer_album_id IS NULL, r.id"
                         ),
                         {"aid": artist_id},
                     )
                     .mappings()
                     .all()
                 )
-                # `spotify_streams_source` et `spotify_editions_json` étaient
-                # SÉLECTIONNÉS mais absents du dict rendu (2026-09-05) : lus en
-                # base puis jetés avant d'atteindre la GUI. Or les deux sources
-                # ne comptent PAS la même chose — Kworb ne somme que les morceaux
-                # de l'artiste, Spotify toutes les pistes du disque — donc un
-                # total sans sa provenance n'est pas interprétable.
-                return [
+                editions_spotify = self._totaux_spotify_par_edition(conn, artist_id)
+            vus: set[tuple[int, str]] = set()
+            albums_lus = []
+            for row in rows:
+                cle = (row["projet_id"], normalize_title(row["title"] or ""))
+                if cle in vus:
+                    continue
+                vus.add(cle)
+                albums_lus.append(
                     {
                         "title": row["title"],
+                        "projet_id": row["projet_id"],
+                        "projet_titre": row["projet_titre"],
                         "spotify_streams": row["spotify_streams"],
                         "spotify_daily_streams": row["spotify_daily_streams"],
                         "spotify_streams_updated": row["spotify_streams_updated"],
+                        # Kworb ne somme que les morceaux de l'artiste, Spotify
+                        # toutes les pistes : un total sans sa provenance ne se
+                        # lit pas (2026-09-05).
                         "spotify_streams_source": row["spotify_streams_source"],
-                        "spotify_editions_json": row["spotify_editions_json"],
-                        # 3e occurrence du MÊME défaut : une colonne ajoutée au
-                        # SELECT mais oubliée du dict est lue en base puis jetée.
-                        # Celle-ci porte les IDs d'édition, seul moyen pour le
-                        # scrape Spotify d'atteindre une réédition que la page
-                        # artiste ne liste pas.
+                        "spotify_editions_json": editions_spotify.get(row["projet_id"]),
+                        # IDs d'édition : la passe Spotify atteint par eux une
+                        # réédition que la page artiste ne liste pas.
                         "spotify_album_ids": row["spotify_album_ids"],
                         "ytm_streams": row["ytm_streams"],
-                        # e26 : nature du disque (Deezer ou saisie), sourcée.
-                        "record_type": row["record_type"],
-                        "record_type_source": row["record_type_source"],
-                        "record_type_updated": row["record_type_updated"],
+                        # Nature du PROJET : `manual`, `deezer` ou `parution`.
+                        "record_type": row["nature"],
+                        "record_type_source": row["nature_source"],
+                        "record_type_updated": row["nature_maj"],
                         "deezer_album_id": row["deezer_album_id"],
                     }
-                    for row in rows
-                ]
+                )
+            return albums_lus
         except SQLAlchemyError as e:
             logger.error(f"Erreur get_albums_for_artist (artist_id={artist_id}): {e}")
             return []
+
+    def get_projets_for_artist(self, artist_id: int) -> list[dict[str, Any]]:
+        """Les PROJETS de l'artiste (e67/e68), chacun avec ses éditions — ce que
+        lit la Timeline du studio (voie (b), décision utilisateur 2026-11-20 :
+        « autant être cohérent partout ») : un disque et sa réédition sont un
+        projet à deux éditions, au lieu d'une réédition devinée sur les dates.
+
+        `[{projet_id, titre, scope, nature, nature_source, spotify_streams,
+        spotify_streams_source, ytm_streams, edition_reference_id,
+        track_ids: [...], editions: [{release_id, titre, date, track_ids}]}]`,
+        éditions de la plus ancienne à la plus récente ; seuls les projets qui
+        ont au moins une fiche."""
+        try:
+            with self.engine.connect() as conn:
+                projets = {
+                    r["id"]: {
+                        "projet_id": r["id"],
+                        "titre": r["titre"],
+                        "scope": None,
+                        "nature": r["nature"],
+                        "nature_source": r["nature_source"],
+                        "spotify_streams": r["spotify_streams"],
+                        "spotify_streams_source": r["spotify_streams_source"],
+                        "ytm_streams": r["ytm_streams"],
+                        "edition_reference_id": r["edition_reference_id"],
+                        "track_ids": [],
+                        "editions": [],
+                    }
+                    for r in conn.execute(
+                        text(
+                            "SELECT id, titre, nature, nature_source, spotify_streams, "
+                            "spotify_streams_source, ytm_streams, edition_reference_id "
+                            "FROM projets WHERE artist_id = :a ORDER BY id"
+                        ),
+                        {"a": artist_id},
+                    ).mappings()
+                }
+                editions: dict[int, dict[str, Any]] = {}
+                for r in conn.execute(
+                    text(
+                        "SELECT r.id, r.projet_id, r.title, r.release_date, r.scope, rt.track_id "
+                        "FROM releases r JOIN release_tracks rt ON rt.release_id = r.id "
+                        "WHERE r.artist_id = :a AND r.projet_id IS NOT NULL "
+                        "ORDER BY r.release_date IS NULL, r.release_date, r.id, rt.track_id"
+                    ),
+                    {"a": artist_id},
+                ).mappings():
+                    projet = projets.get(r["projet_id"])
+                    if projet is None:
+                        continue
+                    projet["scope"] = r["scope"]
+                    ed = editions.get(r["id"])
+                    if ed is None:
+                        ed = editions[r["id"]] = {
+                            "release_id": r["id"],
+                            "titre": r["title"],
+                            "date": str(r["release_date"])[:10] if r["release_date"] else None,
+                            "track_ids": [],
+                        }
+                        projet["editions"].append(ed)
+                    ed["track_ids"].append(r["track_id"])
+                    if r["track_id"] not in projet["track_ids"]:
+                        projet["track_ids"].append(r["track_id"])
+            return [p for p in projets.values() if p["track_ids"]]
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur get_projets_for_artist({artist_id}): {e}")
+            return []
+
+    @staticmethod
+    def _totaux_spotify_par_edition(conn, artist_id: int) -> dict[int, str]:
+        """`{projet_id: JSON {ID d'album Spotify: total}}` des éditions qui ont le
+        leur — la forme de l'ancienne `albums.spotify_editions_json`."""
+        par_projet: dict[int, dict[str, int]] = {}
+        for pid, ext, total in conn.execute(
+            text(
+                "SELECT r.projet_id, ri.external_id, r.spotify_streams FROM releases r "
+                "JOIN release_identifiers ri ON ri.release_id = r.id AND ri.source = 'spotify_web' "
+                "WHERE r.artist_id = :a AND r.projet_id IS NOT NULL "
+                "AND r.spotify_streams IS NOT NULL"
+            ),
+            {"a": artist_id},
+        ):
+            par_projet.setdefault(pid, {})[ext] = total
+        return {pid: json.dumps(d, sort_keys=True) for pid, d in par_projet.items()}
 
     def record_ytm_compteurs(self, track_id: int, compteurs: dict[str, int]) -> bool:
         """Enregistre les compteurs YouTube Music qu'un run a COMPTÉS sans mesure
@@ -6825,22 +7038,28 @@ class TrackRepository:
         ).scalar()
         return lire_compteurs_ytm(valeur, track_id)
 
-    def recalculer_vues_ytm(self, track_id: int, exclues=None) -> int | None:
+    def recalculer_vues_ytm(self, track_id: int) -> int | None:
         """Recalcule `ytm_streams` depuis les vidéos de la fiche déjà mesurées et
-        ses compteurs sans mesure exacte (`record_ytm_compteurs`), HORS `exclues`
-        (vidéos qui ne sont pas le morceau, `services.vues_comptees`) et hors
-        celles qu'une autre fiche du même artiste porte (règle du run YTM). Sans
-        rien de comptable, le total est VIDÉ — une valeur ancienne y compterait
-        encore la vidéo écartée. `exclues=None` : relues en base (verdicts
-        « ✓ Normal » compris). Rend le nouveau total (ou None)."""
+        ses compteurs sans mesure exacte (`record_ytm_compteurs`), hors les
+        vidéos qui ne sont pas le morceau (`services.vues_comptees`, relues en
+        base, verdicts « ✓ Normal » compris) et hors celles qu'une autre fiche du
+        même artiste porte (règle du run YTM). Sans rien de comptable, le total
+        est VIDÉ — une valeur ancienne y compterait encore la vidéo écartée. Rend
+        le nouveau total (ou None).
+
+        Les exclusions ne viennent plus de l'appelant (2026-11-22, chantier A) :
+        un ensemble passé à la main donnait un total que le verdict de la
+        colonne (`_rematerialiser_fiche`, exclusions relues en base) défaisait
+        au prochain recalcul. Par `_ecrire` : la fiche et ses sœurs suivent."""
         try:
-            with self.engine.begin() as conn:
-                return self._recalculer_vues_ytm(conn, track_id, exclues)
+            with self._ecrire() as conn:
+                self._toucher(conn, track_id)
+                return self._recalculer_vues_ytm(conn, track_id)
         except SQLAlchemyError as e:
             logger.error(f"Erreur recalculer_vues_ytm (track_id={track_id}): {e}")
             return None
 
-    def _recalculer_vues_ytm(self, conn, track_id: int, exclues=None) -> int | None:
+    def _recalculer_vues_ytm(self, conn, track_id: int) -> int | None:
         """Corps de `recalculer_vues_ytm`, dans la transaction de l'appelant."""
         aid = conn.execute(
             text("SELECT artist_id FROM tracks WHERE id = :t"), {"t": track_id}
@@ -6859,8 +7078,7 @@ class TrackRepository:
                 {"t": track_id, "aid": aid},
             ).all()
         )
-        if exclues is None:
-            exclues = self._videos_exclues(conn, track_id, aid)
+        exclues = self._videos_exclues(conn, track_id, aid)
         total = total_ytm(propres, self._compteurs_ytm(conn, track_id), exclues)
         if total is not None:
             maintenant = datetime.now()
@@ -6959,10 +7177,10 @@ class TrackRepository:
     def renommer_album(self, artist_id: int, ancien: str, nouveau: str) -> tuple[int, int]:
         """Renomme un disque partout où son TITRE est stocké, pour un artiste.
 
-        Trois magasins portent ce titre en clair — `tracks.album` (l'album
-        REPÈRE), `releases.title` (le catalogue des parutions) et `albums.title`
-        (le magasin des streams d'album) — et les laisser diverger ferait deux
-        disques là où il y en a un. Rend (morceaux, parutions) touchés.
+        Deux magasins portent ce titre en clair — `tracks.album` (l'album
+        REPÈRE) et `releases.title` (le catalogue des parutions) — et les
+        laisser diverger ferait deux disques là où il y en a un (le titre du
+        projet suit son édition de référence au prochain regroupement). Rend (morceaux, parutions) touchés.
 
         `album_override` n'est PAS posé : ce n'est pas une saisie humaine mais
         le nettoyage d'une convention de Genius, et le marquer en manuel
@@ -7002,13 +7220,6 @@ class TrackRepository:
                     ),
                     {"nouveau": nouveau, "ancien": ancien, "aid": artist_id, "now": datetime.now()},
                 ).rowcount
-                conn.execute(
-                    text(
-                        "UPDATE albums SET title = :nouveau "
-                        "WHERE artist_id = :aid AND title = :ancien"
-                    ),
-                    {"nouveau": nouveau, "ancien": ancien, "aid": artist_id},
-                )
             logger.info(f"💿 Album renommé : {ancien!r} → {nouveau!r} ({morceaux} morceau(x))")
             return int(morceaux or 0), int(parutions or 0)
         except SQLAlchemyError as e:
@@ -7049,16 +7260,27 @@ class TrackRepository:
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
-                gid = conn.execute(
-                    text("SELECT genius_id FROM tracks WHERE id = :id"), {"id": track_id}
-                ).scalar()
+                ligne = conn.execute(
+                    text("SELECT genius_id, apple_music_id FROM tracks WHERE id = :id"),
+                    {"id": track_id},
+                ).first()
+                gid, vise = (ligne[0], ligne[1]) if ligne is not None else (None, None)
                 lignes = [track_id]
                 if gid is not None:
+                    # Une sœur dont la colonne porte un AUTRE ID garde tout (comme
+                    # `clear_track_deezer_id`) : ses observations `apple_music`
+                    # viennent du sien (« Gangsta Shit », 2026-11-23 : single chez
+                    # Isha, album chez Aketo — le retrait effaçait l'album).
                     lignes = [
                         r[0]
                         for r in conn.execute(
-                            text("SELECT id FROM tracks WHERE genius_id = :g"), {"g": gid}
+                            text("SELECT id, apple_music_id FROM tracks WHERE genius_id = :g"),
+                            {"g": gid},
                         )
+                        if r[0] == track_id
+                        or r[1] is None
+                        or vise is None
+                        or str(r[1]) == str(vise)
                     ]
                 for tid in lignes:
                     conn.execute(
@@ -9020,15 +9242,14 @@ class TrackRepository:
             return False
 
     def update_album_ytm_streams(self, artist_id: int, title: str, streams: int) -> bool:
-        """Met à jour les streams YouTube Music d'un album."""
+        """Le total YouTube Music d'un album, posé sur l'édition que nomme le
+        titre et sur son PROJET (e68, `poser_streams_ytm`). False sans disque."""
         try:
-            stmt = (
-                update(albums)
-                .where(albums.c.title == title, albums.c.artist_id == artist_id)
-                .values(ytm_streams=streams, ytm_streams_updated=datetime.now())
-            )
             with self.engine.begin() as conn:
-                conn.execute(stmt)
+                projet = projet_de(conn, artist_id, titre=title)
+                if projet is None:
+                    return False
+                poser_streams_ytm(conn, projet, streams, titre=title)
             return True
         except SQLAlchemyError as e:
             logger.error(

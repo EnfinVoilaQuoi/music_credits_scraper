@@ -10,6 +10,7 @@ Harnais : `YTMusicAPI.__new__` (le `__init__` réel instancie un client
 `YTMusic()` qui interroge le réseau) + un faux client posé en `self.yt`.
 """
 
+import logging
 from urllib.parse import urlencode
 
 import pytest
@@ -373,6 +374,22 @@ class TestInfosArtiste:
     def test_erreur_reseau(self):
         yt = _FauxYT(artist=requests.RequestException("timeout"))
         assert _api(yt).get_artist_info("UC1") == {"albums": [], "monthly_listeners": None}
+
+    def test_chaine_sans_page_artiste_est_un_constat(self, caplog):
+        """Une chaîne YouTube ordinaire prise pour un artiste : ytmusicapi lève
+        `KeyError('musicImmersiveHeaderRenderer')`, journalisée en ERROR jusqu'ici."""
+        yt = _FauxYT(artist=KeyError("musicImmersiveHeaderRenderer"))
+        with caplog.at_level(logging.INFO):
+            infos = _api(yt).get_artist_info("UC1")
+        assert infos == {"albums": [], "monthly_listeners": None, "sans_page_artiste": True}
+        assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+    def test_autre_cle_manquante_reste_une_erreur(self, caplog):
+        yt = _FauxYT(artist=KeyError("autre"))
+        with caplog.at_level(logging.INFO):
+            infos = _api(yt).get_artist_info("UC1")
+        assert infos == {"albums": [], "monthly_listeners": None}
+        assert [r for r in caplog.records if r.levelno == logging.ERROR]
 
 
 class TestMorceauxDAlbum:

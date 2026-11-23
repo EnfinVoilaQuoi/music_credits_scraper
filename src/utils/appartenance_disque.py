@@ -385,7 +385,7 @@ def a_decider(db_path, ids_fiches, chemin_brut=None) -> dict[int, dict]:
         albums = {a for ids_a in albums_deezer_des_parutions(c, artistes).values() for a in ids_a}
         if not albums:
             return {}
-        chemin = chemin_brut or brut.CHEMIN
+        chemin = brut.chemin_lu(chemin_brut)
         cat = CatalogueDuBrut(
             chemin, albums=albums, pistes={t["deezer_id"] for t in pistes if t["deezer_id"]}
         )

@@ -79,6 +79,18 @@ class TestMesures:
         ctx = _ctx(t, obs={1: self._obs(getsongbpm={"bpm": 83}, reccobeats={"bpm": 130})})
         assert "getsongbpm 83" in revue.bpm_desaccord(t, ctx)[0]
 
+    def test_le_meme_tempo_arrondi_par_deux_analyseurs_n_est_pas_un_desaccord(self):
+        """71 / 74, 82 / 85 (The Game) : 3,6 à 4,2 %, le même tempo (5 %, 2026-11-22)."""
+        for a, b in ((71, 74), (82, 85), (78, 81)):
+            t = _t("X")
+            obs = self._obs(deezer={"bpm": b}, reccobeats={"bpm": a})
+            assert revue.bpm_desaccord(t, _ctx(t, obs={1: obs})) is None
+
+    def test_un_demi_ton_de_vitesse_reste_un_desaccord(self):
+        t = _t("X")
+        obs = self._obs(deezer={"bpm": 106}, reccobeats={"bpm": 100})
+        assert revue.bpm_desaccord(t, _ctx(t, obs={1: obs})) is not None
+
     def test_octave_et_repli_ne_sont_pas_un_desaccord(self):
         t = _t("X")
         obs = self._obs(songbpm={"bpm": 70}, reccobeats={"bpm": 140}, heritage={"bpm": 99})
@@ -706,6 +718,23 @@ class TestNatures:
         t.credits.append(Credit("Plain Pat", CreditRole.PRODUCER, source="genius"))
         assert self._nature("credits_api", t) == [revue.INFORMATION]
 
+    def test_credits_api_d_une_page_relue_apres_le_detail_sont_une_decision(self):
+        """CORRECTIFS 2026-11-14 : Kanye « Arguing », relue le 15/11 en
+        `--force-credits`, détail API lu le 16/10 — aucun run ne la règle."""
+        from datetime import datetime
+
+        t = _t("Arguing", last_scraped=datetime(2026, 11, 15, 0, 18))
+        t.credits = [Credit("Kid Cudi", CreditRole.PROGRAMMER, source="genius_api")]
+        t.genius_detail_checked_at = "2026-10-16T17:06:41"
+        assert self._nature("credits_api", t) == [revue.DECISION]
+        # Détail relu APRÈS la page (IAM « Rapline II ») : la page n'a peut-être
+        # pas vu ces crédits, un run la relira.
+        t.genius_detail_checked_at = "2026-11-20T13:22:32"
+        assert self._nature("credits_api", t) == [revue.RUN]
+        # Sans date du détail, on ne sait pas quand ils ont été posés : un run.
+        t.genius_detail_checked_at = None
+        assert self._nature("credits_api", t) == [revue.RUN]
+
     def test_video_partagee_comptee_nulle_part_ou_chez_un_seul(self):
         autre = Artist(name="Lunatic")
         autre.id, _A.id = 2, 1
@@ -1085,6 +1114,8 @@ def test_fenetre_se_construit(racine_tk):
         get_artist_positions=lambda _id: {},
         fusions_a_decider=lambda _ids: {},
         hors_du_disque_a_decider=lambda _ids: {},
+        paroles_d_autres_artistes=lambda _aid, _textes: {},
+        cas_de_projets=lambda _aid: [],
         non_music_sortis=lambda _fiches: set(),
         videos_mortes_constatees=dict,
         signalements_revue=lambda _id: [],
@@ -1314,6 +1345,73 @@ class TestVideoPartagee:
             _ctx(donda, slum), detecteurs=(), detecteurs_artiste=revue.DETECTEURS_ARTISTE
         )
         assert [c.nature for c in cas] == [revue.DECISION]
+
+    def test_le_clip_revient_a_la_page_principale_jamais_a_sa_version(self):
+        """Décision utilisateur 2026-11-22 : un clip partagé par la page
+        principale et sa démo, son freestyle ou son édition revient à la page
+        principale (Eminem « The Real Slim Shady » / « - Clean(Ish) », Dinos
+        « NMD_V3 » / « Dinos x Adidas / NMD_V3 », Kid Cudi : Genius rattache le
+        « Day ‘N’ Nite » d'un disque de remixes à « (Nightmare) »)."""
+        clip = self._v("RSS", "Eminem - The Real Slim Shady (Official Video - Clean Version)")
+        page = _t("The Real Slim Shady", 1, videos=[clip], genius_id=531)
+        clean = _t("The Real Slim Shady - Clean(Ish)", 2, videos=[clip], genius_id=6614924)
+        demo = _t("The Real Slim Shady (Demo)", 3, videos=[clip], genius_id=7)
+        ((_, motif, preuves),) = revue.video_partagee(_ctx(page, clean, demo))
+        assert preuves["garder"] == 1 and preuves["track_ids"] == [2, 3]
+        assert "page principale" in motif
+
+        dinos = Artist(name="Dinos")
+        pub = self._v("NMD", "Dinos x Adidas / NMD_V3")
+        a = _t("NMD_V3", 1, videos=[pub], genius_id=8341294, artist=dinos)
+        b = _t("Dinos x Adidas / NMD_V3", 2, videos=[pub], genius_id=10801919, artist=dinos)
+        ((_, _, preuves),) = revue.video_partagee(_ctx(a, b))
+        assert preuves["garder"] == 1 and preuves["track_ids"] == [2]
+
+        dnn = self._v("DNN", "Kid Cudi - Day 'N' Nite")
+        nightmare = _t(
+            "Day ’N’ Nite (Nightmare)",
+            1,
+            videos=[dnn],
+            genius_id=131,
+            genius_url="https://genius.com/Kid-cudi-day-n-nite-nightmare-lyrics",
+        )
+        remix = _t(
+            "Day ‘N’ Nite",
+            2,
+            videos=[dnn],
+            genius_id=1836726,
+            album="Just Dance (The Biggest Club Remixes)",
+            relationships=[
+                {
+                    "type": "remix_of",
+                    "url": "https://genius.com/Kid-cudi-day-n-nite-nightmare-lyrics",
+                }
+            ],
+        )
+        ((_, _, preuves),) = revue.video_partagee(_ctx(nightmare, remix))
+        assert preuves["garder"] == 1 and preuves["track_ids"] == [2]
+
+    def test_deux_versions_ou_une_video_de_la_version_restent_a_l_humain(self):
+        # Deux démos sans leur page principale (« Joyride » de Travis Scott) :
+        # aucune n'est principale.
+        v = self._v("J", "Travis Scott - Joyride (Ft. Tinashe) (Unreleased)")
+        d1 = _t("Joyride (Demo)", 1, videos=[v], genius_id=1)
+        d2 = _t("Joyride (Demo 2)", 2, videos=[v], genius_id=2)
+        ((_, _, preuves),) = revue.video_partagee(_ctx(d1, d2))
+        assert "garder" not in preuves
+        # La vidéo nomme le sous-titre de l'autre page : c'est la sienne.
+        game = self._v("G", "The Game: My Bitch (Dissin 50cent,Jay-Z,Suge Knight)")
+        a = _t("My Bitch", 1, videos=[game], genius_id=1)
+        b = _t("My Bitch (Dissin’ 50 Cent, Jay-Z, Suge Knight)", 2, videos=[game], genius_id=2)
+        ((_, _, preuves),) = revue.video_partagee(_ctx(a, b))
+        assert preuves.get("garder") != 1
+        # Un live garde sa vidéo : ce n'est ni une démo ni une édition.
+        live = self._v("L", "Kery James - Le Ghetto Français")
+        a = _t("Le Ghetto Français", 1, videos=[live], genius_id=1)
+        b = _t("Le Ghetto Français (Live)", 2, videos=[live], genius_id=2)
+        from src.services.politiques_revue import versions_de_la_page_principale
+
+        assert versions_de_la_page_principale([a, b], live) is None
 
     def _king(self, duree_video=157, bully=None, vultures=None):
         """« KING » : la vidéo de ¥$ (157 s) posée par Genius sur la page de
@@ -2018,3 +2116,78 @@ class TestPageEtFichePlateforme:
         }
         assert revue.page_et_fiche_plateforme(fiche, ctx) is None
         assert revue.meme_place(page, ctx)
+
+    def test_skits_recurrents_de_deux_disques(self):
+        """Décision utilisateur 2026-11-13 : « Paul » de *The Marshall Mathers
+        LP* (11 s) n'est pas une édition de « Paul (Skit) » de *The Slim Shady
+        LP* (15 s) ni de *Kamikaze* (36 s) — deux skits au même nom."""
+        sslp = self._f(
+            "Paul (Skit)", 1, 15, genius_id=11, spotify_id="A", album="The Slim Shady LP"
+        )
+        kami = self._f("Paul (Skit)", 2, 36, genius_id=12, spotify_id="B", album="Kamikaze")
+        mmlp = self._f("Paul", 3, 11, spotify_id="C", album="The Marshall Mathers LP")
+        assert revue.page_et_fiche_plateforme(mmlp, _ctx(sslp, kami, mmlp)) is None
+
+    def test_skit_meme_disque_ou_meme_duree_reste_signale(self):
+        page = self._f(
+            "Paul (Skit)", 1, 15, genius_id=11, spotify_id="A", album="The Slim Shady LP"
+        )
+        meme_disque = self._f("Paul", 2, 11, spotify_id="B", album="The Slim Shady LP (Expanded)")
+        meme_duree = self._f("Paul", 3, 16, spotify_id="C", album="Curtain Call")
+        sans_disque = self._f("Paul", 4, 11, spotify_id="D")
+        for fiche in (meme_disque, meme_duree, sans_disque):
+            assert revue.page_et_fiche_plateforme(fiche, _ctx(page, fiche))
+
+    def test_hors_skit_le_disque_et_la_duree_ne_suffisent_pas(self):
+        page = self._f("Mélomanes", 1, 150, genius_id=11, spotify_id="A", album="The Narvalow Tape")
+        fiche = self._f("Melomanes", 2, 159, spotify_id="B", album="Hérésie Tape")
+        assert revue.page_et_fiche_plateforme(fiche, _ctx(page, fiche))
+
+
+class TestCreeeSansTrace:
+    """Règle C, reste (CORRECTIFS 2026-11-09) : une fiche créée par règle qui,
+    son étape identité passée, n'a ni ID Spotify ni vidéo va à l'humain."""
+
+    _CORR = {
+        "id": 7,
+        "detecteur": "deezer_version",
+        "applied_at": "2026-11-19 10:00:00",
+        "retablie_at": None,
+        "annulation": {"type": "fiche_deezer", "deezer_id": 555},
+    }
+
+    def _cas(self, t, corrections=None):
+        ctx = _ctx(t)
+        ctx.creees_par_regle = revue.fiches_creees_par_regle(
+            [self._CORR] if corrections is None else corrections, [t]
+        )
+        d = [x for x in revue.DETECTEURS if x.code == "creee_sans_trace"]
+        return revue.detecter(ctx, detecteurs=d, detecteurs_artiste=())
+
+    def test_creee_puis_identite_sans_rien_va_a_l_humain(self):
+        t = _t("H (Instrumental)", deezer_id=555, spotify_id_checked_at="2026-11-20T08:00:00")
+        (cas,) = self._cas(t)
+        assert cas.nature == revue.DECISION and "deezer_version" in cas.motif
+        assert cas.cle.endswith("|cree:7")
+
+    def test_identite_pas_encore_passee(self):
+        t = _t("H (Instrumental)", deezer_id=555, spotify_id_checked_at="2026-11-18T08:00:00")
+        assert self._cas(t) == []
+        t.spotify_id_checked_at = None
+        assert self._cas(t) == []
+
+    def test_un_id_spotify_ou_une_video_suffit(self):
+        t = _t("H", deezer_id=555, spotify_id_checked_at="2026-11-20T08:00:00", spotify_id="SP")
+        assert self._cas(t) == []
+        t.spotify_id, t.youtube_url = None, "https://youtu.be/abc"
+        assert self._cas(t) == []
+
+    def test_fiche_creee_par_l_humain_ou_retablie_ignoree(self):
+        t = _t("H", deezer_id=555, spotify_id_checked_at="2026-11-20T08:00:00")
+        assert self._cas(t, corrections=[]) == []
+        assert self._cas(t, corrections=[{**self._CORR, "retablie_at": "2026-11-21"}]) == []
+
+    def test_fiche_kworb_retrouvee_par_son_id(self):
+        t = _t("X (Remix)", 42, spotify_id_checked_at="2026-11-20T08:00:00")
+        kworb = {**self._CORR, "annulation": {"type": "fiche_kworb", "creee": 42}}
+        assert len(self._cas(t, corrections=[kworb])) == 1

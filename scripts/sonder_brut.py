@@ -150,7 +150,7 @@ def main() -> int:
         for source, b in sorted(brut.bilan().items()):
             print(f"{source:16} {b}")
         return 0
-    docs = lire(str(brut.CHEMIN), args.source, args.url, args.limite)
+    docs = lire(str(brut.chemin_lu()), args.source, args.url, args.limite)
     print(
         f"{len(docs)} réponse(s) JSON de « {args.source} »" + (f" ({args.url})" if args.url else "")
     )

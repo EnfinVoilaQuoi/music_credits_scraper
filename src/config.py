@@ -92,6 +92,11 @@ class Settings(BaseSettings):
     # + la dernière de chaque semaine sur 4 (`src/utils/sauvegardes_hors_disque`),
     # en fin de run CLI. Vide → aucune copie.
     base_backup_externe_dir: str = ""
+    # Le data/ RÉEL à lire depuis un worktree git (dont data/ est vide) : brut,
+    # pages désactivées, en LECTURE SEULE (`src/utils/donnees_lues.py`). Vide →
+    # le data/ du code ; dans un worktree sans brut, sa lecture lève (2026-11-23 :
+    # une mesure y lisait un brut vide en silence). Relatif → depuis la racine.
+    donnees_lues_dir: str = ""
 
     # --- Scraping ---
     selenium_timeout: int = 30  # secondes

@@ -2402,7 +2402,7 @@ def pochettes_photo(c, pistes, chemin_brut: Path | None = None) -> list[Cas]:
     from src.persistence import brut
     from src.utils.pochettes_photo import pages_a_photo, pochettes_a_photo
 
-    pages = pages_a_photo(chemin_brut or brut.CHEMIN)
+    pages = pages_a_photo(brut.chemin_lu(chemin_brut))
     isoles = [
         (t["artiste"], t["title"], t["genius_id"], t)
         for t in pistes
@@ -2454,7 +2454,7 @@ def hors_du_disque(
     from src.persistence import brut
     from src.utils import appartenance_disque as ad
 
-    cat = ad.CatalogueDuBrut(chemin_brut or brut.CHEMIN)
+    cat = ad.CatalogueDuBrut(brut.chemin_lu(chemin_brut))
     jugees = [t for t in pistes if t["id"] not in desactivees]
     cas = []
     for x in ad.liens_hors_liste(c, cat, jugees):

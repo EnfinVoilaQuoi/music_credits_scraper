@@ -61,7 +61,7 @@ def liste_deezer(album_id, chemin_brut: Path | None = None) -> list[str] | None:
     d'album ou `/tracks`), EN LECTURE SEULE ; None si le brut ne l'a pas."""
     from src.persistence import brut
 
-    chemin = Path(chemin_brut or brut.CHEMIN)
+    chemin = brut.chemin_lu(chemin_brut)
     if not chemin.exists():
         return None
     base = f"https://api.deezer.com/album/{album_id}"

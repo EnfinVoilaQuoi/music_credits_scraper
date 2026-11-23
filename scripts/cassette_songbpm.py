@@ -112,7 +112,7 @@ def main() -> int:
 
         stats = Counter()
         pages = []
-        for url, html in pages_du_brut(brut.CHEMIN):
+        for url, html in pages_du_brut(brut.chemin_lu()):
             m = H1.search(html)
             if not m:
                 stats["sans requête lisible"] += 1

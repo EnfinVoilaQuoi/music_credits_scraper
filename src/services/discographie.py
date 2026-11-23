@@ -357,8 +357,18 @@ def _filtrer_non_musique(nouveaux: list[Track]) -> tuple[list[Track], list[str]]
 @etape_de_flux("Discographie")
 def regrouper_projets(dm, artist: Artist) -> None:
     """Réunit les éditions de l'artiste en projets (e67) en fin d'étape. Un
-    échec ne coûte pas l'étape : les projets seront refaits à la suivante."""
+    échec ne coûte pas l'étape : les projets seront refaits à la suivante.
+
+    D'abord, deux parutions au même code-barres n'en font qu'une
+    (`fusionner_parutions_meme_upc`) : un doublon né d'un run (Sadek « Nique le
+    Casino 2 », 2026-10-22) attendait sinon le script de réparation."""
     try:
+        for fusion in dm.fusionner_parutions_meme_upc(appliquer=True, artist_id=artist.id):
+            logger.info(
+                f"💿 Parutions au même code-barres réunies dans « {fusion['titre']} » "
+                f"(#{fusion['garde']}) : "
+                + ", ".join(f"« {t} » (#{i})" for i, t in fusion["absorbees"])
+            )
         b = dm.regrouper_projets(artist.id)
         logger.info(
             f"💿 Projets : {b.projets} ({b.reunis} à plusieurs éditions, {b.crees} créé(s), "

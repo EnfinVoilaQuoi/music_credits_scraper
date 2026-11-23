@@ -162,6 +162,35 @@ class TestCollab:
         assert {(c.name, c.role) for c in remix.credits} == {("Damso", CreditRole.FEATURED)}
 
 
+class TestVersion:
+    def test_l_instru_d_un_featuring_garde_le_role_de_l_original(self, data_manager):
+        """« Forgot About Dre - Instrumental » chez Eminem : invité, pas principal
+        (décision utilisateur 2026-11-23)."""
+        artist = Artist(name="Eminem")
+        artist.id = data_manager.save_artist(artist)
+        original = Track(title="Forgot About Dre", artist=artist)
+        original.is_featuring, original.primary_artist_name = True, "Dr. Dre"
+        data_manager.save_track(original)
+        prop = _proposition(
+            original,
+            kworb_title="Forgot About Dre - Instrumental",
+            kind="rendition",
+            remixer=None,
+            socle="Forgot About Dre",
+            is_feature=True,
+            proposition="rendition",
+            identite={
+                "name": "Forgot About Dre - Instrumental",
+                "artists": ["Dr. Dre", "Eminem"],
+                "duration": 222,
+            },
+        )
+        kd.appliquer(data_manager, artist, prop, "version", _DATE)
+        instru = _lignes(data_manager, artist)["Forgot About Dre - Instrumental"]
+        assert (instru.is_featuring, instru.primary_artist_name) == (True, "Dr. Dre")
+        assert instru.relationships[0]["type"] == "version_of"
+
+
 class TestExistant:
     def test_le_morceau_existant_recoit_l_id_et_les_streams(self, data_manager, booba):
         artist, parent = booba

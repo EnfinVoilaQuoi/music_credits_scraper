@@ -1080,8 +1080,9 @@ class TestVarianteKworb:
         }
         assert self._juger(preuves, [socle], None) is None
 
-    def test_l_instrumental_d_un_featuring_ne_fait_pas_de_fiche(self):
-        """« Forgot About Dre - Instrumental » : Eminem n'y est même pas."""
+    def test_l_instrumental_d_un_featuring_fait_une_fiche(self):
+        """« Forgot About Dre - Instrumental » : l'original est en base, on garde
+        son instru (décision utilisateur 2026-11-23)."""
         socle = _t("Forgot About Dre", 1, durations_observees={"deezer": 222})
         preuves = {
             "kworb_title": "Forgot About Dre - Instrumental",
@@ -1089,7 +1090,17 @@ class TestVarianteKworb:
             "parent_track_id": 1,
             "is_feature": True,
         }
-        assert self._juger(preuves, [socle], None) is None
+        assert self._juger(preuves, [socle], 222).action == "kworb_version"
+
+    def test_un_autre_featuring_reste_a_l_humain(self):
+        socle = _t("Forgot About Dre", 1, durations_observees={"deezer": 222})
+        preuves = {
+            "kworb_title": "Forgot About Dre - Live",
+            "proposition": "rendition",
+            "parent_track_id": 1,
+            "is_feature": True,
+        }
+        assert self._juger(preuves, [socle], 260) is None
 
     def test_un_remix_a_la_duree_du_socle_reste_a_l_humain(self):
         """Comme la règle C : à la durée de l'original, un remix peut n'être qu'un libellé."""

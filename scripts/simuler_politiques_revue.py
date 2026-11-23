@@ -201,8 +201,8 @@ def simuler(dm, noms=None, *, reseau: bool = False, runtime=None) -> list[str]:
         pol.Politique(
             "kworb",
             ("kworb_proposition", "kworb_a_confirmer"),
-            "Kworb : la proposition ★ qui ne crée rien (variante, morceau existant)",
-            pol.politique_kworb,
+            "Kworb : rejeu d'aujourd'hui, puis la variante d'une fiche (sommée ou à part)",
+            lambda c, t, x: pol.politique_kworb(c, t, x) or pol.politique_kworb_variante(c, t, x),
         ),
         # Les autres signalements Kworb : seulement « périmé ou non » (rejeu).
     ]
@@ -223,8 +223,10 @@ def simuler(dm, noms=None, *, reseau: bool = False, runtime=None) -> list[str]:
         kworb = pol.Politique(
             "kworb",
             ("kworb_proposition", "kworb_a_confirmer", "kworb_ecartee", "kworb_flou"),
-            "Kworb : rejeu d'aujourd'hui, puis la proposition ★ qui ne crée rien",
-            lambda c, t, x, r=kworb_rejoue: pol.politique_kworb(c, t, x, rejoues=r),
+            "Kworb : rejeu d'aujourd'hui, puis la variante d'une fiche (sommée ou à part)",
+            lambda c, t, x, r=kworb_rejoue: (
+                pol.politique_kworb(c, t, x, rejoues=r) or pol.politique_kworb_variante(c, t, x)
+            ),
         )
         deezer = pol.Politique(
             "ecarts_deezer",

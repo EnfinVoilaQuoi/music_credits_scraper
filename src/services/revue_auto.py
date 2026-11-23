@@ -147,6 +147,9 @@ _SANS_FICHE = frozenset(
         "taire_lien",
         "refuser_lien",
         "kworb_tiers",
+        # La ligne Kworb n'est sur aucune fiche ; la fiche visée est dans ses preuves.
+        "kworb_sommer",
+        "kworb_version",
         # Cas d'ARTISTE : ses fiches sont dans ses preuves.
         "retirer_video_partagee",
     }
@@ -614,6 +617,71 @@ def _kworb_tiers(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
     }
 
 
+def _kworb_version(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Crée la fiche à part d'une VERSION Kworb (`kworb_decisions`, voie
+    « version », page Spotify lue). Rétablir la supprime, comme `_kworb_tiers`."""
+    from src.services import revue_actions
+    from src.utils.title_matching import normalize_title
+
+    ctx = _contexte_action(dm, artiste)
+    compte_rendu = revue_actions._kworb_decision("version")(ctx, cas)
+    titre = cas.preuves["kworb_title"]
+    decision = (
+        revue_actions._kworb_links().load(artiste.name)["decisions"].get(normalize_title(titre), {})
+    )
+    return compte_rendu, {
+        "type": "fiche_kworb",
+        "kworb_title": titre,
+        "creee": decision.get("track_id"),
+    }
+
+
+def _kworb_sommer(dm, _track, cas: Cas, *, artiste) -> tuple[str, dict]:
+    """Somme la ligne Kworb à la fiche dont l'ID a la durée (`kworb_decisions`,
+    voie « existant » vers le morceau existant, « edition » vers le socle).
+    Avant, ce que l'écriture remplace est lu — le compteur Kworb de la fiche,
+    l'ID qu'elle reçoit si elle n'en avait pas — de quoi rétablir."""
+    from src.services import revue_actions
+
+    preuves = cas.preuves
+    existants = preuves.get("existants") or []
+    if preuves.get("proposition") == "existant" and len(existants) == 1:
+        voie, cible_id = "existant", existants[0][0]
+    else:
+        voie, cible_id = "edition", preuves.get("parent_track_id")
+    fiche = next((t for t in artiste.tracks or [] if t.id == cible_id), None)
+    if fiche is None:
+        raise LookupError("la fiche visée n'est plus dans la discographie")
+    avant = {fiche.spotify_id, *(fiche.spotify_ids or ())}
+    compteurs = [
+        {
+            "track_id": fiche.id,
+            "field": o.field,
+            "source": o.source,
+            "value": o.value,
+            "confidence": o.confidence,
+            "seen_at": str(o.seen_at) if o.seen_at else None,
+        }
+        for o in dm.get_artist_observations(fiche.artist.id).get(fiche.id, [])
+        if o.field == "spotify_streams" and o.source == "kworb"
+    ]
+    compte_rendu = revue_actions._kworb_decision(voie)(_contexte_action(dm, artiste), cas)
+    sid = preuves.get("spotify_id")
+    apres = next((t for t in dm.get_artist_tracks(fiche.artist.id) if t.id == fiche.id), None)
+    pose = (
+        sid
+        if apres is not None and sid not in avant and sid in {apres.spotify_id, *apres.spotify_ids}
+        else None
+    )
+    return compte_rendu, {
+        "type": "somme_kworb",
+        "kworb_title": preuves["kworb_title"],
+        "track_id": fiche.id,
+        "spotify_id": pose,
+        "observations": compteurs,
+    }
+
+
 #: Les durées tirées des vidéos, qui partent avec elles (`forget_track_video`).
 _SOURCES_DUREE_VIDEO = ("youtube", "youtube_video", "youtube_officiel")
 
@@ -1019,6 +1087,8 @@ _CORRECTEURS_DE_REGLE = {
     "taire_lien": _statut_de_regle("info"),
     "refuser_lien": _statut_de_regle("refused"),
     "kworb_tiers": _kworb_tiers,
+    "kworb_version": _kworb_version,
+    "kworb_sommer": _kworb_sommer,
     "retirer_video_partagee": _retirer_video_partagee,
     # Même geste pour UNE fiche : `track_ids` = [la fiche], refus de règle.
     "retirer_video_recherche": _retirer_video_partagee,
@@ -1298,6 +1368,7 @@ def retablir(dm, artiste, correction: dict) -> str:
         "edition_deezer",
         "lien",
         "fiche_kworb",
+        "somme_kworb",
         "videos",
         # Un « ✓ Normal » ne touche aucune fiche (DV1 : version Deezer sans page).
         "verdict",
@@ -1432,6 +1503,22 @@ def retablir(dm, artiste, correction: dict) -> str:
             dm.delete_track(annulation["creee"])
         revue_actions._kworb_links().oublier_decision(artiste.name, annulation["kworb_title"])
         compte_rendu = f"« {annulation['kworb_title']} » : fiche retirée, proposition rendue"
+    elif annulation.get("type") == "somme_kworb":
+        from src.services import revue_actions
+        from src.utils.spotify_audit import rejeter_spotify_id
+
+        fiche = next(
+            (t for t in dm.discographie_reunie(artiste) if t.id == annulation["track_id"]),
+            None,
+        )
+        if fiche is None:
+            raise LookupError("la fiche sommée n'est plus là")
+        if annulation.get("spotify_id"):
+            rejeter_spotify_id(dm, fiche, annulation["spotify_id"])
+        dm.forget_spotify_streams_observation(fiche.id, "kworb")
+        dm.restaurer_observations(annulation.get("observations") or [])
+        revue_actions._kworb_links().oublier_decision(artiste.name, annulation["kworb_title"])
+        compte_rendu = f"« {annulation['kworb_title']} » : ligne retirée de « {fiche.title} »"
     elif annulation.get("type") == "lien":
         if not dm.set_relation_status(
             artiste.id,

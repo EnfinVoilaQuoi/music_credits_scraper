@@ -1079,6 +1079,104 @@ def test_remix_tiers_cree_par_regle_puis_retabli(data_manager, artiste):
     assert revue_actions._kworb_links().load(artiste.name)["decisions"] == {}
 
 
+def _cas_kworb(titre, preuves):
+    return revue.Cas(
+        "kworb_proposition", None, titre, "", 0, {"kworb_title": titre, **preuves}, "k"
+    )
+
+
+def _observations_kworb(dm, track):
+    return [
+        o.value
+        for o in dm.get_artist_observations(track.artist.id).get(track.id, [])
+        if o.field == "spotify_streams" and o.source == "kworb"
+    ]
+
+
+def test_ligne_kworb_sommee_par_regle_puis_retablie(data_manager, artiste):
+    """Règle du 2026-11-23 : la ligne va au remix existant (même durée) — ID
+    posé, compteur Kworb ; Rétablir retire l'ID, le compteur, la décision."""
+    from src.services import revue_actions
+
+    t = Track(title="Back dans les bacs (Remix)", artist=artiste, duration=207)
+    t.observations.append(Observation("duration", 207, "deezer"))
+    data_manager.save_track(t)
+    titre = "Back dans les bacs - IV My People Remix"
+    identite = {"name": titre, "artists": [artiste.name], "duration": 208}
+    cas = _cas_kworb(
+        titre,
+        {
+            "spotify_id": "4uLU6hMCjMI75M1A2tKUQC",
+            "streams": 162700,
+            "daily": 12,
+            "proposition": "existant",
+            "existants": [[t.id, t.title]],
+            "identite": identite,
+        },
+    )
+    _charger(data_manager, artiste)
+    compte_rendu, annulation = revue_auto._kworb_sommer(data_manager, None, cas, artiste=artiste)
+    fiche = _charger(data_manager, artiste)[t.title]
+    assert [int(v) for v in _observations_kworb(data_manager, fiche)] == [162700]
+    assert fiche.spotify_id == annulation["spotify_id"] == "4uLU6hMCjMI75M1A2tKUQC"
+    decisions = revue_actions._kworb_links().load(artiste.name)["decisions"]
+    assert [d["kind"] for d in decisions.values()] == ["existant"]
+
+    data_manager.journaliser_correction(
+        artiste.id, cas, "regle:kworb_sommer", compte_rendu, annulation
+    )
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    revue_auto.retablir(data_manager, artiste, correction)
+    fiche = _charger(data_manager, artiste)[t.title]
+    assert fiche.spotify_id is None
+    assert _observations_kworb(data_manager, fiche) == []
+    assert revue_actions._kworb_links().load(artiste.name)["decisions"] == {}
+
+
+def test_version_kworb_creee_par_regle_puis_retablie(data_manager, artiste, monkeypatch):
+    """L'instrumental d'un remix devient une fiche à part, version du REMIX
+    (`socle_de_version`) ; Rétablir la supprime et rend la proposition."""
+    from src.services import revue_actions
+
+    monkeypatch.setattr(
+        "src.scrapers.spotify_web_scraper.lire_identite_page", lambda _sid: None, raising=False
+    )
+    socle = Track(title="Pose ton gun", artist=artiste, duration=220)
+    remix = Track(title="Pose ton gun - IV My People Remix", artist=artiste, duration=228)
+    data_manager.save_track(socle)
+    data_manager.save_track(remix)
+    titre = "Pose ton Gun - IV My People Remix (Instrumental)"
+    cas = _cas_kworb(
+        titre,
+        {
+            "spotify_id": "73VBwDGrq1VBwDCMHA21ji",
+            "streams": 134821,
+            "daily": 5,
+            "proposition": "existant",
+            "existants": [[remix.id, remix.title]],
+            "parent_track_id": socle.id,
+            "parent_title": socle.title,
+            "remixer": "IV My People",
+            "identite": {"name": titre, "artists": [artiste.name], "duration": 231},
+        },
+    )
+    _charger(data_manager, artiste)
+    compte_rendu, annulation = revue_auto._kworb_version(data_manager, None, cas, artiste=artiste)
+    fiches = _charger(data_manager, artiste)
+    creee = fiches[titre]
+    assert annulation == {"type": "fiche_kworb", "kworb_title": titre, "creee": creee.id}
+    assert not creee.is_featuring
+    assert [(r["type"], r["title"]) for r in creee.relationships] == [("version_of", remix.title)]
+
+    data_manager.journaliser_correction(
+        artiste.id, cas, "regle:kworb_version", compte_rendu, annulation
+    )
+    (correction,) = data_manager.corrections_revue(artiste.id)
+    revue_auto.retablir(data_manager, artiste, correction)
+    assert titre not in _charger(data_manager, artiste)
+    assert revue_actions._kworb_links().load(artiste.name)["decisions"] == {}
+
+
 def test_page_songbpm_retiree_par_regle_refusee_puis_levee_au_retablissement(data_manager, artiste):
     from src.utils.corrections_fiches import (
         CHAMP_PAGE_SONGBPM,

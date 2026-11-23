@@ -912,13 +912,11 @@ _TITRE_KWORB = ("kworb_title", "titre_kworb")
 
 
 def politique_kworb(cas, _track, _ctx, rejoues: dict | None = None):
-    """Une proposition Kworb « ★ » qui ne crée rien : rattacher comme VARIANTE
-    au socle connu (`rendition` : ID gardé à part, jamais sommé) ou au morceau
-    qui EST déjà ce remix (`existant`). Les voies qui créent une fiche ou
-    somment des streams (`collab`, `tiers`, `edition`) restent à l'humain.
-    `rejoues` : `{titre Kworb: verdict}` du rapprochement d'AUJOURD'HUI, rejoué
-    hors ligne depuis le brut (`update_kworb.rapprochements`) — une ligne
-    désormais rattachée sans suggestion rend le signalement périmé."""
+    """Un signalement Kworb PÉRIMÉ : `rejoues` = `{titre Kworb: verdict}` du
+    rapprochement d'AUJOURD'HUI, rejoué hors ligne depuis le brut
+    (`update_kworb.rapprochements`) — une ligne désormais rattachée sans
+    suggestion rend le signalement périmé. Les propositions ★ elles-mêmes se
+    jugent par `politique_kworb_proposition` (tiers, variante d'une fiche)."""
     preuves = cas.preuves or {}
     titre = next((preuves[k] for k in _TITRE_KWORB if preuves.get(k)), None)
     verdict = (rejoues or {}).get(titre) if titre else None
@@ -928,16 +926,133 @@ def politique_kworb(cas, _track, _ctx, rejoues: dict | None = None):
             "run",
             f"« {titre} » → « {verdict['fiche']['titre']} » ({verdict.get('via')})",
         )
-    propose = preuves.get("proposition")
-    if propose == "rendition" and preuves.get("parent_track_id"):
-        return Arbitrage(
-            "variante rattachée au socle (jamais sommée)",
-            "kworb_rendition",
-            f"socle « {preuves.get('parent_title')} »",
-        )
-    if propose == "existant" and len(preuves.get("existants") or []) == 1:
-        return Arbitrage("rattacher au morceau existant", "kworb_existant", "un seul existant")
     return None
+
+
+def _lire_embed_muet(_sid):
+    """Aucun réseau : `update_kworb._identite_embed` lit le BRUT d'abord."""
+    return None
+
+
+def juger_variante_kworb(preuves: dict, fiches: dict, lire_identite=_lire_embed_muet):
+    """Une ligne Kworb qui ressemble à une VERSION d'une fiche (proposition ★
+    « rendition » au socle, ou « existant » au seul morceau qui serait déjà ce
+    remix), décision utilisateur du 2026-11-23 :
+
+      · SOMMÉE à la fiche (`kworb_sommer`) quand la durée de l'ID de la ligne,
+        lue à son embed (brut), est à ± `ECART_FICHIER_S` de la durée
+        INDÉPENDANTE de la fiche (`duree_temoin`, jamais une durée lue par ce
+        même ID), dans la même version — le juge des « même morceau ? »
+        Kworb, `update_kworb.duree_de_la_ligne` == « meme » (ID refusé exclu) ;
+      · sinon une FICHE À PART (`kworb_version`, version secondaire, comme la
+        règle C des écarts Deezer), quand rien ne la dit déjà en base : aucune
+        fiche au titre de la ligne ni à son ID, et chaque fiche de la même
+        version (la cible, le socle) à plus de `ECART_VERSION_S` de sa durée.
+
+    Restent à l'humain : une ligne de featuring (`tiers` a sa règle), une
+    édition de diffusion ou de support (même enregistrement sous un autre
+    libellé), une même version entre 2 et 10 s ou sans durée lisible (une
+    autre édition du même remix ?), un remix ou un edit à la durée du socle
+    (règle C) et un socle qui est lui-même une version (« La Fin De Leur
+    Monde - Live » proposée au socle « (Instrumentale) », inventaire du
+    2026-11-22). `fiches` : `{id: Track}` de la discographie réunie.
+
+    Garde-fou ajouté à la règle de l'utilisateur, simulé sur les 17 cas : une
+    autre VERSION (« Seine Saint-Denis Style - IV My People Remix
+    (Instrumental) », 200 s comme le remix vocal) n'est jamais sommée, même à
+    la même durée — une variante ne se somme pas à son original (Kworb)."""
+    from src.utils.spotify_identity import duree_temoin
+    from src.utils.title_matching import names_match_as_words
+    from src.utils.update_kworb import (
+        _SUFFIXE_UPLOAD,
+        _identite_embed,
+        duree_de_la_ligne,
+        socle_du_titre,
+    )
+    from src.utils.version_descriptors import (
+        edition_de_diffusion,
+        meme_version_stricte,
+        porte_une_version,
+        titres_equivalents,
+    )
+    from src.utils.version_heritage import famille_de
+
+    titre, sid = preuves.get("kworb_title"), preuves.get("spotify_id")
+    if not titre or not sid:
+        return None
+    propose = preuves.get("proposition")
+    existants = preuves.get("existants") or []
+    parent = fiches.get(preuves.get("parent_track_id"))
+    if propose == "existant" and len(existants) == 1:
+        cible, voie = fiches.get(existants[0][0]), "existant"
+    elif propose == "rendition" and parent is not None:
+        cible, voie = parent, "edition"
+    else:
+        return None
+    if cible is None:
+        return None
+    entree = {"title": titre, "spotify_id": sid}
+    duree = (_identite_embed(sid, lire_identite) or {}).get("duration")
+    if duree_de_la_ligne(entree, cible, lire_identite) == "meme":
+        return Arbitrage(
+            f"sommer la ligne à « {cible.title} » (même enregistrement)",
+            "kworb_sommer",
+            f"ID {duree} s, fiche {duree_temoin(cible)} s ({voie})",
+        )
+    nu = _SUFFIXE_UPLOAD.sub("", titre)
+    fam = famille_de(nu)
+    if preuves.get("is_feature") or fam in (None, "edition") or edition_de_diffusion(nu):
+        return None
+    if parent is not None and (
+        porte_une_version(parent.title) or not titres_equivalents(socle_du_titre(nu), parent.title)
+    ):
+        # Le socle proposé n'est pas l'original de la ligne : la fiche créée
+        # en hériterait (« La fin de leur monde (Instrumentale) », que le juge
+        # des titres ne lit pas comme une version).
+        return None
+    jugees = {id(f): f for f in (cible, parent) if f is not None}
+    for t in fiches.values():
+        if sid == t.spotify_id or sid in (t.spotify_ids or ()):
+            # La ligne est déjà une fiche : un run Kworb la rattache par son ID.
+            return None
+        if id(t) not in jugees and titres_equivalents(nu, t.title):
+            return None
+    remixeur = preuves.get("remixer")
+    for t in jugees.values():
+        if meme_version_stricte(nu, t.title):
+            temoin = duree_temoin(t)
+            if not duree or not temoin or abs(int(duree) - int(temoin)) <= ECART_VERSION_S:
+                return None
+            if remixeur and names_match_as_words(remixeur, t.title):
+                # Le même remixeur : une autre durée y est une autre ÉDITION
+                # du même remix (« Ma Benz … B.O.S.S. 2000 Remix », 220 s,
+                # contre « Ma benz (Remix de B.O.S.S) » du *Clash* de 2000,
+                # 232 s chez Deezer).
+                return None
+    socle = parent if parent is not None else None
+    if socle is not None and fam not in FAMILLES_JAMAIS_MENTION_DE_SUPPORT:
+        temoin = duree_temoin(socle)
+        if duree and temoin and abs(int(duree) - int(temoin)) <= ECART_FICHIER_S:
+            return None
+    return Arbitrage(
+        "fiche à part (version secondaire)",
+        "kworb_version",
+        f"{fam} ; ID {duree or '?'} s, « {cible.title} » {duree_temoin(cible)} s",
+    )
+
+
+def politique_kworb_variante(cas, _track, ctx, lire_identite=_lire_embed_muet):
+    """`juger_variante_kworb` sur un cas `kworb_proposition` du panneau."""
+    if cas.detecteur != "kworb_proposition" or ctx is None:
+        return None
+    return juger_variante_kworb(
+        cas.preuves or {}, {t.id: t for t in ctx.disco}, lire_identite=lire_identite
+    )
+
+
+def politique_kworb_proposition(cas, track, ctx):
+    """Les propositions ★ Kworb : remix par un tiers, ou variante d'une fiche."""
+    return politique_kworb_tiers(cas, track, ctx) or politique_kworb_variante(cas, track, ctx)
 
 
 # ── Alias proposés ──────────────────────────────────────────────────────────
@@ -2896,6 +3011,12 @@ REGLES_ETENDUES = frozenset(
         ("deezer_link_candidate", "deezer_appliquer"),
         ("deezer_link_candidate", "normal"),
         ("kworb_proposition", "kworb_tiers"),
+        # 2026-11-23, décision utilisateur : la variante d'une fiche, sommée à
+        # ± 2 s de sa durée indépendante, sinon fiche à part
+        # (`juger_variante_kworb`) ; simulée sur les 17 propositions du panneau :
+        # 6 sommées, 2 fiches, 9 à l'humain.
+        ("kworb_proposition", "kworb_sommer"),
+        ("kworb_proposition", "kworb_version"),
         # 2026-10-27 : simulée sur toute la base (41 vidéos partagées sur 90),
         # témoins d'accord (album vu par la recherche, durées de catalogue).
         ("video_partagee", "retirer_video_partagee"),
@@ -3603,7 +3724,7 @@ _POLITIQUE_PAR_DETECTEUR: dict[str, Callable] = {
     "doublon_lrc": politique_lrc,
     "liens_proposes": politique_alias,
     "deezer_link_candidate": politique_liens_deezer,
-    "kworb_proposition": politique_kworb_tiers,
+    "kworb_proposition": politique_kworb_proposition,
     "video_partagee": politique_video_partagee,
     "recherche_perimee": politique_recherche_perimee,
     "jumelle_annee": politique_jumelle_annee,

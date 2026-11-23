@@ -17,6 +17,7 @@ from src.scrapers.crawl4ai_scraper_base import CrawlAIScraperBase
 from src.utils import credits_genius_api
 from src.utils.corrections_fiches import constat_instrumental_refuse
 from src.utils.credit_roles import LIBELLES_HORS_CREDITS, map_role, valeur_vide
+from src.utils.credit_sources import retirer_source
 from src.utils.encodage import reparer_c1
 from src.utils.inedits import titre_sans_marqueur
 from src.utils.logger import get_logger
@@ -204,10 +205,10 @@ class GeniusScraperV3(CrawlAIScraperBase):
                     )
             # Purger les anciens crédits Genius (évite que des erreurs d'anciens
             # runs — ex: titres de tracklist en Writer — persistent en base).
+            # La page se RETIRE (`credit_sources`) : un crédit qu'une autre
+            # source confirme reste, porté par elle.
             before = len(track.credits)
-            track.credits = [
-                c for c in track.credits if c.source != credits_genius_api.SOURCE_SCRAPE
-            ]
+            track.credits = retirer_source(track.credits, credits_genius_api.SOURCE_SCRAPE)
             purged = before - len(track.credits)
             if purged:
                 logger.info(f"GeniusScraperV3: {purged} ancien(s) crédit(s) Genius purgé(s)")
@@ -222,15 +223,19 @@ class GeniusScraperV3(CrawlAIScraperBase):
         # Même chose pour un crédit HÉRITÉ d'une autre fiche (2026-10-20, Kanye
         # « They Say (Instrumental) ») : à la même clé, il bloquait le crédit
         # de la page, qui disparaissait — la fiche restait « jamais scrapée ».
-        confirmes = {credits_genius_api.cle_credit(c) for c in credits}
-        track.credits = [
-            c
-            for c in track.credits
-            if not (
-                (c.source == credits_genius_api.SOURCE_API or est_herite(c.source))
-                and credits_genius_api.cle_credit(c) in confirmes
-            )
-        ]
+        # Le crédit scrapé garde les sources tierces qui confirmaient celui
+        # qu'il remplace (`transmettre_confirmations`).
+        confirmes = {credits_genius_api.cle_credit(c): c for c in credits}
+        gardes = []
+        for c in track.credits:
+            cle = credits_genius_api.cle_credit(c)
+            if (
+                c.source == credits_genius_api.SOURCE_API or est_herite(c.source)
+            ) and cle in confirmes:
+                credits_genius_api.transmettre_confirmations(c, confirmes[cle])
+                continue
+            gardes.append(c)
+        track.credits = gardes
         for credit in credits:
             track.add_credit(credit)
 

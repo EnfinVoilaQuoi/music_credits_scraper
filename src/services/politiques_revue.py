@@ -1293,7 +1293,9 @@ def arbitrage_credits_api(cas, track, _ctx) -> Arbitrage | None:
 
     Mesuré le 2026-11-22 sur une copie : 189 crédits 🎫 sur 96 cas, 1 seul
     confirmé au même rôle, aucune fiche couverte entière — tout va en
-    indécidable. Les rôles VOISINS (« Writer » de l'API contre « Composer » /
+    indécidable : la table ne gardait qu'une source par crédit. Depuis e70
+    (2026-11-23), un crédit 🎫 que Discogs, Deezer ou YouTube redonne À LA MÊME
+    CLÉ porte cette source en confirmation, et elle compte ici. Les rôles VOISINS (« Writer » de l'API contre « Composer » /
     « Lyricist » d'une Topic, « Producer » contre « Additional Production »
     de la page) ne confirment pas : pas validés."""
     from src.utils.title_matching import normalize_name
@@ -1303,10 +1305,13 @@ def arbitrage_credits_api(cas, track, _ctx) -> Arbitrage | None:
     api = [c for c in track.credits if c.source == revue.SOURCE_API]
     if not api:
         return None
+    # Toutes les sources d'un crédit comptent, pas seulement celle de sa ligne
+    # (`Credit.confirmations`, 2026-11-23) : la table n'a qu'une ligne par clé,
+    # la seconde source qui donnait le même crédit était perdue.
     temoins = {
         (normalize_name(c.name), c.role)
         for c in track.credits
-        if c.source in SOURCES_TEMOINS_CREDITS and c.name
+        if c.sources & SOURCES_TEMOINS_CREDITS and c.name
     }
     confirmes = [c for c in api if (normalize_name(c.name), c.role) in temoins]
     if len(confirmes) == len(api):

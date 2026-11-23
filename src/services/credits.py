@@ -372,7 +372,9 @@ def _phase_youtube(
             canaux[vid] = info.get("channel")
 
     topic_count = clip_count = 0
-    existing_credits: dict[int, set[tuple[str, str]]] = {}
+    # Clé « même personne, même rôle » → le crédit qui la porte : une
+    # description qui redonne un crédit connu le CONFIRME (`credit_sources`).
+    existing_credits: dict[int, dict[tuple[str, str], object]] = {}
 
     for vid, (track, kind) in track_by_vid.items():
         if hooks.should_stop():
@@ -385,7 +387,7 @@ def _phase_youtube(
 
         tid = track.id or id(track)
         if tid not in existing_credits:
-            existing_credits[tid] = {_cle_youtube(c) for c in track.credits}
+            existing_credits[tid] = {_cle_youtube(c): c for c in track.credits}
         seen = existing_credits[tid]
 
         new_credits = []
@@ -399,8 +401,10 @@ def _phase_youtube(
                 for c in parsed:
                     key = _cle_youtube(c)
                     if key not in seen:
-                        seen.add(key)
+                        seen[key] = c
                         new_credits.append(c)
+                    else:
+                        seen[key].confirmer_par(c)
                 if new_credits:
                     topic_count += 1
 
@@ -415,8 +419,10 @@ def _phase_youtube(
                 for c in parsed_clip:
                     key = _cle_youtube(c)
                     if key not in seen:
-                        seen.add(key)
+                        seen[key] = c
                         new_credits.append(c)
+                    else:
+                        seen[key].confirmer_par(c)
                 if new_credits and not any(nc.source == "youtube_topic" for nc in new_credits):
                     clip_count += 1
 

@@ -61,6 +61,7 @@ EXCEPTIONS: dict[str, str] = {
     "upsert_album": _ALBUMS,
     # ── Crédits ──
     "enregistrer_credits_album": _CREDITS_ALBUM,
+    "ajouter_confirmations_credits": _CREDITS + " (confirmations, rattrapage par lots)",
     "forget_credit": _CREDITS,
     "forget_discogs_credits": _CREDITS,
     "remplacer_credits_youtube": _CREDITS,

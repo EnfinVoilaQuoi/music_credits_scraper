@@ -31,6 +31,13 @@ from src.utils.corrections_fiches import (
     refus_videos_a_la_fusion,
     videos_refusees,
 )
+from src.utils.credit_sources import ecrire as ecrire_confirmations
+from src.utils.credit_sources import lire as lire_confirmations
+from src.utils.credit_sources import (
+    retirer_source,
+    retirer_source_en_base,
+    unir_confirmations_en_base,
+)
 from src.utils.credits_genius_api import (
     purger_provisoires_couverts,
     sans_provisoires_couverts,
@@ -360,9 +367,9 @@ class TrackRepository:
                         )
                         if frais
                     }
-                    en_base = [
-                        c for c in self._get_track_credits(conn, track.id) if c.source not in relues
-                    ]
+                    en_base = self._get_track_credits(conn, track.id)
+                    for source in relues:
+                        en_base = retirer_source(en_base, source)
                     track.credits = unir_credits(en_base, track.credits)
                 self._signaler_identites_concurrentes(track, existing_track)
                 if track.is_featuring is None:
@@ -693,12 +700,13 @@ class TrackRepository:
                 ):
                     if not getattr(track, frais):
                         continue
+                    # La source relue se RETIRE (`credit_sources`) : un crédit
+                    # qu'une autre source confirme reste, porté par elle.
                     effacer_chez_les_soeurs(
                         conn,
                         track.id,
-                        lambda jumelle, source=source: conn.execute(
-                            text("DELETE FROM credits WHERE track_id = :tid AND source = :src"),
-                            {"tid": jumelle, "src": source},
+                        lambda jumelle, source=source: retirer_source_en_base(
+                            conn, jumelle, source
                         ),
                     )
                     setattr(track, frais, False)
@@ -764,8 +772,9 @@ class TrackRepository:
             conn.execute(
                 text(
                     "INSERT INTO credits "
-                    "(track_id, name, role, role_detail, tracks, source) "
-                    "VALUES (:track_id, :name, :role, :role_detail, :tracks, :source)"
+                    "(track_id, name, role, role_detail, tracks, source, confirme_par) "
+                    "VALUES (:track_id, :name, :role, :role_detail, :tracks, :source, "
+                    ":confirme_par)"
                 ),
                 {
                     "track_id": track_id,
@@ -774,6 +783,7 @@ class TrackRepository:
                     "role_detail": credit.role_detail,
                     "tracks": credit.tracks,
                     "source": credit.source,
+                    "confirme_par": ecrire_confirmations(credit.confirmations, credit.source),
                 },
             )
         except SQLAlchemyError as e:
@@ -1023,6 +1033,7 @@ class TrackRepository:
             # s'invente pas (un rescrape Genius purgerait la ligne
             # comme la sienne). 0 ligne concernée au 2026-09-24.
             source=str(row["source"] or "legacy"),
+            confirmations=lire_confirmations(row.get("confirme_par")),
         )
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1633,6 +1644,9 @@ class TrackRepository:
                 # provisoires de l'API partent AVANT la dédup, sinon l'un d'eux
                 # écarterait le crédit scrapé identique de l'autre fiche.
                 purger_provisoires_couverts(conn, (keep_id, delete_id))
+                # Les sources d'un crédit que les deux fiches portent restent
+                # sur la ligne conservée (`credit_sources`), avant la dédup.
+                unir_confirmations_en_base(conn, delete_id, keep_id)
                 # Crédits : ne transférer que ceux absents du morceau conservé
                 conn.execute(
                     text("""
@@ -2489,15 +2503,11 @@ class TrackRepository:
                     ),
                     {"id": track_id},
                 )
-                conn.execute(
-                    # Provisoires de l'API compris : ils viennent de la même
-                    # page mélangée.
-                    text(
-                        "DELETE FROM credits WHERE track_id = :id "
-                        "AND source IN ('genius', 'genius_api')"
-                    ),
-                    {"id": track_id},
-                )
+                # Provisoires de l'API compris : ils viennent de la même page
+                # mélangée. La page se RETIRE (`credit_sources`) : un crédit
+                # qu'une autre source donne aussi garde sa ligne.
+                for source in ("genius", "genius_api"):
+                    retirer_source_en_base(conn, track_id, source)
                 conn.execute(
                     text("DELETE FROM observations WHERE track_id = :id AND source = 'genius'"),
                     {"id": track_id},
@@ -3116,6 +3126,40 @@ class TrackRepository:
             return len(ids)
         except SQLAlchemyError as e:
             logger.error(f"Erreur forget_credit({track_id}, {name}, {role}): {e}")
+            return 0
+
+    def ajouter_confirmations_credits(self, confirmations: dict[int, set[str]]) -> int:
+        """Ajoute des sources en CONFIRMATION de crédits existants
+        (`{credit_id: sources}`, `credits.confirme_par`, e70) — union, jamais
+        retrait ; la source de la ligne et un héritage n'y entrent pas. Écrivain
+        du rattrapage `scripts/rattraper_confirmations_credits.py`. Rend le
+        nombre de lignes changées."""
+        from src.utils.credit_sources import ecrire, lire
+        from src.utils.version_heritage import est_herite
+
+        changees = 0
+        try:
+            with self.engine.begin() as conn:
+                for credit_id, sources in confirmations.items():
+                    ligne = conn.execute(
+                        text("SELECT source, confirme_par FROM credits WHERE id = :i"),
+                        {"i": int(credit_id)},
+                    ).first()
+                    if ligne is None:
+                        continue
+                    avant = lire(ligne[1])
+                    apres = avant | {s for s in sources if s and not est_herite(s)}
+                    apres -= {ligne[0]}
+                    if apres == avant:
+                        continue
+                    conn.execute(
+                        text("UPDATE credits SET confirme_par = :c WHERE id = :i"),
+                        {"c": ecrire(apres, ligne[0]), "i": int(credit_id)},
+                    )
+                    changees += 1
+            return changees
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur ajouter_confirmations_credits: {e}")
             return 0
 
     def forget_discogs_credits(self, track_id: int, cles) -> int:
@@ -5044,10 +5088,9 @@ class TrackRepository:
                 conn, track_id, self._arbitrer_discographie(conn, track_id, touches)
             )
 
-        rapport["credits_retires"] += conn.execute(
-            text("DELETE FROM credits WHERE track_id = :tid AND source = 'discogs'"),
-            {"tid": track_id},
-        ).rowcount
+        # Discogs se RETIRE (`credit_sources`) : un crédit qu'une autre source
+        # donne aussi garde sa ligne, Discogs quitte ses confirmations.
+        rapport["credits_retires"] += retirer_source_en_base(conn, track_id, "discogs")
 
         # La place Discogs sur une parution de la base (même code-barres) : la
         # preuve part ; le lien aussi s'il n'en a plus d'autre (sauf l'album

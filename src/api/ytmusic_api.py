@@ -55,6 +55,10 @@ except ImportError:
 
 _YT_BATCH_SIZE = 50  # limite YouTube Data API v3
 
+#: En-tête d'une page artiste YTM : `ytmusicapi.get_artist` lève `KeyError` à
+#: son nom quand la chaîne n'en est pas une (chaîne YouTube ordinaire).
+EN_TETE_PAGE_ARTISTE = "musicImmersiveHeaderRenderer"
+
 
 # ── Utilitaires ───────────────────────────────────────────────────────────────
 
@@ -336,7 +340,15 @@ class YTMusicAPI:
             # Réponse VIDE : le bridage de YTM (cf. `get_album_tracks_raw`).
             logger.warning(f"YTM bridé : réponse vide (get_artist_info {channel_id}) ({e})")
             return {"albums": [], "monthly_listeners": None}
-        except (YTMusicError, requests.RequestException, KeyError, TypeError) as e:
+        except KeyError as e:
+            if e.args == (EN_TETE_PAGE_ARTISTE,):
+                # Une chaîne YouTube ordinaire (en-tête `musicVisualHeaderRenderer`),
+                # pas une page artiste YTM : un constat, pas une panne.
+                logger.info(f"YTMusic : {channel_id} est une chaîne sans page artiste")
+                return {"albums": [], "monthly_listeners": None, "sans_page_artiste": True}
+            logger.error(f"Erreur get_artist_info ({channel_id}): {e!r}")
+            return {"albums": [], "monthly_listeners": None}
+        except (YTMusicError, requests.RequestException, TypeError) as e:
             logger.error(f"Erreur get_artist_info ({channel_id}): {e}")
             return {"albums": [], "monthly_listeners": None}
 

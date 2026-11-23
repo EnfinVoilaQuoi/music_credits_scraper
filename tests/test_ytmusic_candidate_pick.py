@@ -79,3 +79,19 @@ def test_candidat_unique_score_nul_conserve():
     api = _API({"UC1": _albums("Foo")})
     cid, _ = mod._pick_best_candidate(api, [("UC1", "X")], {_n("Bar")})
     assert cid == "UC1"
+
+
+def test_chaine_sans_page_artiste_ecartee_des_candidats():
+    # UC1 : chaîne YouTube ordinaire (pas de page artiste YTM) → écartée au profit
+    # de UC2, même sans album : elle n'est retenue que s'il n'y a qu'elles.
+    class _APIChaine(_API):
+        def get_artist_info(self, cid):
+            if cid == "UC1":
+                return {"albums": [], "monthly_listeners": None, "sans_page_artiste": True}
+            return super().get_artist_info(cid)
+
+    api = _APIChaine({})
+    cid, _ = mod._pick_best_candidate(api, [("UC1", "X"), ("UC2", "X")], set())
+    assert cid == "UC2"
+    cid, info = mod._pick_best_candidate(api, [("UC1", "X")], set())
+    assert cid == "UC1" and info["sans_page_artiste"]

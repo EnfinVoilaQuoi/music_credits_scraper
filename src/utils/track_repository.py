@@ -7212,16 +7212,27 @@ class TrackRepository:
         try:
             with self._ecrire() as conn:  # chantier A : recalcul en fin de transaction
                 self._toucher(conn, track_id)
-                gid = conn.execute(
-                    text("SELECT genius_id FROM tracks WHERE id = :id"), {"id": track_id}
-                ).scalar()
+                ligne = conn.execute(
+                    text("SELECT genius_id, apple_music_id FROM tracks WHERE id = :id"),
+                    {"id": track_id},
+                ).first()
+                gid, vise = (ligne[0], ligne[1]) if ligne is not None else (None, None)
                 lignes = [track_id]
                 if gid is not None:
+                    # Une sœur dont la colonne porte un AUTRE ID garde tout (comme
+                    # `clear_track_deezer_id`) : ses observations `apple_music`
+                    # viennent du sien (« Gangsta Shit », 2026-11-23 : single chez
+                    # Isha, album chez Aketo — le retrait effaçait l'album).
                     lignes = [
                         r[0]
                         for r in conn.execute(
-                            text("SELECT id FROM tracks WHERE genius_id = :g"), {"g": gid}
+                            text("SELECT id, apple_music_id FROM tracks WHERE genius_id = :g"),
+                            {"g": gid},
                         )
+                        if r[0] == track_id
+                        or r[1] is None
+                        or vise is None
+                        or str(r[1]) == str(vise)
                     ]
                 for tid in lignes:
                     conn.execute(

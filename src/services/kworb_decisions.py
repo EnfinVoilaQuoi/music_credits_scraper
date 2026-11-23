@@ -223,6 +223,7 @@ def appliquer(
         _memoriser(parent_id)
         return f"« {titre} » rattaché comme variante" + ("" if ok else " (compteur NON écrit)")
 
+    creee = False
     if decision in ("existant", "edition"):
         track_id = proposition.get("track_id")
         existants = proposition.get("existants") or []
@@ -243,6 +244,7 @@ def appliquer(
         track = _morceau_existant(dm, artist, (identite or {}).get("name") or titre)
         if track is None:
             track = _creer_ligne(dm, artist, proposition, decision, identite)
+            creee = True
             socle = _track_par_id(dm, artist, proposition.get("parent_track_id"))
             if decision == "version":
                 socle = _modele_de_version(dm, artist, track) or socle
@@ -274,7 +276,12 @@ def appliquer(
             logger.warning(f"ID {sid} refusé par le gate pour « {track.title} » — ligne sans ID")
     dm.save_track(track)
     dm.record_pending(track)
-    if decision not in ("existant", "edition"):
+    if creee:
+        # Ce que la page Spotify a dit de la ligne CRÉÉE. Une fiche déjà en base
+        # retrouvée par son titre garde ses propres faits : les reposer sous
+        # `spotify_web` leur prêterait une provenance (et sa date, lue en base,
+        # est une chaîne : « J'appuie sur la gâchette (B.O.S.S. Remix
+        # Instrumental) », 2026-11-23).
         obs = []
         if track.duration:
             obs.append(Observation("duration", track.duration, "spotify_web"))

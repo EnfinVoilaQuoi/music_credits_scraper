@@ -1006,7 +1006,8 @@ def juger_variante_kworb(preuves: dict, fiches: dict, lire_identite=_lire_embed_
     if cible is None:
         return None
     entree = {"title": titre, "spotify_id": sid}
-    duree = (_identite_embed(sid, lire_identite) or {}).get("duration")
+    identite = _identite_embed(sid, lire_identite) or {}
+    duree = identite.get("duration")
     if duree_de_la_ligne(entree, cible, lire_identite) == "meme":
         return Arbitrage(
             f"sommer la ligne à « {cible.title} » (même enregistrement)",
@@ -1040,6 +1041,13 @@ def juger_variante_kworb(preuves: dict, fiches: dict, lire_identite=_lire_embed_
     for t in jugees.values():
         if meme_version_stricte(nu, t.title):
             temoin = duree_temoin(t)
+            proche = not temoin or abs(int(duree or 0) - int(temoin)) <= ECART_VERSION_S
+            if duree and proche and _meme_remix_nomme(nu, t, remixeur, identite):
+                return Arbitrage(
+                    f"sommer la ligne à « {t.title} » (le même remix, nommé)",
+                    "kworb_sommer",
+                    f"remix de {remixeur} ; ID {duree} s, fiche {temoin or '?'} s ({voie})",
+                )
             if not duree or not temoin or abs(int(duree) - int(temoin)) <= ECART_VERSION_S:
                 return None
             if remixeur and names_match_as_words(remixeur, t.title):
@@ -1058,6 +1066,37 @@ def juger_variante_kworb(preuves: dict, fiches: dict, lire_identite=_lire_embed_
         "kworb_version",
         f"{fam} ; ID {duree or '?'} s, « {cible.title} » {duree_temoin(cible)} s",
     )
+
+
+def _meme_remix_nomme(ligne: str, fiche, remixeur, identite: dict) -> bool:
+    """La ligne Kworb « Titre - X Remix » (invités compris) et la fiche
+    « Titre (Remix de X) » sont le même remix NOMMÉ : même remixeur, rien de
+    plus dans la ligne (« B.O.S.S. 2000 Remix » ajoute « 2000 » : une autre
+    édition, à l'humain), et chaque invité que Spotify crédite sur la ligne est
+    crédité sur la fiche ou nommé dans son titre (décision utilisateur
+    2026-11-23 : « J'appuie sur la gâchette - B.O.S.S. Remix », « la réponse est
+    dans la question »). Les 3 à 6 s d'écart entre l'ID et la fiche n'y font
+    rien : la durée de la fiche est souvent celle d'une recherche YTM par titre."""
+    from src.utils.title_matching import names_match_as_words
+    from src.utils.update_kworb import socle_du_titre
+    from src.utils.version_descriptors import meme_titre_normalise
+
+    if not remixeur or not names_match_as_words(remixeur, fiche.title):
+        return False
+    if not meme_titre_normalise(ligne, f"{socle_du_titre(ligne)} - {remixeur} Remix"):
+        return False
+    credites = [c.name for c in fiche.credits or []]
+    # Le premier artiste est l'interprète principal de la ligne ; le remixeur
+    # est nommé par la ligne même.
+    for nom in (identite.get("artists") or [])[1:]:
+        if names_match_as_words(nom, remixeur):
+            continue
+        if not (
+            names_match_as_words(nom, fiche.title)
+            or any(names_match_as_words(nom, c) for c in credites)
+        ):
+            return False
+    return True
 
 
 def politique_kworb_variante(cas, _track, ctx, lire_identite=_lire_embed_muet):

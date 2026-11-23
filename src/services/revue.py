@@ -1938,7 +1938,9 @@ def meme_enregistrement(track, ctx):
     Versé de l'audit le 2026-11-10 : une suspicion d'audit n'avait ni action ni
     mémoire, le « non » de l'utilisateur ne se retenait nulle part. À l'humain :
     la fusion n'est pas réversible ; « ✓ Normal » retient que ce sont deux
-    fiches. UN cas par paire, porté par la fiche d'identifiant le plus bas."""
+    fiches ; « 📎 Noter en édition » garde l'une, l'autre devient son édition
+    (`titre_autre` : le sens que les titres désignent). UN cas par paire, porté
+    par la fiche d'identifiant le plus bas."""
     paire = ctx.fusions.get(track.id)
     if paire is None:
         return None
@@ -1952,7 +1954,12 @@ def meme_enregistrement(track, ctx):
             f"même ISRC {paire['isrc']} que « {autre.title} », dont le titre est joint à "
             "celui-ci, durées par identifiant à ± 2 s : le même enregistrement sous deux "
             "pages — fusionner ?",
-            {"autres": [autre.id], "isrc": paire["isrc"], "empreinte": empreinte},
+            {
+                "autres": [autre.id],
+                "titre_autre": autre.title,
+                "isrc": paire["isrc"],
+                "empreinte": empreinte,
+            },
         )
     if paire.get("texte"):
         # Versé de `paroles_identiques` (audit) le 2026-11-11.
@@ -1961,7 +1968,12 @@ def meme_enregistrement(track, ctx):
             + (f" ({autre.album})" if autre.album else "")
             + ", servi par les deux pages, sans durée par identifiant pour les départager : "
             "doublon de pages Genius ou version que le titre ne nomme pas — fusionner ?",
-            {"autres": [autre.id], "texte": True, "empreinte": empreinte},
+            {
+                "autres": [autre.id],
+                "titre_autre": autre.title,
+                "texte": True,
+                "empreinte": empreinte,
+            },
         )
     if paire.get("deux_pages"):
         # Règle 3 (décision utilisateur 2026-11-22).
@@ -1969,7 +1981,12 @@ def meme_enregistrement(track, ctx):
             f"même enregistrement que « {autre.title} »"
             + (f" ({autre.album})" if autre.album else "")
             + f" ? {paire['deux_pages']} — fusionner, ou noter l'une en édition de l'autre ?",
-            {"autres": [autre.id], "deux_pages": paire["deux_pages"], "empreinte": empreinte},
+            {
+                "autres": [autre.id],
+                "titre_autre": autre.title,
+                "deux_pages": paire["deux_pages"],
+                "empreinte": empreinte,
+            },
         )
     if paire.get("compteur"):
         # Versé de `streams_double` (audit) le 2026-11-11.
@@ -1977,7 +1994,12 @@ def meme_enregistrement(track, ctx):
             f"même compteur Spotify ({paire['compteur']:,}) que « {autre.title} », sur le même "
             "disque, sans ID Spotify commun ni durées contraires : le même enregistrement "
             "sous deux fiches — fusionner ?",
-            {"autres": [autre.id], "compteur": paire["compteur"], "empreinte": empreinte},
+            {
+                "autres": [autre.id],
+                "titre_autre": autre.title,
+                "compteur": paire["compteur"],
+                "empreinte": empreinte,
+            },
         )
     return (
         f"mêmes paroles Genius que « {autre.title} »"
@@ -1986,6 +2008,7 @@ def meme_enregistrement(track, ctx):
         "le même enregistrement sous deux pages — fusionner ?",
         {
             "autres": [autre.id],
+            "titre_autre": autre.title,
             "paroles": paire["paroles"],
             "empreinte": empreinte,
         },

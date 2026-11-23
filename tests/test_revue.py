@@ -1113,6 +1113,7 @@ def test_fenetre_se_construit(racine_tk):
         divergences_identite_soeurs=lambda _id: [],
         get_artist_positions=lambda _id: {},
         fusions_a_decider=lambda _ids: {},
+        pages_genius_supprimees=set,
         hors_du_disque_a_decider=lambda _ids: {},
         paroles_d_autres_artistes=lambda _aid, _textes: {},
         cas_de_projets=lambda _aid: [],

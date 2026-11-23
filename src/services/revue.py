@@ -224,6 +224,10 @@ class Contexte:
     #: (`meme_enregistrement.fusions_a_decider`), lues par `charger_contexte` :
     #: le détecteur reste pur.
     fusions: dict = field(default_factory=dict)
+    #: `{track_id: Track}` des fiches à la page Genius SUPPRIMÉE hors du
+    #: panneau (désactivées par la règle), autre côté d'une paire « page
+    #: recréée ? » de `ctx.fusions` (`pages_supprimees.paires_au_panneau`).
+    pages_supprimees: dict = field(default_factory=dict)
     #: Fiches rangées sur un disque dont la liste Deezer ne les contient pas,
     #: leur piste Deezer sur un autre disque (`appartenance_disque.a_decider`),
     #: lues par `charger_contexte` : le détecteur reste pur.
@@ -1945,9 +1949,26 @@ def meme_enregistrement(track, ctx):
     if paire is None:
         return None
     autre = ctx.memo("par_id", lambda: {t.id: t for t in ctx.disco}).get(paire["autre"])
+    autre = autre or ctx.pages_supprimees.get(paire["autre"])
     if autre is None:
         return None
     empreinte = f"g{autre.genius_id}" if autre.genius_id else f"t{autre.id}"
+    if paire.get("page_recreee"):
+        # Pages Genius supprimées (2026-11-23) : la page recréée sous un autre
+        # ID que la discographie n'a pas osé rattacher.
+        return (
+            f"même titre que « {autre.title} »"
+            + (f" ({autre.album})" if autre.album else "")
+            + f", dont la page Genius #{autre.genius_id}, plus ancienne, est supprimée : "
+            "la page recréée par Genius ? — fusionner (garder l'historique de "
+            "l'ancienne fiche), ou « ✓ Normal » si ce sont deux morceaux",
+            {
+                "autres": [autre.id],
+                "titre_autre": autre.title,
+                "page_recreee": True,
+                "empreinte": empreinte,
+            },
+        )
     if paire.get("isrc"):
         # Versé de `id_partage` (audit) : même ISRC, titre joint à l'autre.
         return (
@@ -4505,6 +4526,24 @@ def formations_prouvees_par_genius(data_manager, artiste, relations) -> dict:
     return prouvees
 
 
+def _paires_pages_recreees(ctx: Contexte, data_manager, artiste) -> None:
+    """Verse dans `ctx.fusions` les paires « page recréée ? »
+    (`pages_supprimees.paires_au_panneau`), sans remplacer une paire déjà
+    trouvée ; l'autre côté désactivé va dans `ctx.pages_supprimees`."""
+    from src.services import pages_supprimees
+
+    tracks = artiste.tracks or []
+    supprimees, desactives = pages_supprimees.supprimees_de(data_manager, artiste.name)
+    if not supprimees:
+        return
+    paires = pages_supprimees.paires_au_panneau(tracks, supprimees, desactives)
+    par_id = {t.id: t for t in tracks}
+    for fiche, paire in paires.items():
+        ctx.fusions.setdefault(fiche, paire)
+        if paire["autre"] in desactives:
+            ctx.pages_supprimees[paire["autre"]] = par_id[paire["autre"]]
+
+
 def charger_contexte(data_manager, artiste) -> Contexte:
     """Le contexte des détecteurs, lu UNE fois (lectures seules) — celui
     qu'`analyser` juge, et que les politiques d'arbitrage relisent. Sans les
@@ -4524,6 +4563,7 @@ def charger_contexte(data_manager, artiste) -> Contexte:
     ctx.positions = data_manager.get_artist_positions(artiste.id)
     ctx.isrc_editions = data_manager.get_artist_edition_isrcs(artiste.id)
     ctx.fusions = data_manager.fusions_a_decider([t.id for t in tracks if t.id])
+    _paires_pages_recreees(ctx, data_manager, artiste)
     ctx.hors_disque = data_manager.hors_du_disque_a_decider([t.id for t in tracks if t.id])
     refs = _references_bigrammes(ctx)
     textes = {

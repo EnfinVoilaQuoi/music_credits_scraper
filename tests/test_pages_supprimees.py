@@ -355,3 +355,72 @@ class TestPageRecreee:
             rt, _A, [_page_neuve(9, "Summer '99")], [fiche]
         )
         assert dm.rattachees == [(1, 9)] and faits
+
+
+class TestPairesAuPanneau:
+    """La paire que la discographie ne rattache pas va au panneau ♊
+    (décision utilisateur 2026-11-23), désactivées comprises."""
+
+    def test_la_page_vivante_plus_recente_au_meme_titre_porte_le_cas(self):
+        morte, vivante = _fiche(1, "Summer '99", album="X"), _fiche(5, "Summer '99", album="X")
+        p = pages_supprimees.paires_au_panneau([morte, vivante], {1}, {1})
+        assert p == {5: {"autre": 1, "page_recreee": True}}
+
+    def test_une_page_plus_ancienne_n_est_pas_une_recreation(self):
+        morte, vivante = _fiche(5, "Summer '99"), _fiche(1, "Summer '99")
+        assert pages_supprimees.paires_au_panneau([morte, vivante], {5}, set()) == {}
+
+    def test_un_titre_seulement_proche_ou_un_autre_disque_ne_va_pas_au_panneau(self):
+        """Simulé le 2026-11-23 : le titre de base rapprochait 37 paires, presque
+        toutes deux morceaux (remixes nommés différents, freestyles)."""
+        morte = _fiche(1, "Flashing Lights (Diplo Remix)", album="Sky High")
+        remix = _fiche(5, "Flashing Lights (Original)")
+        autre_disque = _fiche(6, "Anamnèse", album="Klassik")
+        morte2 = _fiche(2, "Anamnèse", album="Noctambus")
+        fiches = [morte, morte2, remix, autre_disque]
+        assert pages_supprimees.paires_au_panneau(fiches, {1, 2}, {1, 2}) == {}
+
+    def test_une_page_desactivee_a_la_main_ne_porte_pas_de_cas(self):
+        morte, vivante = _fiche(1, "Summer '99"), _fiche(5, "Summer '99")
+        assert pages_supprimees.paires_au_panneau([morte, vivante], {1}, {1, 5}) == {}
+
+    def test_le_detecteur_montre_la_fiche_desactivee(self):
+        from src.services import revue
+
+        morte, vivante = _fiche(1, "Summer '99", album="X"), _fiche(5, "Summer '99", album="X")
+        ctx = revue.contexte([vivante])
+        ctx.fusions = {5: {"autre": 1, "page_recreee": True}}
+        ctx.pages_supprimees = {1: morte}
+        message, preuves = revue.meme_enregistrement(vivante, ctx)
+        assert "supprimée" in message and preuves["autres"] == [1]
+        assert preuves["empreinte"] == "g1001"
+
+    def test_le_contexte_verse_la_paire_sans_remplacer(self, monkeypatch):
+        from src.services import revue
+
+        morte, vivante = _fiche(1, "Summer '99"), _fiche(5, "Summer '99")
+        artiste = Artist(name="Logic")
+        artiste.tracks = [morte, vivante]
+        monkeypatch.setattr(pages_supprimees, "supprimees_de", lambda dm, nom: ({1}, {1}))
+        ctx = revue.contexte([vivante])
+        revue._paires_pages_recreees(ctx, None, artiste)
+        assert ctx.fusions[5]["autre"] == 1 and ctx.pages_supprimees == {1: morte}
+        ctx = revue.contexte([vivante])
+        ctx.fusions = {5: {"autre": 9, "paroles": 0.95, "ecart": 1}}
+        revue._paires_pages_recreees(ctx, None, artiste)
+        assert ctx.fusions[5]["autre"] == 9
+
+
+def test_la_base_rend_les_pages_constatees_supprimees(data_manager):
+    from src.observability.repository import SourceUsageRepository
+
+    artiste = Artist(name="Logic")
+    artiste.id = data_manager.save_artist(artiste)
+    tid = data_manager.save_track(Track(title="Summer '99", artist=artiste))
+    repo = SourceUsageRepository(data_manager.engine)
+    repo.constater_absences(module_runtime.ABSENCE_PAGE_GENIUS, [(tid, datetime.now())], [])
+    assert data_manager.pages_genius_supprimees() == {tid}
+    vieux = datetime.now() - timedelta(days=400)
+    repo.constater_absences(module_runtime.ABSENCE_PAGE_GENIUS, [], [tid])
+    repo.constater_absences(module_runtime.ABSENCE_PAGE_GENIUS, [(tid, vieux)], [])
+    assert data_manager.pages_genius_supprimees() == set()

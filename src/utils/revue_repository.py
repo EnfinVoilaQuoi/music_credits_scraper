@@ -248,6 +248,19 @@ class RevueRepository:
 
         return constats_frais(self.engine)
 
+    def pages_genius_supprimees(self) -> set[int]:
+        """Les fiches dont la page Genius est constatée supprimée dans le délai
+        des absences (`services.pages_supprimees`, 2026-11-23)."""
+        from datetime import datetime, timedelta
+
+        from src.config import settings
+        from src.observability.repository import SourceUsageRepository
+        from src.services.runtime import ABSENCE_PAGE_GENIUS
+
+        depuis = datetime.now() - timedelta(days=settings.delai_absence_jours)
+        repo = SourceUsageRepository(self.engine)
+        return set(repo.absences_recentes([ABSENCE_PAGE_GENIUS], depuis))
+
     def fusions_a_decider(self, ids_fiches) -> dict[int, dict]:
         """`{fiche: {"autre", "paroles", "ecart"}}` : les paires de ces fiches que
         les données disent le même enregistrement sous deux pages (lecture seule,

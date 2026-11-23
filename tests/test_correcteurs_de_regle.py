@@ -9,10 +9,11 @@ from src.services import politiques_revue, revue_auto
 #: verdict « ✓ Normal », `indecidable` le verdict « indécidable » (`corriger`).
 _SANS_CORRECTEUR = {"normal", "indecidable"}
 
-#: Écrites dans une politique, mais qui attendent la décision de l'utilisateur
-#: (inventaire du 2026-11-22 : « La Fin De Leur Monde - Live » proposée en
-#: variante de l'instrumentale ; deux remix de « Ma Benz » au même existant).
-_EN_ATTENTE_DE_DECISION = {"kworb_rendition", "kworb_existant"}
+#: Écrites dans une politique, mais qui attendent la décision de l'utilisateur.
+#: Vide depuis le 2026-11-23 : `kworb_rendition` / `kworb_existant` (inventaire
+#: du 2026-11-22) ont laissé la place à la règle décidée, `kworb_sommer` /
+#: `kworb_version` (`politiques_revue.juger_variante_kworb`).
+_EN_ATTENTE_DE_DECISION: set[str] = set()
 
 
 def _regles_validees() -> set[tuple[str, str]]:

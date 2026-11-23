@@ -912,11 +912,162 @@ class TestEditionALaDureeDeLIdSpotify:
         assert arbitrage.action == "deezer_rattacher_edition"
 
 
-def test_kworb_seules_les_voies_qui_ne_creent_rien():
-    rendition = _cas("kworb_proposition", None, {"proposition": "rendition", "parent_track_id": 3})
-    tiers = _cas("kworb_proposition", None, {"proposition": "tiers"})
-    assert pol.politique_kworb(rendition, None, None).action == "kworb_rendition"
-    assert pol.politique_kworb(tiers, None, None) is None
+class TestVarianteKworb:
+    """Décision utilisateur 2026-11-23 : une ligne Kworb qui ressemble à une
+    version d'une fiche est SOMMÉE à cette fiche quand la durée de son ID
+    (embed) est à ± 2 s d'une durée INDÉPENDANTE de la fiche, sinon elle
+    devient une fiche à part. Cas tirés des 17 propositions du panneau."""
+
+    @staticmethod
+    def _juger(preuves, fiches, duree):
+        return pol.juger_variante_kworb(
+            {"spotify_id": "SID", **preuves},
+            {t.id: t for t in fiches},
+            lire_identite=lambda _sid: {"duration": duree} if duree else None,
+        )
+
+    @classmethod
+    def _existant(cls, ligne, fiches, duree, **plus):
+        cible = fiches[-1]
+        preuves = {
+            "kworb_title": ligne,
+            "proposition": "existant",
+            "existants": [[cible.id, cible.title]],
+            **plus,
+        }
+        return cls._juger(preuves, fiches, duree)
+
+    def test_meme_remix_a_deux_secondes_somme(self):
+        """« Back dans les bacs - IV My People Remix » : ID 208 s, fiche 207 s (Deezer)."""
+        socle = _t("Back dans les bacs", 1, durations_observees={"deezer": 197})
+        remix = _t("Back dans les bacs (Remix)", 2, durations_observees={"deezer": 207})
+        arbitrage = self._existant(
+            "Back dans les bacs - IV My People Remix",
+            [socle, remix],
+            208,
+            parent_track_id=1,
+            remixer="IV My People",
+        )
+        assert arbitrage.action == "kworb_sommer"
+
+    def test_une_duree_lue_par_le_meme_id_ne_temoigne_pas(self):
+        remix = _t("Back dans les bacs (Remix)", 2, durations_observees={"spotify_web": 208})
+        arbitrage = self._existant("Back dans les bacs - Remix", [remix], 208)
+        assert arbitrage is None or arbitrage.action != "kworb_sommer"
+
+    def test_un_featuring_se_somme_aussi(self):
+        """« The Hills - Remix » (Eminem invité) : 264 s contre 263 s."""
+        remix = _t("The Hills (Eminem Remix)", 2, durations_observees={"deezer": 263})
+        arbitrage = self._existant("The Hills - Remix", [remix], 264, is_feature=True)
+        assert arbitrage.action == "kworb_sommer"
+
+    def test_l_instrumental_du_remix_n_est_jamais_somme(self):
+        """Garde ajoutée : une autre VERSION n'est jamais sommée, même à la même
+        durée ; elle devient une fiche à part."""
+        socle = _t("Pose ton gun", 1, durations_observees={"deezer": 220})
+        remix = _t("Pose ton gun - IV My People Remix", 2, durations_observees={"deezer": 231})
+        arbitrage = self._existant(
+            "Pose ton Gun - IV My People Remix (Instrumental)",
+            [socle, remix],
+            231,
+            parent_track_id=1,
+            remixer="IV My People",
+        )
+        assert arbitrage.action == "kworb_version"
+
+    def test_un_autre_remixeur_loin_de_la_fiche_fait_une_fiche(self):
+        """« Ma Benz … - R-Ash Remix » 201 s, proposée sur « (Remix de B.O.S.S) » 232 s."""
+        socle = _t("Ma Benz", 1, durations_observees={"deezer": 247})
+        remix = _t("Ma benz (Remix de B.O.S.S)", 2, durations_observees={"deezer": 232})
+        arbitrage = self._existant(
+            "Ma Benz (feat. Lord Kossity) - R-Ash Remix",
+            [socle, remix],
+            201,
+            parent_track_id=1,
+            remixer="R-Ash",
+        )
+        assert arbitrage.action == "kworb_version"
+
+    def test_le_meme_remixeur_a_douze_secondes_reste_a_l_humain(self):
+        """« B.O.S.S. 2000 Remix » 220 s contre « (Remix de B.O.S.S) » 232 s : une
+        autre édition du même remix, pas une autre fiche."""
+        socle = _t("Ma Benz", 1, durations_observees={"deezer": 247})
+        remix = _t("Ma benz (Remix de B.O.S.S)", 2, durations_observees={"deezer": 232})
+        arbitrage = self._existant(
+            "Ma Benz (feat. Lord Kossity) - B.O.S.S. 2000 Remix",
+            [socle, remix],
+            220,
+            parent_track_id=1,
+            remixer="B.O.S.S.",
+        )
+        assert arbitrage is None
+
+    @pytest.mark.parametrize("duree", [206, None])
+    def test_meme_version_entre_deux_et_dix_secondes_ou_sans_duree(self, duree):
+        remix = _t("Quelle gratitude ? (Remix de B.O.S.S)", 2, durations_observees={"ytmusic": 202})
+        ligne = "Quelle gratitude ? - B.O.S.S. Remix"
+        assert self._existant(ligne, [remix], duree, remixer="B.O.S.S.") is None
+
+    def test_la_ligne_deja_fiche_par_son_id_reste_au_run(self):
+        remix = _t("Seine Saint-Denis Style (IV My People Remix)", 2, durations_observees={})
+        deja = _t("Seine Saint-Denis Style (IV My People Remix Instrumental)", 3, spotify_id="SID")
+        preuves = {
+            "kworb_title": "Seine Saint-Denis Style - IV My People Remix (Instrumental)",
+            "proposition": "existant",
+            "existants": [[2, remix.title]],
+        }
+        assert self._juger(preuves, [remix, deja], 200) is None
+
+    def test_un_socle_qui_n_est_pas_l_original_reste_a_l_humain(self):
+        """« La Fin De Leur Monde - Live … » proposée au socle « (Instrumentale) »."""
+        socle = _t("La fin de leur monde (Instrumentale)", 1, durations_observees={"deezer": 611})
+        preuves = {
+            "kworb_title": "La Fin De Leur Monde - Live Retour Aux Pyramides 14/03/2008",
+            "proposition": "rendition",
+            "parent_track_id": 1,
+        }
+        assert self._juger(preuves, [socle], None) is None
+
+    def test_l_instrumental_d_un_featuring_ne_fait_pas_de_fiche(self):
+        """« Forgot About Dre - Instrumental » : Eminem n'y est même pas."""
+        socle = _t("Forgot About Dre", 1, durations_observees={"deezer": 222})
+        preuves = {
+            "kworb_title": "Forgot About Dre - Instrumental",
+            "proposition": "rendition",
+            "parent_track_id": 1,
+            "is_feature": True,
+        }
+        assert self._juger(preuves, [socle], None) is None
+
+    def test_un_remix_a_la_duree_du_socle_reste_a_l_humain(self):
+        """Comme la règle C : à la durée de l'original, un remix peut n'être qu'un libellé."""
+        socle = _t("Titre", 1, durations_observees={"deezer": 200})
+        preuves = {"kworb_title": "Titre - Remix", "proposition": "rendition", "parent_track_id": 1}
+        assert self._juger(preuves, [socle], 201) is None
+
+    @pytest.mark.parametrize("propose", ["tiers", "collab"])
+    def test_tiers_et_collab_ne_sont_pas_des_variantes(self, propose):
+        socle = _t("Titre", 1, durations_observees={"deezer": 200})
+        preuves = {"kworb_title": "Titre - X Remix", "proposition": propose, "parent_track_id": 1}
+        assert self._juger(preuves, [socle], 260) is None
+
+    def test_branchee_au_panneau(self):
+        remix = _t("Back dans les bacs (Remix)", 2, durations_observees={"deezer": 207})
+        cas = _cas(
+            "kworb_proposition",
+            None,
+            {
+                "kworb_title": "Back dans les bacs - Remix",
+                "spotify_id": "SID",
+                "proposition": "existant",
+                "existants": [[2, remix.title]],
+            },
+        )
+        ctx = revue.contexte([remix], {})
+        arbitrage = pol.politique_kworb_variante(
+            cas, None, ctx, lire_identite=lambda _s: {"duration": 208}
+        )
+        assert arbitrage.action == "kworb_sommer"
 
 
 def test_id_propose_gate_et_duree_independante():

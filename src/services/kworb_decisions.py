@@ -19,6 +19,12 @@ GUI ou, en CLI, jamais (listée, non appliquée) — devient une écriture :
     morceau est créée où l'artiste tient un RÔLE SECONDAIRE (`is_featuring`,
     `primary_artist_name` = le remixeur, `secondary_role` = « Remix ») — comme
     les rôles secondaires que Genius attribue ;
+  · `version`   → une autre VERSION d'une fiche (instrumental d'un remix, remix
+    d'un autre remixeur…), fiche à part, l'artiste PRINCIPAL (règle du panneau
+    `politiques_revue.juger_variante_kworb`, décision utilisateur 2026-11-23) :
+    relation `remix_of` pour un remix, `version_of` sinon, vers l'original que
+    désigne `version_heritage.socle_de_version` (l'instrumental d'un remix → le
+    remix), à défaut le socle proposé ; jamais proposée par le dialogue ;
   · `ignore`    → rien, et on ne redemande plus.
 
 **Une ligne créée n'est jamais vide** (décision utilisateur : « des morceaux
@@ -49,7 +55,7 @@ from src.utils.title_matching import clean_stored_title, names_match_as_words, n
 
 logger = get_logger(__name__)
 
-DECISIONS = ("edition", "rendition", "existant", "collab", "tiers", "ignore")
+DECISIONS = ("edition", "rendition", "existant", "collab", "tiers", "version", "ignore")
 
 #: Libellés du dialogue, dans l'ordre des boutons.
 LIBELLES = {
@@ -58,12 +64,14 @@ LIBELLES = {
     "existant": "→ morceau existant",
     "collab": "Remix collab → morceau à part",
     "tiers": "Remix par un tiers → rôle secondaire",
+    "version": "Version → fiche à part",
     "ignore": "Ignorer",
 }
 
 
 #: Ordre des voies ; « existant » n'apparaît que si un morceau en base est déjà
 #: ce remix, « edition » / « rendition » que si le morceau souche est connu.
+#: « version » n'y est pas : seule la règle du panneau la prend.
 VOIES = ("edition", "rendition", "existant", "collab", "tiers", "ignore")
 
 
@@ -145,11 +153,18 @@ def _creer_ligne(dm, artist, proposition: dict, decision: str, identite: dict | 
                 )
             )
     parent_title = proposition.get("parent_title") or proposition.get("socle")
+    parent = _track_par_id(dm, artist, proposition.get("parent_track_id"))
+    type_relation = "remix_of"
+    if decision == "version":
+        modele = _modele_de_version(dm, artist, track) or parent
+        if modele is not None:
+            parent, parent_title = modele, modele.title
+        if not (version_heritage.famille_de(track.title) or "").startswith("remix"):
+            type_relation = "version_of"
     if parent_title:
-        parent = _track_par_id(dm, artist, proposition.get("parent_track_id"))
         track.relationships = [
             {
-                "type": "remix_of",
+                "type": type_relation,
                 "title": parent_title,
                 "artist": artist.name,
                 "url": getattr(parent, "genius_url", None) if parent else None,
@@ -157,6 +172,12 @@ def _creer_ligne(dm, artist, proposition: dict, decision: str, identite: dict | 
         ]
         track._relationships_pending = True
     return track
+
+
+def _modele_de_version(dm, artist, track) -> Track | None:
+    """L'original d'une version parmi les fiches de l'artiste, par le juge
+    commun de l'héritage (`socle_de_version`)."""
+    return version_heritage.socle_de_version(track, dm.get_artist_tracks(artist.id))
 
 
 def appliquer(
@@ -223,6 +244,8 @@ def appliquer(
         if track is None:
             track = _creer_ligne(dm, artist, proposition, decision, identite)
             socle = _track_par_id(dm, artist, proposition.get("parent_track_id"))
+            if decision == "version":
+                socle = _modele_de_version(dm, artist, track) or socle
             if socle is not None:
                 # Héritage transversal : un remix garde les auteurs du socle.
                 version_heritage.heriter(track, socle)
@@ -258,7 +281,7 @@ def appliquer(
     dm.record_spotify_streams(
         track.id, streams, "kworb", updated_at=kworb_date, daily_streams=daily
     )
-    if decision in ("collab", "tiers"):
+    if decision in ("collab", "tiers", "version"):
         # Une ligne créée où un autre artiste de la base chante : il reçoit la
         # sienne (CORRECTIFS 1.17).
         from src.services.lignes_tiers import donner_aux_interpretes
@@ -270,5 +293,6 @@ def appliquer(
         "existant": "morceau existant",
         "collab": "remix collab (principal)",
         "tiers": "remix tiers (rôle secondaire)",
+        "version": "version, fiche à part",
     }[decision]
     return f"« {titre} » → « {track.title} » ({role})"

@@ -246,6 +246,12 @@ def appliquer(
             socle = _track_par_id(dm, artist, proposition.get("parent_track_id"))
             if decision == "version":
                 socle = _modele_de_version(dm, artist, track) or socle
+                if socle is not None and socle.is_featuring:
+                    # La version d'un morceau où l'artiste est invité garde ce
+                    # rôle : l'instru de « Forgot About Dre » n'est pas un
+                    # morceau principal d'Eminem (2026-11-23).
+                    track.is_featuring = True
+                    track.primary_artist_name = socle.primary_artist_name
             if socle is not None:
                 # Héritage transversal : un remix garde les auteurs du socle.
                 version_heritage.heriter(track, socle)

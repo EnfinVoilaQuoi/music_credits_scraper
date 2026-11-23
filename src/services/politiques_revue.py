@@ -962,7 +962,8 @@ def juger_variante_kworb(preuves: dict, fiches: dict, lire_identite=_lire_embed_
         fiche au titre de la ligne ni à son ID, et chaque fiche de la même
         version (la cible, le socle) à plus de `ECART_VERSION_S` de sa durée.
 
-    Restent à l'humain : une ligne de featuring (`tiers` a sa règle), une
+    Restent à l'humain : une ligne de featuring (`tiers` a sa règle), sauf
+    l'instrumental d'un original en base (fiche à part, 2026-11-23), une
     édition de diffusion ou de support (même enregistrement sous un autre
     libellé), une même version entre 2 et 10 s ou sans durée lisible (une
     autre édition du même remix ?), un remix ou un edit à la durée du socle
@@ -1014,14 +1015,19 @@ def juger_variante_kworb(preuves: dict, fiches: dict, lire_identite=_lire_embed_
         )
     nu = _SUFFIXE_UPLOAD.sub("", titre)
     fam = famille_de(nu)
-    if preuves.get("is_feature") or fam in (None, "edition") or edition_de_diffusion(nu):
+    if fam in (None, "edition") or edition_de_diffusion(nu):
+        return None
+    if preuves.get("is_feature") and not (fam == "instrumental" and parent is not None):
+        # Une ligne de featuring reste à l'humain, sauf l'INSTRUMENTAL d'un
+        # original en base : fiche à part, au même rôle que l'original (Eminem
+        # « Forgot About Dre - Instrumental », décision utilisateur 2026-11-23).
         return None
     if parent is not None and (
         porte_une_version(parent.title) or not titres_equivalents(socle_du_titre(nu), parent.title)
     ):
         # Le socle proposé n'est pas l'original de la ligne : la fiche créée
-        # en hériterait (« La fin de leur monde (Instrumentale) », que le juge
-        # des titres ne lit pas comme une version).
+        # en hériterait (« La Fin De Leur Monde - Live » proposée au socle
+        # « La fin de leur monde (Instrumentale) »).
         return None
     jugees = {id(f): f for f in (cible, parent) if f is not None}
     for t in fiches.values():

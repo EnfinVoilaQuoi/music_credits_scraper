@@ -15,11 +15,8 @@ from pathlib import Path
 RACINE = Path(__file__).resolve().parents[1]
 
 #: (fichier, fonction) → raison.
-EXCEPTIONS = {
-    # CTk gelée hors correctifs : note la suppression (`add_deleted`), pas la
-    # fusion — à rebrancher (CORRECTIFS).
-    ("src/gui/dialogs/merge_tracks.py", "_do_merge"): "CTk gelée",
-}
+#: Vide depuis que le dialogue de fusion CTk consigne (2026-11-23).
+EXCEPTIONS: dict[tuple[str, str], str] = {}
 
 
 def _fusions_sans_consignation():

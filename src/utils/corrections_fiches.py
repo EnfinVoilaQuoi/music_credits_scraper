@@ -608,7 +608,7 @@ def designation_de(track) -> dict:
 
 
 def memoriser_fusion(artiste: str, absorbee: dict, gardee: dict) -> None:
-    """Consigne une fusion décidée par une RÈGLE (pas à la main) : sans elle, le
+    """Consigne une fusion (règle, ou dialogue de fusion de la GUI) : sans elle, le
     prochain import recréerait la page absorbée (`genius_ids_absorbes`). En
     base quand elle est ouverte ; sinon dans le fichier, d'où la prochaine
     migration la versera."""

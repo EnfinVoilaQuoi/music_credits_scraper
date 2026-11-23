@@ -882,6 +882,41 @@ def test_fusion_des_parutions_d_avant_e54_au_meme_upc(data_manager):
     assert data_manager.fusionner_parutions_meme_upc() == []
 
 
+def _deux_parutions_au_meme_upc(dm, nom, deezer_id, idents):
+    artist = _artist(dm, name=nom, deezer_id=deezer_id)
+    track = _track(dm, artist, title=f"Titre de {nom}")
+    parutions = [
+        poser_parution(dm, track.id, "Nique le Casino 2", source="deezer", ident=ident)
+        for ident in idents
+    ]
+    with dm.engine.begin() as conn:
+        for r in parutions:
+            conn.exec_driver_sql("UPDATE releases SET upc = '3617052941532' WHERE id = ?", (r,))
+    return artist, parutions
+
+
+def test_la_fin_de_discographie_reunit_les_parutions_au_meme_upc(data_manager):
+    """Sadek « Nique le Casino 2 » (2026-10-22) : un doublon au même code-barres né
+    d'un run attendait `scripts/fusionner_parutions_upc.py`. La fin d'étape
+    discographie le réunit, pour l'artiste du run seulement."""
+    from src.services.discographie import regrouper_projets
+
+    sadek, (r1, r2) = _deux_parutions_au_meme_upc(data_manager, "Sadek", 11, (501, 502))
+    autre, _ = _deux_parutions_au_meme_upc(data_manager, "Autre", 12, (601, 602))
+
+    regrouper_projets(data_manager, sadek)
+
+    assert _nb_parutions(data_manager, sadek.id) == 1
+    assert _nb_parutions(data_manager, autre.id) == 2
+    with data_manager.engine.connect() as conn:
+        ids = conn.exec_driver_sql(
+            "SELECT external_id FROM release_identifiers WHERE release_id = ? "
+            "AND source = 'deezer' ORDER BY 1",
+            (r1,),
+        ).fetchall()
+    assert ids == [("501",), ("502",)]
+
+
 class TestSingleFonduAvecLAlbum:
     """2026-11-13 : le single Deezer « Vinyl Days » (1 piste) avait adopté la
     parution de l'album Genius du même titre (28 pistes) — 9 parutions."""

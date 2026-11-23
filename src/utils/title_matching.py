@@ -176,6 +176,19 @@ def noms_de_meme_graphie(a: str, b: str) -> bool:
 #: moitié portait des données que l'autre n'avait pas.
 _SANS_LARGEUR = {0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF}
 
+#: Caractères « tag » (U+E0000–U+E007F) : invisibles eux aussi, Genius en sert
+#: (JeanJass #12434, « \U000E006Aintro », 2026-11-23). Seule leur raison d'être est
+#: gardée : la suite qui suit le drapeau noir et finit par CANCEL TAG fait les
+#: drapeaux de sous-région (🏴 + tags = Angleterre, Écosse, pays de Galles).
+_DRAPEAU_A_TAGS_RE = re.compile("(\U0001f3f4[\U000e0020-\U000e007e]+\U000e007f)")
+_TAGS_RE = re.compile("[\U000e0000-\U000e007f]+")
+
+
+def _sans_tags(texte: str) -> str:
+    morceaux = _DRAPEAU_A_TAGS_RE.split(texte)
+    # split avec groupe : les indices impairs sont les drapeaux, gardés tels quels.
+    return "".join(m if i % 2 else _TAGS_RE.sub("", m) for i, m in enumerate(morceaux))
+
 
 def clean_stored_title(title: str) -> str:
     """Titre tel qu'il doit être ENREGISTRÉ : sans caractère invisible.
@@ -195,6 +208,7 @@ def clean_stored_title(title: str) -> str:
     if not title:
         return ""
     propre = "".join(ch for ch in reparer_c1(title) if ord(ch) not in _SANS_LARGEUR)
+    propre = _sans_tags(propre)
     return unicodedata.normalize("NFC", propre).strip()
 
 

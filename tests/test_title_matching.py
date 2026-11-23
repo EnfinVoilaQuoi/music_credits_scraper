@@ -239,6 +239,20 @@ class TestCleanStoredTitle:
         assert clean_stored_title(barre) == barre
         assert clean_display_title(barre) == "Fiesta"
 
+    def test_les_caracteres_tag_sont_retires(self):
+        """JeanJass #12434 : Genius sert « intro » précédé de U+E006A (bloc Tags)."""
+        assert clean_stored_title("\U000e006aintro") == "intro"
+        assert clean_stored_title("in\U000e0001tro\U000e007f") == "intro"
+
+    def test_le_drapeau_de_sous_region_reste(self):
+        """Seul usage des tags : 🏴 + « gbeng » + CANCEL TAG = drapeau de l'Angleterre."""
+        angleterre = "\U0001f3f4\U000e0067\U000e0062\U000e0065\U000e006e\U000e0067\U000e007f"
+        assert clean_stored_title(f"Three Lions {angleterre}") == f"Three Lions {angleterre}"
+
+    def test_les_tags_ne_touchent_pas_la_cle_d_index(self):
+        """`normalize_title` (clé d'index) n'est pas changée par ce correctif."""
+        assert normalize_title("intro") == normalize_title(clean_stored_title("\U000e006aintro"))
+
     def test_laffichage_nettoie_AUSSI_les_invisibles(self):
         assert clean_display_title("\u200bbank") == "bank"
 

@@ -297,6 +297,15 @@ def parse_album_title(html: str) -> str | None:
     return coupe[0].strip() or None
 
 
+#: Préfixe que Spotify ajoute au `<title>` d'une page artiste selon la locale
+#: (« Écoutez les titres de 5 Majeur | Spotify », vu sur toutes les pages
+#: `intl-fr` du brut le 2026-11-23) : il n'appartient pas au nom. Sans le
+#: retirer, le gate d'identité refusait « 5 Majeur » (run du 2026-11-22).
+_PREFIXE_TITRE_ARTISTE_RE = re.compile(
+    r"^(?:Écoutez les titres (?:de |d['’]\s*)|Listen to songs by )", re.IGNORECASE
+)
+
+
 def parse_page_artist_name(html: str) -> str | None:
     """Nom d'artiste porté par le `<title>` d'une page artiste (« ISHA | Spotify »).
 
@@ -308,7 +317,7 @@ def parse_page_artist_name(html: str) -> str | None:
     raw = node.get_text(strip=True) if node else ""
     if not raw or "Web Player" in raw:
         return None
-    name = raw.split("|")[0].strip()
+    name = _PREFIXE_TITRE_ARTISTE_RE.sub("", raw.split("|")[0].strip()).strip()
     return name or None
 
 

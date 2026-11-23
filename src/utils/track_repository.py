@@ -5775,7 +5775,9 @@ class TrackRepository:
         )
         return release_id
 
-    def fusionner_parutions_meme_upc(self, *, appliquer: bool = False) -> list[dict[str, Any]]:
+    def fusionner_parutions_meme_upc(
+        self, *, appliquer: bool = False, artist_id: int | None = None
+    ) -> list[dict[str, Any]]:
         """Réunit les parutions d'un artiste qui portent le MÊME code-barres.
 
         e54 empêche les nouveaux doublons ; ceux d'avant restent deux parutions
@@ -5787,14 +5789,17 @@ class TrackRepository:
         plus ancienne ; l'autre disparaît. Comparé par clé (`cle_upc`).
 
         Rend `[{artist_id, garde, absorbees: [(id, titre)], titre}]` ; n'écrit
-        qu'avec `appliquer`, en une transaction."""
+        qu'avec `appliquer`, en une transaction. `artist_id` : ce seul artiste
+        (fin d'étape discographie, `discographie.regrouper_projets`)."""
         with self.engine.begin() as conn:
             rows = (
                 conn.execute(
                     text(
                         "SELECT id, artist_id, title, upc FROM releases "
-                        "WHERE upc IS NOT NULL AND status = 'confirmed' ORDER BY artist_id, id"
-                    )
+                        "WHERE upc IS NOT NULL AND status = 'confirmed' "
+                        "AND (:artiste IS NULL OR artist_id = :artiste) ORDER BY artist_id, id"
+                    ),
+                    {"artiste": artist_id},
                 )
                 .mappings()
                 .all()

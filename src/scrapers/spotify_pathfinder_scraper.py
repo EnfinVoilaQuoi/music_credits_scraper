@@ -136,6 +136,12 @@ class SpotifyAvecRepli:
 
     @asynccontextmanager
     async def session(self):
+        # Une session = un run (un artiste) : le provider garde le même scraper
+        # d'un artiste à l'autre, les compteurs et la bascule repartent de zéro.
+        self.echecs_de_suite = 0
+        self.bascule = False
+        self.replis = 0
+        self._plafond_dit = False
         async with AsyncExitStack() as pile, self.principal.session() as sess:
             yield _SessionsAvecRepli(sess, pile, self.repli)
 
@@ -207,6 +213,33 @@ class Plafonds:
 
     par_run: int
     sans_stream: int
+
+
+def chemin_pris(scraper, lectures: int) -> dict:
+    """Ce que la passe a RÉELLEMENT fait, pour le récit et le bilan : `chemin`
+    (« requetes » ou « pages »), `requetes` (lectures par les requêtes internes),
+    `replis` (pages ouvertes en repli), `bascule` (passée aux pages seules après
+    des échecs de suite). `lectures` = le total compté par le run (`pages`)."""
+    if isinstance(scraper, SpotifyAvecRepli):
+        return {
+            "chemin": "requetes",
+            "requetes": max(lectures - scraper.replis, 0),
+            "replis": scraper.replis,
+            "bascule": scraper.bascule,
+        }
+    if isinstance(scraper, SpotifyPathfinderScraper):
+        return {"chemin": "requetes", "requetes": lectures, "replis": 0, "bascule": False}
+    return {"chemin": "pages", "requetes": 0, "replis": 0, "bascule": False}
+
+
+def libelle(chemin: str | None = None) -> str:
+    """Nom de la passe Spotify dans le récit et le bilan. Sans `chemin` (avant
+    le run), celui que le réglage fera prendre."""
+    if chemin is None:
+        from src.config import SPOTIFY_STREAMS_PAR_PATHFINDER
+
+        chemin = "requetes" if SPOTIFY_STREAMS_PAR_PATHFINDER else "pages"
+    return "Spotify (requêtes internes)" if chemin == "requetes" else "Spotify (pages web)"
 
 
 def plafonds(scraper) -> Plafonds:

@@ -38,7 +38,7 @@ from datetime import datetime, timedelta
 from src.concurrency import async_loop
 from src.config import settings
 from src.scrapers.crawl4ai_scraper_base import ChronoPages, CrawlAIScraperBase
-from src.scrapers.spotify_pathfinder_scraper import plafonds, scraper_des_streams
+from src.scrapers.spotify_pathfinder_scraper import chemin_pris, plafonds, scraper_des_streams
 from src.utils.logger import get_logger
 from src.utils.title_matching import base_album_key, normalize_title
 
@@ -199,6 +199,16 @@ def update_spotify_streams(
             )
         )
     finally:
+        result.update(chemin_pris(scraper, result["pages"]))
+        if result["replis"] or result["bascule"]:
+            logger.warning(
+                f"Spotify '{artist.name}' : {result['replis']} page(s) ouverte(s) en repli"
+                + (
+                    " — bascule sur les pages après des échecs de suite"
+                    if result["bascule"]
+                    else ""
+                )
+            )
         if chronometre:
             result["chrono"] = scraper.chrono.resume()
             for ligne in result["chrono"]:

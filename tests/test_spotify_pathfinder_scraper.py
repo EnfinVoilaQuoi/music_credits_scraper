@@ -308,3 +308,72 @@ class TestPlafonds:
         # aurait lu deux.
         assert result["pages"] == 2
         assert client.appels == ["artiste:artistid", f"piste:{_ID_A}"]
+
+
+# ── Le chemin réellement pris, dans le récit et le bilan ──────────────────────
+class TestCheminPris:
+    def test_requetes_avec_replis_comptes_a_part(self):
+        client = _FauxClient(pistes={"q": _piste("q")}, erreurs=[_bride()])
+        scraper = _avec_repli(client, _Pages())
+        asyncio.run(_lire_pistes(scraper, ["p", "q"]))
+        assert sps.chemin_pris(scraper, 2) == {
+            "chemin": "requetes",
+            "requetes": 1,
+            "replis": 1,
+            "bascule": False,
+        }
+
+    def test_pages_seules(self):
+        assert sps.chemin_pris(_Pages(), 6)["chemin"] == "pages"
+
+    def test_les_compteurs_repartent_a_chaque_run(self):
+        """Le provider garde le même scraper d'un artiste à l'autre."""
+        n = sps.ECHECS_AVANT_BASCULE
+        client = _FauxClient(erreurs=[_bride()] * n)
+        scraper = _avec_repli(client, _Pages())
+        asyncio.run(_lire_pistes(scraper, [f"p{i}" for i in range(n)]))
+        assert scraper.bascule and scraper.replis == n
+        asyncio.run(_lire_pistes(scraper, []))
+        assert not scraper.bascule and scraper.replis == 0
+
+    def test_libelle_suit_le_reglage_avant_le_run(self, monkeypatch):
+        monkeypatch.setattr("src.config.SPOTIFY_STREAMS_PAR_PATHFINDER", True)
+        assert sps.libelle() == "Spotify (requêtes internes)"
+        monkeypatch.setattr("src.config.SPOTIFY_STREAMS_PAR_PATHFINDER", False)
+        assert sps.libelle() == "Spotify (pages web)"
+        assert sps.libelle("requetes") == "Spotify (requêtes internes)"
+
+
+class TestBilan:
+    @staticmethod
+    def _bilan(spotify_web: dict) -> str:
+        from tests.test_workers_streams import _resume
+
+        return _resume({"spotify_web": spotify_web})
+
+    def test_requetes_sans_repli(self):
+        texte = self._bilan(
+            {"recorded": 10, "pages": 6, "chemin": "requetes", "requetes": 6, "replis": 0}
+        )
+        assert "Spotify (requêtes internes) : 10 morceau(x) relevé(s)" in texte
+        assert "6 requête(s)" in texte
+        assert "page" not in texte
+
+    def test_replis_et_bascule_dits(self):
+        texte = self._bilan(
+            {
+                "recorded": 3,
+                "pages": 9,
+                "chemin": "requetes",
+                "requetes": 4,
+                "replis": 5,
+                "bascule": True,
+            }
+        )
+        assert "4 requête(s) + 5 page(s) ouverte(s) en repli" in texte
+        assert "passé par les pages du navigateur" in texte
+
+    def test_pages_seules(self):
+        texte = self._bilan({"recorded": 2, "pages": 3, "chemin": "pages"})
+        assert "Spotify (pages web) : 2 morceau(x) relevé(s)" in texte
+        assert "3 page(s) ouverte(s)" in texte

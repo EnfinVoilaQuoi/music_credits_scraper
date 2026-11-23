@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from src.config import settings
 from src.enrichment.providers.streams import StreamsProvider
 from src.models import Artist
+from src.scrapers.spotify_pathfinder_scraper import libelle as libelle_spotify
 from src.services.runtime import Bilan, Hooks, Runtime
 from src.utils.logger import etape_de_flux, get_logger
 
@@ -102,7 +103,7 @@ def run(
                 if hooks.should_stop():
                     bilan.interrompu(f"arrêt demandé avant {source}")
                     break
-                label = "Spotify (Kworb)" if source == "kworb" else "Spotify (pages web)"
+                label = "Spotify (Kworb)" if source == "kworb" else libelle_spotify()
                 hooks.progress(0, 0, artist.name, label)
                 cle = "spotify" if source == "kworb" else "spotify_web"
                 try:
@@ -366,17 +367,33 @@ def build_summary(results: dict, *, spotify_full_crawl: bool) -> str:
                     lines.append(f"   … et {len(details) - 8} autre(s) (voir logs)")
     if "spotify_web" in results:
         r = results["spotify_web"]
+        # Le chemin RÉELLEMENT pris (2026-11-23) : requêtes internes, pages en
+        # repli comptées à part, ou pages seules — jamais « pages » pour des requêtes.
+        nom = libelle_spotify(r.get("chemin"))
         if "error" in r:
-            lines.append(f"Spotify (pages web) : ❌ {r['error']}")
+            lines.append(f"{nom} : ❌ {r['error']}")
         elif r.get("aborted"):
             # Gate d'identité : rien n'a été écrit, et c'est voulu.
-            lines.append(f"🚨 Spotify (pages web) : {r['aborted']} — aucune écriture.")
+            lines.append(f"🚨 {nom} : {r['aborted']} — aucune écriture.")
         else:
+            # Un run abouti note toujours son chemin ; sans lui, les pages.
+            chemin = r.get("chemin", "pages")
+            nom = libelle_spotify(chemin)
+            if chemin == "requetes":
+                lectures = f"{r.get('requetes', 0)} requête(s)"
+                if r.get("replis"):
+                    lectures += f" + {r['replis']} page(s) ouverte(s) en repli"
+            else:
+                lectures = f"{r.get('pages', 0)} page(s) ouverte(s)"
             lines.append(
-                f"Spotify (pages web) : {r.get('recorded', 0)} morceau(x) relevé(s), "
-                f"{r.get('albums_totalises', 0)} album(s) totalisé(s), "
-                f"{r.get('pages', 0)} page(s) ouverte(s)"
+                f"{nom} : {r.get('recorded', 0)} morceau(x) relevé(s), "
+                f"{r.get('albums_totalises', 0)} album(s) totalisé(s), {lectures}"
             )
+            if r.get("bascule"):
+                lines.append(
+                    "   ⚠️ requêtes internes en échec de suite : le reste du run est passé "
+                    "par les pages du navigateur"
+                )
             for ligne in r.get("chrono") or []:
                 lines.append(f"   ⏱️ {ligne}")
             if r.get("sans_stream"):

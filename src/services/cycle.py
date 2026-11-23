@@ -87,6 +87,9 @@ class BilanCycle(Bilan):
     non_lancees: list[str] = field(default_factory=list)
     #: Pages vides sans aucune trace désactivées en fin de cycle (`pages_vides`).
     pages_desactivees: int = 0
+    #: Pages supprimées de Genius, sans identifiant de plateforme, désactivées
+    #: en fin de cycle (`pages_supprimees`).
+    pages_supprimees_desactivees: int = 0
 
 
 def manques_credits(o: credits.OptionsCredits) -> list[Manque]:
@@ -291,6 +294,7 @@ def _run(
         _recharger(runtime, artist)
         bilan.corrections = revue_auto.corriger_apres_run(runtime.data_manager, artist).appliquees
         _desactiver_pages_vides(runtime, artist, bilan)
+        _desactiver_pages_supprimees(runtime, artist, bilan)
     if any(not b.complete for b in bilan.etapes.values()) and bilan.complete:
         rates = [e for e, b in bilan.etapes.items() if not b.complete]
         bilan.interrompu(f"étape(s) incomplète(s) : {', '.join(rates)}")
@@ -322,6 +326,28 @@ def _desactiver_pages_vides(runtime: Runtime, artist: Artist, bilan: BilanCycle)
     except (OSError, ValueError, SQLAlchemyError) as e:
         logger.exception("Désactivation des pages vides en échec")
         bilan.erreurs.append(f"pages vides (fin de cycle) : {e}")
+
+
+def _desactiver_pages_supprimees(runtime: Runtime, artist: Artist, bilan: BilanCycle) -> None:
+    """Pages supprimées de Genius sans identifiant de plateforme désactivées en
+    fin de cycle (2026-11-23) : mêmes conditions que les pages vides —
+    identité et streams ont pu leur en donner un."""
+    etapes = bilan.etapes
+    if runtime.disabled is None or not all(
+        e in etapes and etapes[e].complete for e in ETAPES_AVANT_PAGES_VIDES
+    ):
+        return
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from src.services.pages_supprimees import desactiver_pages_supprimees
+
+    try:
+        bilan.pages_supprimees_desactivees = desactiver_pages_supprimees(
+            runtime, artist, artist.tracks
+        )
+    except (OSError, ValueError, SQLAlchemyError) as e:
+        logger.exception("Désactivation des pages supprimées en échec")
+        bilan.erreurs.append(f"pages supprimées (fin de cycle) : {e}")
 
 
 def _rattraper_discogs(runtime: Runtime, artist: Artist, bilan: BilanCycle) -> None:

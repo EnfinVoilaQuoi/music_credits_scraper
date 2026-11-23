@@ -145,6 +145,8 @@ class BilanCredits(Bilan):
     genius_complets: int = 0
     #: Pages Genius lues (ce run ou récemment) sans aucun crédit : constat posé.
     genius_sans_credit: int = 0
+    #: Pages Genius servies « Page not found » par ce run : constat posé.
+    genius_introuvables: int = 0
     #: Morceaux non redemandés à Discogs : crédits déjà là, ou « rien » récent.
     discogs_ignores: int = 0
     #: Phase des crédits d'ALBUM Genius (`credits_album.BilanAlbums`).
@@ -246,6 +248,37 @@ def constater_pages_sans_credits(runtime: Runtime, tracks) -> int:
     if poser:
         logger.info(f"Genius : {len(poser)} page(s) lue(s) sans aucun crédit (constat daté)")
     return len(poser)
+
+
+def constater_pages_supprimees(runtime: Runtime, introuvables, lues) -> int:
+    """Le constat des pages servies « Page not found » (`pages_supprimees`) ;
+    celui d'une page constatée supprimée et LUE (relecture forcée, page
+    revenue) est levé."""
+    from src.services.pages_supprimees import constater, pages_constatees
+
+    lues = [tid for tid in lues if tid in pages_constatees(runtime)] if lues else []
+    if not (introuvables or lues):
+        return 0
+    return constater(runtime, introuvables, lues)
+
+
+def sans_page_supprimee(runtime: Runtime, tracks, *, force: bool) -> list:
+    """Les morceaux dont la page Genius n'est pas constatée supprimée : la phase
+    des paroles ne rouvre pas une page « Page not found » avant l'expiration du
+    constat (la phase des crédits l'écarte par `SOURCES_DU_MANQUE`). Forcé, ou
+    sans délais : tous — une MàJ forcée redemande."""
+    if force or not tracks:
+        return list(tracks)
+    from src.services.pages_supprimees import pages_constatees
+
+    supprimees = pages_constatees(runtime)
+    gardes = [t for t in tracks if t.id not in supprimees]
+    if len(gardes) < len(tracks):
+        logger.info(
+            f"Paroles (Genius) : {len(tracks) - len(gardes)} page(s) supprimée(s) de Genius "
+            "(constat récent), non relue(s)"
+        )
+    return gardes
 
 
 def _genius_scraper():
@@ -611,8 +644,23 @@ def run(
                     f"Genius : {bilan.genius_recents} page(s) lue(s) depuis moins de "
                     f"{RELECTURE_GENIUS.days} j, non relue(s) (forcer pour tout relire)"
                 )
+            debut_lecture = datetime.now()
             bilan.genius = scraper.scrape_multiple_tracks(
                 a_lire, progress_callback=lambda c, tot, nom: hooks.progress(c, tot, nom, "Genius")
+            )
+            # « Page not found » : une RÉPONSE, constat daté ; une page LUE lève
+            # le constat d'une page revenue (`pages_supprimees`).
+            introuvables = set(bilan.genius.get("introuvables") or ())
+            bilan.genius_introuvables = constater_pages_supprimees(
+                runtime,
+                introuvables,
+                [
+                    t.id
+                    for t in a_lire
+                    if t.id not in introuvables
+                    and isinstance(t.last_scraped, datetime)
+                    and t.last_scraped.replace(tzinfo=None) >= debut_lecture
+                ],
             )
             # Les pages lues (ce run, ou récemment et non relues) sans aucun
             # crédit : une RÉPONSE de Genius, datée — sans ce constat, la
@@ -688,12 +736,19 @@ def run(
                 avec_page = avec_page_genius(tracks, "Paroles (Genius)")
                 besoin = [t for t in avec_page if t.lyrics.page_genius_a_relire()]
                 if besoin:
+                    avec_page = sans_page_supprimee(
+                        runtime, avec_page, force=options.force_paroles or options.sans_delais
+                    )
                     scraper = scraper or clients.genius()
                     bilan.paroles = scraper.scrape_lyrics_batch(
                         avec_page,
                         progress_callback=lambda c, tot, nom: hooks.progress(
                             c, tot, nom, "Paroles (Genius)"
                         ),
+                    )
+                    introuvables = bilan.paroles.get("introuvables") or ()
+                    bilan.genius_introuvables += constater_pages_supprimees(
+                        runtime, introuvables, ()
                     )
                 for t in tracks:
                     if t.lyrics.present and t.lyrics.text and not t.lyrics.source:

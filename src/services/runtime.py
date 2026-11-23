@@ -270,6 +270,13 @@ def est_manquant(track: Track, kind: Manque, *, sans_delais: bool = False) -> bo
 #: puis le run les écartait (`RELECTURE_GENIUS`) — 37 fiches d'A2H.
 ABSENCE_CREDITS_GENIUS = cle_absence("genius_scrape", "credits")
 
+#: Page Genius SUPPRIMÉE : le crawl a servi le « Oops! Page not found » de Genius
+#: (`genius_scraper_v3.page_introuvable`, 2026-11-23). Constat daté de la lecture,
+#: posé par l'étape crédits : la page n'est plus relue (crédits ni paroles
+#: Genius) avant l'expiration du constat ; il ne dit rien des paroles d'AILLEURS
+#: (YTM continue de chercher). Lu par `services.pages_supprimees`.
+ABSENCE_PAGE_GENIUS = cle_absence("genius_scrape", "page")
+
 
 #: Sources (clés d'observabilité) dont une RÉPONSE « rien » couvre la donnée
 #: d'un flux. Une donnée manquante n'est plus redemandée (hors mode forcé) quand
@@ -284,7 +291,7 @@ ABSENCE_CREDITS_GENIUS = cle_absence("genius_scrape", "credits")
 #: 2026-10-29) ne dit rien de ses paroles — sous la clé nue `genius_scrape`, il
 #: ferait taire aussi la recherche de paroles (YTM compris).
 SOURCES_DU_MANQUE: dict[Manque, tuple[str, ...]] = {
-    Manque.CREDITS_GENIUS: ("genius_scrape", ABSENCE_CREDITS_GENIUS),
+    Manque.CREDITS_GENIUS: ("genius_scrape", ABSENCE_CREDITS_GENIUS, ABSENCE_PAGE_GENIUS),
     Manque.CREDITS_DISCOGS: ("discogs",),
     Manque.PAROLES: ("genius_scrape", "ytmusic"),
     Manque.TIMESTAMPS: ("lrclib", "ytmusic", "musixmatch"),

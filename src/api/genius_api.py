@@ -912,6 +912,31 @@ class GeniusAPI:
             return None
         return pistes
 
+    def page_repond(self, genius_id, track_id: int | None = None) -> bool | None:
+        """La page Genius existe-t-elle encore ? `GET /songs/{id}` : True s'il
+        rend un morceau (200), False si Genius refuse (403, la page supprimée)
+        ou ne rend rien, None sans réponse (réseau, autre erreur). Lu par la
+        réactivation des pages supprimées (`services.pages_supprimees`)."""
+        with source_usage.observe(
+            _SOURCE, label=f"#{genius_id}", track_id=track_id, absent_statuses=_ABSENT
+        ) as obs:
+            try:
+                with source_usage.attempt(_SOURCE):
+                    data = self.genius.song(genius_id)
+            except requests.HTTPError as e:
+                if _statut_http(e) == 403:
+                    obs.absent(f"morceau #{genius_id} : détail refusé par l'API (403)")
+                    return False
+                logger.warning(f"genius.song échec #{genius_id}: {e}")
+                return None
+            except (requests.RequestException, AssertionError) as e:
+                logger.warning(f"genius.song échec #{genius_id}: {e}")
+                return None
+            if not (data or {}).get("song"):
+                obs.absent(f"morceau #{genius_id} sans détail")
+                return False
+            return True
+
     def apply_song_metadata(self, track: "Track") -> bool:
         """
         UN appel `GET /songs/{id}` → pose album + Spotify ID + YouTube (depuis

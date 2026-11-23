@@ -94,7 +94,23 @@ _JS_WAIT_CREDITS = (
     "() => document.querySelectorAll('[class*=\"Credit__Label\"]').length > 1"
     " || document.querySelectorAll('[class*=\"SongInfo__Credit\"]').length > 2"
     " || document.querySelectorAll('[class*=\"SongInfo__Label\"]').length > 1"
+    " || document.querySelector('.render_404') !== null"
 )
+
+#: Page Genius SUPPRIMÉE (2026-11-23) : Genius sert « Oops! Page not found »
+#: (titre « Burrr! | Genius », bloc `render_404`), un HTML de ~350 Ko sans
+#: conteneur de paroles. Mesuré dans le brut : 1 734 lectures (873 adresses) sur
+#: 30 240 portent le bloc, jamais avec des paroles. C'est une RÉPONSE, pas une
+#: page lue : rien n'en est tiré, rien n'est effacé (`page_introuvable`).
+_MARQUEUR_PAGE_INTROUVABLE = re.compile(r"""class=["']render_404["']""")
+
+
+def page_introuvable(html: str | None) -> bool:
+    """La page servie est le « Oops! Page not found » de Genius (page
+    supprimée, ou adresse périmée) : son bloc `render_404`, sans paroles."""
+    return bool(
+        html and _MARQUEUR_PAGE_INTROUVABLE.search(html) and "data-lyrics-container" not in html
+    )
 
 
 #: Genius écrit une RELATION entre morceaux comme « Titre by Artiste (Ft. X) »,
@@ -117,6 +133,10 @@ class GeniusScraperV3(CrawlAIScraperBase):
     Scraper Genius v3 — Crawl4AI pour le rendu, extraction déterministe du HTML.
     API publique identique à GeniusScraper (v2).
     """
+
+    #: La dernière page lue était le « Page not found » de Genius
+    #: (`page_introuvable`) ; posé par chaque lecture.
+    derniere_page_introuvable: bool = False
 
     def __init__(self, headless: bool = True):
         super().__init__(headless)
@@ -146,6 +166,18 @@ class GeniusScraperV3(CrawlAIScraperBase):
             page_timeout=30_000,
             delay_before_return=1.5,
         )
+        self.derniere_page_introuvable = page_introuvable(html)
+        if self.derniere_page_introuvable:
+            # Une RÉPONSE de Genius : la page n'existe plus. Ni lue (pas de
+            # `last_scraped`), ni vidée — un échec ou une réponse vide ne
+            # remplace rien ; l'appelant en fait un constat daté.
+            logger.info(
+                f"🚫 Page Genius introuvable (« Page not found ») pour '{track.title}' : "
+                "rien n'est effacé"
+            )
+            self.derniers_ecarts_api = None
+            time.sleep(DELAY_BETWEEN_REQUESTS)
+            return []
         # « La section crédits de la page a été LUE » : sans cette date, une
         # fiche sans crédit ne dit pas si la page n'en a pas ou si personne ne
         # l'a regardée (*Tu voulais du rap* : paroles lues, crédits jamais —
@@ -254,6 +286,8 @@ class GeniusScraperV3(CrawlAIScraperBase):
             # contredisaient la page (titre → écarts).
             "api_remplaces": 0,
             "api_ecarts": {},
+            # Morceaux dont la page est le « Page not found » de Genius.
+            "introuvables": [],
         }
         total = len(tracks)
         for i, track in enumerate(tracks):
@@ -262,6 +296,12 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 self.derniers_ecarts_api = None
                 with source_usage.track_scope(track.id):
                     self.scrape_track_credits(track)
+                if self.derniere_page_introuvable:
+                    # Un constat, ni un succès ni un échec.
+                    results["introuvables"].append(track.id)
+                    if progress_callback:
+                        progress_callback(i + 1, total, track.title)
+                    continue
                 ecarts = self.derniers_ecarts_api
                 if ecarts is not None:
                     results["api_remplaces"] += 1
@@ -294,12 +334,22 @@ class GeniusScraperV3(CrawlAIScraperBase):
         # chaque run (« This song is an instrumental » n'a pas de conteneur).
         html = self._crawl_page(
             url=track.genius_url,
-            wait_for=f"css:[data-lyrics-container='true'], {_LYRICS_PLACEHOLDER_SEL}",
+            wait_for=(
+                f"css:[data-lyrics-container='true'], {_LYRICS_PLACEHOLDER_SEL}, .render_404"
+            ),
             wait_timeout=12_000,
             page_timeout=30_000,
             delay_before_return=1.0,
         )
+        self.derniere_page_introuvable = page_introuvable(html)
         if not html:
+            return ""
+        if self.derniere_page_introuvable:
+            logger.info(
+                f"🚫 Page Genius introuvable (« Page not found ») pour '{track.title}' : "
+                "paroles en base gardées"
+            )
+            time.sleep(DELAY_BETWEEN_REQUESTS)
             return ""
 
         lyrics = self._apply_lyrics_from_html(html, track)
@@ -319,6 +369,8 @@ class GeniusScraperV3(CrawlAIScraperBase):
             "lyrics_scraped": 0,
             "instrumental": 0,
             "non_transcrites": 0,
+            # Morceaux dont la page est le « Page not found » de Genius.
+            "introuvables": [],
         }
         total = len(tracks)
         for i, track in enumerate(tracks):
@@ -337,7 +389,10 @@ class GeniusScraperV3(CrawlAIScraperBase):
                 else:
                     with source_usage.track_scope(track.id):
                         lyrics = self.scrape_track_lyrics(track)
-                    if lyrics:
+                    if self.derniere_page_introuvable:
+                        # Une réponse, pas un échec : rien n'est vidé.
+                        results["introuvables"].append(track.id)
+                    elif lyrics:
                         results["success"] += 1
                         results["lyrics_scraped"] += 1
                     elif track.lyrics.instrumental:

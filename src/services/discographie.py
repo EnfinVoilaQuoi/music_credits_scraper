@@ -83,8 +83,11 @@ class BilanDisco(Bilan):
     images: int = 0
     featurings_total: int = 0
     total_en_base: int = 0
-    #: Pages désactivées car vides, réactivées (remplies, ou constat expiré).
+    #: Pages désactivées (vides : remplies ou constat expiré ; supprimées : la page répond).
     pages_reactivees: int = 0
+    #: Pages Genius recréées sous un autre ID, rattachées à la fiche dont la page
+    #: est supprimée (« page → fiche », `pages_supprimees`).
+    pages_recreees: list[str] = field(default_factory=list)
     #: Certifs/relations recalculées mais NON enregistrées (contrôle de fin de flux).
     oublies: list[str] = field(default_factory=list)
 
@@ -448,6 +451,14 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
             runtime, artist, existants + nouveaux, exclus, options, hooks, bilan
         )
     nouveaux, bilan.editions = _rattacher_editions(dm, nouveaux, existants)
+    # Une page RECRÉÉE par Genius (nouvel ID, même morceau) reprend la fiche
+    # dont la page est supprimée, au lieu d'en créer une seconde
+    # (`pages_supprimees`) ; la fiche porte alors le nouvel ID.
+    from src.services.pages_supprimees import rattacher_pages_recreees
+
+    bilan.pages_recreees = rattacher_pages_recreees(runtime, artist, nouveaux, existants)
+    if bilan.pages_recreees:
+        existants = dm.get_artist_tracks(artist.id)
     bilan.recuperes = len(nouveaux)
 
     fusion = fusionner(nouveaux, existants, should_stop=hooks.should_stop)
@@ -591,6 +602,10 @@ def run(runtime: Runtime, artist: Artist, options: OptionsDisco, hooks: Hooks) -
 
     if runtime.disabled is not None:
         bilan.pages_reactivees = reactiver_pages_remplies(runtime.disabled, artist, artist.tracks)
+        # Une page SUPPRIMÉE dont le détail Genius répond de nouveau revient.
+        from src.services.pages_supprimees import reactiver_pages_revenues
+
+        bilan.pages_reactivees += reactiver_pages_revenues(runtime, artist, artist.tracks)
     # Les éditions vues par ce run rejoignent leur projet (e67).
     regrouper_projets(dm, artist)
     bilan.total_en_base = len(artist.tracks)

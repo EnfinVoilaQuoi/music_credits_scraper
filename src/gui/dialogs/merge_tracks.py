@@ -6,8 +6,8 @@ entre les deux fiches — l'utilisateur choisit alors la fiche qui gagne.
 
 La fiche gardée est complétée avec les champs qui lui manquent, ses crédits
 sont enrichis de ceux de l'autre (sans doublons — cf. data_manager.merge_tracks),
-et la suppression est mémorisée (deleted_tracks_manager) pour que le doublon
-ne revienne pas au prochain import de discographie.
+et la fusion est consignée (`corrections_fiches.memoriser_fusion`) pour que le
+doublon ne revienne pas au prochain import de discographie.
 Backup DB systématique AVANT la fusion (règle projet).
 """
 
@@ -213,13 +213,12 @@ def _do_merge(app, keep, other):
         report.show_error(app, "Fusion", "La fusion a échoué — voir les logs (backup disponible).")
         return
 
-    # 4. Mémoriser la suppression pour ne pas réimporter le doublon
-    try:
-        app.deleted_tracks_manager.add_deleted(
-            app.current_artist.name, other.genius_id, other.title
-        )
-    except (OSError, ValueError) as e:
-        logger.debug(f"Mémo suppression échec: {e}")
+    # 4. Consigner la fusion (table `corrections`, exportée) : le prochain import
+    #    ne recrée pas la page absorbée (`genius_ids_absorbes`) et ses refus
+    #    suivent la fiche gardée — règle « une fusion se consigne » (2026-11-19).
+    from src.utils.corrections_fiches import designation_de, memoriser_fusion
+
+    memoriser_fusion(app.current_artist.name, designation_de(other), designation_de(keep))
 
     # 5. Rafraîchir la GUI
     try:

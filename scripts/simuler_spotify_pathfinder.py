@@ -8,7 +8,7 @@ ont écrit, sur un échantillon tiré au hasard :
   lecture du même ID par `SpotifyPathfinderScraper.afetch_track` ;
 - artistes : auditeurs mensuels en base contre `afetch_artist` ;
 - albums totalisés par `spotify_web` : le total recalculé sur leurs éditions
-  (`spotify_album_ids`) avec les compteurs de `afetch_album`, dédupliqués par TITRE
+  (`projets.spotify_album_ids`) avec les compteurs de `afetch_album`, dédupliqués par TITRE
   comme `_totaliser_albums`, contre le total en base.
 
 N'écrit RIEN en base (ouverte en lecture seule ; une COPIE de préférence,
@@ -61,9 +61,11 @@ def _echantillons(base: Path, n_pistes: int, n_artistes: int, n_albums: int, jou
             "SELECT name, spotify_id, spotify_monthly_listeners FROM artists "
             "WHERE spotify_id IS NOT NULL AND spotify_monthly_listeners > 0"
         ).fetchall()
+        # Les streams d'album vivent dans `projets` depuis le retrait de la table
+        # `albums` (e69, 2026-11-20).
         albums = c.execute(
-            "SELECT title, spotify_album_ids, spotify_streams, spotify_streams_updated "
-            "FROM albums WHERE spotify_streams_source = 'spotify_web' "
+            "SELECT titre, spotify_album_ids, spotify_streams, spotify_streams_updated "
+            "FROM projets WHERE spotify_streams_source = 'spotify_web' "
             "AND spotify_album_ids IS NOT NULL AND spotify_streams > 0 "
             "AND spotify_streams_updated >= datetime('now', ?)",
             (f"-{jours} days",),

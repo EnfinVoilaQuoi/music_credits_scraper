@@ -61,7 +61,7 @@ Pilotage en ligne de commande : `venv/Scripts/python -m src.cli --help`. Tests :
 - [RIAA](https://www.riaa.com/gold-platinum/)                       - **Certifications RIAA** (USA, dont le programme latin)
 - [Ultratop](https://www.ultratop.be)                               - **Certifications BRMA** (Belgique)
 - [BPI](https://www.bpi.co.uk/)                                     - **Certifications BPI** (Royaume-Uni)
-- [Spotify](https://open.spotify.com/intl-fr)                       - **Track ID** pour Reccobeats, **Nb de Streams** et **Auditeurs mensuels**
+- [Spotify](https://open.spotify.com/intl-fr)                       - **Track ID** pour Reccobeats, **Nb de Streams** et **Auditeurs mensuels** (requêtes internes du lecteur web via [SpotAPI](https://github.com/Aran404/SpotAPI), pages du navigateur en repli)
 - [Kworb](https://kworb.net/)                                       - **Nb de Streams** sur Spotify (quotidien, ventilation lead/solo/feature)
 
 ## Ressources utilisées

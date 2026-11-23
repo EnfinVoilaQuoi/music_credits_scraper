@@ -163,12 +163,25 @@ def politique_durees(minimum: int) -> Callable:
                 )
             # ReccoBeats lit d'abord par l'ISRC : son accord avec les
             # catalogues ne prouve pas l'ID, seulement que la page de l'ID dit
-            # autre chose. Rien n'est retiré ; l'action reste à définir.
+            # autre chose. Rien n'est retiré. Il n'est d'ailleurs pas compté
+            # au démenti (même famille `spotify` que la page, `_dementie`) :
+            # ce sont `minimum` catalogues INDÉPENDANTS qui démentent la page.
+            # Décision utilisateur 2026-11-23 : la colonne durée suit alors
+            # ces catalogues, pas la page démentie. C'est déjà l'ordre de
+            # `DISCOGRAPHY_PRIORITIES` : tout catalogue indépendant qui peut
+            # démentir passe devant `spotify_web`, sauf une famille au plus
+            # (garde : `test_la_page_spotify_dementie_ne_tient_jamais_la_colonne`).
+            # Une colonne qui tiendrait encore la page ne peut être qu'un
+            # verdict périmé (rematérialiser) : l'humain le voit.
             juste = next(s for s in presents if s not in faux)
             return Arbitrage(
                 f"{faux[0]} {durees[faux[0]]} s démentie ; {juste} {durees[juste]} s = les "
                 "catalogues : ID d'une autre édition, ou lecture fausse"
-                + (" — elle tient la colonne" if _colonne_impactee(track, faux[0]) else ""),
+                + (
+                    " — elle tient la colonne : verdict périmé, à rematérialiser"
+                    if _colonne_impactee(track, faux[0])
+                    else ""
+                ),
                 # Hors colonne, rien de faux n'est affiché ni compté : ✓ Normal.
                 "" if _colonne_impactee(track, faux[0]) else "normal",
                 f"démentie par {minimum}+ catalogues d'accord entre eux",

@@ -57,8 +57,10 @@ class TestDurees:
 
     def test_relecture_reccobeats_d_accord_ne_prouve_pas_l_id(self):
         """ReccoBeats lit d'abord par l'ISRC : l'ID n'est jamais retiré. Hors de
-        la colonne, la durée démentie ne fausse rien : ✓ Normal ; si elle tient
-        la colonne, l'action reste à définir."""
+        la colonne, la durée démentie ne fausse rien : ✓ Normal. Une colonne
+        qui la tiendrait encore (verdict périmé : l'ordre des priorités ne le
+        permet pas, `test_la_page_spotify_dementie_ne_tient_jamais_la_colonne`)
+        va à l'humain."""
         t = _t(
             spotify_id="SP",
             durations_observees={
@@ -72,6 +74,56 @@ class TestDurees:
         assert self.juger(_cas("duree_spotify", t), t, None).action == "normal"
         t.duration_source = "spotify_web"
         assert self.juger(_cas("duree_spotify", t), t, None).action == ""
+
+    @pytest.mark.parametrize(
+        "temoins",
+        [
+            {"deezer": 275, "youtube": 276},
+            {"apple_music": 275, "ytmusic": 276},
+            {"youtube_officiel": 275, "youtube_video": 276, "deezer": 274},
+            {"apple_music": 275, "youtube_video": 276},
+        ],
+    )
+    def test_la_page_spotify_dementie_ne_tient_jamais_la_colonne(self, temoins):
+        """Décision utilisateur 2026-11-23 : la colonne durée suit deux
+        catalogues indépendants d'accord, pas la page Spotify qu'ils démentent
+        (ReccoBeats, de la famille de la page, n'y compte pas). Tenu par
+        l'ordre de `DISCOGRAPHY_PRIORITIES` : mesuré sur la copie du
+        2026-11-23, 301 colonnes tenues par `spotify_web`, aucune isolée au
+        vote. Un réordonnancement qui la ferait passer devant ces catalogues
+        casse ce test."""
+        from src.enrichment.observation import Observation
+        from src.enrichment.reconcile import DISCOGRAPHY_PRIORITIES, resoudre_duree
+
+        durees = {"spotify_web": 78, "reccobeats": 275, **temoins}
+        t = _t(spotify_id="SP", durations_observees=durees)
+        verdict = resoudre_duree(
+            [Observation("duration", d, s) for s, d in durees.items()],
+            DISCOGRAPHY_PRIORITIES["duration"],
+            None,
+        )
+        assert verdict.source != "spotify_web"
+        assert abs(int(verdict.value) - 275) <= 5
+        t.duration_source = verdict.source
+        assert self.juger(_cas("duree_spotify", t), t, None).action == "normal"
+
+    def test_seule_une_famille_independante_suit_spotify_web(self):
+        """La propriété d'ordre derrière la règle : après `spotify_web`, au
+        plus UNE famille de catalogues solides et indépendants de la page
+        (ni fragile, ni de la famille `spotify`) — deux ne peuvent donc jamais
+        la démentir tant qu'elle tient la colonne."""
+        from src.enrichment.reconcile import DISCOGRAPHY_PRIORITIES
+        from src.utils.vote_durees import FRAGILES, HORS_VOTE, famille
+
+        ordre = DISCOGRAPHY_PRIORITIES["duration"]
+        apres = ordre[ordre.index("spotify_web") + 1 :]
+        familles = {
+            famille(s)
+            for s in apres
+            if s not in FRAGILES | HORS_VOTE | {"manual", "legacy"}
+            and famille(s) != famille("spotify_web")
+        }
+        assert len(familles) <= 1, familles
 
     def test_catalogue_en_desaccord_avec_lui_meme_ne_prouve_rien(self):
         """« Guess Who's Back » : page Spotify 241 s, ReccoBeats 255 s."""

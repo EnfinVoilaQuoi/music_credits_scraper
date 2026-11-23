@@ -232,3 +232,22 @@ class TestVersionsLiees:
         original = _t("Day ‘N’ Nite", 1)
         reprise = _t("Day N Night", 2, relationships=[{"type": "cover_of", "url": None}])
         assert editions.versions_liees(original, [original, reprise]) == []
+
+
+class TestGardeeParLeTitre:
+    """♊ « Noter en édition » : la fiche gardée est celle dont le titre porte
+    l'indice qui la distingue (décision utilisateur 2026-11-19) ; une édition de
+    diffusion va toujours sur l'original."""
+
+    def test_l_invite_d_un_remix_distingue(self):
+        assert editions.gardee_par_le_titre("W.T.P. (Remix)", "W.T.P. (ft. Yelawolf) (Remix)") == 1
+
+    def test_l_annee_d_un_live_distingue(self):
+        assert editions.gardee_par_le_titre("Suzy (Live 2006)", "Suzy (Live)") == 0
+
+    def test_l_edition_de_diffusion_va_sur_l_original(self):
+        assert editions.gardee_par_le_titre("Impossible (Radio Edit)", "Impossible") == 1
+
+    def test_deux_titres_sans_indice_a_l_humain(self):
+        assert editions.gardee_par_le_titre("Promise Land", "Promised Land") is None
+        assert editions.gardee_par_le_titre("Bonjour", "bonjour") is None

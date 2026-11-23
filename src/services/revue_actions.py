@@ -485,6 +485,51 @@ def _action_retirer_lrc() -> Action:
     )
 
 
+def _noter_en_edition(garder_l_autre: bool):
+    """♊ Même enregistrement, deux sorties : l'une des fiches devient une
+    ÉDITION de l'autre (décision utilisateur) — sa ligne d'édition garde ses
+    identifiants et sa durée, puis elle est fusionnée ET consignée
+    (`editions.absorber` : jamais `merge_tracks` seul)."""
+
+    def executer(ctx: ContexteAction, cas: Cas) -> str:
+        from src.services import editions
+
+        fiche, autre = _fiche(ctx, cas), _autre_fiche(ctx, cas)
+        socle, edition = (autre, fiche) if garder_l_autre else (fiche, autre)
+        if not editions.absorber(ctx.data_manager, socle, edition):
+            raise LookupError(f"« {edition.title} » n'a pas pu rejoindre « {socle.title} »")
+        ctx.tracks.pop(edition.id, None)
+        return f"« {edition.title} » notée en édition de « {socle.title} »"
+
+    return executer
+
+
+def _actions_noter_en_edition(cas: Cas) -> list[Action]:
+    """Le sens que les titres désignent (`editions.gardee_par_le_titre` : la
+    fiche au titre qui distingue est gardée), sinon les deux sens, au choix."""
+    from src.services.editions import gardee_par_le_titre
+
+    titre, titre_autre = cas.morceau, cas.preuves.get("titre_autre")
+    if not titre_autre:
+        return []
+    gardee = gardee_par_le_titre(titre, titre_autre)
+    sens = [False, True] if gardee is None else [gardee == 1]
+    actions = []
+    for garder_l_autre in sens:
+        socle, edition = (titre_autre, titre) if garder_l_autre else (titre, titre_autre)
+        actions.append(
+            Action(
+                "noter_en_edition_autre" if garder_l_autre else "noter_en_edition",
+                f"📎 « {edition} » en édition de « {socle} »",
+                _noter_en_edition(garder_l_autre),
+                f"Noter « {edition} » comme ÉDITION de « {socle} » ? Sa fiche est fusionnée "
+                "dans l'autre (ses identifiants et sa durée gardés dans la ligne d'édition) ; "
+                "une fusion ne se défait pas.",
+            )
+        )
+    return actions
+
+
 def actions_pour(cas: Cas) -> list[Action]:
     """Les actions proposées pour un cas (hors « ✓ Normal », toujours là)."""
     d = cas.detecteur
@@ -595,6 +640,14 @@ def actions_pour(cas: Cas) -> list[Action]:
             )
             for s in sources
         ]
+    if d == "meme_enregistrement":
+        fusion = Action(
+            "fusionner",
+            "🔀 Fusionner…",
+            _renvoi("fusion", _fiche, _autre_fiche),
+            resout=False,
+        )
+        return [fusion, *_actions_noter_en_edition(cas)]
     if d in _CODES_DOUBLON:
         fusion = Action(
             "fusionner",

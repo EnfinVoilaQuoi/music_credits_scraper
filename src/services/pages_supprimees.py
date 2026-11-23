@@ -225,6 +225,52 @@ def pages_recreees(nouveaux, existants, supprimees: set[int]) -> Recreations:
     return sortie
 
 
+def paires_au_panneau(fiches, supprimees: set[int], desactives: set[int]) -> dict[int, dict]:
+    """PUR. Les paires « page recréée ? » que `rattacher_pages_recreees` ne
+    tranche pas, pour le panneau ♊ (`revue.meme_enregistrement`, décision
+    utilisateur 2026-11-23) : `{fiche vivante: {"autre": fiche à la page
+    supprimée, "page_recreee": True}}`. La fiche VIVANTE (page ni supprimée ni
+    désactivée) porte le cas : une page désactivée n'en produit aucun, mais la
+    fiche à la page supprimée — désactivée par la règle comprise — en est
+    l'autre côté. Exigé : une page PLUS RÉCENTE que la page supprimée (Genius
+    numérote ses pages dans l'ordre), le même titre NORMALISÉ (le titre de
+    base seul rapprochait des remixes, freestyles et versions différents :
+    37 paires simulées le 2026-11-23, presque toutes deux morceaux) et le même
+    disque, ou un disque inconnu d'un côté. Une fiche vivante n'a qu'une paire :
+    la fiche supprimée d'identifiant le plus bas."""
+    from src.utils.version_descriptors import meme_disque, meme_titre_normalise
+
+    mortes = sorted((t for t in fiches if t.id in supprimees and t.genius_id), key=lambda t: t.id)
+    if not mortes:
+        return {}
+    out: dict[int, dict] = {}
+    for page in sorted(fiches, key=lambda t: t.id or 0):
+        if not page.id or not page.genius_id or page.id in supprimees or page.id in desactives:
+            continue
+        for m in mortes:
+            if (
+                int(m.genius_id) < int(page.genius_id)
+                and meme_titre_normalise(page.title, m.title)
+                and (not page.album or not m.album or meme_disque(page.album, m.album))
+            ):
+                out[page.id] = {"autre": m.id, "page_recreee": True}
+                break
+    return out
+
+
+def supprimees_de(data_manager, artist_name: str, disabled=None) -> tuple[set[int], set[int]]:
+    """Les fiches à la page supprimée de l'artiste (constat récent, ou
+    désactivées par la règle ; une désactivation À LA MAIN reste hors jeu) et
+    toutes ses fiches désactivées. Lectures seules."""
+    from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+    disabled = disabled or DisabledTracksManager()
+    constatees = data_manager.pages_genius_supprimees()
+    desactives = set(disabled.load_disabled_tracks(artist_name))
+    par_regle = desactivees_au_motif(disabled.load_motifs(artist_name))
+    return (constatees - desactives) | par_regle, desactives
+
+
 def _date(track) -> str | None:
     d = track.release_date
     if d is None:
@@ -266,7 +312,7 @@ def rattacher_pages_recreees(runtime, artist, nouveaux, existants) -> list[str]:
             f"⚠️ « {page.title} » (page Genius #{page.genius_id}) : page recréée ? "
             f"{len(fiches)} fiche(s) à la page supprimée au titre proche "
             f"({', '.join(f'« {f.title} » #{f.id}' for f in fiches)}) — aucune rattachée, "
-            "à trancher"
+            "à trancher au panneau ♊"
         )
     faits, reactivees = [], []
     for page, fiche in trouve.rattacher:

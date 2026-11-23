@@ -899,7 +899,10 @@ class ArtistRepository:
         Commun » (graphie Discogs) ne trouvait pas « L'Or du Commun » en base —
         la confirmation insérait un DOUBLON, le refus ne touchait rien.
         """
-        cible = normalize_name(nom)
+        # Un nom fait de symboles (« ¥$ ») n'a pas de forme normalisée : il se
+        # compare alors tel quel, aux espaces et à la casse près (2026-11-23 :
+        # la formation de Kanye ne pouvait être ni confirmée ni refusée).
+        cible = normalize_name(nom) or (nom or "").strip().casefold()
         if not cible:
             return None
         lignes = conn.execute(
@@ -910,7 +913,8 @@ class ArtistRepository:
             {"aid": artist_id, "kind": kind},
         ).mappings()
         for ligne in lignes:
-            if normalize_name(ligne["related_name"]) == cible:
+            brut = ligne["related_name"] or ""
+            if (normalize_name(brut) or brut.strip().casefold()) == cible:
                 return ligne["id"]
         return None
 

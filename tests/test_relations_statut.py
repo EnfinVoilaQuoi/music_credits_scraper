@@ -118,6 +118,23 @@ class TestArbitrer:
         assert data_manager.get_artist_relations(a.id, "refused")[0].related_name == "Psmaker"
         assert not data_manager.set_relation_status(a.id, "Inconnu", "alias", "refused")
 
+    def test_un_nom_fait_de_symboles_s_arbitre(self, data_manager):
+        """« ¥$ » n'a pas de forme normalisée (2026-11-23) : la formation de
+        Kanye ne pouvait être ni confirmée ni refusée."""
+        from sqlalchemy import text
+
+        a = _artiste(data_manager, "Kanye West")
+        with data_manager.engine.begin() as conn:
+            conn.execute(
+                text(
+                    "INSERT INTO artist_relations (artist_id, related_name, kind, status) "
+                    "VALUES (:a, '¥$', 'member_of', 'proposed')"
+                ),
+                {"a": a.id},
+            )
+        assert data_manager.set_relation_status(a.id, "¥$", "member_of", "confirmed", "groupe")
+        assert [r.related_name for r in data_manager.get_artist_relations(a.id)] == ["¥$"]
+
     def test_readers_ignore_non_confirmed(self, data_manager):
         a = _artiste(data_manager, "Isha")
         data_manager.propose_artist_relations(a.id, [_rel("Psmaker")])

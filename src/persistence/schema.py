@@ -199,6 +199,9 @@ credits = Table(
     # `ALTER TABLE ADD COLUMN` ajoute en fin de table, et `test_alembic_baseline`
     # exige que ce fichier rende le MÊME DDL que la suite des migrations.
     Column("tracks", Text),
+    # Les AUTRES sources qui donnent le même crédit (e70, 2026-11-23) : triées,
+    # séparées par des virgules, NULL = aucune (`utils.credit_sources`).
+    Column("confirme_par", Text),
     UniqueConstraint("track_id", "name", "role", "role_detail"),
     sqlite_autoincrement=True,
 )

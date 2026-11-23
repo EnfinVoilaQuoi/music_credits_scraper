@@ -534,8 +534,8 @@ def _unir_credits(conn, source_id: int, cible_id: int) -> int:
 
     return conn.execute(
         text(
-            "INSERT INTO credits (track_id, name, role, role_detail, tracks, source) "
-            "SELECT :cible, c.name, c.role, c.role_detail, c.tracks, c.source "
+            "INSERT INTO credits (track_id, name, role, role_detail, tracks, source, confirme_par) "
+            "SELECT :cible, c.name, c.role, c.role_detail, c.tracks, c.source, c.confirme_par "
             "FROM credits c WHERE c.track_id = :source AND NOT EXISTS ("
             "  SELECT 1 FROM credits d WHERE d.track_id = :cible AND d.name = c.name "
             "    AND d.role = c.role "
@@ -886,6 +886,7 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
         "doublons": doublons,
         "colonnes": 0,
         "credits": 0,
+        "confirmations": 0,
         "observations": 0,
         "videos": 0,
         "spotify_ids": 0,
@@ -935,9 +936,15 @@ def synchroniser_soeurs(conn, track_id: int, genius_id=None) -> dict:
     from src.utils.credits_genius_api import purger_provisoires_couverts
 
     rapport["provisoires"] = purger_provisoires_couverts(conn, famille)
+    from src.utils.credit_sources import unir_confirmations_en_base
+
     for source in famille:
         for cible in famille:
             if source != cible:
+                # Les sources d'un crédit que les deux portent s'unissent
+                # (`credit_sources`, 2026-11-23) : la clé d'union ignorait la
+                # source, la confirmation d'une sœur restait chez elle.
+                rapport["confirmations"] += unir_confirmations_en_base(conn, source, cible)
                 rapport["credits"] += _unir_credits(conn, source, cible)
 
     rapport["observations"] = unir_observations(conn, famille)

@@ -292,6 +292,11 @@ _MUSIC_EXCLUSIONS = (
 )
 
 
+def _est_heritage(source: str | None) -> bool:
+    """Même juge que `version_heritage.est_herite` (non importé : cycle)."""
+    return bool(source) and source.split(":")[0] == "heritage"
+
+
 @dataclass
 class Credit:
     """Représente un crédit sur un morceau"""
@@ -304,6 +309,25 @@ class Credit:
     # écrasait l'un avec l'autre selon le sens du `or`.
     tracks: str | None = None
     source: str = "genius"  # Source de l'information
+    # Les AUTRES sources qui donnent le même crédit (même clé de table : nom,
+    # rôle, détail), colonne `credits.confirme_par` (e70, 2026-11-23). La table
+    # ne garde qu'une ligne par clé : sans elles, la confirmation par une
+    # seconde source était perdue (1 crédit 🎫 confirmé sur 189). Hors de
+    # l'égalité : deux crédits restent « le même » quelle que soit leur preuve.
+    confirmations: frozenset[str] = field(default_factory=frozenset, compare=False)
+
+    @property
+    def sources(self) -> frozenset[str]:
+        """Toutes les sources qui donnent ce crédit : la sienne et les autres."""
+        return frozenset({self.source}) | self.confirmations
+
+    def confirmer_par(self, autre: "Credit") -> None:
+        """Note les sources d'`autre` (même crédit) comme confirmations. Un
+        héritage ne confirme rien : ce n'est pas une source, c'est une copie
+        d'une autre fiche (`version_heritage`), recalculée à chaque passage."""
+        ajout = frozenset(s for s in autre.sources if s and not _est_heritage(s)) - {self.source}
+        if ajout - self.confirmations:
+            self.confirmations = self.confirmations | ajout
 
     def to_dict(self) -> dict:
         """Convertit le crédit en dictionnaire (utilisé par Track.to_dict / export JSON)"""
@@ -809,14 +833,20 @@ class Track:
         return hash(self._identity())
 
     def add_credit(self, credit: Credit):
-        """Ajoute un crédit au morceau"""
-        # Éviter les doublons
-        for existing in self.credits:
+        """Ajoute un crédit au morceau. Un crédit déjà là (même nom, rôle,
+        détail) n'est pas doublé, mais la source qui le redonne est GARDÉE en
+        confirmation (`Credit.confirmations`, 2026-11-23) ; et un crédit HÉRITÉ
+        cède la place à la source directe qui le donne."""
+        for i, existing in enumerate(self.credits):
             if (
                 existing.name == credit.name
                 and existing.role == credit.role
                 and existing.role_detail == credit.role_detail
             ):
+                if _est_heritage(existing.source) and not _est_heritage(credit.source):
+                    self.credits[i] = credit
+                else:
+                    existing.confirmer_par(credit)
                 return
         self.credits.append(credit)
 

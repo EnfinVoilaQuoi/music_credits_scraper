@@ -103,11 +103,32 @@ def cle_credit(c) -> tuple[str, str]:
 
 def sans_provisoires_couverts(credits: list) -> list:
     """Les crédits sans les `genius_api` que la page confirme (même personne,
-    même rôle) : ceux-là sont remplacés par le crédit scrapé."""
-    scrapes = {cle_credit(c) for c in credits if c.source == SOURCE_SCRAPE}
+    même rôle) : ceux-là sont remplacés par le crédit scrapé, qui reçoit les
+    AUTRES sources qui les confirmaient (`Credit.confirmations`)."""
+    scrapes = {cle_credit(c): c for c in credits if c.source == SOURCE_SCRAPE}
     if not scrapes:
         return list(credits)
-    return [c for c in credits if not (c.source == SOURCE_API and cle_credit(c) in scrapes)]
+    out = []
+    for c in credits:
+        cle = cle_credit(c)
+        if c.source == SOURCE_API and cle in scrapes:
+            transmettre_confirmations(c, scrapes[cle])
+            continue
+        out.append(c)
+    return out
+
+
+def transmettre_confirmations(remplace, remplacant) -> None:
+    """Le crédit qui en REMPLACE un autre (scrape contre provisoire ou héritage)
+    garde les sources tierces qui confirmaient le remplacé — sans la source
+    remplacée elle-même ni un héritage."""
+    from src.utils.version_heritage import est_herite
+
+    tierces = frozenset(
+        s for s in remplace.confirmations if s != SOURCE_API and not est_herite(s)
+    ) - {remplacant.source}
+    if tierces - remplacant.confirmations:
+        remplacant.confirmations = remplacant.confirmations | tierces
 
 
 def poser(track, song: dict) -> bool:
@@ -124,7 +145,11 @@ def poser(track, song: dict) -> bool:
     avant = {(c.name, c.role, c.role_detail) for c in track.credits if c.source == SOURCE_API}
     if avant == {(c.name, c.role, c.role_detail) for c in frais}:
         return False
-    track.credits = [c for c in track.credits if c.source != SOURCE_API]
+    from src.utils.credit_sources import retirer_source
+
+    # La réponse plus récente REMPLACE l'ancienne : l'API se retire des
+    # crédits (un crédit 🎫 qu'une autre source confirme reste, porté par elle).
+    track.credits = retirer_source(track.credits, SOURCE_API)
     for c in frais:
         track.add_credit(c)
     return True
@@ -137,14 +162,20 @@ def unir(existants: list, entrants: list) -> list:
     crédits scrapés (`save_track` réécrit la table depuis l'objet), soit les
     frais. Des provisoires ENTRANTS remplacent les provisoires existants
     (réponse plus récente de la même source), comme dans `poser`."""
+    from src.utils.credit_sources import retirer_source
+
     if any(c.source == SOURCE_API for c in entrants):
-        existants = [c for c in existants if c.source != SOURCE_API]
+        existants = retirer_source(list(existants), SOURCE_API)
     out = list(existants)
-    cles = {(c.name, c.role, c.role_detail) for c in out}
+    par_cle = {(c.name, c.role, c.role_detail): c for c in out}
     for c in entrants:
-        if (c.name, c.role, c.role_detail) not in cles:
-            cles.add((c.name, c.role, c.role_detail))
+        cle = (c.name, c.role, c.role_detail)
+        if cle not in par_cle:
+            par_cle[cle] = c
             out.append(c)
+        else:
+            # Le même crédit : sa source est GARDÉE en confirmation.
+            par_cle[cle].confirmer_par(c)
     return sans_provisoires_couverts(out)
 
 
@@ -200,19 +231,36 @@ def purger_provisoires_couverts(conn, track_ids) -> int:
     ids = list(track_ids)
     if not ids:
         return 0
+    from src.utils.credit_sources import ecrire, lire
+
     lignes = conn.execute(
         text(
-            "SELECT id, name, role, source FROM credits "
+            "SELECT id, name, role, source, confirme_par, track_id FROM credits "
             "WHERE source IN (:api, :scrape) AND track_id IN :ids"
         ).bindparams(bindparam("ids", expanding=True)),
         {"api": SOURCE_API, "scrape": SOURCE_SCRAPE, "ids": ids},
     ).all()
-    scrapes = {(normalize_name(n), r) for _i, n, r, s in lignes if s == SOURCE_SCRAPE}
+    scrapes = {(normalize_name(n), r) for _i, n, r, s, _c, _t in lignes if s == SOURCE_SCRAPE}
     a_retirer = [
-        i for i, n, r, s in lignes if s == SOURCE_API and (normalize_name(n), r) in scrapes
+        i for i, n, r, s, _c, _t in lignes if s == SOURCE_API and (normalize_name(n), r) in scrapes
     ]
     if not a_retirer:
         return 0
+    # Les sources tierces qui confirmaient un provisoire retiré passent au
+    # crédit scrapé de la même ligne (même personne, même rôle).
+    tierces: dict[tuple, set] = {}
+    for _i, n, r, s, c, t in lignes:
+        if s == SOURCE_API and (normalize_name(n), r) in scrapes:
+            autres = lire(c) - {SOURCE_API, SOURCE_SCRAPE}
+            if autres:
+                tierces.setdefault((t, normalize_name(n), r), set()).update(autres)
+    for i, n, r, s, c, t in lignes:
+        venues = tierces.get((t, normalize_name(n), r))
+        if s == SOURCE_SCRAPE and venues and not venues <= lire(c):
+            conn.execute(
+                text("UPDATE credits SET confirme_par = :c WHERE id = :i"),
+                {"c": ecrire(lire(c) | venues, s), "i": i},
+            )
     return conn.execute(
         text("DELETE FROM credits WHERE id IN :ids").bindparams(bindparam("ids", expanding=True)),
         {"ids": a_retirer},

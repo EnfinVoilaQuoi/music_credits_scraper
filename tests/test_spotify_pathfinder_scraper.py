@@ -377,3 +377,196 @@ class TestBilan:
         texte = self._bilan({"recorded": 2, "pages": 3, "chemin": "pages"})
         assert "Spotify (pages web) : 2 morceau(x) relevé(s)" in texte
         assert "3 page(s) ouverte(s)" in texte
+
+
+# ── Albums que la page artiste ne cite pas : trouvés par une de leurs pistes ──
+from src.utils.update_spotify_streams import projets_a_rattacher  # noqa: E402
+
+_ARTISTE_SPOTIFY = "artist00000000000000000"[:22]
+
+
+def _projet(titre, credit="ISHA", nature="album", pistes=("p1",), projet_id=5):
+    return {
+        "projet_id": projet_id,
+        "nature": nature,
+        "titres": [titre],
+        "signatures": [(titre, credit)],
+        "pistes": list(pistes),
+    }
+
+
+class TestProjetsARattacher:
+    connus = {"guernica": "Guernica", "rap 2007": "Rap 2007", "single": "Single"}
+
+    def _rattacher(self, projets, groupes=None, vers=None):
+        return projets_a_rattacher(projets, {"ISHA"}, set(), self.connus, vers or {}, groupes or {})
+
+    def test_le_disque_qu_il_signe(self):
+        assert self._rattacher([_projet("Guernica")]) == {"guernica": ["p1"]}
+
+    def test_pas_la_compilation_d_un_autre(self):
+        """`scope='own'` ne dit que l'interprète de la piste."""
+        assert self._rattacher([_projet("Rap 2007", credit="Various Artists")]) == {}
+
+    def test_ni_un_single(self):
+        assert self._rattacher([_projet("Single", nature="single")]) == {}
+
+    def test_ni_un_disque_deja_relie(self):
+        assert self._rattacher([_projet("Guernica")], groupes={"guernica": ["alb"]}) == {}
+
+    def test_sous_le_titre_qui_le_represente(self):
+        connus = {"guernica": "Guernica"}
+        rendu = projets_a_rattacher(
+            [_projet("Guernica (Deluxe)")],
+            {"ISHA"},
+            set(),
+            connus,
+            {"guernica deluxe": "guernica"},
+            {},
+        )
+        assert rendu == {"guernica": ["p1"]}
+
+
+class _DataManagerProjets(_DataManager):
+    def __init__(self, projets, **kw):
+        super().__init__(albums=[{"title": "Guernica", "projet_id": 5}], **kw)
+        self._projets = projets
+
+    def projets_sans_album_spotify(self, artist_id):
+        return self._projets
+
+    def noms_de_lartiste(self, artist_id, nom):
+        return {nom}
+
+    def noms_des_formations(self, artist_id):
+        return set()
+
+    def ids_spotify_connus(self, artist_id):
+        return set()
+
+
+def _piste_d_album(id_, compteur, artiste_id, place):
+    return sp.PisteSpotify(
+        id=id_,
+        titre=f"T{place}",
+        compteur=compteur,
+        duree_s=200.0,
+        album_id="albG",
+        place=place,
+        disque=1,
+        artistes=(("X", artiste_id),),
+        jouable=True,
+    )
+
+
+def _run_albums(pistes_album):
+    from src.utils.update_spotify_streams import _totaliser_albums
+
+    dm = _DataManagerProjets([_projet("Guernica", pistes=("p1", "p2"))])
+    client = _FauxClient(
+        pistes={"p1": _piste("p1"), "p2": _piste("p2")},
+        albums={"albG": pistes_album},
+    )
+    for p in client.pistes.values():
+        object.__setattr__(p, "album_id", "albG")
+    result = {
+        "pages": 0,
+        "albums_totalises": 0,
+        "durees": 0,
+        "ids_resolus": 0,
+        "recorded": 0,
+        "harvested_foreign": 0,
+        "unknown_ids": 0,
+    }
+    artiste = _Artist()
+    artiste.spotify_id = _ARTISTE_SPOTIFY
+    asyncio.run(
+        _totaliser_albums(
+            client, _scraper(client), artiste, dm, {}, {}, 100, None, result, id_map={}
+        )
+    )
+    return dm, client, result
+
+
+class TestAlbumParSaPiste:
+    def test_l_album_de_l_artiste_est_totalise(self):
+        pistes = [
+            _piste_d_album(sid, 100 * i, _ARTISTE_SPOTIFY, i)
+            for i, sid in enumerate(("p1", "p2", "t3"), start=1)
+        ]
+        dm, client, result = _run_albums(pistes)
+        assert result["albums_totalises"] == 1
+        assert dm.album_calls[0]["title"] == "Guernica"
+        assert dm.album_calls[0]["streams"] == 600
+        assert dm.album_calls[0]["spotify_album_ids"] == "albG"
+        # Première et dernière piste du projet : un même album, lu une fois.
+        assert client.appels == ["piste:p1", "piste:p2", "album:albG"]
+
+    def test_la_compilation_trouvee_par_sa_piste_est_ignoree(self):
+        pistes = [_piste_d_album("t1", 100, _ARTISTE_SPOTIFY, 1)] + [
+            _piste_d_album(f"t{i}", 100, "autre000000000000000000"[:22], i) for i in (2, 3, 4)
+        ]
+        dm, _client, result = _run_albums(pistes)
+        assert result["albums_totalises"] == 0 and dm.album_calls == []
+
+    def test_une_fiche_hors_des_editions_trouvees_n_ecrit_rien(self):
+        """« The Ballad of Rooster Jenkins » : l'album trouvé par une piste est une
+        autre parution, plus petite, sans les autres fiches du projet — même plus
+        longue que le projet, elle ne donne pas son total. Le total, ou rien."""
+        pistes = [
+            _piste_d_album(sid, 100, _ARTISTE_SPOTIFY, i)
+            for i, sid in enumerate(("p1", "x2", "x3", "x4"), start=1)
+        ]
+        dm, _client, result = _run_albums(pistes)
+        assert result["albums_totalises"] == 0 and dm.album_calls == []
+
+
+def test_projets_sans_album_spotify_en_base(data_manager):
+    """Lecture réelle : projets sans ID d'album, crédit de chaque édition, ID
+    Spotify des fiches ; un projet déjà relié ou sans piste Spotify n'y est pas."""
+
+    def sql(requete, *params):
+        with data_manager.engine.begin() as conn:
+            conn.exec_driver_sql(requete, params)
+
+    sql("INSERT INTO artists (id, name) VALUES (1, 'Swift Guad')")
+    for tid, sid in ((1, "s1"), (2, "s2"), (3, None), (4, "s4")):
+        sql(
+            "INSERT INTO tracks (id, title, artist_id, spotify_id) VALUES (?, ?, 1, ?)",
+            tid,
+            f"T{tid}",
+            sid,
+        )
+    sql("INSERT INTO projets (id, artist_id, titre) VALUES (7, 1, 'Guernica')")
+    sql(
+        "INSERT INTO projets (id, artist_id, titre, spotify_album_ids) VALUES (8, 1, 'Relié', 'alb')"
+    )
+    sql("INSERT INTO projets (id, artist_id, titre) VALUES (9, 1, 'Sans Spotify')")
+    for rid, pid, titre, credit in (
+        (70, 7, "Guernica", "Swift Guad"),
+        (71, 7, "Guernica (Deluxe)", "Swift Guad"),
+        (80, 8, "Relié", "Swift Guad"),
+        (90, 9, "Sans Spotify", "Swift Guad"),
+    ):
+        sql(
+            "INSERT INTO releases (id, artist_id, title, identity_key, credited_artist_name, "
+            "projet_id) VALUES (?, 1, ?, ?, ?, ?)",
+            rid,
+            titre,
+            f"k{rid}",
+            credit,
+            pid,
+        )
+    for rid, tid in ((70, 1), (71, 1), (71, 2), (80, 4), (90, 3)):
+        sql("INSERT INTO release_tracks (release_id, track_id) VALUES (?, ?)", rid, tid)
+
+    projets = data_manager.projets_sans_album_spotify(1)
+    assert projets == [
+        {
+            "projet_id": 7,
+            "nature": None,
+            "titres": ["Guernica", "Guernica (Deluxe)"],
+            "signatures": [("Guernica", "Swift Guad"), ("Guernica (Deluxe)", "Swift Guad")],
+            "pistes": ["s1", "s2"],
+        }
+    ]

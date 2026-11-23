@@ -38,7 +38,14 @@ from datetime import datetime, timedelta
 from src.concurrency import async_loop
 from src.config import settings
 from src.scrapers.crawl4ai_scraper_base import ChronoPages, CrawlAIScraperBase
-from src.scrapers.spotify_pathfinder_scraper import chemin_pris, plafonds, scraper_des_streams
+from src.scrapers.spotify_pathfinder_scraper import (
+    PART_MIN_DE_L_ARTISTE,
+    chemin_pris,
+    part_de_l_artiste,
+    plafonds,
+    scraper_des_streams,
+    trouve_l_album_par_piste,
+)
 from src.utils.logger import get_logger
 from src.utils.title_matching import base_album_key, normalize_title
 
@@ -610,6 +617,31 @@ def resoudre_ids_par_album(album: dict, artiste_nom: str, fiches: list, deja_pri
     return trouves
 
 
+def projets_a_rattacher(
+    projets: list[dict], noms, formations, connus: dict, vers: dict, groupes: dict
+) -> dict[str, list[str]]:
+    """PUR. `{clé du disque: [ID Spotify de ses pistes]}` des projets dont la
+    passe des albums cherchera l'album par une piste (2026-11-23) : signés par
+    l'artiste (`signe_son_disque` sur le crédit de leurs éditions — `scope='own'`
+    ne dit que l'interprète de la PISTE : sa piste sur *Rap 2007* est « own »),
+    hors singles (leur total est celui de leur piste), connus de la base sous un
+    de leurs titres, et sans édition déjà reliée."""
+    from src.utils.participation import signe_son_disque
+
+    rattacher: dict[str, list[str]] = {}
+    for projet in projets:
+        if projet.get("nature") == "single" or not projet.get("pistes"):
+            continue
+        if not signe_son_disque(projet.get("signatures") or [], noms, formations):
+            continue
+        cles = [normalize_title(t or "") for t in projet.get("titres") or []]
+        cle = next((vers.get(c, c) for c in cles if vers.get(c, c) in connus), None)
+        if cle is None or groupes.get(cle) or cle in rattacher:
+            continue
+        rattacher[cle] = list(projet["pistes"])
+    return rattacher
+
+
 def albums_a_totaliser(groupes: dict, totaux: dict, now: datetime) -> list[str]:
     """PUR. Les albums dont le total se recalcule à ce run, dans l'ordre où le
     budget de pages les servira (2026-10-31). `totaux` : `{clé: (source,
@@ -684,7 +716,8 @@ async def _totaliser_albums(
 
     Retourne le budget de pages restant.
     """
-    if budget <= 0 or not albums_spotify:
+    # Sans disque cité par la page, la recherche par piste peut encore en relier.
+    if budget <= 0:
         return budget
 
     connus: dict[str, str] = {}
@@ -725,6 +758,23 @@ async def _totaliser_albums(
         if cle and album_id not in groupes.setdefault(cle, []):
             groupes[cle].append(album_id)
 
+    # Projets que ni la base ni la page artiste ne relient à un album Spotify
+    # (2026-11-23) : leur album se trouve par une de leurs pistes, au premier
+    # passage, puis ses ID restent au projet (`upsert_album`).
+    par_piste: dict[str, list[str]] = {}
+    if trouve_l_album_par_piste(scraper):
+        par_piste = projets_a_rattacher(
+            data_manager.projets_sans_album_spotify(artist.id),
+            data_manager.noms_de_lartiste(artist.id, artist.name),
+            data_manager.noms_des_formations(artist.id),
+            connus,
+            vers,
+            groupes,
+        )
+        for cle in par_piste:
+            groupes.setdefault(cle, [])
+    ids_artiste: set[str] | None = None
+
     # Fiches SANS ID de chaque album connu : la page album les nomme (6B).
     sans_id: dict[str, list] = {}
     if id_map is not None:
@@ -739,6 +789,20 @@ async def _totaliser_albums(
         editions = groupes[cle]
         if budget <= 0 or (stop_requested and stop_requested()):
             break
+        trouve_par_piste = not editions and cle in par_piste
+        if trouve_par_piste:
+            pris = {a for c, eds in groupes.items() if c != cle for a in eds}
+            for sid in dict.fromkeys(par_piste[cle][:1] + par_piste[cle][-1:]):
+                if budget <= 0:
+                    break
+                album_id = await scraper.afetch_album_de_piste(sess, sid)
+                budget -= 1
+                result["pages"] += 1
+                # Un album déjà relié à un AUTRE projet n'est pas celui-ci.
+                if album_id and album_id not in pris and album_id not in editions:
+                    editions.append(album_id)
+            if not editions:
+                continue
         if refus_de_suite >= _REFUS_DE_BUDGET_DE_SUITE:
             logger.info(
                 f"{refus_de_suite} albums de suite hors budget ({budget} page(s) restantes) — "
@@ -788,6 +852,34 @@ async def _totaliser_albums(
                 rendues = len(album["tracks"]) + (album.get("indisponibles") or 0)
                 if annonce is not None and rendues < annonce:
                     tronquee = True
+        if trouve_par_piste and compositions:
+            if ids_artiste is None:
+                ids_artiste = {artist.spotify_id} | data_manager.ids_spotify_connus(artist.id)
+                ids_artiste.discard(None)
+            etrangers = [
+                a
+                for a, comp in compositions.items()
+                if part_de_l_artiste(comp, ids_artiste) < PART_MIN_DE_L_ARTISTE
+            ]
+            if etrangers:
+                logger.info(
+                    f"Album '{connus[cle]}' : l'album Spotify de sa piste ({', '.join(etrangers)}) "
+                    "ne crédite pas l'artiste sur la plupart de ses pistes (compilation ?) — ignoré"
+                )
+                groupes[cle] = []
+                continue
+            # Chaque fiche du projet doit être une piste des éditions trouvées : une
+            # autre parution plus petite (le single d'une de ses pistes) donnerait
+            # un total faux qui a l'air juste (« The Ballad of Rooster Jenkins »,
+            # simulé le 2026-11-23 : 286 k pour un album à plusieurs millions).
+            lues = {tid for comp in compositions.values() for tid in comp["track_ids"]}
+            hors = [s for s in par_piste[cle] if s not in lues]
+            if hors:
+                logger.info(
+                    f"Album '{connus[cle]}' : {len(hors)} fiche(s) du projet absente(s) des "
+                    "éditions trouvées par piste — total NON écrit (le total, ou rien)"
+                )
+                continue
         if len(compositions) != len(editions) or tronquee:
             logger.warning(f"Album '{connus[cle]}' : composition incomplète — total NON écrit")
             continue

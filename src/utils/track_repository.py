@@ -6906,6 +6906,56 @@ class TrackRepository:
             logger.error(f"Erreur get_albums_for_artist (artist_id={artist_id}): {e}")
             return []
 
+    def projets_sans_album_spotify(self, artist_id: int) -> list[dict[str, Any]]:
+        """Les projets de l'artiste SANS ID d'album Spotify dont une fiche a un
+        ID Spotify principal (2026-11-23) : `projet_id`, `nature`, `titres` (ceux
+        de ses éditions), `signatures` ((titre, crédit) de chaque édition, pour
+        `participation.signe_son_disque`) et `pistes` (ID Spotify de ses fiches).
+        La passe des albums Spotify les rattache à un album par l'une de leurs
+        pistes : la page artiste ne cite que ~10 disques par rayon (mesuré : 25
+        albums ou EP propres sur 41 jamais cités, donc jamais totalisés)."""
+        try:
+            with self.engine.connect() as conn:
+                rows = (
+                    conn.execute(
+                        text(
+                            "SELECT p.id AS projet_id, p.nature, r.title, "
+                            "r.credited_artist_name, t.spotify_id "
+                            "FROM projets p JOIN releases r ON r.projet_id = p.id "
+                            "JOIN release_tracks rt ON rt.release_id = r.id "
+                            "JOIN tracks t ON t.id = rt.track_id "
+                            "WHERE p.artist_id = :aid "
+                            "AND COALESCE(p.spotify_album_ids, '') = '' "
+                            "AND t.spotify_id IS NOT NULL "
+                            "ORDER BY p.id, r.id, rt.disc_number, rt.track_number, t.id"
+                        ),
+                        {"aid": artist_id},
+                    )
+                    .mappings()
+                    .all()
+                )
+        except SQLAlchemyError as e:
+            logger.error(f"Erreur projets_sans_album_spotify (artist_id={artist_id}): {e}")
+            return []
+        projets: dict[int, dict[str, Any]] = {}
+        for row in rows:
+            projet = projets.setdefault(
+                row["projet_id"],
+                {
+                    "projet_id": row["projet_id"],
+                    "nature": row["nature"],
+                    "titres": [],
+                    "signatures": [],
+                    "pistes": [],
+                },
+            )
+            if row["title"] and row["title"] not in projet["titres"]:
+                projet["titres"].append(row["title"])
+                projet["signatures"].append((row["title"], row["credited_artist_name"]))
+            if row["spotify_id"] not in projet["pistes"]:
+                projet["pistes"].append(row["spotify_id"])
+        return list(projets.values())
+
     def get_projets_for_artist(self, artist_id: int) -> list[dict[str, Any]]:
         """Les PROJETS de l'artiste (e67/e68), chacun avec ses éditions — ce que
         lit la Timeline du studio (voie (b), décision utilisateur 2026-11-20 :

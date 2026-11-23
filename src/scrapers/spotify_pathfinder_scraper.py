@@ -112,7 +112,16 @@ class SpotifyPathfinderScraper:
             "indisponibles": len(pistes) - len(lisibles),
             "durations": {p.id: s for p in lisibles if (s := _secondes(p))},
             "playcounts": {p.id: p.compteur for p in lisibles if p.compteur is not None},
+            # ID Spotify des artistes de chaque piste : un album trouvé par l'une de
+            # ses pistes doit être celui de l'artiste (`part_de_l_artiste`).
+            "credits": {p.id: tuple(i for _, i in p.artistes if i) for p in lisibles},
         }
+
+    async def afetch_album_de_piste(self, sess: SpotifyPathfinder, track_id: str) -> str | None:
+        """L'ID de l'album Spotify d'une piste (2026-11-23) ; None si la piste
+        n'existe pas. La page ne le donne pas : pas d'équivalent navigateur."""
+        piste = await sess.piste(track_id)
+        return piste.album_id if piste else None
 
 
 class SpotifyAvecRepli:
@@ -188,6 +197,17 @@ class SpotifyAvecRepli:
     async def afetch_album(self, sessions, album_id: str) -> dict | None:
         return await self._lire(sessions, album_id, lambda s, sess: s.afetch_album(sess, album_id))
 
+    async def afetch_album_de_piste(self, sessions, track_id: str) -> str | None:
+        """Requêtes internes seules : un échec rend None (aucune page n'a l'ID
+        d'album), sans compter comme un repli ni pousser à la bascule."""
+        if self.bascule:
+            return None
+        try:
+            return await self.principal.afetch_album_de_piste(sessions.principale, track_id)
+        except SansReponse as e:
+            logger.info(f"Spotify {track_id} : album de la piste illisible ({e.kind})")
+            return None
+
 
 class _SessionsAvecRepli:
     """La session des requêtes internes, et celle du navigateur ouverte au
@@ -205,6 +225,26 @@ class _SessionsAvecRepli:
             logger.info("Spotify : ouverture de la session navigateur (repli)")
             self._sess_repli = await self._pile.enter_async_context(self._repli.session())
         return self._sess_repli
+
+
+def trouve_l_album_par_piste(scraper) -> bool:
+    """Le scraper sait-il donner l'album d'une piste (requêtes internes) ?"""
+    return isinstance(scraper, SpotifyAvecRepli | SpotifyPathfinderScraper)
+
+
+#: Part minimale des pistes d'un album Spotify qui doivent créditer l'artiste pour
+#: qu'un album trouvé par UNE piste soit le sien : une compilation (*Rap 2007*,
+#: *100% Rap Français*) où il a une piste en crédite d'autres sur presque toutes.
+PART_MIN_DE_L_ARTISTE = 0.5
+
+
+def part_de_l_artiste(album: dict, ids_artiste: set[str]) -> float:
+    """PUR. Part des pistes de l'album qui créditent un des profils Spotify de
+    l'artiste (0 sans crédits lus)."""
+    credits = album.get("credits") or {}
+    if not credits:
+        return 0.0
+    return sum(1 for ids in credits.values() if ids_artiste & set(ids)) / len(credits)
 
 
 @dataclass(frozen=True)

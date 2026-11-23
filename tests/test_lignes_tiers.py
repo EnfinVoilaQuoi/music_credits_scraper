@@ -4,7 +4,9 @@ Cas réel : « Dolce Camara (Snight B Remix) », créé par les écarts Deezer c
 Booba seulement, SDM crédité en featuring.
 """
 
-from src.models import Artist, Track
+import pytest
+
+from src.models import Artist, ArtistRelation, Track
 from src.models.track import Credit, CreditRole
 from src.services.lignes_tiers import donner_aux_interpretes, interpretes_en_base, rattraper
 
@@ -103,3 +105,18 @@ def test_la_ligne_creee_a_les_totaux_de_ses_observations(data_manager):
             {"t": ligne.id},
         ).one()
     assert (spotify, ytm, duree) == (25_900_000, 750_000, 144)
+
+
+@pytest.mark.parametrize("nature", ["groupe", "collectif"])
+def test_le_membre_d_une_formation_ne_recoit_pas_de_copie(data_manager, nature):
+    """Bad Meets Evil chez Eminem (2026-11-22) : la discographie réunie du membre
+    lit déjà la fiche de la formation ; une ligne à lui serait une copie."""
+    groupe, membre = _artiste(data_manager, "Bad Meets Evil"), _artiste(data_manager, "Eminem")
+    lien = ArtistRelation(related_name="Bad Meets Evil", kind="member_of", formation=nature)
+    data_manager.record_artist_relations(membre.id, [lien])
+    t = Track(title="Nuttin' To Do (Instrumental)", artist=groupe)
+    t.deezer_id = 11327631
+    t.credits = [Credit(name="Eminem", role=CreditRole.FEATURED, source="deezer")]
+    data_manager.save_track(t)
+    assert donner_aux_interpretes(data_manager, t, groupe) == []
+    assert data_manager.get_artist_tracks(membre.id) == []

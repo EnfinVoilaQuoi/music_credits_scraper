@@ -56,11 +56,20 @@ def interpretes_en_base(track: Track, artistes: list[Artist], proprietaire_id) -
 def donner_aux_interpretes(dm, track: Track, proprietaire: Artist) -> list[str]:
     """Crée la ligne de chaque interprète en base qui n'en a pas. Rend un
     compte rendu par ligne créée. Une fiche AVEC page Genius n'est pas concernée
-    (ses lignes sœurs naissent de la page)."""
+    (ses lignes sœurs naissent de la page). Le MEMBRE d'une formation
+    propriétaire (groupe ou collectif) n'en reçoit pas : sa discographie réunie
+    lit déjà la fiche de la formation — la ligne serait une copie (Bad Meets
+    Evil chez Eminem, 5 copies du maxi « Nuttin' To Do / Scary Movies », créées
+    le 2026-11-22)."""
     if track.genius_id or track.id is None:
         return []
     faits = []
     for artiste in interpretes_en_base(track, dm.artistes_de_la_base(), proprietaire.id):
+        formations = set(dm.ids_discographie_reunie(artiste.id)) | set(
+            dm.ids_collectifs(artiste.id)
+        )
+        if proprietaire.id in formations:
+            continue
         if any(_meme_enregistrement(track, t) for t in dm.get_artist_tracks(artiste.id)):
             continue
         ligne = Track(title=track.title, artist=artiste)

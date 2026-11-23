@@ -1277,6 +1277,41 @@ def test_credits_api_confirmes_normaux_le_reste_indecidable(data_manager, artist
     )
 
 
+def test_credits_api_confirmes_par_un_role_voisin(data_manager, artiste):
+    """Décision utilisateur 2026-11-23 : la même personne dans la même famille
+    de rôles (production, écriture) confirme un crédit 🎫, page Genius comprise ;
+    chanter n'est pas écrire (« Lil B (Vocals) » / Writer)."""
+    from datetime import datetime
+
+    from src.models.track import Credit, CreditRole
+    from src.utils.revue_repository import VERDICT_INDECIDABLE, VERDICT_NORMAL
+
+    lu = datetime(2026, 11, 15)
+    a = Track(title="BGYCFMB", artist=artiste, genius_id=31, last_scraped=lu)
+    a.credits = [
+        Credit("Lil B", CreditRole.WRITER, source="genius"),
+        Credit("Lil B", CreditRole.LYRICIST, source="genius_api"),
+        Credit("Lil B", CreditRole.COMPOSER, source="genius_api"),
+        Credit("Plain Pat", CreditRole.ADDITIONAL_PRODUCTION, source="genius"),
+        Credit("Plain Pat", CreditRole.PRODUCER, source="genius_api"),
+    ]
+    data_manager.save_track(a)
+    b = Track(title="Vocals", artist=artiste, genius_id=32, last_scraped=lu)
+    b.credits = [
+        Credit("Lil B", CreditRole.WRITER, source="genius"),
+        Credit("Lil B", CreditRole.VOCALS, source="genius_api"),
+    ]
+    data_manager.save_track(b)
+    _charger(data_manager, artiste)
+
+    bilan = revue_auto.corriger(data_manager, artiste, seulement=frozenset({"credits_api"}))
+    assert len(bilan.appliquees) == 2
+    verdicts = {
+        v["morceau"]: v["verdict"] for v in data_manager.verdicts_revue(artiste.id).values()
+    }
+    assert verdicts == {"BGYCFMB": VERDICT_NORMAL, "Vocals": VERDICT_INDECIDABLE}
+
+
 def test_credits_api_d_une_page_a_relire_ne_sont_pas_tranches(data_manager, artiste):
     """Page jamais relue depuis le détail API : un run peut les confirmer."""
     from datetime import datetime

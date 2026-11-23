@@ -1282,6 +1282,23 @@ REGLES_CREDITS_API = frozenset({("credits_api", "normal"), ("credits_api", "inde
 #: Discogs, les contributeurs Deezer, les descriptions YouTube (Topic, clip).
 #: Ni l'héritage, ni un crédit déduit d'un titre, ni Kworb.
 SOURCES_TEMOINS_CREDITS = frozenset({"discogs", "deezer", "youtube_topic", "youtube_clip"})
+#: Pour un rôle VOISIN seulement : la page Genius (même personne, autre rôle de
+#: la même famille). Au même rôle, la page et l'API partageraient la clé.
+SOURCES_TEMOINS_VOISINS = frozenset({"genius"})
+
+
+def _familles_de_roles():
+    from src.models.track import CreditRole as R
+
+    familles = {
+        "production": (R.PRODUCER, R.CO_PRODUCER, R.ADDITIONAL_PRODUCTION),
+        "ecriture": (R.WRITER, R.COMPOSER, R.LYRICIST),
+    }
+    return {role: nom for nom, roles in familles.items() for role in roles}
+
+
+#: Rôle → famille de rôles voisins (décision utilisateur 2026-11-23).
+_FAMILLE_DE_ROLE = _familles_de_roles()
 
 
 def arbitrage_credits_api(cas, track, _ctx) -> Arbitrage | None:
@@ -1295,9 +1312,14 @@ def arbitrage_credits_api(cas, track, _ctx) -> Arbitrage | None:
     confirmé au même rôle, aucune fiche couverte entière — tout va en
     indécidable : la table ne gardait qu'une source par crédit. Depuis e70
     (2026-11-23), un crédit 🎫 que Discogs, Deezer ou YouTube redonne À LA MÊME
-    CLÉ porte cette source en confirmation, et elle compte ici. Les rôles VOISINS (« Writer » de l'API contre « Composer » /
-    « Lyricist » d'une Topic, « Producer » contre « Additional Production »
-    de la page) ne confirment pas : pas validés."""
+    CLÉ porte cette source en confirmation, et elle compte ici.
+
+    Rôles VOISINS (décision utilisateur 2026-11-23) : la même personne dans la
+    même FAMILLE de rôles confirme aussi, et la page Genius y est un témoin —
+    production (Producer, Co-Producer, Additional Production) et écriture
+    (Writer, Composer, Lyricist). Une confirmation seulement, jamais une fusion
+    de rôles ; chanter n'est pas écrire, un ingénieur n'est pas un producteur
+    (Vocals, Engineer : hors familles)."""
     from src.utils.title_matching import normalize_name
 
     if cas.detecteur != "credits_api" or track is None or cas.nature == revue.RUN:
@@ -1313,17 +1335,32 @@ def arbitrage_credits_api(cas, track, _ctx) -> Arbitrage | None:
         for c in track.credits
         if c.sources & SOURCES_TEMOINS_CREDITS and c.name
     }
-    confirmes = [c for c in api if (normalize_name(c.name), c.role) in temoins]
+    voisins = {
+        (normalize_name(c.name), _FAMILLE_DE_ROLE[c.role])
+        for c in track.credits
+        if c.role in _FAMILLE_DE_ROLE
+        and c.sources & (SOURCES_TEMOINS_CREDITS | SOURCES_TEMOINS_VOISINS)
+        and c.name
+    }
+
+    def confirme(c) -> bool:
+        cle = normalize_name(c.name)
+        if (cle, c.role) in temoins:
+            return True
+        famille = _FAMILLE_DE_ROLE.get(c.role)
+        return famille is not None and (cle, famille) in voisins
+
+    confirmes = [c for c in api if confirme(c)]
     if len(confirmes) == len(api):
         return Arbitrage(
-            "chaque crédit 🎫 est confirmé au même rôle par une autre source : ✓ Normal",
+            "chaque crédit 🎫 est confirmé (même rôle ou rôle voisin) par une autre source : ✓ Normal",
             "normal",
             ", ".join(f"{c.name} ({c.role.value})" for c in confirmes),
         )
     return Arbitrage(
         "crédits 🎫 qu'aucune autre source ne confirme : indécidable",
         "indecidable",
-        f"{len(confirmes)} / {len(api)} confirmé(s) au même rôle",
+        f"{len(confirmes)} / {len(api)} confirmé(s), même rôle ou rôle voisin",
     )
 
 

@@ -4529,19 +4529,26 @@ def formations_prouvees_par_genius(data_manager, artiste, relations) -> dict:
 def _paires_pages_recreees(ctx: Contexte, data_manager, artiste) -> None:
     """Verse dans `ctx.fusions` les paires « page recréée ? »
     (`pages_supprimees.paires_au_panneau`), sans remplacer une paire déjà
-    trouvée ; l'autre côté désactivé va dans `ctx.pages_supprimees`."""
+    trouvée. `ctx.pages_supprimees` reçoit TOUTES les fiches désactivées parce
+    que leur page Genius est supprimée : elles ne produisent aucun cas, mais
+    restent des enregistrements que les règles de rattachement visent (règle C,
+    variantes Kworb) au lieu d'en créer un doublon (NTM, remixes du *Clash*,
+    2026-11-24)."""
     from src.services import pages_supprimees
 
     tracks = artiste.tracks or []
     supprimees, desactives = pages_supprimees.supprimees_de(data_manager, artiste.name)
     if not supprimees:
         return
-    paires = pages_supprimees.paires_au_panneau(tracks, supprimees, desactives)
-    par_id = {t.id: t for t in tracks}
-    for fiche, paire in paires.items():
+    ctx.pages_supprimees = {t.id: t for t in tracks if t.id in supprimees and t.id in desactives}
+    for fiche, paire in pages_supprimees.paires_au_panneau(tracks, supprimees, desactives).items():
         ctx.fusions.setdefault(fiche, paire)
-        if paire["autre"] in desactives:
-            ctx.pages_supprimees[paire["autre"]] = par_id[paire["autre"]]
+
+
+def cibles_des_rattachements(ctx: Contexte) -> list:
+    """Les fiches qu'un rattachement peut viser : celles du panneau, plus les
+    fiches désactivées à page Genius supprimée (`ctx.pages_supprimees`)."""
+    return [*ctx.disco, *ctx.pages_supprimees.values()]
 
 
 def charger_contexte(data_manager, artiste) -> Contexte:

@@ -1103,9 +1103,10 @@ def politique_kworb_variante(cas, _track, ctx, lire_identite=_lire_embed_muet):
     """`juger_variante_kworb` sur un cas `kworb_proposition` du panneau."""
     if cas.detecteur != "kworb_proposition" or ctx is None:
         return None
-    return juger_variante_kworb(
-        cas.preuves or {}, {t.id: t for t in ctx.disco}, lire_identite=lire_identite
-    )
+    from src.services.revue import cibles_des_rattachements
+
+    fiches = {t.id: t for t in cibles_des_rattachements(ctx)}
+    return juger_variante_kworb(cas.preuves or {}, fiches, lire_identite=lire_identite)
 
 
 def politique_kworb_proposition(cas, track, ctx):
@@ -1883,7 +1884,9 @@ def _version_portee_par_une_fiche(cas, ctx) -> Arbitrage | None:
     if ecart.get("genius"):
         return None
     piste = ecart.get("piste") or {}
-    fiche = fiche_de_la_version(piste, ctx.disco)
+    from src.services.revue import cibles_des_rattachements
+
+    fiche = fiche_de_la_version(piste, cibles_des_rattachements(ctx))
     if fiche is None:
         return None
     return Arbitrage(

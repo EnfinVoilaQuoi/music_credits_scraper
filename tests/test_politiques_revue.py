@@ -692,7 +692,9 @@ class TestRegleA1:
             "genius": genius,
         }
         cas = _cas(detecteur, None, {"ecart": ecart})
-        return pol.arbitrage_deezer(cas, None, SimpleNamespace(disco=list(fiches)), {}, {7})
+        return pol.arbitrage_deezer(
+            cas, None, SimpleNamespace(pages_supprimees={}, disco=list(fiches)), {}, {7}
+        )
 
     def test_meme_isrc_et_duree_lue_par_id_rattache(self):
         """Eminem, « The King and I (From the Original Motion Picture
@@ -794,7 +796,9 @@ class TestRegleA1:
                 "album": {"id": 43852, "title": album, "artist_id": 7, "artist_name": "MC"},
             }
             cas = _cas("deezer_absent", None, {"ecart": ecart})
-            return pol.arbitrage_deezer(cas, None, SimpleNamespace(disco=[]), {}, {7})
+            return pol.arbitrage_deezer(
+                cas, None, SimpleNamespace(pages_supprimees={}, disco=[]), {}, {7}
+            )
 
         assert juger("Le tour de la question").action == "deezer_appliquer"
         assert juger("Le tour de la question (Live)") is None
@@ -869,7 +873,9 @@ class TestIntroDuMemeDisque:
         )
         # Règle C (2) : seul disque à porter la plage, mais la fiche au nom du
         # disque, sans page Deezer, peut l'être.
-        ctx = SimpleNamespace(disco=[fiche], pistes_deezer_absentes=[cas.preuves["ecart"]])
+        ctx = SimpleNamespace(
+            pages_supprimees={}, disco=[fiche], pistes_deezer_absentes=[cas.preuves["ecart"]]
+        )
         assert pol.arbitrage_deezer(cas, None, ctx, {}, {7}, lire_deezer=lambda _i: None) is None
 
 
@@ -906,7 +912,7 @@ class TestEditionALaDureeDeLIdSpotify:
         return pol.arbitrage_deezer(
             _cas("deezer_link_candidate", track, {"ecart": ecart}),
             track,
-            SimpleNamespace(disco=[track]),
+            SimpleNamespace(pages_supprimees={}, disco=[track]),
             {},
             {7},
         )
@@ -1191,7 +1197,7 @@ def test_id_partage_le_gate_designe_la_fiche():
     autre morceau. Seule la fiche que le gate accepte garde l'ID."""
     juste = _t("I CAN'T WAIT", 1, spotify_id="SID", spotify_id_entries=[])
     autre = _t("Wait", 2, spotify_id="SID", spotify_id_entries=[])
-    ctx = SimpleNamespace(disco=[juste, autre])
+    ctx = SimpleNamespace(pages_supprimees={}, disco=[juste, autre])
     juger = pol.politique_id_partage(lambda t, _sid: t is juste)
     cas_autre = _cas("kworb_id_partage", autre, {"spotify_id": "SID"})
     cas_juste = _cas("kworb_id_partage", juste, {"spotify_id": "SID"})
@@ -1274,7 +1280,7 @@ def test_kworb_remix_par_un_tiers_que_spotify_confirme():
     Spotify : l'humain."""
     t = _t("One Man Can Change the World", 1)
     t.artist = Artist(name="Kanye West")
-    ctx = SimpleNamespace(disco=[t])
+    ctx = SimpleNamespace(pages_supprimees={}, disco=[t])
     preuves = {
         "proposition": "tiers",
         "kind": "remix_named",
@@ -1684,7 +1690,7 @@ class TestIdSpotifyVersion:
         )
         original = _t("K-POP", 2, spotify_id=id_original, duration=duree_original)
         cas = _cas("id_spotify_version", cs, {"spotify_id": "CS", "spotify_sert": "K-POP"})
-        return cas, cs, SimpleNamespace(disco=[cs, original])
+        return cas, cs, SimpleNamespace(pages_supprimees={}, disco=[cs, original])
 
     def test_la_version_nommee_a_sa_fiche_d_une_autre_duree(self):
         cas, cs, ctx = self._cas_kpop()
@@ -1703,7 +1709,9 @@ class TestIdSpotifyVersion:
     def test_meme_id_ou_sans_fiche_l_humain(self):
         cas, cs, ctx = self._cas_kpop(id_original="CS")
         assert pol.arbitrage_etendu(cas, cs, ctx) is None
-        assert pol.arbitrage_etendu(cas, cs, SimpleNamespace(disco=[cs])) is None
+        assert (
+            pol.arbitrage_etendu(cas, cs, SimpleNamespace(pages_supprimees={}, disco=[cs])) is None
+        )
 
     def test_le_feat_du_titre_servi_ne_compte_pas(self):
         cas, cs, ctx = self._cas_kpop()
@@ -1727,7 +1735,7 @@ class TestIdSpotifyVersion:
         )
         sert = "FRANCHISE (feat. Young Thug & M.I.A.)"
         cas = _cas("id_spotify_version", remix, {"spotify_id": "REMIX", "spotify_sert": sert})
-        return cas, remix, SimpleNamespace(disco=[remix, original])
+        return cas, remix, SimpleNamespace(pages_supprimees={}, disco=[remix, original])
 
     def test_ecart_court_mais_duree_de_l_original_confirmee(self):
         """Travis « FRANCHISE (REMIX) » (2026-10-31) : 5 s d'écart seulement,
@@ -1768,7 +1776,7 @@ class TestGeneriqueDistincts:
         return (
             _cas("generique_duree", a, {"duree": 50, "autres": [2]}),
             a,
-            SimpleNamespace(disco=[a, b]),
+            SimpleNamespace(pages_supprimees={}, disco=[a, b]),
         )
 
     def test_identifiants_distincts_et_catalogues_d_accord(self):

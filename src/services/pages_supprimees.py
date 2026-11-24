@@ -93,12 +93,40 @@ def a_desactiver(tracks, desactives, supprimees, a_la_main=()) -> list:
     ]
 
 
+def a_reactiver_par_identifiant(tracks, motifs: dict[int, dict]) -> list:
+    """PUR. Les fiches désactivées au motif `page_supprimee` qui ont DEPUIS un
+    identifiant de plateforme : la raison de la désactivation est tombée (un
+    rattachement Deezer, une fusion, une ligne Kworb sommée — NTM, remixes
+    du *Clash*, 2026-11-24)."""
+    ids = desactivees_au_motif(motifs)
+    return [t for t in tracks if t.id in ids and identifiants_de_plateforme(t)]
+
+
+def reactiver_avec_identifiant(disabled, artist_name: str, tracks) -> int:
+    """Réactive ce qu'`a_reactiver_par_identifiant` désigne (fin de cycle,
+    fin du correcteur du panneau). Le constat de page supprimée reste."""
+    if disabled is None:
+        return 0
+    revenues = a_reactiver_par_identifiant(tracks, disabled.load_motifs(artist_name))
+    if not revenues:
+        return 0
+    for t in revenues:
+        logger.info(
+            f"♻️ Page réactivée « {t.title} » (#{t.id}) : page Genius supprimée, mais "
+            f"identifiant {', '.join(identifiants_de_plateforme(t))} désormais"
+        )
+    disabled.reactiver(artist_name, [t.id for t in revenues])
+    return len(revenues)
+
+
 def desactiver_pages_supprimees(runtime, artist, tracks) -> int:
     """Désactive (réversible, motif `page_supprimee`, origine
     `regle:page_supprimee`) ce qu'`a_desactiver` désigne, et le journalise.
     Appelée en fin de CYCLE, après identité et streams, qui ont pu donner un
-    identifiant à la fiche. Jamais de suppression."""
+    identifiant à la fiche — qui est alors réactivée si elle l'était à ce
+    motif (`reactiver_avec_identifiant`). Jamais de suppression."""
     disabled = runtime.disabled
+    reactiver_avec_identifiant(disabled, artist.name, tracks)
     pages = a_desactiver(
         tracks,
         disabled.load_disabled_tracks(artist.name),

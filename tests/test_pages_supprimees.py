@@ -424,3 +424,58 @@ def test_la_base_rend_les_pages_constatees_supprimees(data_manager):
     repo.constater_absences(module_runtime.ABSENCE_PAGE_GENIUS, [], [tid])
     repo.constater_absences(module_runtime.ABSENCE_PAGE_GENIUS, [(tid, vieux)], [])
     assert data_manager.pages_genius_supprimees() == set()
+
+
+class TestCiblesDesRattachements:
+    """NTM, remixes du *Clash* (2026-11-24) : les fiches « (Remix de B.O.S.S) »,
+    désactivées parce que leur page Genius est supprimée, étaient invisibles
+    des règles ; la règle C a créé 5 doublons Deezer et le correcteur a sauté
+    les lignes Kworb du même remix."""
+
+    def test_une_fiche_qui_recoit_un_identifiant_revient(self, manager):
+        manager.desactiver("Logic", {1, 2}, MOTIF_PAGE_SUPPRIMEE, ORIGINE_REGLE)
+        manager.save_disabled_tracks(
+            "Logic", manager.load_disabled_tracks("Logic") | {3}, manager.load_motifs("Logic")
+        )
+        avec_id = _fiche(1, deezer_id=555331)
+        sans_id = _fiche(2)
+        a_la_main = _fiche(3, deezer_id=7)  # désactivée sans motif : jamais levée seule
+        n = pages_supprimees.reactiver_avec_identifiant(
+            manager, "Logic", [avec_id, sans_id, a_la_main]
+        )
+        assert n == 1 and manager.load_disabled_tracks("Logic") == {2, 3}
+
+    def test_la_regle_c_vise_la_fiche_desactivee(self):
+        from src.services import politiques_revue as pol
+        from src.services import revue
+
+        remix = _fiche(1, "Tout n’est pas si facile (Remix de B.O.S.S)", duration=333)
+        ctx = revue.contexte([])
+        ctx.pages_supprimees = {1: remix}
+        piste = {"title": "Tout n'est pas si facile (B.O.S.S. Remix)", "duration": 330}
+        cas = revue.Cas(
+            "deezer_version", None, piste["title"], "m", 0, {"ecart": {"piste": piste}}, "k"
+        )
+        arb = pol._version_portee_par_une_fiche(cas, ctx)
+        assert arb.action == "deezer_rattacher_version" and "#1" in arb.raison
+
+    def test_la_variante_kworb_vise_la_fiche_desactivee(self):
+        from src.services import politiques_revue as pol
+        from src.services import revue
+
+        remix = _fiche(1, "Tout n’est pas si facile (Remix de B.O.S.S)")
+        remix.durations_observees = {"ytmusic": 333}
+        ctx = revue.contexte([])
+        ctx.pages_supprimees = {1: remix}
+        preuves = {
+            "kworb_title": "Tout n'est pas si facile - B.O.S.S. Remix",
+            "spotify_id": "SID",
+            "proposition": "existant",
+            "existants": [[1, remix.title]],
+            "remixer": "B.O.S.S.",
+        }
+        cas = revue.Cas("kworb_proposition", 1, "x", "m", 0, preuves, "k")
+        arb = pol.politique_kworb_variante(
+            cas, None, ctx, lire_identite=lambda _s: {"duration": 332, "artists": ["NTM"]}
+        )
+        assert arb.action == "kworb_sommer"

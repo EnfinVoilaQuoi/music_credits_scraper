@@ -1264,6 +1264,15 @@ def corriger(dm, artiste, seulement: frozenset[str] | None = None) -> BilanCorre
             # générique que la passe vient de créer).
             artiste.tracks = dm.discographie_reunie(artiste)
             tracks = {t.id: t for t in artiste.tracks or []}
+    if bilan.appliquees and artiste.id is not None:
+        # Une fiche désactivée parce que sa page Genius est supprimée a pu
+        # recevoir un identifiant (rattachement Deezer, ligne Kworb) : revenue.
+        from src.services.pages_supprimees import reactiver_avec_identifiant
+        from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+        reactiver_avec_identifiant(
+            DisabledTracksManager(), artiste.name, dm.get_artist_tracks(artiste.id)
+        )
     return bilan
 
 

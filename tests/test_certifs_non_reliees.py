@@ -201,6 +201,22 @@ class TestNature:
         assert (cas.famille, cas.nature, cas.pistes) == ("certif_non_reliee", au.ERREUR, [t.id])
         assert "Silver" in cas.libelle and "Gold" in cas.libelle  # une œuvre, un cas
 
+    def test_le_morceau_d_un_autre_sans_ce_principal_au_credit_n_est_pas_admis(
+        self, data_manager, travis
+    ):
+        """« CHOUPETTA » créditée au seul « SOFIANE » ne va pas au « Choupetta »
+        de HMZ où Sofiane est invité : la pose la refuse, l'audit aussi
+        (2026-11-24)."""
+        t = _fiche(data_manager, travis, "Choupetta")
+        t.primary_artist_name = "HMZ"
+        data_manager.save_track(t)
+        (cas,) = _cas(data_manager, _magasin(_certif("SNEP", "TRAVIS SCOTT", "CHOUPETTA")))
+        assert (cas.nature, cas.pistes) == (au.INFORMATION, [])
+        (cas,) = _cas(
+            data_manager, _magasin(_certif("SNEP", "TRAVIS SCOTT FEAT. HMZ", "CHOUPETTA"))
+        )
+        assert (cas.nature, cas.pistes) == (au.ERREUR, [t.id])
+
     def test_sans_fiche_pour_information(self, data_manager, travis):
         _fiche(data_manager, travis, "Goosebumps")
         (cas,) = _cas(data_manager, _magasin(_certif("BPI", "TRAVIS SCOTT", "5 PERCENT TINT")))

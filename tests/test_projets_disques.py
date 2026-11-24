@@ -217,3 +217,44 @@ class TestVolumesDuDisque:
         a = _ed(1, "Summer Stories Kushtape Volume 2", range(11))
         b = _ed(2, "Summer Stories Kushtape, Vol. 2", range(11))
         assert _projets(a, b) == [[1, 2]]
+
+
+class TestGraphieDuNom:
+    """Deux éditions au même nom à la GRAPHIE près sont un même projet, sans
+    l'humain (décision utilisateur 2026-11-24 ; simulé sur toute la base :
+    9 regroupements, tous justes, panneau 172 → 162)."""
+
+    def test_graphies_d_un_meme_nom(self):
+        from src.utils.version_descriptors import meme_disque_a_la_graphie_pres
+
+        for a, b in [
+            ("Or Noir Part II", "Or Noir Part 2 (Deluxe)"),
+            ("Or Noir 3", "Or Noir Part 3"),
+            ("Double Fuck", "Double F**k"),
+            ("Ce n’est que le début", "Ce n'est que l'début"),
+            ("Johnny Niuuum ne meurt jamais", "Johnny Niuum ne meurt jamais"),
+            ("Ballon d’or", "Ballon d'##"),
+            ("Immortel 2", "Immortel II (Édition collector)"),
+        ]:
+            assert meme_disque_a_la_graphie_pres(a, b), (a, b)
+
+    def test_ce_qui_n_est_pas_une_graphie(self):
+        from src.utils.version_descriptors import meme_disque_a_la_graphie_pres
+
+        for a, b in [
+            ("Hôtel sans *****", "Hôtel sans étoile"),  # 5 masques, 6 lettres
+            ("Too Good", "To God"),  # une lettre doublée n'est pas réduite
+            ("Or Noir", "Or Noir Part 2"),  # une suite
+            ("Or Noir Part 2", "Or Noir Part 3"),
+            ("Official Mixtape", "IAM Official Mixtape"),
+            ("Capitale du crime Vol. 4", "CDC4"),
+        ]:
+            assert not meme_disque_a_la_graphie_pres(a, b), (a, b)
+
+    def test_reunis_sans_le_panneau(self):
+        a = _ed(1, "Double Fuck", range(16))
+        b = _ed(2, "Double F**k", range(16))
+        assert meme_projet(a, b) == "contenue"
+        c = _ed(3, "Or Noir Part II", range(10))
+        d = _ed(4, "Or Noir Part 2", range(1, 11))
+        assert meme_projet(c, d) == "commune"

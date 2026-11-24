@@ -280,6 +280,21 @@ def _pistes(c, artistes: list[int] | None):
     return c.execute(sql, artistes or []).fetchall()
 
 
+def _credit_de_la_fiche(t, certs, cles_noms, normalize_text) -> bool:
+    """La pose (`certification_enricher._qui_chercher`) ne donne la certif d'un
+    morceau dont le principal est un AUTRE (feat, reprise, production) que si
+    l'organisme nomme ce principal : « CHOUPETTA » créditée au seul « SOFIANE »
+    ne va pas au « Choupetta » de HMZ, où Sofiane n'est qu'invité. L'audit ne
+    compte en erreur que ce que la pose admet (2026-11-24 : 2 cas sur 5)."""
+    from src.utils.certification_enricher import _noms_du_credit
+    from src.utils.title_matching import names_match_as_words
+
+    principal = _noms_du_credit(t["primary_artist_name"])
+    if not principal or any(normalize_text(n) in cles_noms for n in principal):
+        return True
+    return any(names_match_as_words(n, e["artist_name"] or "") for e in certs for n in principal)
+
+
 def _par_artiste(pistes) -> dict[int, list]:
     par = collections.defaultdict(list)
     for t in pistes:
@@ -958,7 +973,12 @@ def certifs_non_reliees(c, pistes, magasin) -> list[Cas]:
             if album:
                 fiches = [t for t in ts if t["album"] and titres_equivalents(t["album"], titre)]
             else:
-                fiches = [t for t in ts if certif_du_morceau(t["title"], titre)]
+                fiches = [
+                    t
+                    for t in ts
+                    if certif_du_morceau(t["title"], titre)
+                    and _credit_de_la_fiche(t, certs, cles_noms, normalize_text)
+                ]
             paliers = ", ".join(
                 f"{e['body']} {e['certification']} {(e['certification_date'] or '')[:10]}"
                 for e in sorted(certs, key=lambda e: (e["body"], e["certification_date"] or ""))

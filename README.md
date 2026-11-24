@@ -1,7 +1,9 @@
 # théRAPie - Music_Credit_Scraper
+
 ## Contruis une Base de Données Complète pour un artiste donné
 
 ## Fonctionnement
+
 - Récupère la **Discographie** complète (en tant qu'artiste principal et secondaire)
 - Récupère **Credits** Complets (Producteur, Invité, Voix et Instrument Additionnel, Sample et Interpolation, Album associé, Numéro de Piste), **Paroles structurées**, **Paroles synchronisées** (timestamps LRC), **Anectodes** et **Date de Sortie**
 - Associe automatiquement les **Certifications RIAA** (US), **SNEP** (FR), **BRMA** (BE) et **BPI** (UK)
@@ -12,6 +14,7 @@
 - **Exporte** les données en **JSON**
 
 ## Fonctionnalités
+
 - **Une seule Base de Données** (`data/music_credits.db`, SQLite) qui rassemble tous les artistes
 - **Deux interfaces** : customtkinter (`python src/main.py`) et PyQt6 en cours (`python -m src.gui_qt`)
 - **Pilotage sans GUI** via `python -m src.cli` (mêmes flux que l'interface, un flag par case à cocher)
@@ -33,37 +36,43 @@
 - **Base de Données** des **Certifications** Mise à Jour Automatique et Manuelle
 
 ## Installation et lancement
+
 ```bash
 python -m venv venv
 venv/Scripts/pip install -r requirements.txt
 venv/Scripts/pip install -e .
 venv/Scripts/python src/main.py
 ```
+
 Pilotage en ligne de commande : `venv/Scripts/python -m src.cli --help`. Tests : `venv/Scripts/python -m pytest -q`.
 
 ## APIs utilisées
-- [GetSongBPM](https://getsongbpm.com/)                             - Données **BPM**, **Key**, **Mode** et **Time Signature**
+
+- [GetSongBPM](https://getsongbpm.com/)                     - Données **BPM**, **Key**, **Mode** et **Time Signature**
 - [Genius](https://docs.genius.com/)                                - Liste de **Morceaux** d'un Artiste
-- [ReccoBeats](https://reccobeats.com/)                             - Données **Durée**, **BPM**, **Key** & **Mode**
-- [YouTubeMusic](https://ytmusicapi.readthedocs.io/en/stable/#)     - Lien **YouTube** pour chaque Morceau et **Nb de Streams**
-- [Deezer](https://developers.deezer.com/api)                       - Données **Durée**, **ISRC**, Explicit Lyrics, **Picture**, **Date de Sortie**, **Type d'album** (Album/EP/Single)
-- [LRCLIB](https://lrclib.net/)                                     - **Paroles synchronisées** (timestamps LRC)
-- [Musixmatch](https://www.musixmatch.com/)                          - **Paroles synchronisées** (dernier recours, option `--musixmatch`)
-- [iTunes Search](https://performance-partners.apple.com/search-api) - Contrôle des identifiants **Apple Music** (**Durée**, **Date de Sortie**), album Apple d'une parution par son **code-barres**
-- [MusicBrainz](https://musicbrainz.org/)                           - **Groupes & Alias** d'un artiste, album Spotify d'une parution par son **code-barres**
+- [ReccoBeats](https://reccobeats.com/)                        - Données **Durée**, **BPM**, **Key** & **Mode**
+- [YouTubeMusic](https://ytmusicapi.readthedocs.io/en/stable/#)                  - Lien **YouTube** pour chaque Morceau et **Nb de Streams**
+- [Deezer](https://developers.deezer.com/api)                                - Données **Durée**, **ISRC**, Explicit Lyrics, **Picture**, **Date de Sortie**, **Type d'album** (Album/EP/Single)
+- [LRCLIB](https://lrclib.net/)                                 - **Paroles synchronisées** (timestamps LRC)
+- [Musixmatch](https://www.musixmatch.com/)                       - **Paroles synchronisées** (dernier recours, option `--musixmatch`)
+- [iTunes Search](https://performance-partners.apple.com/search-api)                    - Contrôle des identifiants **Apple Music** (**Durée**, **Date de Sortie**), album Apple d'une parution par son **code-barres**
+- [MusicBrainz](https://musicbrainz.org/)                       - **Groupes & Alias** d'un artiste, album Spotify d'une parution par son **code-barres**
 
 ## Données utilisées
-- [Genius](https://genius.com/)                                     - **Crédits** Complets, **Paroles** Structurées, **Date de Sortie**
-- [SongBPM](https://songbpm.com/)                                   - Données **Durée**, **BPM**, **Key**, **Mode** et **Time Signature**
-- [Discogs](https://www.discogs.com/)                               - **Crédits** additionnels (gravure, pochette, management, stylisme...), confirmation des **Groupes**
-- [Backpackerz](https://www.thebackpackerz.com/)                    - **Photographies**
-- [SNEP](https://snepmusique.com/)                                  - **Certifications SNEP** (France)
-- [RIAA](https://www.riaa.com/gold-platinum/)                       - **Certifications RIAA** (USA, dont le programme latin)
+
+- [Genius](https://genius.com/)                                 - **Crédits** Complets, **Paroles** Structurées, **Date de Sortie**
+- [SongBPM](https://songbpm.com/)                            - Données **Durée**, **BPM**, **Key**, **Mode** et **Time Signature**
+- [Discogs](https://www.discogs.com/)                                - **Crédits** additionnels (gravure, pochette, management, stylisme...), confirmation des **Groupes**
+- [Backpackerz](https://www.thebackpackerz.com/)                       - **Photographies**
+- [SNEP](https://snepmusique.com/)                                    - **Certifications SNEP** (France)
+- [RIAA](https://www.riaa.com/gold-platinum/)                                      - **Certifications RIAA** (USA, dont le programme latin)
 - [Ultratop](https://www.ultratop.be)                               - **Certifications BRMA** (Belgique)
-- [BPI](https://www.bpi.co.uk/)                                     - **Certifications BPI** (Royaume-Uni)
-- [Spotify](https://open.spotify.com/intl-fr)                       - **Track ID** pour Reccobeats, **Nb de Streams** et **Auditeurs mensuels** (requêtes internes du lecteur web via [SpotAPI](https://github.com/Aran404/SpotAPI), pages du navigateur en repli)
-- [Kworb](https://kworb.net/)                                       - **Nb de Streams** sur Spotify (quotidien, ventilation lead/solo/feature)
+- [BPI](https://www.bpi.co.uk/)                                        - **Certifications BPI** (Royaume-Uni)
+- [Spotify](https://open.spotify.com/intl-fr)                                 - **Track ID** pour Reccobeats, **Nb de Streams** et **Auditeurs mensuels** (requêtes internes du lecteur web via [SpotAPI](https://github.com/Aran404/SpotAPI), pages du navigateur en repli)
+- [Kworb](https://kworb.net/)                                  - **Nb de Streams** sur Spotify (quotidien, ventilation lead/solo/feature)
 
 ## Ressources utilisées
-- [Claude - **Sonnet** (3.5, 4.0 et 4.5) et **Opus** (4.0 et 4.1) et **Fable** (depuis 5.0)](https://claude.ai/)              - Modèle de Langage développé par Anthropic
-- [**H3nrycrosby** - RIAA Scraping Project](https://github.com/H3nrycrosby/riaa_scraping_project/)  - Database **Certification RIAA** (USA)
+
+- [Claude - **Sonnet** et **Opus** et **Fable**](https://claude.ai/) - Modèle de Langage développé par Anthropic
+- [**H3nrycrosby** RIAA Scraping Project](https://github.com/H3nrycrosby/riaa_scraping_project/)  - Database **Certification RIAA** (USA)
+- [**Aran404** - SpotAPI](https://github.com/Aran404/SpotAPI) - Typed async Spotify tools for Python, built on Spotify’s private API

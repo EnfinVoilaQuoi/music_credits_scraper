@@ -2138,6 +2138,23 @@ class TestMemeEnregistrement:
         assert not self._cas(au.auditer(data_manager))
 
 
+def test_une_intro_courte_datee_par_une_plateforme_n_est_pas_aberrante():
+    """« Je vous l'ai dit » d'Oxmo Puccino : 22 s (Deezer), cinq mots, la
+    première piste de *L'amour est mort* (2026-11-25)."""
+    from src.services.audit import duree_aberrante
+
+    paroles = "[Bruit de pas, une porte claque] Je vous l'ai dit"
+    assert not duree_aberrante("Je vous l'ai dit", 22, {"deezer": 22}, paroles)
+    assert not duree_aberrante("Je vous l'ai dit", 22, {"deezer": 22}, None, ouverture=True)
+    # Ni ouverture ni paroles brèves : toujours suspecte.
+    assert duree_aberrante("Je vous l'ai dit", 22, {"deezer": 22}, "mot " * 60)
+    # Sans plateforme qui fait foi, l'ouverture ne suffit pas.
+    assert duree_aberrante("Je vous l'ai dit", 22, {"youtube_video": 22}, None, ouverture=True)
+    # Une autre édition du même enregistrement (le remaster) à la même durée.
+    assert not duree_aberrante("X", 22, {"deezer": 22}, "mot " * 60, editions=[23])
+    assert duree_aberrante("X", 22, {"deezer": 22}, "mot " * 60, editions=[40])
+
+
 def test_un_disque_de_versions_de_ses_morceaux_n_est_pas_un_homonyme():
     """Kool Shen *L'avenir est à nous* : live et instrumentaux de morceaux dont
     il a la page (2026-11-24)."""

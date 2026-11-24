@@ -719,9 +719,22 @@ def durees(c, pistes) -> list[Cas]:
         ):
             if r["track_id"] in suspectes:
                 observees[r["track_id"]][r["source"]] = _clean_duration(r["value"])
+    ouvertures = ouvertures_de_disque(c) if suspectes else set()
+    editions = collections.defaultdict(list)
+    if suspectes:
+        for r in c.execute(
+            "SELECT track_id, duration FROM track_editions WHERE duration IS NOT NULL"
+        ):
+            if r["track_id"] in suspectes:
+                editions[r["track_id"]].append(int(r["duration"]))
     for tid, (t, d) in suspectes.items():
         if not duree_aberrante(
-            t["title"], d, observees[tid], paroles_de_reference(t["lyrics"], t["lyrics_source"])
+            t["title"],
+            d,
+            observees[tid],
+            paroles_de_reference(t["lyrics"], t["lyrics_source"]),
+            ouverture=tid in ouvertures,
+            editions=editions[tid],
         ):
             continue
         cas.append(
@@ -810,7 +823,41 @@ def duree_annoncee_par_le_titre(titre: str | None) -> int | None:
     return int(m.group(1)) * 60 + int(m.group(2))
 
 
-def duree_aberrante(titre, duree: int, observees: dict, paroles: str | None) -> bool:
+def ouvertures_de_disque(c) -> set[int]:
+    """Les fiches en PREMIÈRE place d'un disque qui n'est pas un single (place
+    Deezer ou Apple, `release_tracks.track_number`)."""
+    return {
+        r[0]
+        for r in c.execute(
+            "SELECT rt.track_id FROM release_tracks rt JOIN releases r ON r.id = rt.release_id "
+            "WHERE rt.track_number = 1 AND COALESCE(rt.disc_number, 1) = 1 "
+            "AND COALESCE(r.record_type, '') != 'single'"
+        )
+    }
+
+
+#: Mots par seconde sous lesquels des paroles tiennent dans une durée courte.
+MOTS_PAR_SECONDE_COURT = 1.0
+
+
+def paroles_breves(paroles: str | None, duree: int) -> bool:
+    """PUR. Des paroles Genius, hors descriptions entre crochets (« [Bruit de
+    pas] »), qui tiennent largement dans la durée (≤ 1 mot/s)."""
+    if paroles is None:
+        return False
+    texte = re.sub(r"\[[^\]]*\]", " ", paroles)
+    return len(texte.split()) <= MOTS_PAR_SECONDE_COURT * duree
+
+
+def duree_aberrante(
+    titre,
+    duree: int,
+    observees: dict,
+    paroles: str | None,
+    *,
+    ouverture: bool = False,
+    editions=(),
+) -> bool:
     """PUR. Une durée hors de 25 s - 15 min qui reste INEXPLIQUÉE.
 
     Expliquée : deux catalogues indépendants la donnent (« ISABELLA » 9 s,
@@ -818,11 +865,29 @@ def duree_aberrante(titre, duree: int, observees: dict, paroles: str | None) -> 
     — ou, au-delà de 15 min, la fiche est une émission (Grünt, Rentre dans le
     Cercle, freestyle, live) : la MÊME règle que la pose de la durée
     (`duree_youtube.FICHE_EMISSION`), sauf si ses paroles la démentent
-    (`dementie_par_les_paroles`, le juge du verdict)."""
+    (`dementie_par_les_paroles`, le juge du verdict).
+
+    Sous 25 s, une durée qu'une plateforme qui fait foi donne est expliquée
+    par l'OUVERTURE du disque (première place, hors single : l'intro de
+    l'album) ou par des paroles brèves (`paroles_breves`) — « Je vous l'ai
+    dit » d'Oxmo Puccino, 22 s, cinq mots, première piste de *L'amour est
+    mort* (décision utilisateur 2026-11-25). Une plateforme et une autre
+    ÉDITION du même enregistrement à ± 2 s (`track_editions` : l'original et
+    son remaster) l'expliquent aussi, à toute durée (même décision)."""
     from src.utils.lrc_garde import duree_confirmee
 
     fiche = SimpleNamespace(duration=duree, durations_observees=observees)
     if duree_confirmee(fiche):
+        return False
+    if SOURCES_DUREE_PLATEFORME & set(observees) and any(
+        abs(int(e) - duree) <= 2 for e in editions
+    ):
+        return False
+    if (
+        duree < DUREE_MIN_MORCEAU
+        and SOURCES_DUREE_PLATEFORME & set(observees)
+        and (ouverture or paroles_breves(paroles, duree))
+    ):
         return False
     if (annoncee := duree_annoncee_par_le_titre(titre)) and abs(annoncee - duree) <= 30:
         # « 16'30 contre la censure » (Akhenaton, 1 012 s) : le titre le dit

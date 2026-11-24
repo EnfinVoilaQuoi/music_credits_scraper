@@ -1259,6 +1259,55 @@ def _lignes_calees(lrc: str, lrc_autre: str) -> tuple[int, int]:
     return calees, len(communes)
 
 
+def _lrc_copie_de_l_original(track, ctx):
+    """Le LRC de la version est OCTET POUR OCTET celui d'une fiche sans
+    descripteur du même socle (« Jump Around (Jason Nevins 2000 club mix) » =
+    LRC de « Jump Around (Radio Edit) », « Nouvelle école (version longue) » =
+    celui de « Nouvelle école ») : la recherche de paroles PAR LE TITRE a rendu
+    celui de l'original. Un autre audio aurait d'autres horodatages ; les deux
+    durées à ± 2 s (peut-être le même audio) ne sont pas jugées. Pas besoin de
+    paroles Genius (un segment de DJ mix n'en a pas) : décision utilisateur
+    2026-11-24, « supprime les erreurs » de l'audit `lrc_version`."""
+    from src.utils.corrections_fiches import empreinte_lrc
+    from src.utils.version_descriptors import meme_socle
+
+    lrc = track.lyrics.synced.strip()
+    if len(lrc) <= 100:
+        return None
+
+    def _par_texte():
+        index: dict[str, list] = {}
+        for t in ctx.disco:
+            if t.lyrics.synced:
+                index.setdefault(t.lyrics.synced.strip(), []).append(t)
+        return index
+
+    for autre in ctx.memo("lrc_par_texte", _par_texte).get(lrc, ()):
+        if (
+            autre.id == track.id
+            or (track.genius_id and autre.genius_id == track.genius_id)
+            or porte_une_version(autre.title)
+            or not meme_socle(track.title, autre.title)
+        ):
+            continue
+        if (
+            track.duration
+            and autre.duration
+            and abs(int(track.duration) - int(autre.duration)) <= 2
+        ):
+            return None
+        return (
+            f"LRC identique à celui de l'original « {autre.title} » (#{autre.id}) : "
+            "trouvé par le titre, pas synchronisé sur l'audio de la version",
+            {
+                "autre": autre.id,
+                "source": track.lyrics.synced_source,
+                "empreinte": empreinte_lrc(track.lyrics.synced),
+            },
+        )
+    return None
+
+
 def lrc_de_l_original(track, ctx):
     """FORMEL. Une VERSION (démo, live, `[V…]`, référence, medley) porte le LRC
     de son ORIGINAL : ses paires de mots sont dans les paroles Genius de
@@ -1272,6 +1321,8 @@ def lrc_de_l_original(track, ctx):
     from src.utils.lrc_garde import fin_du_lrc
 
     lrc = track.lyrics.synced
+    if lrc and porte_une_version(track.title) and (copie := _lrc_copie_de_l_original(track, ctx)):
+        return copie
     refs = _references_bigrammes(ctx)
     if not lrc or track.id not in refs or not porte_une_version(track.title):
         return None

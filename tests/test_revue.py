@@ -2192,3 +2192,30 @@ class TestCreeeSansTrace:
         t = _t("X (Remix)", 42, spotify_id_checked_at="2026-11-20T08:00:00")
         kworb = {**self._CORR, "annulation": {"type": "fiche_kworb", "creee": 42}}
         assert len(self._cas(t, corrections=[kworb])) == 1
+
+
+class TestLrcCopieDeLOriginal:
+    """Le LRC d'une version identique à celui de l'original, trouvé par le
+    titre (« Jump Around (Jason Nevins 2000 club mix) », 2026-11-24)."""
+
+    LRC = "\n".join(f"[00:{i:02d}.00] ligne{i} mot{i} encore{i}" for i in range(20))
+
+    def _fiches(self, duree_version=None, duree_original=215):
+        o = _t("Jump Around (Radio Edit)", 1)
+        o.lyrics.synced, o.duration = self.LRC, duree_original
+        v = _t("Jump Around (Jason Nevins 2000 club mix)", 2)
+        v.lyrics.synced, v.duration = self.LRC, duree_version
+        return o, v
+
+    def test_la_copie_est_signalee_sans_paroles_genius(self):
+        o, v = self._fiches()
+        motif, preuves = revue.lrc_de_l_original(v, _ctx(o, v))
+        assert "identique" in motif and preuves["autre"] == 1
+
+    def test_meme_duree_pas_jugee(self):
+        o, v = self._fiches(duree_version=214)
+        assert revue.lrc_de_l_original(v, _ctx(o, v)) is None
+
+    def test_l_original_n_est_pas_signale(self):
+        o, v = self._fiches()
+        assert revue.lrc_de_l_original(o, _ctx(o, v)) is None

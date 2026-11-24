@@ -213,6 +213,21 @@ def _certifs_au_sous_titre(matcher, cherche, extra, track: Track, invites, deja)
     ]
 
 
+#: Écart admis entre la sortie que déclare l'organisme et celle de la fiche.
+SORTIE_DECLAREE_JOURS = 7
+
+
+def meme_sortie_declaree(sortie_certif, sortie_fiche) -> bool:
+    """PUR. L'organisme déclare la sortie de la fiche (± 7 j). La preuve qui
+    rend à un FEAT la certif créditée à notre seul artiste : la compilation
+    *Art de rue* sort « CHOUPETTA » sous le nom de SOFIANE (SNEP, sortie
+    26/06/2020), Genius la donne à HMZ avec Sofiane en invité — même jour, même
+    morceau (constat utilisateur 2026-11-24). Sans elle, la certif d'un
+    homonyme (« Diamonds » de Teairra Marí ft. Kanye) irait au feat."""
+    a, b = parse_flexible(sortie_certif), parse_flexible(sortie_fiche)
+    return bool(a and b) and abs((a.date() - b.date()).days) <= SORTIE_DECLAREE_JOURS
+
+
 def _credite(match: dict, exiges: list[str], en_tete=()) -> bool:
     credit = match.get("artist_name", "") or ""
     if exiges and not any(names_match_as_words(n, credit) for n in exiges):
@@ -470,7 +485,16 @@ def apply_certifications(
             )
             if cherche and (invites := _invites_de_la_fiche(track, artist.name, alias)):
                 matches += _certifs_au_sous_titre(matcher, cherche, extra, track, invites, matches)
-            matches = [m for m in matches if _credite(m, exiges, en_tete)]
+            matches = [
+                m
+                for m in matches
+                if _credite(m, exiges, en_tete)
+                or (
+                    exiges
+                    and _credite(m, [], en_tete)
+                    and meme_sortie_declaree(m.get("release_date"), track.release_date)
+                )
+            ]
             # CORRECTIFS 1.9 (2026-10-09) : une certif d'ALBUM ne va jamais sur
             # un morceau (« Trône » prenait le Diamant de l'album), et le titre
             # doit être celui du morceau — le matcher, par mots contenus, n'est

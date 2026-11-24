@@ -465,6 +465,9 @@ def test_un_titre_qui_annonce_un_morceau_court(titre, court):
         ("SICKO MODE (ref. CyHi)", 12, {"youtube_video": 12}, None, True),
         # Long et pas une émission.
         ("Morts pour rien", 3840, {"youtube_video": 3840}, None, True),
+        # Le titre annonce sa durée (2026-11-24) — à ± 30 s seulement.
+        ("16'30 contre la censure", 1012, {"deezer": 1012}, None, False),
+        ("16'30 contre la censure", 1300, {"deezer": 1300}, None, True),
     ],
 )
 def test_une_duree_hors_norme_expliquee_n_est_pas_aberrante(
@@ -2133,3 +2136,19 @@ class TestMemeEnregistrement:
             "'{\"genius_id\": 4242}')",
         )
         assert not self._cas(au.auditer(data_manager))
+
+
+def test_un_disque_de_versions_de_ses_morceaux_n_est_pas_un_homonyme():
+    """Kool Shen *L'avenir est à nous* : live et instrumentaux de morceaux dont
+    il a la page (2026-11-24)."""
+    from src.services.audit import _disque_de_versions
+
+    fiches = [
+        {"title": "Qui suis-je ? (Live)"},
+        {"title": "Qui suis-je ? (Instrumental)"},
+        {"title": "L'avenir est à nous (Instrumental)"},
+        {"title": "Inconnu"},
+    ]
+    assert _disque_de_versions(fiches, ["Qui suis-je ?", "L’avenir est à nous"])
+    assert not _disque_de_versions(fiches, ["Autre chose"])
+    assert not _disque_de_versions([{"title": "A"}, {"title": "B"}, {"title": "C"}], ["A"])

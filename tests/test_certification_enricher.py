@@ -635,3 +635,26 @@ class TestCertifsNonReliees20261124:
         assert meme_version_certifiee(
             "DOLCE CAMARA (SNIGHT B REMIX)", "Dolce Camara (Snight B Remix)"
         )
+
+
+class TestSortieDeclaree:
+    """« CHOUPETTA » (SNEP, SOFIANE seul, sortie 26/06/2020) est le
+    « Choupetta » de HMZ ft. Sofiane sorti le même jour (2026-11-24)."""
+
+    def _feat(self, sortie):
+        sofiane = Artist(name="Sofiane")
+        t = Track(title="Choupetta", artist=sofiane, is_featuring=True)
+        t.primary_artist_name, t.release_date = "HMZ", sortie
+        return sofiane, t
+
+    def test_meme_sortie_le_feat_prend_la_certif(self):
+        sofiane, t = self._feat("2020-06-26")
+        snep = _match(title="CHOUPETTA", artist_name="SOFIANE", release_date="2020-06-26")
+        apply_certifications(sofiane, [t], _MatcherParArtiste({"Sofiane": [snep]}))
+        assert len(t.certs.entries) == 1
+
+    def test_autre_sortie_rien(self):
+        sofiane, t = self._feat("2019-01-11")
+        snep = _match(title="CHOUPETTA", artist_name="SOFIANE", release_date="2020-06-26")
+        apply_certifications(sofiane, [t], _MatcherParArtiste({"Sofiane": [snep]}))
+        assert t.certs.entries == []

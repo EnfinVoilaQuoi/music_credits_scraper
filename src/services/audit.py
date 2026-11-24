@@ -283,16 +283,22 @@ def _pistes(c, artistes: list[int] | None):
 def _credit_de_la_fiche(t, certs, cles_noms, normalize_text) -> bool:
     """La pose (`certification_enricher._qui_chercher`) ne donne la certif d'un
     morceau dont le principal est un AUTRE (feat, reprise, production) que si
-    l'organisme nomme ce principal : « CHOUPETTA » créditée au seul « SOFIANE »
-    ne va pas au « Choupetta » de HMZ, où Sofiane n'est qu'invité. L'audit ne
-    compte en erreur que ce que la pose admet (2026-11-24 : 2 cas sur 5)."""
-    from src.utils.certification_enricher import _noms_du_credit
+    l'organisme nomme ce principal, ou s'il déclare la sortie de la fiche
+    (`meme_sortie_declaree` : « CHOUPETTA » de la compilation *Art de rue*,
+    créditée au seul SOFIANE, est le « Choupetta » de HMZ). L'audit ne compte
+    en erreur que ce que la pose admet (2026-11-24)."""
+    from src.utils.certification_enricher import _noms_du_credit, meme_sortie_declaree
     from src.utils.title_matching import names_match_as_words
 
     principal = _noms_du_credit(t["primary_artist_name"])
     if not principal or any(normalize_text(n) in cles_noms for n in principal):
         return True
-    return any(names_match_as_words(n, e["artist_name"] or "") for e in certs for n in principal)
+    return any(
+        names_match_as_words(n, e["artist_name"] or "")
+        or meme_sortie_declaree(e.get("release_date"), t["release_date"])
+        for e in certs
+        for n in principal
+    )
 
 
 def _par_artiste(pistes) -> dict[int, list]:
@@ -792,6 +798,18 @@ def _nature_d_une_duree(observees: dict) -> str:
     return ERREUR if SOURCES_DUREE_PLATEFORME & set(observees) else INDECIDABLE
 
 
+#: Une durée écrite dans le titre : « 16'30 », « 16’30'' », « 16 min 30 ».
+_DUREE_DU_TITRE = re.compile(r"\b(\d{1,2})\s*(?:['’′]|min\s*)(\d{2})\b")
+
+
+def duree_annoncee_par_le_titre(titre: str | None) -> int | None:
+    """PUR. La durée (s) que le titre annonce, s'il en écrit une."""
+    m = _DUREE_DU_TITRE.search(titre or "")
+    if not m or int(m.group(2)) >= 60:
+        return None
+    return int(m.group(1)) * 60 + int(m.group(2))
+
+
 def duree_aberrante(titre, duree: int, observees: dict, paroles: str | None) -> bool:
     """PUR. Une durée hors de 25 s - 15 min qui reste INEXPLIQUÉE.
 
@@ -805,6 +823,10 @@ def duree_aberrante(titre, duree: int, observees: dict, paroles: str | None) -> 
 
     fiche = SimpleNamespace(duration=duree, durations_observees=observees)
     if duree_confirmee(fiche):
+        return False
+    if (annoncee := duree_annoncee_par_le_titre(titre)) and abs(annoncee - duree) <= 30:
+        # « 16'30 contre la censure » (Akhenaton, 1 012 s) : le titre le dit
+        # (constat utilisateur 2026-11-24).
         return False
     if duree > DUREE_MAX_MORCEAU and FICHE_EMISSION.search(titre or ""):
         return dementie_par_les_paroles(duree, paroles)
@@ -1887,6 +1909,22 @@ def disques_acceptes_de(c) -> set[tuple[str, int]]:
     }
 
 
+def _disque_de_versions(fiches, titres_des_pages) -> bool:
+    """Au moins la moitié des fiches du disque sont des VERSIONS (instrumental,
+    live, « Street Version ») de morceaux dont l'artiste a la page Genius : son
+    disque, pas celui d'un homonyme (Kool Shen *L'avenir est à nous*, le maxi
+    single de Bad Meets Evil — constat utilisateur 2026-11-24)."""
+    from src.utils.version_descriptors import meme_socle
+
+    versions = sum(
+        1
+        for f in fiches
+        if porte_une_version(f["title"])
+        and any(meme_socle(f["title"], p) for p in titres_des_pages)
+    )
+    return versions * 2 >= len(fiches)
+
+
 def disques_homonymes(
     pistes, credite_un_profil_connu=None, parutions=None, acceptes=frozenset()
 ) -> list[Cas]:
@@ -1913,9 +1951,12 @@ def disques_homonymes(
 
     parutions = parutions or {}
     disques = collections.defaultdict(list)
+    pages_par_artiste = collections.defaultdict(list)
     for t in pistes:
         if t["album"]:
             disques[t["artist_id"], t["album"]].append(t)
+        if t["genius_id"]:
+            pages_par_artiste[t["artist_id"]].append(t["title"])
     cas = []
     for (_, album), fiches in sorted(disques.items(), key=lambda x: str(x[0])):
         if len(fiches) < FICHES_MIN_DISQUE_HOMONYME:
@@ -1932,6 +1973,8 @@ def disques_homonymes(
         ):
             continue
         if _disque_de_sessions(album, fiches):
+            continue
+        if _disque_de_versions(fiches, pages_par_artiste.get(fiches[0]["artist_id"], ())):
             continue
         artiste = fiches[0]["artiste"]
         lues = [p for f in fiches for p in parutions.get(f["id"], ())]

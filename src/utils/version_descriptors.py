@@ -285,7 +285,9 @@ def titre_sans_son_disque(titre: str | None, album: str | None) -> str:
     return m["titre"]
 
 
-_GROUPE = re.compile(r"\s*[\(\[]([^\(\)\[\]]*)[\)\]]")
+#: Un groupe entre parenthèses ou crochets. UNE définition : une seconde, plus bas,
+#: remplaçait celle-ci en silence (crible `test_noms_de_module_uniques`, 2026-11-25).
+_GROUPE = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
 
 
 def titre_sans_sous_titre(titre: str | None) -> str | None:
@@ -662,9 +664,6 @@ _MOTS_DE_LIAISON = frozenset({"version", "the", "a", "of", "and", "de", "la", "l
 _MOTS_DE_CAPTATION = frozenset(
     {"tour", "concert", "benefit", "festival", "grammy", "grammys", "bet", "awards"}
 )
-
-
-_GROUPE = re.compile(r"[\(\[]([^\)\]]*)[\)\]]")
 
 
 def _qualificatif(v: Variant) -> str:

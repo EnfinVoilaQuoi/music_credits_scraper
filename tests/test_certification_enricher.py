@@ -559,3 +559,79 @@ class TestTeteDuCreditEtHomonymes:
         )
         apply_certifications(sch, [t], m)
         assert len(t.certs.entries) == 1
+
+
+class _MatcherAuJuge:
+    """Répond par le JUGE passé (le pré-filtre du vrai matcher ne voit que des
+    titres équivalents) : sans juge, rien."""
+
+    def __init__(self, certifs):
+        self.certifs = certifs
+
+    def get_track_certifications(self, artist, title, extra_artists=None, juge=None):
+        noms = {artist, *(extra_artists or [])}
+        return [
+            m for a, m in self.certifs if a in noms and juge is not None and juge(title, m["title"])
+        ]
+
+    def get_album_certifications(self, artist, album, **_):
+        return []
+
+
+class TestCertifsNonReliees20261124:
+    """Les certifs que l'audit `certif_non_reliee` disait admises mais que la
+    pose ne posait pas (2026-11-24)."""
+
+    def test_le_sous_titre_omis_par_l_organisme_quand_il_nomme_l_invite(self):
+        from src.models.track import Credit, CreditRole
+
+        cudi = Artist(name="Kid Cudi")
+        t = Track(title="Pursuit of Happiness (Nightmare)", artist=cudi)
+        t.credits = [
+            Credit(name="MGMT", role=CreditRole.FEATURED),
+            Credit(name="Ratatat", role=CreditRole.FEATURED),
+        ]
+        bpi = _match(
+            title="PURSUIT OF HAPPINESS", artist_name="KID CUDI FT MGMT & RATATAT", body="BPI"
+        )
+        riaa = _match(title="PURSUIT OF HAPPINESS (NIGHTMARE)", artist_name="KID CUDI", body="RIAA")
+        m = _MatcherAuJuge([("Kid Cudi", bpi), ("Kid Cudi", riaa)])
+        apply_certifications(cudi, [t], m)
+        assert sorted(e["body"] for e in t.certs.entries) == ["BPI", "RIAA"]
+        # Sans organisme qui la certifie sous son titre complet : rien.
+        t2 = Track(title="Pursuit of Happiness (Nightmare)", artist=cudi)
+        t2.credits = list(t.credits)
+        apply_certifications(cudi, [t2], _MatcherAuJuge([("Kid Cudi", bpi)]))
+        assert t2.certs.entries == []
+
+    def test_l_invite_seul_ne_suffit_pas(self):
+        """« Runaway (Film) », où Pusha T est crédité : simulé le 2026-11-24."""
+        from src.models.track import Credit, CreditRole
+
+        cudi = Artist(name="Kid Cudi")
+        t = Track(title="Runaway (Film)", artist=cudi)
+        t.credits = [Credit(name="Pusha T", role=CreditRole.FEATURED)]
+        bpi = _match(title="RUNAWAY", artist_name="KANYE WEST FT PUSHA T", body="BPI")
+        apply_certifications(cudi, [t], _MatcherAuJuge([("Kid Cudi", bpi)]))
+        assert t.certs.entries == []
+
+    def test_la_formation_du_credit_de_la_fiche_est_cherchee(self):
+        kanye = Artist(name="Kanye West")
+        t = Track(title="CARNIVAL", artist=kanye)
+        t.primary_artist_name = "¥$, Kanye West & Ty Dolla $ign"
+        brma = _match(
+            title="Carnival", artist_name="¥$ feat. Rich The Kid & Playboi Carti", body="BRMA"
+        )
+        m = _MatcherParArtiste({"¥$": [brma]})
+        apply_certifications(kanye, [t], m, formations=("¥$",))
+        assert [e["body"] for e in t.certs.entries] == ["BRMA"]
+
+    def test_le_remix_d_un_autre_remixeur_n_est_pas_la_version_certifiee(self):
+        from src.utils.version_descriptors import meme_version_certifiee
+
+        assert not meme_version_certifiee(
+            "DOLCE CAMARA (SNIGHT B REMIX)", "Dolce Camara (Dee Mad x Akalex Remix)"
+        )
+        assert meme_version_certifiee(
+            "DOLCE CAMARA (SNIGHT B REMIX)", "Dolce Camara (Snight B Remix)"
+        )

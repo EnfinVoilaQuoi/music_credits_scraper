@@ -1454,12 +1454,16 @@ def meme_version_stricte(a: str | None, b: str | None) -> bool:
 
 def meme_version_certifiee(titre_certif: str | None, titre_version: str | None) -> bool:
     """PUR. La certif `titre_certif` est-elle celle de la VERSION `titre_version`
-    (même nature ; deux remix, ou la même PRISE : `meme_prise`) ? Un titre sans
-    descripteur n'est la version de rien (échos des certifs, 2026-09-26)."""
+    (même nature ; deux remix de la même famille — deux remixeurs nommés
+    différents sont deux remix —, ou la même PRISE : `meme_prise`) ? Un titre
+    sans descripteur n'est la version de rien (échos des certifs, 2026-09-26).
+    2026-11-24 : la certif de « DOLCE CAMARA (SNIGHT B REMIX) » quittait
+    l'original pour la fiche « Dolce Camara (Dee Mad x Akalex Remix) », qui ne
+    la prenait pas — perdue (audit `certif_non_reliee`)."""
     ec, ev = cle_titre(titre_certif).variant, cle_titre(titre_version).variant
     if ec.kind == Kind.NONE or ec.kind != ev.kind:
         return False
-    return ev.est_remix or meme_prise(ec, ev)
+    return meme_famille(ec, ev) if ev.est_remix else meme_prise(ec, ev)
 
 
 def meme_prise_du_morceau(a: str | None, b: str | None) -> bool:

@@ -261,7 +261,7 @@ def test_les_questions_des_gates_valent_les_primitives_sur_le_corpus(paires):
             ),
             "meme_version_certifiee": va.kind != Kind.NONE
             and va.kind == vb.kind
-            and (vb.est_remix or vd.meme_prise(va, vb)),
+            and (vd.meme_famille(va, vb) if vb.est_remix else vd.meme_prise(va, vb)),
             "meme_prise_du_morceau": normalize_title(va.socle) == normalize_title(vb.socle)
             and vd.meme_prise(va, vb),
             "remix_du_meme_morceau": va.est_remix

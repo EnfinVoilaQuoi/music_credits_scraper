@@ -147,6 +147,16 @@ def _qui_chercher(
     if p == Participation.PRINCIPAL:
         # Y compris l'interprète sous un alias confirmé (« Ye » pour Kanye West).
         en_tete = [*noms, *formations, *_noms_du_credit(principal)]
+        # Une FORMATION de l'artiste nommée dans le crédit de la fiche se cherche
+        # aussi : la BRMA crédite « ¥$ feat. Rich The Kid & Playboi Carti » le
+        # « CARNIVAL » de « ¥$, Kanye West & Ty Dolla $ign » (2026-11-24, audit
+        # `certif_non_reliee`) — la tête l'admettait, la recherche ne la voyait pas.
+        formations_cles = {f.casefold() for f in formations}
+        extra += [
+            n
+            for n in _noms_du_credit(principal)
+            if n.casefold() in formations_cles and n not in extra and n != artist_name
+        ]
         return artist_name, extra, [], en_tete
     exiges: list[str] = []
     if principal:
@@ -161,12 +171,59 @@ def _qui_chercher(
     return artist_name, extra, exiges, [*exiges, *noms]
 
 
+def _invites_de_la_fiche(track: Track, artist_name: str, alias=()) -> list[str]:
+    """Les invités (feat) de la fiche, hors notre artiste."""
+    noms = (artist_name, *alias)
+    return [
+        n
+        for c in track.credits
+        if c.role == CreditRole.FEATURED
+        for n in _noms_du_credit(c.name)
+        if not any(names_match_as_words(a, n) for a in noms if a)
+    ]
+
+
+def _cle_de_match(m: dict) -> tuple:
+    return tuple(
+        m.get(k) for k in ("title", "artist_name", "body", "certification", "certification_date")
+    )
+
+
+def _certifs_au_sous_titre(matcher, cherche, extra, track: Track, invites, deja) -> list[dict]:
+    """Les certifs qu'admet `certif_du_morceau` sans être un titre équivalent —
+    la fiche porte un SOUS-TITRE que l'organisme omet (« Pursuit of Happiness
+    (Nightmare) » / BPI « PURSUIT OF HAPPINESS ») —, quand le crédit de la
+    certif nomme un INVITÉ de la fiche (« KID CUDI FT MGMT & RATATAT »). Le
+    pré-filtre du matcher ne les voit pas, et `certif_du_morceau` seul y
+    prenait des sous-titres faux (« RUNAWAY » sur « Runaway (Film) », simulé le
+    2026-11-16). Deux preuves (2026-11-24, audit `certif_non_reliee`) : l'invité,
+    et un AUTRE organisme qui certifie la fiche sous son titre COMPLET (RIAA
+    « PURSUIT OF HAPPINESS (NIGHTMARE) ») — l'invité seul laissait passer
+    « Runaway (Film) », où Pusha T est crédité (simulé : 3 faux sur 16)."""
+    if not any(titres_equivalents(track.title, m.get("title")) for m in deja):
+        return []
+    vus = {_cle_de_match(m) for m in deja}
+    return [
+        m
+        for m in matcher.get_track_certifications(
+            cherche, _normalize_title(track.title), extra_artists=extra, juge=certif_du_morceau
+        )
+        if _cle_de_match(m) not in vus
+        and any(names_match_as_words(i, m.get("artist_name") or "") for i in invites)
+    ]
+
+
 def _credite(match: dict, exiges: list[str], en_tete=()) -> bool:
     credit = match.get("artist_name", "") or ""
     if exiges and not any(names_match_as_words(n, credit) for n in exiges):
         return False
     tete = _tete_du_credit(credit)
-    return not en_tete or any(n and names_match_as_words(n, tete) for n in en_tete)
+    # Un nom fait de symboles (« ¥$ ») se normalise en rien : l'égalité exacte
+    # de la tête le reconnaît (2026-11-24, « CARNIVAL » de ¥$).
+    return not en_tete or any(
+        n and (names_match_as_words(n, tete) or n.strip().casefold() == tete.strip().casefold())
+        for n in en_tete
+    )
 
 
 #: Relations Genius qui font d'une page une VERSION d'une autre.
@@ -411,6 +468,8 @@ def apply_certifications(
                 if cherche
                 else []
             )
+            if cherche and (invites := _invites_de_la_fiche(track, artist.name, alias)):
+                matches += _certifs_au_sous_titre(matcher, cherche, extra, track, invites, matches)
             matches = [m for m in matches if _credite(m, exiges, en_tete)]
             # CORRECTIFS 1.9 (2026-10-09) : une certif d'ALBUM ne va jamais sur
             # un morceau (« Trône » prenait le Diamant de l'album), et le titre

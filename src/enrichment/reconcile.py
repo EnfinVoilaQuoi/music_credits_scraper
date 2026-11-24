@@ -208,6 +208,30 @@ _VIDEOS_ORDINAIRES = frozenset({"youtube_video", "youtube_officiel"})
 #: pas visée : c'est alors la page Genius qui peut être la fausse.
 _LUES_PAR_LE_TITRE = _VIDEOS_ORDINAIRES | frozenset({"songbpm", "discogs", "legacy"})
 
+#: Catalogues dont la durée est lue PAR L'IDENTIFIANT de la fiche.
+_CATALOGUES_PAR_ID = frozenset({"spotify_web", "deezer", "apple_music"})
+#: Au-delà, une durée YouTube Music trouvée par le TITRE (recherche de paroles)
+#: que démentent les catalogues lus par ID, sans qu'aucun la soutienne, n'est
+#: pas celle du morceau (2026-11-24 : 6 colonnes tenues contre Spotify, toutes
+#: fausses à l'écoute — « Enfants terribles » 248 s pour 3:52, lives de Mac
+#: Miller, coupes de mixtape de Sinik).
+ECART_YTM_CONTRE_CATALOGUE_S = 10
+
+
+def ytm_dementie_par_les_catalogues(d: int, observations: list) -> bool:
+    """PUR. La durée `ytmusic` `d` contredite de plus de
+    `ECART_YTM_CONTRE_CATALOGUE_S` par un catalogue lu par ID, et soutenue
+    (± 2 s) par aucun."""
+    from src.utils.track_mapper import _clean_duration
+
+    catalogues = [_clean_duration(o.value) for o in observations if o.source in _CATALOGUES_PAR_ID]
+    catalogues = [c for c in catalogues if c]
+    return (
+        bool(catalogues)
+        and not any(abs(c - d) <= 2 for c in catalogues)
+        and any(abs(c - d) > ECART_YTM_CONTRE_CATALOGUE_S for c in catalogues)
+    )
+
 
 #: Veto du vote dans le verdict de durée — PROPOSITION, interrupteur BAISSÉ
 #: (2026-10-27). Levé, la source en tête de l'ordre cède quand sa valeur est
@@ -358,6 +382,9 @@ def resoudre_duree(
     court = titre is None or court_par_nature(titre)
 
     def recevable(o) -> bool:
+        if o.source == "ytmusic":
+            d = _clean_duration(o.value) or 0
+            return not ytm_dementie_par_les_catalogues(d, observations)
         if o.source not in _LUES_PAR_LE_TITRE:
             return True
         d = _clean_duration(o.value) or 0

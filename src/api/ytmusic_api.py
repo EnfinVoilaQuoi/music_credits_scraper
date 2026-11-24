@@ -597,6 +597,7 @@ class YTMusicAPI:
                     "source": None,
                     "duration": duree,
                     "title": chosen.get("title"),
+                    "video_id": chosen["videoId"],
                 }
                 if duree
                 else None

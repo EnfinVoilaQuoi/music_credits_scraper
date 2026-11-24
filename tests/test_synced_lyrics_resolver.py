@@ -341,3 +341,37 @@ def test_sources_repondues_retenues_ou_ecartees():
         sync_ytm=True,
     )
     assert muet.sources_repondues == {"ytmusic"}
+
+
+def test_une_piste_ytm_refusee_ne_donne_rien(monkeypatch):
+    """« Enfants terribles » (2026-11-24) : la piste YTM trouvée par le titre,
+    refusée, ne donne ni durée, ni LRC, ni texte."""
+    from src.utils import corrections_fiches
+
+    monkeypatch.setattr(corrections_fiches, "pistes_ytm_refusees", lambda _t: {"BUxLXviXuLA"})
+    ytm = _FakeYTM(lrc=_LRC, text="paroles", duration=248)
+    ytm._res["video_id"] = "BUxLXviXuLA"
+    out = resolve_track_synced_lyrics(
+        _track(duration=232),
+        "X",
+        lrclib=_FakeLRCLIB(None),
+        ytm=ytm,
+        mxm=None,
+        need_sync=True,
+        need_text=True,
+        sync_ytm=True,
+    )
+    assert not [o for o in out.observations if o.source == "ytmusic"]
+
+
+def test_refus_de_piste_ytm_en_base(data_manager):
+    from src.utils import corrections_fiches as cf
+
+    a = Artist(name="Sinik")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Enfants terribles", artist=a)
+    t.id = data_manager.save_track(t)
+    cf.memoriser_piste_ytm_refusee(t, "BUxLXviXuLA")
+    assert cf.pistes_ytm_refusees(t) == {"BUxLXviXuLA"}
+    assert cf.oublier_piste_ytm_refusee(t, "BUxLXviXuLA")
+    assert cf.pistes_ytm_refusees(t) == set()

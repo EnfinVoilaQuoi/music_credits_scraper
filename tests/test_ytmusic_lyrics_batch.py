@@ -204,6 +204,8 @@ class TestDureeDeclaree:
             "source": None,
             "duration": 203,
             "title": "Titre",
+            # La piste retenue : de quoi la refuser (`piste_ytm`, 2026-11-24).
+            "video_id": "v1",
         }
         # Sans durée ni paroles : None, comme avant.
         api.yt = _YTLyrics(search=[_resultat()], watch={})

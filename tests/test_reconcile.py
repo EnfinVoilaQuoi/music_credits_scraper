@@ -578,3 +578,31 @@ class TestChampsDeclares:
         with caplog.at_level("WARNING"):
             assert CHAMP_DUREE_AUDIO not in reconcile(obs)
         assert not [r for r in caplog.records if "GÉNÉRIQUE" in r.getMessage()]
+
+
+class TestDureeYtmDementie:
+    """2026-11-24 : la durée YouTube Music trouvée par le TITRE ne tient pas la
+    colonne contre un catalogue lu par ID qui la dément de plus de 10 s."""
+
+    @staticmethod
+    def _resoudre(**durees):
+        from src.enrichment.observation import Observation
+        from src.enrichment.reconcile import DISCOGRAPHY_PRIORITIES, resoudre_duree
+
+        obs = [Observation("duration", v, s) for s, v in durees.items()]
+        return resoudre_duree(obs, DISCOGRAPHY_PRIORITIES["duration"], "Enfants terribles")
+
+    def test_spotify_seul_contre_ytm_l_emporte(self):
+        assert self._resoudre(ytmusic=248, spotify_web=232).value == 232
+
+    def test_un_catalogue_qui_soutient_ytm_la_garde(self):
+        r = self._resoudre(ytmusic=295, spotify_web=270, deezer=295)
+        assert r.value == 295
+
+    def test_un_petit_ecart_ne_change_rien(self):
+        from src.enrichment.observation import Observation
+        from src.enrichment.reconcile import ytm_dementie_par_les_catalogues
+
+        assert not ytm_dementie_par_les_catalogues(
+            240, [Observation("duration", 235, "spotify_web")]
+        )

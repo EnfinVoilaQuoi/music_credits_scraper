@@ -152,6 +152,7 @@ PAR_ENREGISTREMENT = frozenset(
         "constat_instrumental",
         "segment_mixtape",
         "date",
+        "piste_ytm",
     }
 )
 
@@ -519,6 +520,13 @@ def apple_refuses(track) -> set[str]:
     """Les ID Apple Music refusés pour la fiche : la vérification Apple de
     l'étape identité (`identite.verifier_apple_music`) ne les repose pas."""
     return {str(r["valeur"]) for r in _lignes(track, "id_apple")}
+
+
+def pistes_ytm_refusees(track) -> set[str]:
+    """Les pistes YouTube Music (videoId) refusées pour la fiche : la recherche
+    de paroles YTM (`synced_lyrics_resolver`) n'en prend ni la durée, ni le
+    LRC, ni le texte (« Enfants terribles » : 248 s d'une autre piste, 2026-11-24)."""
+    return {str(r["valeur"]) for r in _lignes(track, "piste_ytm")}
 
 
 def credits_refuses(track) -> set[tuple[str, str]]:
@@ -1147,6 +1155,18 @@ def memoriser_apple_refuse(track, apple_music_id, origine: str | None = None) ->
 def oublier_apple_refuse(track, apple_music_id) -> bool:
     """Pendant : un ID Apple retiré par une règle, qu'on RÉTABLIT."""
     return _oublier(track, "id_apple", str(apple_music_id))
+
+
+def memoriser_piste_ytm_refusee(track, video_id: str, origine: str | None = None) -> None:
+    """Consigne une piste YouTube Music (videoId) qui n'est pas le morceau
+    (`scripts/refuser_piste_ytm.py`) : la recherche de paroles ne la reprend
+    plus (`pistes_ytm_refusees`)."""
+    _memoriser(track, "piste_ytm", str(video_id), origine=origine)
+
+
+def oublier_piste_ytm_refusee(track, video_id: str) -> bool:
+    """Pendant : la piste YTM refusée qu'on RÉTABLIT."""
+    return _oublier(track, "piste_ytm", str(video_id))
 
 
 def memoriser_discogs_refuse(track, discogs_id: int, origine: str | None = None) -> None:

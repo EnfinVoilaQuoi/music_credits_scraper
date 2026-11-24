@@ -112,7 +112,7 @@ def resolve_track_synced_lyrics(
     # le même socle de titre — sinon il prend le 1ᵉʳ résultat du bon artiste.
     paroles = paroles_de_reference(track.lyrics.text, track.lyrics.source)
 
-    from src.utils.corrections_fiches import empreinte_lrc, lrc_refuses
+    from src.utils.corrections_fiches import empreinte_lrc, lrc_refuses, pistes_ytm_refusees
 
     refuses = lrc_refuses(track)
     # « Suzy » / « Suzy 2003 » : le LRC d'un morceau à l'année de la JUMELLE
@@ -160,6 +160,11 @@ def resolve_track_synced_lyrics(
             # Le client YTM gère déjà son réseau (YTMusicError/requests) → ici on ne
             # couvre plus qu'un retour inattendu ; les autres sources continuent.
             logger.debug(f"YTM get_lyrics échec '{artist_name} - {track.title}': {e}")
+    if ytm_res and ytm_res.get("video_id") in pistes_ytm_refusees(track):
+        # Une piste YTM refusée à la main n'est pas le morceau : ni sa durée,
+        # ni son LRC, ni son texte (2026-11-24).
+        logger.info(f"⏭ {track.title}: piste YTM {ytm_res['video_id']} écartée — refusée")
+        ytm_res = None
     if ytm_res and ytm_res.get("duration"):
         # Lot 3 (2026-09-22) : YTM DÉCLARE sa durée — jamais écrite avant
         # (l'ordre la classait 2ᵉ, la base en comptait 0). Déclarée même si la

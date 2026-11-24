@@ -14,6 +14,9 @@ Règles (simulées sur la base entière le 2026-11-20 avant d'être gardées :
    disque (`meme_disque`) → même projet ;
 2bis. même nom de disque et ≥ 80 % des fiches de la plus petite en commun →
    même projet (décision utilisateur 2026-11-20, « Vas-y » : 30 / 30 justes) ;
+   le même nom s'entend aussi à la GRAPHIE près (`meme_disque_a_la_graphie_pres` :
+   « Or Noir Part II » / « Part 2 », « Double F**k » / « Fuck », élisions,
+   lettre triplée ; décision utilisateur 2026-11-24) ;
 
 jamais :
 - avec une édition `single` (un single ne rejoint jamais l'album du même titre,
@@ -42,6 +45,7 @@ from dataclasses import dataclass, field
 from src.utils.codes_barres import cle_upc
 from src.utils.version_descriptors import (
     meme_disque,
+    meme_disque_a_la_graphie_pres,
     meme_disque_edition,
     memes_parties_de_disque,
 )
@@ -101,7 +105,10 @@ def meme_projet(a: Edition, b: Edition) -> str | None:
     if _jamais_ensemble(a, b):
         return None
     commun = len(a.pistes & b.pistes)
-    if commun < 2 or not meme_disque(a.titre, b.titre):
+    # Même nom à la graphie près (« Or Noir Part II » / « Part 2 », « Double
+    # F**k » / « Fuck ») : un même nom de disque (décision utilisateur 2026-11-24).
+    graphie = meme_disque_a_la_graphie_pres(a.titre, b.titre)
+    if commun < 2 or not (graphie or meme_disque(a.titre, b.titre)):
         return None
     if commun < PART_COMMUNE * max(len(a.pistes), len(b.pistes)) and not memes_parties_de_disque(
         a.titre, b.titre
@@ -110,7 +117,7 @@ def meme_projet(a: Edition, b: Edition) -> str | None:
     # Dans le doute, séparer (décision utilisateur 2026-11-20) : réunir sans
     # l'humain exige le même nom à un marqueur d'édition près ; un nom contenu
     # dans l'autre (tome d'un double album) va au panneau « même projet ? ».
-    if not meme_disque_edition(a.titre, b.titre):
+    if not (graphie or meme_disque_edition(a.titre, b.titre)):
         return None
     petite = min(len(a.pistes), len(b.pistes))
     if commun == petite:

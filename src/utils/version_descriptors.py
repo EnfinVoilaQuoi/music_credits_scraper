@@ -1777,6 +1777,81 @@ def _volume_nu(titre: str) -> str:
     return _MARQUEUR_DE_VOLUME.sub(" ", titre)
 
 
+#: Chiffres romains d'un numéro de partie ou de tome écrits en mot (« Or Noir
+#: Part II », « Immortel II ») ; « I » seul est un pronom, jamais lu.
+_ROMAINS_DU_NOM = {"ii": "2", "iii": "3", "iv": "4", "v": "5", "vi": "6", "vii": "7"}
+#: Mots qui ne font qu'annoncer un numéro (« Or Noir Part 3 » = « Or Noir 3 »).
+_ANNONCE_DE_NUMERO = frozenset(["part", "pt", "partie", "vol", "volume", "tome"])
+#: Élisions détachées par l'apostrophe (« d'or », « n'est », « l'début »).
+_ELISIONS = frozenset(["d", "n", "j", "s", "qu", "c", "m", "t"])
+#: Lettres masquées d'un nom (« Double F**k », « Ballon d'## ») : une par lettre.
+_LETTRES_MASQUEES = re.compile(r"[*#]+")
+_LETTRE_MASQUEE = "\x00"
+
+
+def _cle_graphique(titre: str) -> str:
+    """Le cœur d'un nom de disque à la GRAPHIE près : apostrophes et élisions
+    détachées (« l'début » = « le début »), chiffres romains d'un numéro en
+    chiffres, annonce du numéro retirée (« Part 3 » = « 3 »), lettre triplée
+    réduite à deux (« Niuuum » = « Niuum »), une lettre masquée gardée comme
+    joker (une par caractère : « F**k » vaut « Fuck », pas « Fk »)."""
+    t = _sans_groupes_d_edition(titre)
+    t = re.sub(r"[’'`´]", " ", t)
+    t = _LETTRES_MASQUEES.sub(lambda m: f" zjk{'x' * len(m.group(0))}zq ", t)
+    mots = re.findall(r"[a-z]+|\d+", normalize_title(t))
+    out = []
+    for m in mots:
+        if j := re.fullmatch(r"zjk(x+)zq", m):
+            out.append(_LETTRE_MASQUEE * len(j.group(1)))
+            continue
+        m = _ROMAINS_DU_NOM.get(m, m)
+        if m in _MOTS_VIDES_DU_NOM or m in _ELISIONS:
+            continue
+        out.append(m)
+    # Retire l'annonce d'un numéro (le mot qui précède un nombre).
+    out = [
+        m
+        for k, m in enumerate(out)
+        if not (m in _ANNONCE_DE_NUMERO and k + 1 < len(out) and out[k + 1].isdigit())
+    ]
+    fin = len(out)
+    while fin > 0 and _mot_d_edition(out[fin - 1]) and not out[fin - 1].isdigit():
+        fin -= 1
+    cle = "".join(out[:fin])
+    # Trois lettres ou plus réduites à deux : « Niuuum » = « Niuum », mais
+    # « Too Good » ≠ « To God ».
+    return re.sub(r"([a-z])\1{2,}", r"\1\1", cle)
+
+
+def _accord_graphique(a: str, b: str) -> bool:
+    if _LETTRE_MASQUEE in a and _LETTRE_MASQUEE in b:
+        return False
+    if _LETTRE_MASQUEE in b:
+        a, b = b, a
+    if _LETTRE_MASQUEE not in a:
+        return a == b
+    motif = "".join("[a-z0-9]" if c == _LETTRE_MASQUEE else re.escape(c) for c in a)
+    return bool(re.fullmatch(motif, b))
+
+
+def meme_disque_a_la_graphie_pres(a: str | None, b: str | None) -> bool:
+    """PUR. Deux noms désignent-ils le même disque, à une GRAPHIE près que ni
+    `meme_disque` ni `meme_disque_edition` ne lisent : « Or Noir Part II » /
+    « Or Noir Part 2 (Deluxe) », « Or Noir 3 » / « Or Noir Part 3 », « Double
+    Fuck » / « Double F**k », « Ce n’est que le début » / « Ce n'est que
+    l'début », « Johnny Niuuum » / « Johnny Niuum » (décision utilisateur
+    2026-11-24 : ces cas-là n'ont pas à aller au panneau « même projet ? »).
+    Jamais deux parties différentes ; un nom de moins de trois lettres n'est
+    comparé à rien ; un masque qui n'a pas le nombre de lettres du mot
+    (« Hôtel sans ***** » / « Hôtel sans étoile ») ne vaut rien."""
+    if not a or not b or not memes_parties_de_disque(a, b):
+        return False
+    ca, cb = _cle_graphique(a), _cle_graphique(b)
+    if len(ca.replace(_LETTRE_MASQUEE, "")) < 3 or len(cb.replace(_LETTRE_MASQUEE, "")) < 3:
+        return False
+    return _accord_graphique(ca, cb)
+
+
 def edition_de_diffusion(titre: str | None) -> str | None:
     """PUR. Le libellé de l'ÉDITION de diffusion que porte le titre (« Radio
     Edit », « 2011 Remaster » : même fiche que l'original), ou None."""

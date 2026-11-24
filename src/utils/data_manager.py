@@ -33,7 +33,13 @@ class DataManager(ArtistRepository, TrackRepository, RevueRepository):
         # Persistance pure : ouvrir la base. Les certifications ne sont PLUS
         # importées ici (elles vivent dans certif_snep.csv, lu paresseusement par
         # le matcher unifié) — le constructeur ne déclenche aucun import CSV.
-        self._db = Database(DATABASE_URL.replace("sqlite:///", ""))
+        chemin = DATABASE_URL.replace("sqlite:///", "")
+        # Depuis un worktree sans données, la base de la configuration serait
+        # une base NEUVE et vide : on lève au lieu de répondre « 0 » (2026-11-24).
+        from src.utils.donnees_lues import verifier_base
+
+        verifier_base(chemin)
+        self._db = Database(chemin)
         # Le gate d'identité Spotify refuse un ID qui est celui d'une AUTRE fiche
         # de l'artiste ; il ne touche pas la base, on lui fournit les titres.
         from src.utils import spotify_identity

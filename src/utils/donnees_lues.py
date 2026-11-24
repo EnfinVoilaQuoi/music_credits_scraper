@@ -64,3 +64,24 @@ def dossier_des_donnees(
             "du script)."
         )
     return data_dir, False
+
+
+def verifier_base(
+    chemin: str | Path, racine: Path | None = None, data_dir: Path | None = None
+) -> None:
+    """La BASE de la configuration, ouverte depuis un worktree dont `data/` n'a
+    pas le brut, LÈVE `DonneesAbsentes` (2026-11-24) : `Database` y créait une
+    base neuve, vide, et un script (`rematerialiser`, `historique_fiche`,
+    `recalculer_heritage`) répondait « 0 fiche » sans erreur. Une base
+    redirigée par l'appelant (tests, `--base` d'un script) n'est pas visée."""
+    racine = Path(racine or config.BASE_DIR)
+    data_dir = Path(data_dir or config.DATA_DIR)
+    if Path(chemin).resolve() != (data_dir / "music_credits.db").resolve():
+        return
+    if dans_un_worktree(racine) and not (data_dir / MARQUEUR).exists():
+        raise DonneesAbsentes(
+            f"Base ouverte depuis un worktree git ({racine}) dont data/ est vide : "
+            f"{chemin} serait une base NEUVE et vide (« 0 fiche » sans erreur). Lancer "
+            "le script depuis le dépôt principal, ou lui passer une copie de la base "
+            "(--base, scripts/copie_base.py)."
+        )

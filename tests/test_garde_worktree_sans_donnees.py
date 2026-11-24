@@ -145,3 +145,22 @@ def test_un_chemin_redirige_ne_passe_pas_par_la_garde(tmp_path, code_dans, monke
     assert brut.requetes_gardees("deezer", tmp_path / "autre.db") == set()
     monkeypatch.setattr(brut, "CHEMIN", tmp_path / "copie" / "brut.db")
     assert brut.requetes_gardees("deezer") == set()
+
+
+class TestBaseDuWorktree:
+    """2026-11-24 : `rematerialiser` lancé depuis un worktree ouvrait une base
+    NEUVE et vide et répondait « 0 fiche » sans erreur."""
+
+    def test_la_base_de_la_configuration_leve(self, tmp_path):
+        data = _depot(tmp_path / "wt", worktree=True, avec_brut=False)
+        with pytest.raises(DonneesAbsentes):
+            donnees_lues.verifier_base(data / "music_credits.db", tmp_path / "wt", data)
+
+    def test_une_base_redirigee_ne_leve_pas(self, tmp_path):
+        data = _depot(tmp_path / "wt", worktree=True, avec_brut=False)
+        donnees_lues.verifier_base(tmp_path / "copie.db", tmp_path / "wt", data)
+
+    @pytest.mark.parametrize("worktree,avec_brut", [(False, False), (True, True)])
+    def test_depot_principal_ou_lot_fige_ne_levent_pas(self, tmp_path, worktree, avec_brut):
+        data = _depot(tmp_path / "d", worktree=worktree, avec_brut=avec_brut)
+        donnees_lues.verifier_base(data / "music_credits.db", tmp_path / "d", data)

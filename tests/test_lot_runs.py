@@ -24,6 +24,12 @@ class TestLireLot:
             ["streams", "Shurik’n", "--no-kworb"],
         ]
 
+    def test_le_bom_ne_fait_pas_du_commentaire_un_run(self):
+        """2026-11-24 : un lot écrit par PowerShell commençait par un BOM."""
+        assert lot_runs.lire_lot("﻿# lot\ncredits Booba --fiches 1\n") == [
+            ["credits", "Booba", "--fiches", "1"]
+        ]
+
     def test_nom_de_journal_sans_caractere_interdit(self):
         nom = lot_runs.nom_de_journal(3, ["streams", "Shurik’n", "--no-kworb"])
         assert nom.startswith("run_03_streams_Shurik") and nom.endswith(".txt")

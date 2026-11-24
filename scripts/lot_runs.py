@@ -124,9 +124,11 @@ def sans_marque(run: list[str]) -> list[str]:
 
 
 def lire_lot(texte: str) -> list[list[str]]:
-    """PUR. Les runs d'un fichier de lot : une ligne = les arguments d'un run."""
+    """PUR. Les runs d'un fichier de lot : une ligne = les arguments d'un run.
+    Le BOM d'un fichier écrit par PowerShell (`Set-Content -Encoding utf8`) est
+    retiré : il faisait de la première ligne de commentaire un run (2026-11-24)."""
     runs = []
-    for ligne in texte.splitlines():
+    for ligne in texte.lstrip("﻿").splitlines():
         ligne = ligne.strip()
         if ligne and not ligne.startswith("#"):
             runs.append(shlex.split(ligne, posix=True))

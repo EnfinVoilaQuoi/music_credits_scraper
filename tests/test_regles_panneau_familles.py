@@ -231,8 +231,18 @@ class TestVersionsLaisseesParA1:
         arb = self._juger("Choc frontal (B.O.S.S. Remix)", 182, (fiche,))
         assert arb.action == "deezer_rattacher_version" and "#6" in arb.raison
 
-    def test_a_plus_de_2_s_ou_avec_une_page_deezer_l_humain(self):
-        loin = _t("Choc frontal (Remix de B.O.S.S)", tid=6, duration=187)
+    def test_le_meme_remixeur_nomme_se_rattache_jusqu_a_10_s(self):
+        """NTM, 2026-11-24 : « Quelle gratitude ? (feat. Jaeyez) (B.O.S.S. Remix) »
+        207 s, fiche « (Remix de B.O.S.S) » 202 s (recherche YTM par titre) —
+        5 doublons créés quand la règle exigeait ± 2 s."""
+        a_5_s = _t("Choc frontal (Remix de B.O.S.S)", tid=6, duration=187)
+        arb = self._juger("Choc frontal (B.O.S.S. Remix)", 182, (a_5_s,))
+        assert arb.action == "deezer_rattacher_version"
+        a_12_s = _t("Choc frontal (Remix de B.O.S.S)", tid=6, duration=194)
+        assert self._juger("Choc frontal (B.O.S.S. Remix)", 182, (a_12_s,)) is None
+
+    def test_sans_remixeur_commun_a_plus_de_2_s_ou_avec_une_page_deezer_l_humain(self):
+        loin = _t("Choc frontal (Remix)", tid=6, duration=187)
         assert self._juger("Choc frontal (B.O.S.S. Remix)", 182, (loin,)) is None
         paginee = _t("Choc frontal (Remix de B.O.S.S)", tid=6, duration=183, deezer_id=44)
         assert self._juger("Choc frontal (B.O.S.S. Remix)", 182, (paginee,)) is None

@@ -1855,9 +1855,24 @@ def fiche_de_la_version(piste: dict, fiches) -> object | None:
     if len(candidates) != 1:
         return None
     t = candidates[0]
-    if t.deezer_id or not t.duration or abs(int(t.duration) - int(duree)) > ECART_FICHIER_S:
+    # Le même remixeur NOMMÉ des deux côtés (« (B.O.S.S. Remix) » / « (Remix de
+    # B.O.S.S) ») : le même remix, à ± `ECART_VERSION_S` — la seule durée de ces
+    # fiches Genius est souvent la recherche YTM par titre, à 3-6 s (5 doublons
+    # créés chez NTM le 2026-11-24).
+    ecart_max = ECART_VERSION_S if _meme_remixeur_nomme(titre, t.title) else ECART_FICHIER_S
+    if t.deezer_id or not t.duration or abs(int(t.duration) - int(duree)) > ecart_max:
         return None
     return t
+
+
+def _meme_remixeur_nomme(titre_deezer: str, titre_fiche: str) -> bool:
+    """PUR. Le remixeur que nomme le titre Deezer est nommé, en mots entiers,
+    dans le titre de la fiche."""
+    from src.utils.title_matching import names_match_as_words
+    from src.utils.version_descriptors import remixeur_du_titre
+
+    remixeur = remixeur_du_titre(titre_deezer)
+    return bool(remixeur) and names_match_as_words(remixeur, titre_fiche)
 
 
 def _version_portee_par_une_fiche(cas, ctx) -> Arbitrage | None:

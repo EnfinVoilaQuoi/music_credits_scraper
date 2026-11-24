@@ -44,7 +44,8 @@ def _etat(conn, tid: int) -> list[str]:
     t = (
         conn.execute(
             text(
-                "SELECT t.title, a.name AS artiste, t.album, t.duration, t.genius_url, "
+                "SELECT t.title, a.name AS artiste, t.primary_artist_name, t.album, t.duration, "
+                "t.genius_url, "
                 "t.spotify_id, t.deezer_id, t.youtube_url, t.youtube_url_source, "
                 "t.lyrics_synced, t.lyrics_synced_source FROM tracks t "
                 "JOIN artists a ON a.id = t.artist_id WHERE t.id = :t"
@@ -77,6 +78,7 @@ def _etat(conn, tid: int) -> list[str]:
         f"   durée : {t['duration']} s ; " + ", ".join(f"{f} {s} {v}" for f, s, v in durees),
         f"   LRC : {t['lyrics_synced_source'] or '—'}" + (f", jusqu'à {fin} s" if fin else ""),
         f"   lien : {t['youtube_url'] or '—'} ({t['youtube_url_source'] or '—'})",
+        *_piste_ytmusic(t, durees),
         *(
             # L'adresse se lit avec la source : l'ID d'un lien `genius` est
             # celui de la page Genius (`adresse_de_piste`).
@@ -85,6 +87,23 @@ def _etat(conn, tid: int) -> list[str]:
             for titre, source, ident in parutions
         ),
     ]
+
+
+def _piste_ytmusic(t, durees) -> list[str]:
+    """La piste YouTube Music dont vient la durée `ytmusic` (recherche par le
+    titre), relue dans le brut : de quoi l'écouter (2026-11-24)."""
+    from src.api.ytmusic_brut import video_de_la_duree
+
+    lignes = []
+    for field, source, valeur in durees:
+        if field != "duration" or source != "ytmusic":
+            continue
+        vid = video_de_la_duree(
+            (t["artiste"], t["primary_artist_name"]), t["title"], int(float(valeur))
+        )
+        lien = f"https://music.youtube.com/watch?v={vid}" if vid else "introuvable dans le brut"
+        lignes.append(f"   durée ytmusic {int(float(valeur))} s (recherche par le titre) : {lien}")
+    return lignes
 
 
 def main() -> int:

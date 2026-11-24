@@ -123,3 +123,48 @@ def executer_youtube_data(requete) -> dict:
     corps = json.dumps(reponse, ensure_ascii=False, sort_keys=True).encode("utf-8")
     brut.consigner(SOURCE_DATA, requete.uri, 200, corps)
     return reponse
+
+
+# ── La piste derrière une durée `ytmusic` (2026-11-24) ───────────────────────
+
+
+def hit_de_la_duree(resultats, titre: str, duree: int) -> dict | None:
+    """PUR. Le résultat de recherche dont la durée `ytmusic` vient : son titre
+    est celui cherché (`titres_equivalents`, comme `YTMusicAPI._duree_du_hit`)
+    et sa durée celle observée. None si aucun, ou si plusieurs la donnent."""
+    from src.utils.version_descriptors import titres_equivalents
+
+    hits = [
+        r
+        for r in resultats or []
+        if isinstance(r, dict)
+        and r.get("videoId")
+        and r.get("duration_seconds") == int(duree)
+        and titres_equivalents(titre, r.get("title"))
+    ]
+    return hits[0] if len(hits) == 1 else None
+
+
+def video_de_la_duree(artistes, titre: str, duree: int) -> str | None:
+    """Le videoId de la piste YouTube Music dont vient une durée `ytmusic`, relu
+    dans le BRUT (rejeu hors ligne de la recherche « artiste titre » de
+    `YTMusicAPI.get_lyrics`, jamais le réseau). La durée est une observation,
+    la recherche qui l'a donnée est gardée : de quoi la montrer, et l'écouter
+    (« Tu me mets pas le YT… », 2026-11-23). `artistes` : les noms sous
+    lesquels la recherche a pu être faite (artiste de la ligne, principal)."""
+    from ytmusicapi.exceptions import YTMusicError
+
+    with brut.rejeu():
+        try:
+            yt = client()
+        except (OSError, YTMusicError, requests.RequestException, ValueError):
+            return None
+        for artiste in dict.fromkeys(a for a in artistes if a):
+            try:
+                resultats = yt.search(f"{artiste} {titre}", filter="songs", limit=3)
+            except (OSError, YTMusicError, requests.RequestException, ValueError, KeyError):
+                continue
+            hit = hit_de_la_duree(resultats, titre, duree)
+            if hit is not None:
+                return hit["videoId"]
+    return None

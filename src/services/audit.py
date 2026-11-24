@@ -720,6 +720,13 @@ def durees(c, pistes) -> list[Cas]:
             if r["track_id"] in suspectes:
                 observees[r["track_id"]][r["source"]] = _clean_duration(r["value"])
     ouvertures = ouvertures_de_disque(c) if suspectes else set()
+    editions = collections.defaultdict(list)
+    if suspectes:
+        for r in c.execute(
+            "SELECT track_id, duration FROM track_editions WHERE duration IS NOT NULL"
+        ):
+            if r["track_id"] in suspectes:
+                editions[r["track_id"]].append(int(r["duration"]))
     for tid, (t, d) in suspectes.items():
         if not duree_aberrante(
             t["title"],
@@ -727,6 +734,7 @@ def durees(c, pistes) -> list[Cas]:
             observees[tid],
             paroles_de_reference(t["lyrics"], t["lyrics_source"]),
             ouverture=tid in ouvertures,
+            editions=editions[tid],
         ):
             continue
         cas.append(
@@ -842,7 +850,13 @@ def paroles_breves(paroles: str | None, duree: int) -> bool:
 
 
 def duree_aberrante(
-    titre, duree: int, observees: dict, paroles: str | None, *, ouverture: bool = False
+    titre,
+    duree: int,
+    observees: dict,
+    paroles: str | None,
+    *,
+    ouverture: bool = False,
+    editions=(),
 ) -> bool:
     """PUR. Une durée hors de 25 s - 15 min qui reste INEXPLIQUÉE.
 
@@ -857,11 +871,17 @@ def duree_aberrante(
     par l'OUVERTURE du disque (première place, hors single : l'intro de
     l'album) ou par des paroles brèves (`paroles_breves`) — « Je vous l'ai
     dit » d'Oxmo Puccino, 22 s, cinq mots, première piste de *L'amour est
-    mort* (décision utilisateur 2026-11-25)."""
+    mort* (décision utilisateur 2026-11-25). Une plateforme et une autre
+    ÉDITION du même enregistrement à ± 2 s (`track_editions` : l'original et
+    son remaster) l'expliquent aussi, à toute durée (même décision)."""
     from src.utils.lrc_garde import duree_confirmee
 
     fiche = SimpleNamespace(duration=duree, durations_observees=observees)
     if duree_confirmee(fiche):
+        return False
+    if SOURCES_DUREE_PLATEFORME & set(observees) and any(
+        abs(int(e) - duree) <= 2 for e in editions
+    ):
         return False
     if (
         duree < DUREE_MIN_MORCEAU

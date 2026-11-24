@@ -1050,11 +1050,17 @@ def juger_variante_kworb(preuves: dict, fiches: dict, lire_identite=_lire_embed_
                 )
             if not duree or not temoin or abs(int(duree) - int(temoin)) <= ECART_VERSION_S:
                 return None
-            if remixeur and names_match_as_words(remixeur, t.title):
-                # Le même remixeur : une autre durée y est une autre ÉDITION
-                # du même remix (« Ma Benz … B.O.S.S. 2000 Remix », 220 s,
-                # contre « Ma benz (Remix de B.O.S.S) » du *Clash* de 2000,
-                # 232 s chez Deezer).
+            if (
+                remixeur
+                and names_match_as_words(remixeur, t.title)
+                and not _remix_au_libelle_augmente(nu, remixeur)
+            ):
+                # Le même remixeur, sous le même libellé : une autre durée y
+                # est peut-être une autre ÉDITION du même remix — l'humain.
+                # Un libellé AUGMENTÉ (« B.O.S.S. 2000 Remix », 220 s, sorti en
+                # 2001, contre « Ma benz (Remix de B.O.S.S) », 232 s, 1998) est
+                # un autre remix : fiche à part (décision utilisateur
+                # 2026-11-24).
                 return None
     socle = parent if parent is not None else None
     if socle is not None and fam not in FAMILLES_JAMAIS_MENTION_DE_SUPPORT:
@@ -1066,6 +1072,15 @@ def juger_variante_kworb(preuves: dict, fiches: dict, lire_identite=_lire_embed_
         "kworb_version",
         f"{fam} ; ID {duree or '?'} s, « {cible.title} » {duree_temoin(cible)} s",
     )
+
+
+def _remix_au_libelle_augmente(ligne: str, remixeur: str) -> bool:
+    """PUR. La ligne nomme le remixeur avec un mot de plus (« B.O.S.S. 2000
+    Remix » pour le remixeur « B.O.S.S. ») : n'est pas « Titre - X Remix »."""
+    from src.utils.update_kworb import socle_du_titre
+    from src.utils.version_descriptors import meme_titre_normalise
+
+    return not meme_titre_normalise(ligne, f"{socle_du_titre(ligne)} - {remixeur} Remix")
 
 
 def _meme_remix_nomme(ligne: str, fiche, remixeur, identite: dict) -> bool:

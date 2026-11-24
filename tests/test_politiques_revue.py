@@ -1047,9 +1047,9 @@ class TestVarianteKworb:
         )
         assert arbitrage.action == "kworb_version"
 
-    def test_le_meme_remixeur_a_douze_secondes_reste_a_l_humain(self):
-        """« B.O.S.S. 2000 Remix » 220 s contre « (Remix de B.O.S.S) » 232 s : une
-        autre édition du même remix, pas une autre fiche."""
+    def test_le_remix_au_libelle_augmente_fait_une_fiche(self):
+        """« B.O.S.S. 2000 Remix » 220 s (2001) contre « (Remix de B.O.S.S) »
+        232 s (1998) : un autre remix (décision utilisateur 2026-11-24)."""
         socle = _t("Ma Benz", 1, durations_observees={"deezer": 247})
         remix = _t("Ma benz (Remix de B.O.S.S)", 2, durations_observees={"deezer": 232})
         arbitrage = self._existant(
@@ -1058,6 +1058,15 @@ class TestVarianteKworb:
             220,
             parent_track_id=1,
             remixer="B.O.S.S.",
+        )
+        assert arbitrage.action == "kworb_version"
+
+    def test_le_meme_remixeur_au_meme_libelle_a_douze_secondes_reste_a_l_humain(self):
+        """Même libellé, autre durée : une autre édition du même remix ?"""
+        socle = _t("Ma Benz", 1, durations_observees={"deezer": 247})
+        remix = _t("Ma benz (Remix de B.O.S.S)", 2, durations_observees={"deezer": 232})
+        arbitrage = self._existant(
+            "Ma Benz - B.O.S.S. Remix", [socle, remix], 220, parent_track_id=1, remixer="B.O.S.S."
         )
         assert arbitrage is None
 

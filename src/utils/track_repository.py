@@ -32,12 +32,16 @@ from src.utils.corrections_fiches import (
     videos_refusees,
 )
 from src.utils.credit_sources import ecrire as ecrire_confirmations
-from src.utils.credit_sources import lire as lire_confirmations
 from src.utils.credit_sources import (
+    ecrire_graphies,
+    fondre_graphies,
+    fondre_graphies_en_base,
+    lire_graphies,
     retirer_source,
     retirer_source_en_base,
     unir_confirmations_en_base,
 )
+from src.utils.credit_sources import lire as lire_confirmations
 from src.utils.credits_genius_api import (
     purger_provisoires_couverts,
     sans_provisoires_couverts,
@@ -612,6 +616,9 @@ class TrackRepository:
                 track.credits = sans_heritage_couvert(track.credits)
                 # Crédits PROVISOIRES de l'API Genius remplacés par un scrape.
                 track.credits = sans_provisoires_couverts(track.credits)
+                # Une personne à un rôle sous deux graphies : une seule ligne
+                # (e71).
+                track.credits = fondre_graphies(track.credits)
                 for credit in track.credits:
                     if (normalize_name(credit.name), credit.role.value) in refuses:
                         continue
@@ -772,9 +779,9 @@ class TrackRepository:
             conn.execute(
                 text(
                     "INSERT INTO credits "
-                    "(track_id, name, role, role_detail, tracks, source, confirme_par) "
+                    "(track_id, name, role, role_detail, tracks, source, confirme_par, graphies) "
                     "VALUES (:track_id, :name, :role, :role_detail, :tracks, :source, "
-                    ":confirme_par)"
+                    ":confirme_par, :graphies)"
                 ),
                 {
                     "track_id": track_id,
@@ -784,6 +791,7 @@ class TrackRepository:
                     "tracks": credit.tracks,
                     "source": credit.source,
                     "confirme_par": ecrire_confirmations(credit.confirmations, credit.source),
+                    "graphies": ecrire_graphies(credit.graphies, credit.sources, credit.name),
                 },
             )
         except SQLAlchemyError as e:
@@ -1034,6 +1042,7 @@ class TrackRepository:
             # comme la sienne). 0 ligne concernée au 2026-09-24.
             source=str(row["source"] or "legacy"),
             confirmations=lire_confirmations(row.get("confirme_par")),
+            graphies=lire_graphies(row.get("graphies")),
         )
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1661,6 +1670,7 @@ class TrackRepository:
                     text("UPDATE credits SET track_id = :keep_id WHERE track_id = :delete_id"),
                     {"keep_id": keep_id, "delete_id": delete_id},
                 ).rowcount
+                fondre_graphies_en_base(conn, keep_id)
                 conn.execute(
                     text(
                         "UPDATE scraping_errors SET track_id = :keep_id WHERE track_id = :delete_id"
@@ -3161,6 +3171,31 @@ class TrackRepository:
         except SQLAlchemyError as e:
             logger.error(f"Erreur ajouter_confirmations_credits: {e}")
             return 0
+
+    def fiches_a_graphies_a_fondre(self) -> dict[int, list[tuple]]:
+        """`{track_id: [(gagnant, perdants)]}` : les crédits sous deux graphies
+        que l'écrivain fondrait (`credit_normalize.graphies_a_fondre`). Lecture."""
+        from src.utils.credit_normalize import graphies_a_fondre
+        from src.utils.credit_sources import lignes_de_credit
+
+        par_fiche: dict[int, list] = {}
+        with self.engine.connect() as conn:
+            rows = (
+                conn.execute(text("SELECT * FROM credits WHERE name IS NOT NULL ORDER BY id"))
+                .mappings()
+                .all()
+            )
+        for r, (_i, c) in zip(rows, lignes_de_credit(rows), strict=True):
+            par_fiche.setdefault(r["track_id"], []).append(c)
+        a_fondre = {tid: graphies_a_fondre(credits) for tid, credits in par_fiche.items()}
+        return {tid: groupes for tid, groupes in a_fondre.items() if groupes}
+
+    def fondre_graphies_credits(self, track_ids: Iterable[int]) -> int:
+        """Fond les crédits sous deux graphies de ces fiches, en une transaction
+        (`credit_sources.fondre_graphies_en_base`). Rend le nombre de lignes
+        fondues. Rattrapage : `scripts/fondre_graphies_credits.py`."""
+        with self.engine.begin() as conn:
+            return sum(fondre_graphies_en_base(conn, int(t)) for t in track_ids)
 
     def forget_discogs_credits(self, track_id: int, cles) -> int:
         """Retire des crédits DISCOGS précis `(nom, rôle, pistes)` du morceau ET

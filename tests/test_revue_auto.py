@@ -1348,9 +1348,12 @@ def test_credits_api_confirmes_normaux_le_reste_indecidable(data_manager, artist
     b = Track(title="Liberian", artist=artiste, genius_id=22, last_scraped=lu)
     b.credits = [
         Credit("Plain Pat", CreditRole.PRODUCER, source="genius"),
-        Credit("Mike Dean", CreditRole.MIXING_ENGINEER, source="genius_api"),
-        # Autre graphie : la clé unique des crédits refuse la même (nom, rôle).
-        Credit("MIKE DEAN", CreditRole.MIXING_ENGINEER, source="discogs"),
+        Credit(
+            "Mike Dean",
+            CreditRole.MIXING_ENGINEER,
+            source="genius_api",
+            confirmations=frozenset({"discogs"}),
+        ),
     ]
     data_manager.save_track(b)
     _charger(data_manager, artiste)

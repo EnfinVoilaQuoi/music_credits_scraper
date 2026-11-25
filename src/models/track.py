@@ -315,6 +315,18 @@ class Credit:
     # seconde source était perdue (1 crédit 🎫 confirmé sur 189). Hors de
     # l'égalité : deux crédits restent « le même » quelle que soit leur preuve.
     confirmations: frozenset[str] = field(default_factory=frozenset, compare=False)
+    # La graphie des sources qui n'écrivent pas `name` (« Al Tarba » de Discogs
+    # sur la ligne Genius « Al’Tarba »), colonne `credits.graphies` (e71).
+    graphies: dict[str, str] = field(default_factory=dict, compare=False)
+
+    @property
+    def noms(self) -> tuple[str, ...]:
+        """Le nom de la ligne, puis les autres graphies que ses sources donnent."""
+        return (self.name, *sorted(set(self.graphies.values()) - {self.name}))
+
+    def nom_selon(self, source: str) -> str:
+        """Le nom que cette source donne à la personne."""
+        return self.graphies.get(source, self.name)
 
     @property
     def sources(self) -> frozenset[str]:
@@ -326,7 +338,11 @@ class Credit:
         héritage ne confirme rien : ce n'est pas une source, c'est une copie
         d'une autre fiche (`version_heritage`), recalculée à chaque passage."""
         ajout = frozenset(s for s in autre.sources if s and not _est_heritage(s)) - {self.source}
-        if ajout - self.confirmations:
+        nouvelles = ajout - self.confirmations
+        for s in nouvelles:
+            if autre.nom_selon(s) != self.name:
+                self.graphies = {**self.graphies, s: autre.nom_selon(s)}
+        if nouvelles:
             self.confirmations = self.confirmations | ajout
 
     def to_dict(self) -> dict:

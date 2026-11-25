@@ -115,6 +115,39 @@ def credits_youtube_en_double(credits) -> list:
     return en_double
 
 
+def graphies_a_fondre(credits) -> list[tuple]:
+    """Les crédits d'UN morceau à réunir en une ligne : `[(gagnant, perdants)]`
+    (décision utilisateur 2026-11-25). Le groupe est celui de
+    `credits_sous_deux_graphies`, sauf :
+
+    - une même source y donne deux noms (« Manny » / « Manny (FRA) » sur la même
+      page) : elle les distingue, rien ne dit qu'ils sont un ;
+    - tout est hérité : l'original se fond, l'héritage se recalcule.
+
+    Le gagnant est la ligne que donne la source la plus forte (la page Genius
+    d'abord) ; un héritage cède la place à une source directe. Juge unique des
+    écrivains, de l'audit (`credit_doublon`) et du rattrapage. PUR."""
+    from src.utils.credit_sources import promue
+    from src.utils.version_heritage import est_herite
+
+    rendus = []
+    for groupe in credits_sous_deux_graphies(credits):
+        directs = [c for c in groupe if not est_herite(c.source)]
+        if not directs:
+            continue
+        noms: dict[str, set[str]] = {}
+        for c in directs:
+            for s in c.sources:
+                noms.setdefault(s, set()).add(c.nom_selon(s))
+        if any(len(n) > 1 for n in noms.values()):
+            continue
+        tete = promue(noms)
+        nom = next(iter(noms[tete]))
+        gagnant = next((c for c in directs if c.name == nom), directs[0])
+        rendus.append((gagnant, [c for c in groupe if c is not gagnant]))
+    return rendus
+
+
 def cles_fondues(tracks) -> dict[str, str]:
     """`identity_key` → `identity_key` retenue, pour les graphies d'UNE personne
     que le juge `credits_sous_deux_graphies` réunit sur un MÊME morceau
@@ -135,11 +168,16 @@ def cles_fondues(tracks) -> dict[str, str]:
     frequence: dict[str, int] = {}
     for track in tracks:
         for c in track.credits:
-            k = identity_key(c.name)
-            if k:
-                frequence[k] = frequence.get(k, 0) + 1
-        for groupe in credits_sous_deux_graphies(track.credits):
-            cles = sorted({identity_key(c.name) for c in groupe} - {""})
+            for nom in c.noms:
+                k = identity_key(nom)
+                if k:
+                    frequence[k] = frequence.get(k, 0) + 1
+        # La preuve d'une même personne : deux lignes, ou une ligne qui garde la
+        # graphie de ses autres sources (e71, `Credit.graphies`).
+        preuves = [[c.name for c in g] for g in credits_sous_deux_graphies(track.credits)]
+        preuves += [c.noms for c in track.credits if len(c.noms) > 1]
+        for noms in preuves:
+            cles = sorted({identity_key(n) for n in noms} - {""})
             for k in cles[1:]:
                 a, b = racine(cles[0]), racine(k)
                 if a != b:

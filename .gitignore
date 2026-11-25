@@ -226,6 +226,7 @@ scripts/*
 # Invités d'un album posés sur une piste par le correcteur (2026-11-06).
 !scripts/retirer_feats_d_album.py
 !scripts/rattraper_confirmations_credits.py
+!scripts/fondre_graphies_credits.py
 !scripts/fusionner_copies_de_groupe.py
 !scripts/recalculer_heritage.py
 !scripts/reparer_encodage_genius.py

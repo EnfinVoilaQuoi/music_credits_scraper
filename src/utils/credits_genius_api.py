@@ -127,6 +127,9 @@ def transmettre_confirmations(remplace, remplacant) -> None:
     tierces = frozenset(
         s for s in remplace.confirmations if s != SOURCE_API and not est_herite(s)
     ) - {remplacant.source}
+    for s in tierces - remplacant.confirmations:
+        if remplace.nom_selon(s) != remplacant.name:
+            remplacant.graphies = {**remplacant.graphies, s: remplace.nom_selon(s)}
     if tierces - remplacant.confirmations:
         remplacant.confirmations = remplacant.confirmations | tierces
 

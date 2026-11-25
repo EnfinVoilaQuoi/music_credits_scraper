@@ -106,7 +106,7 @@ def test_familles_de_credits_dans_l_audit(data_manager):
         data_manager.save_track(t)
         fiches[titre] = t.id
     _credit(data_manager, fiches["Fugitif"], "Shurik’n", "Producer", "genius")
-    _credit(data_manager, fiches["Fugitif"], "Eric Chevet", "Mastering Engineer", "discogs")
+    _credit(data_manager, fiches["Fugitif"], "Eric Chevet", "Mastering Engineer", "genius")
     _credit(data_manager, fiches["Fugitif"], "Éric Chevet", "Mastering Engineer", "genius")
     _credit(data_manager, fiches["Fugitif (Instrumental)"], "Shurik’n", "Producer", "heritage")
     _credit(data_manager, fiches["Fugitif (Instrumental)"], "IAM", "Producer", "heritage")
@@ -130,6 +130,8 @@ def test_familles_de_credits_dans_l_audit(data_manager):
     assert "heritage_sans_source" in au.INVARIANTS
     assert "heritage_sans_original" in au.FAMILLES_HORS_CRITERE
     assert "IAM Producer" in heritage[0].libelle and "Shurik" not in heritage[0].libelle
+    # Discogs + Genius : l'écrivain les fond, l'invariant `credit_doublon` les
+    # compte (`tests/test_credits_graphies.py`) ; ici, la page les distingue.
     (graphie,) = [c for c in audit.cas if c.famille == "credit_graphie"]
     assert graphie.nature == au.INFORMATION and graphie.pistes == [fiches["Fugitif"]]
     assert "credit_graphie" in au.FAMILLES_HORS_CRITERE

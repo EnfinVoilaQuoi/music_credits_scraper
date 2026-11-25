@@ -215,7 +215,7 @@ FAMILLES = {
     "refus_vivant": "INVARIANT — valeur refusée à la main encore portée par la fiche ou une sœur",
     "isrc_edition_autre_fiche": "INVARIANT — ISRC d'une édition = celui d'une AUTRE fiche",
     "spotify_principal": "INVARIANT — ID Spotify principal sans sa ligne `track_spotify_ids` principale",
-    "credit_doublon": "INVARIANT — crédit YouTube qui redit un crédit déjà porté, ou nom composé",
+    "credit_doublon": "INVARIANT — même personne au même rôle sur deux lignes, ou nom composé",
     "credit_sans_personne": "INVARIANT — crédit dont le nom ne désigne personne (« Deleted Artist »)",
     "tete_fabriquee": "INVARIANT — tête de section des paroles nommée à tort (« [Couplet 1 : <ligne>] »)",
     "photo_par_defaut": "INVARIANT — silhouette Deezer gardée comme photo d'artiste ou de personne",
@@ -1348,7 +1348,7 @@ def echecs(c, pistes) -> list[Cas]:
 
 def _credits_par_fiche(c, ids, where: str = "") -> dict[int, list]:
     par = collections.defaultdict(list)
-    for r in c.execute(f"SELECT track_id, name, role, role_detail, source FROM credits {where}"):
+    for r in c.execute(f"SELECT * FROM credits {where}"):
         if r["track_id"] in ids:
             par[r["track_id"]].append(r)
     return par
@@ -1466,24 +1466,22 @@ def heritage_sans_source(c, pistes) -> list[Cas]:
 
 def credit_graphie(c, pistes) -> list[Cas]:
     """Le même crédit sous deux graphies sur une fiche, toutes sources hors
-    YouTube (`credit_normalize.credits_sous_deux_graphies` ; YouTube :
-    l'invariant `credit_doublon`). Pour INFORMATION : aucun écrivain ne
-    promet de fondre deux sources, et le studio en fond déjà les trois quarts
-    par `identity_key` (2026-11-10 : 735 fiches, 10 exemples justes sur 10,
+    YouTube (`credit_normalize.credits_sous_deux_graphies`), que l'écrivain ne
+    fond pas (`graphies_a_fondre` : une source y donne deux noms, ou tout est
+    hérité) ; le reste est à l'invariant `credit_doublon`. Pour INFORMATION :
+    le studio en fond déjà les trois quarts par `identity_key` (2026-11-10 : 735 fiches, 10 exemples justes sur 10,
     « M.A.T (FRA) » / « M.A.T. (USA) » écartés)."""
-    from src.utils.credit_normalize import credits_sous_deux_graphies
+    from src.utils.credit_normalize import credits_sous_deux_graphies, graphies_a_fondre
+    from src.utils.credit_sources import lignes_de_credit
 
     ids = {t["id"]: t for t in pistes}
     cas = []
     for tid, credits in _credits_par_fiche(c, ids).items():
-        groupes = credits_sous_deux_graphies(
-            [
-                SimpleNamespace(
-                    name=x["name"], role=x["role"], role_detail=x["role_detail"], source=x["source"]
-                )
-                for x in credits
-            ]
-        )
+        lus = [x for _i, x in lignes_de_credit(credits)]
+        fondus = {id(g) for g, _p in graphies_a_fondre(lus)}
+        groupes = [
+            g for g in credits_sous_deux_graphies(lus) if not any(id(x) in fondus for x in g)
+        ]
         if groupes:
             detail = " ; ".join(
                 " = ".join(f"{x.name} ({x.source})" for x in g) + f" [{g[0].role}]"
@@ -2201,15 +2199,22 @@ def credits_en_double(c, pistes) -> list[Cas]:
     crédit de clip qui colle plusieurs personnes (« Chilea's / Lucci »).
     L'écrivain (`services.credits._phase_youtube`) et le lecteur de description
     les refusent depuis le 2026-11-03 (55 doublons, 3 noms composés) ;
-    rattrapage : `scripts/retirer_credits_youtube_doublons.py`."""
-    from src.utils.credit_normalize import SOURCES_YOUTUBE, credits_youtube_en_double
+    rattrapage : `scripts/retirer_credits_youtube_doublons.py`. Depuis le
+    2026-11-25, toutes les sources : ce que l'écrivain fond en une ligne
+    (`graphies_a_fondre`) ; rattrapage : `scripts/fondre_graphies_credits.py`."""
+    from src.utils.credit_normalize import (
+        SOURCES_YOUTUBE,
+        credits_youtube_en_double,
+        graphies_a_fondre,
+    )
+    from src.utils.credit_sources import lignes_de_credit
     from src.utils.credits_description import noms_d_un_credit_de_clip
 
     fiches = {t["id"]: t for t in pistes}
     par_fiche = collections.defaultdict(list)
-    for r in c.execute("SELECT id, track_id, name, role, source FROM credits ORDER BY id"):
+    for r in c.execute("SELECT * FROM credits ORDER BY id"):
         if r["track_id"] in fiches:
-            par_fiche[r["track_id"]].append(_LigneDeCredit(r["name"], r["role"], r["source"]))
+            par_fiche[r["track_id"]].append(lignes_de_credit([r])[0][1])
     cas = []
     for tid, credits in par_fiche.items():
         f = fiches[tid]
@@ -2220,6 +2225,16 @@ def credits_en_double(c, pistes) -> list[Cas]:
                     f["artiste"],
                     [tid],
                     f"{_lib(f)} {x.role} « {x.name} » en double",
+                )
+            )
+        for gagnant, perdants in graphies_a_fondre(credits):
+            autres = " / ".join(f"{x.name} ({x.source})" for x in perdants)
+            cas.append(
+                Cas(
+                    "credit_doublon",
+                    f["artiste"],
+                    [tid],
+                    f"{_lib(f)} {gagnant.role} « {gagnant.name} » ({gagnant.source}) = {autres}",
                 )
             )
         for x in credits:
@@ -2235,13 +2250,6 @@ def credits_en_double(c, pistes) -> list[Cas]:
                     )
                 )
     return cas
-
-
-@dataclass
-class _LigneDeCredit:
-    name: str
-    role: str
-    source: str | None
 
 
 def credits_sans_personne(c, pistes) -> list[Cas]:

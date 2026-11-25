@@ -202,6 +202,9 @@ credits = Table(
     # Les AUTRES sources qui donnent le même crédit (e70, 2026-11-23) : triées,
     # séparées par des virgules, NULL = aucune (`utils.credit_sources`).
     Column("confirme_par", Text),
+    # Le nom que chacune de ces sources donne, quand il diffère de `name` (e71) :
+    # JSON `{source: nom}`, NULL = aucun.
+    Column("graphies", Text),
     UniqueConstraint("track_id", "name", "role", "role_detail"),
     sqlite_autoincrement=True,
 )

@@ -2108,6 +2108,10 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
             agg["streams"] = par_album.get(key, {}).get("streams", 0)
             agg["daily"] = par_album.get(key, {}).get("daily")
 
+        # Un total par PROJET : deux titres d'album d'un même projet (« Stamina, »
+        # / « Stamina, memento ») comptent des fiches disjointes, ils se somment ;
+        # écrits l'un après l'autre, le dernier effaçait l'autre (2026-11-25).
+        par_projet: dict = {}
         for key, agg in editions.items():
             n_tracks = album_track_counts.get(key, 0)
             if n_tracks < 2:
@@ -2125,6 +2129,17 @@ def update_kworb_streams(artist, data_manager, scraper=None, lire_identite=None)
                 # effacerait un total valide par une valeur qui n'en est pas une.
                 logger.info(f"⏭️ Album sans morceau chiffré, total inchangé : '{agg['title']}'")
                 continue
+            projet = data_manager.projet_d_album(
+                artist.id, agg["title"], ",".join(agg["ids"]) or None
+            )
+            vu = par_projet.get(projet) if projet is not None else None
+            if vu is None:
+                par_projet[projet if projet is not None else ("sans projet", key)] = agg
+                continue
+            vu["streams"] += agg["streams"]
+            vu["daily"] = somme_connue((vu["daily"], agg["daily"]))
+            vu["ids"] += [i for i in agg["ids"] if i not in vu["ids"]]
+        for agg in par_projet.values():
             ok = data_manager.upsert_album(
                 artist.id,
                 agg["title"],

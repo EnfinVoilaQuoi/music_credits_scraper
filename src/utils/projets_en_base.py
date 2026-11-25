@@ -92,6 +92,7 @@ def regrouper_en_base(
     editions = _editions(conn, artist_id)
     par_id = {e.id: e for e in editions}
     regroupement = regrouper(editions, reunies_a_la_main(conn, artist_id))
+    seconds = seconds_disques(conn, artist_id) if donnees else set()
     actuel = dict(
         conn.execute(
             text(
@@ -115,7 +116,10 @@ def regrouper_en_base(
             {actuel[i] for i in ids if actuel.get(i) in existants} - pris,
             key=lambda p: (-sum(1 for i in ids if actuel.get(i) == p), p),
         )
-        ref = edition_de_reference([par_id[i] for i in ids])
+        # Un second disque n'est jamais la base de son projet.
+        ref = edition_de_reference(
+            [par_id[i] for i in ids if i not in seconds] or [par_id[i] for i in ids]
+        )
         titre = par_id[ref].titre
         if candidats:
             pid = candidats[0]
@@ -159,7 +163,9 @@ def regrouper_en_base(
         if donnees:
             heritiers = [nouveau[i] for i, p in actuel.items() if p == pid and i in nouveau]
             if heritiers:
-                _leguer(conn, pid, max(set(heritiers), key=heritiers.count))
+                heritier = max(set(heritiers), key=heritiers.count)
+                _leguer(conn, pid, heritier)
+                _sommer_ytm(conn, heritier)
         conn.execute(text("DELETE FROM projets WHERE id = :p"), {"p": pid})
         bilan.retires += 1
     if donnees:
@@ -186,8 +192,9 @@ _DONNEES_DU_PROJET = (
 def _leguer(conn, de: int, a: int) -> None:
     """Ce que portait un projet disparu passe à celui qui reprend ses éditions :
     le total le plus COMPLET reste (`spotify_web` avant Kworb, puis le plus grand
-    — deux totaux d'éditions d'un disque se recouvrent, ils ne se somment pas :
-    *Watching Movies* y perdait 774 M pour 23 M, 2026-11-25), les ID d'album
+    — deux totaux `spotify_web` se recouvrent : *Watching Movies* y perdait 774 M
+    pour 23 M, 2026-11-25) ; deux totaux KWORB se somment (chacun ne compte que
+    les fiches dont l'album porte son titre, ensembles disjoints) ; les ID d'album
     s'unissent ; une nature MANUELLE passe avant une nature déduite."""
     lire = text(
         "SELECT spotify_streams, spotify_daily_streams, spotify_streams_updated, "
@@ -202,7 +209,17 @@ def _leguer(conn, de: int, a: int) -> None:
     valeurs = {
         "spotify_album_ids": _fusion_ids(garde["spotify_album_ids"], vient["spotify_album_ids"])
     }
-    if vient["spotify_streams"] is not None and (
+    if vient["spotify_streams_source"] == garde["spotify_streams_source"] == "kworb":
+        valeurs["spotify_streams"] = (vient["spotify_streams"] or 0) + (
+            garde["spotify_streams"] or 0
+        )
+        quotidiens = [
+            x["spotify_daily_streams"]
+            for x in (vient, garde)
+            if x["spotify_daily_streams"] is not None
+        ]
+        valeurs["spotify_daily_streams"] = sum(quotidiens) if quotidiens else None
+    elif vient["spotify_streams"] is not None and (
         garde["spotify_streams"] is None or rang(vient) > rang(garde)
     ):
         valeurs.update(
@@ -488,6 +505,16 @@ def poser_streams_ytm(
                     ),
                     {"s": streams, "q": quand, "r": rid},
                 )
+    if not _sommer_ytm(conn, projet_id):
+        conn.execute(
+            text("UPDATE projets SET ytm_streams = :s, ytm_streams_updated = :q WHERE id = :p"),
+            {"s": streams, "q": quand, "p": projet_id},
+        )
+
+
+def _sommer_ytm(conn, projet_id: int) -> bool:
+    """Le total YTM du projet : la somme de ses éditions, une fois par titre. Faux
+    si aucune édition n'a le sien (le total en place reste)."""
     par_titre: dict[str, tuple[int, object]] = {}
     for t, n, q in conn.execute(
         text(
@@ -497,13 +524,17 @@ def poser_streams_ytm(
         {"p": projet_id},
     ).all():
         par_titre[cle_album(t)] = (n, q)  # le plus récent par titre
-    if par_titre:
-        streams = sum(n for n, _ in par_titre.values())
-        quand = max((q for _, q in par_titre.values() if q), default=quand)
+    if not par_titre:
+        return False
     conn.execute(
         text("UPDATE projets SET ytm_streams = :s, ytm_streams_updated = :q WHERE id = :p"),
-        {"s": streams, "q": quand, "p": projet_id},
+        {
+            "s": sum(n for n, _ in par_titre.values()),
+            "q": max((q for _, q in par_titre.values() if q), default=datetime.now()),
+            "p": projet_id,
+        },
     )
+    return True
 
 
 # ── Décisions humaines : « même projet ? » (panneau, 2026-11-20) ─────────────

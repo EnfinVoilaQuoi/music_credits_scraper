@@ -107,6 +107,12 @@ class _DataManager:
         self.totals = kwargs
         return True
 
+    #: `{titre d'album: projet}` : deux titres d'un même projet se somment.
+    projets: dict = {}
+
+    def projet_d_album(self, artist_id, titre, spotify_album_ids=None):
+        return self.projets.get(titre)
+
     def upsert_album(self, artist_id, titre, streams, daily, **kwargs):
         self.album_writes.append((titre, streams, daily, kwargs))
         return True
@@ -998,6 +1004,26 @@ class TestAlbums:
         )
         assert res["albums_updated"] == 1
         assert dm.album_writes[0][3]["spotify_album_ids"] == "AL1"
+
+    def test_deux_titres_d_un_meme_projet_se_somment(self, monkeypatch):
+        """« Stamina, » et « Stamina, memento » : des fiches disjointes, un projet ;
+        écrits l'un après l'autre, le dernier effaçait l'autre (2026-11-25)."""
+        monkeypatch.setattr(_DataManager, "projets", {"Stamina": 7, "Stamina memento": 7})
+        tracks = [_track(i, n, album="Stamina") for i, n in ((1, "Alpha"), (2, "Bravo"))]
+        tracks += [_track(i, n, album="Stamina memento") for i, n in ((3, "Charlie"), (4, "Delta"))]
+        res, dm = self._run(
+            tracks,
+            [_entry("Stamina", 9, 1, "AL1"), _entry("Stamina memento", 9, 1, "AL2")],
+            song_entries=[
+                _entry("Alpha", 30000, 300),
+                _entry("Bravo", 20000, 200),
+                _entry("Charlie", 5000, 50),
+                _entry("Delta", 1000, 10),
+            ],
+        )
+        (ecrit,) = dm.album_writes
+        assert ecrit[0:3] == ("Stamina", 56000, 560), ecrit
+        assert set(ecrit[3]["spotify_album_ids"].split(",")) == {"AL1", "AL2"}
 
     def test_album_sans_morceau_chiffre_n_est_pas_remis_a_zero(self):
         """Aucun morceau de l'album n'a de compteur ce run : écrire 0 effacerait

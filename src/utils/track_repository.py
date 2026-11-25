@@ -5994,7 +5994,16 @@ class TrackRepository:
         """Type une édition « second disque » du projet, ou l'oublie (décision
         gardée, `projets_en_base.poser_second_disque`)."""
         with self.engine.begin() as conn:
-            return poser_second_disque(conn, artist_id, release_id, oui)
+            change = poser_second_disque(conn, artist_id, release_id, oui)
+            regrouper_en_base(conn, artist_id)  # la base du projet en dépend
+            return change
+
+    def projet_d_album(
+        self, artist_id: int, titre: str, spotify_album_ids: str | None = None
+    ) -> int | None:
+        """Le projet qu'un album nommé par une source désigne (`projet_de`)."""
+        with self.engine.connect() as conn:
+            return projet_de(conn, artist_id, spotify_album_ids=spotify_album_ids, titre=titre)
 
     @staticmethod
     def _artistes_des_parutions(conn, track_id: int) -> list[int]:

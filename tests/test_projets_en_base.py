@@ -321,6 +321,26 @@ def test_le_legs_garde_le_total_le_plus_complet(data_manager):
     assert (n, source, set(ids.split(",")), ytm) == (774, "spotify_web", {"a", "b"}, 9)
 
 
+def test_le_legs_somme_deux_totaux_kworb(data_manager):
+    """Kworb totalise par titre d'album : deux ensembles de fiches disjoints."""
+    _deux_editions(data_manager, [1, 4], [1, 5, 6])
+    with data_manager.engine.begin() as conn:
+        for rid, n in ((10, 218), (11, 131)):
+            conn.exec_driver_sql(
+                f"UPDATE projets SET spotify_streams = {n}, spotify_daily_streams = 1, "
+                "spotify_streams_source = 'kworb' "
+                f"WHERE id = (SELECT projet_id FROM releases WHERE id = {rid})"
+            )
+    assert data_manager.merge_tracks(5, 4)
+    with data_manager.engine.connect() as conn:
+        assert tuple(
+            conn.exec_driver_sql(
+                "SELECT p.spotify_streams, p.spotify_daily_streams FROM projets p "
+                "JOIN releases r ON r.projet_id = p.id WHERE r.id = 10"
+            ).one()
+        ) == (349, 2)
+
+
 def test_le_total_ytm_du_projet_somme_ses_titres(data_manager):
     # Le total YTM d'un titre est celui des fiches dont l'album porte ce titre :
     # deux titres = deux ensembles de fiches, le projet les somme (une fois par
@@ -418,6 +438,12 @@ def test_une_edition_second_disque_est_typee_et_s_oublie(data_manager):
     assert data_manager.poser_second_disque(1, 11)
     assert not data_manager.poser_second_disque(1, 11)
     assert types()[11] == "second_disque"
+    # Un second disque n'est jamais la base : typer 10 fait de 11 la base.
+    assert data_manager.poser_second_disque(1, 10)
+    assert data_manager.poser_second_disque(1, 11, oui=False)
+    assert (types()[10], types()[11]) == ("second_disque", "base")
+    data_manager.poser_second_disque(1, 10, oui=False)
+    data_manager.poser_second_disque(1, 11)
     data_manager.regrouper_projets(1)
     assert types()[11] == "second_disque"
     assert data_manager.poser_second_disque(1, 11, oui=False)

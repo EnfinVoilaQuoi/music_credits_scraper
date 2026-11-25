@@ -162,6 +162,12 @@ def appliquer(ctx: _Contexte, artiste: str, entree: dict, lire_identite, journal
             # Garde-fou : fusionner une fiche dans elle-même la SUPPRIME.
             journal.append(f"   ⚠️ {nom} : la fiche serait sa propre cible — rien fait")
             return
+        if plus_recente_que_la_decision(dm, artiste, entree, track):
+            journal.append(
+                f"   ⚠️ {nom} : fiche créée APRÈS la décision de fusion — rien fait "
+                "(décision périmée ? `oublier_correction` ; sinon la ressaisir dans fiches.json)"
+            )
+            return
         if apply:
             dm.merge_tracks(garde.id, track.id)
             ctx.fiches.pop(artiste, None)
@@ -190,7 +196,9 @@ def appliquer(ctx: _Contexte, artiste: str, entree: dict, lire_identite, journal
 
             reject_youtube_link(dm, track, entree["retirer_lien_youtube"], artiste)
         fait(f"lien YouTube rejeté : {entree['retirer_lien_youtube']}")
-    if entree.get("lien_youtube"):
+    if entree.get("lien_youtube") and not (
+        track.youtube_url == entree["lien_youtube"] and track.youtube_url_source == "manual"
+    ):
         if apply:
             from src.utils.youtube_integration import set_youtube_link
 
@@ -277,6 +285,27 @@ def appliquer(ctx: _Contexte, artiste: str, entree: dict, lire_identite, journal
     for c in entree.get("retirer_credits") or []:
         n = dm.forget_credit(track.id, c["nom"], c["role"]) if apply else "?"
         fait(f"crédit retiré : {c['nom']} — {c['role']} ({n})")
+
+
+def plus_recente_que_la_decision(dm, artiste: str, entree: dict, track) -> bool:
+    """La fiche à absorber est née après que la fusion a été consignée : ce
+    n'est plus la fiche que l'humain jugeait (« New God Flow », créée à la main
+    le 2026-11-22, absorbée par une décision du 12/10). Une entrée encore dans
+    le fichier de saisie vient d'être décidée : jamais refusée."""
+    from sqlalchemy import text
+
+    if entree in cf._charger_fichier().get(artiste, []):
+        return False
+    le = cf.date_de_correction(artiste, entree["fiche"], "fusionner_dans")
+    if not le:
+        return False
+    with dm.engine.connect() as conn:
+        nee = conn.execute(
+            text("SELECT created_at FROM tracks WHERE id = :t"), {"t": track.id}
+        ).scalar()
+    if not nee:
+        return False
+    return str(nee).replace("T", " ")[:19] > str(le).replace("T", " ")[:19]
 
 
 def main() -> int:

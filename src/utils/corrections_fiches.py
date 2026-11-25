@@ -1671,6 +1671,44 @@ def corrections_en_base() -> dict[str, list[dict]]:
     return donnees
 
 
+def oublier_correction(artiste: str, fiche: dict, action: str) -> bool:
+    """Retire une correction consignée devenue FAUSSE (une décision humaine
+    inversée). Sans ce geste, le rejeu l'applique de nouveau : « New God Flow »
+    → « New God Flow.1 » (2026-10-12, inversée le 31/10) a absorbé le 2026-11-24
+    la fiche créée à la main le 22/11. Rend False si elle n'était pas là."""
+    if moteur is None:
+        raise RuntimeError("aucune base ouverte (construire un DataManager d'abord)")
+    from sqlalchemy import text
+
+    with moteur.begin() as conn:
+        return bool(
+            conn.execute(
+                text(
+                    "DELETE FROM corrections "
+                    "WHERE cle_fiche = :cle AND artiste = :artiste AND action = :action"
+                ),
+                {"cle": _cle_fiche(fiche), "artiste": artiste, "action": action},
+            ).rowcount
+        )
+
+
+def date_de_correction(artiste: str, fiche: dict, action: str):
+    """Quand la correction a été consignée (texte ISO), ou None : encore dans le
+    fichier de saisie, elle vient d'être décidée."""
+    if moteur is None:
+        return None
+    from sqlalchemy import text
+
+    with moteur.connect() as conn:
+        return conn.execute(
+            text(
+                "SELECT decide_le FROM corrections "
+                "WHERE cle_fiche = :cle AND artiste = :artiste AND action = :action"
+            ),
+            {"cle": _cle_fiche(fiche), "artiste": artiste, "action": action},
+        ).scalar()
+
+
 def _inserer_correction(conn, artiste: str, designation: dict, action: str, valeur, le) -> bool:
     from sqlalchemy import text
 

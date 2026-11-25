@@ -1,7 +1,13 @@
 """Projets d'éditions (e67) : les règles du regroupement, sur les cas réels de
 la simulation du 2026-11-20 (plan `projets_albums_2026-11-20.md`)."""
 
-from src.utils.projets_disques import Edition, edition_de_reference, meme_projet, regrouper
+from src.utils.projets_disques import (
+    Edition,
+    cas_a_trancher,
+    edition_de_reference,
+    meme_projet,
+    regrouper,
+)
 from src.utils.version_descriptors import memes_parties_de_disque
 
 
@@ -45,10 +51,11 @@ class TestRegles:
                 _ed(2, "La Symphonie des chargeurs 2 (Partie 2)", range(14)),
             ),
             # Un mot hors du vocabulaire d'édition (« Boost », « Refill »).
-            (_ed(1, "Enna", range(20)), _ed(2, "Enna Boost", list(range(18)) + [100])),
+            (
+                _ed(1, "Enna", range(20)),
+                _ed(2, "Enna Boost", list(range(18)) + list(range(100, 111))),
+            ),
         ]
-        from src.utils.projets_disques import cas_a_trancher
-
         for a, b in cas:
             assert meme_projet(a, b) is None, (a.titre, b.titre)
             assert [c.editions for c in cas_a_trancher([a, b], regrouper([a, b]))] == [(1, 2)]
@@ -152,26 +159,20 @@ class TestCasATrancher:
         # (décision utilisateur), mais rien ne le dit sans l'humain.
         a = _ed(1, "HHHH", range(5), record_type="ep")
         b = _ed(2, "HHHH²", range(11), record_type="album")
-        from src.utils.projets_disques import cas_a_trancher
-
         (cas,) = cas_a_trancher([a, b], regrouper([a, b]))
         assert cas.editions == (1, 2) and "titres différents" in cas.motif
 
-    def test_une_edition_cumulee_va_au_panneau(self):
-        from src.utils.projets_disques import cas_a_trancher
-
+    def test_une_edition_cumulee_reste_separee_sans_le_panneau(self):
         eds = [
             _ed(1, "Abysses", range(15)),
             _ed(2, "Ivresse des profondeurs", range(100, 107)),
             _ed(3, "Abysses & Ivresse des profondeurs", list(range(15)) + list(range(100, 107))),
         ]
         cas = cas_a_trancher(eds, regrouper(eds))
-        # Chaque disque face au coffret : deux cas « titres différents ».
-        assert [c.editions for c in cas] == [(1, 3), (2, 3)]
+        # Un coffret est son propre projet (2026-11-25).
+        assert cas == [] and _projets(*eds) == [[1], [2], [3]]
 
     def test_une_suite_ou_un_single_n_y_vont_pas(self):
-        from src.utils.projets_disques import cas_a_trancher
-
         eds = [
             _ed(1, "Chambre 140 (Part. 2)", range(22)),
             _ed(2, "Chambre 140 (Part. 3)", range(32)),
@@ -258,3 +259,60 @@ class TestGraphieDuNom:
         c = _ed(3, "Or Noir Part II", range(10))
         d = _ed(4, "Or Noir Part 2", range(1, 11))
         assert meme_projet(c, d) == "commune"
+
+
+class TestRegles20261125:
+    """Panneau 💽 : 162 cas → 92 (simulé sur toute la base le 2026-11-25)."""
+
+    def _cas(self, *editions):
+        eds = list(editions)
+        r = regrouper(eds)
+        return r, [c.editions for c in cas_a_trancher(eds, r)]
+
+    def test_la_meme_liste_sous_deux_noms_est_un_projet(self):
+        a = Edition(1, "Vulgaire, Violent et Ravi D’être Là", pistes=frozenset(range(18)))
+        b = Edition(2, "VVRDL", pistes=frozenset(range(1, 19)))
+        assert meme_projet(a, b) == "meme_liste"
+
+    def test_une_version_du_disque_n_est_pas_la_meme_liste(self):
+        a = Edition(1, "Artefact", pistes=frozenset(range(12)))
+        b = Edition(2, "Artefact (Instrumentale)", pistes=frozenset(range(12)))
+        assert meme_projet(a, b) != "meme_liste"
+        single = Edition(3, "VVRDL", record_type="single", pistes=frozenset(range(12)))
+        assert meme_projet(a, single) is None
+
+    def test_deux_listes_a_moitie_communes_restent_separees(self):
+        a = Edition(1, "Les fées", pistes=frozenset(range(17)))
+        b = Edition(2, "Les monstres", pistes=frozenset(range(4, 18)))
+        assert meme_projet(a, b) is None
+
+    def test_le_coffret_est_separe_de_ses_disques(self):
+        box = Edition(1, "Rimes essentielles", pistes=frozenset(range(12)))
+        v1 = Edition(2, "Première vague", pistes=frozenset(range(6)))
+        v2 = Edition(3, "Deuxième vague", pistes=frozenset(range(6, 12)))
+        r, cas = self._cas(box, v1, v2)
+        assert r.projets == [[1], [2], [3]] and cas == []
+
+    def test_une_edition_augmentee_n_est_pas_un_coffret(self):
+        deluxe = Edition(1, "Futur 2.0 (Deluxe)", pistes=frozenset(range(25)))
+        futur = Edition(2, "Futur", pistes=frozenset(range(17)))
+        ajout = Edition(3, "Futur 2.0 - EP", pistes=frozenset(range(17, 25)))
+        assert (1, 2) in self._cas(deluxe, futur, ajout)[1]
+
+    def test_le_maxi_est_separe_de_son_album(self):
+        album = Edition(1, "Shoot for the Stars (Deluxe)", pistes=frozenset(range(34)))
+        maxi = Edition(
+            2,
+            "For The Night",
+            "ep",
+            pistes=frozenset(range(6)),
+            titres_des_pistes=frozenset({"For the Night (feat. Lil Baby)"}),
+        )
+        assert self._cas(album, maxi)[1] == []
+
+    def test_des_releves_partiels_du_meme_nom_sont_un_projet(self):
+        a = Edition(1, "Under Pressure", pistes=frozenset(range(13)))
+        b = Edition(2, "Under Pressure (Deluxe Version)", pistes=frozenset({20, 21, 22}))
+        c = Edition(3, "Under Pressure (Deluxe)", pistes=frozenset([*range(12), 20, 21, 22]))
+        r, cas = self._cas(a, b, c)
+        assert r.projets == [[1, 2, 3]] and cas == []

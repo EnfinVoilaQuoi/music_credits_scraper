@@ -18,6 +18,10 @@ Règles (simulées sur la base entière le 2026-11-20 avant d'être gardées :
    « Or Noir Part II » / « Part 2 », « Double F**k » / « Fuck », élisions,
    lettre triplée ; décision utilisateur 2026-11-24) ;
 
+3. la MÊME liste de fiches (≥ 80 % de leur réunion, 4 fiches au moins, 3 au
+   même nom) sous deux noms (« VVRDL », « CDC4 », « HHHH² (Au carré) ») → même
+   projet, sauf deux VERSIONS du disque (instrumental, remix, live…) ;
+
 jamais :
 - avec une édition `single` (un single ne rejoint jamais l'album du même titre,
   décision du 2026-11-12) ;
@@ -33,6 +37,12 @@ Garde « édition cumulée » : un groupe où deux éditions d'au moins 3 fiches
 partagent RIEN est recollé par une édition qui en cumule deux (« Abysses &
 Ivresse des profondeurs », « The Documentary 2 + 2.5 ») : il n'est pas formé,
 ses éditions restent chacune leur projet et le groupe est rendu « à trancher ».
+Sauf si toutes portent le même nom à un marqueur d'édition près : deux relevés
+partiels d'un même disque (« Under Pressure »), rien n'y est recollé.
+
+Séparés sans l'humain (`cas_a_trancher`) : un disque et le coffret qui en
+réunit au moins deux (« Magnum 567 », « Rimes essentielles ») ; un maxi et le
+disque dont il porte un titre (« For The Night »), comme un single.
 Jamais de regroupement au seul titre.
 """
 
@@ -43,6 +53,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 
 from src.utils.codes_barres import cle_upc
+from src.utils.title_matching import normalize_title
 from src.utils.version_descriptors import (
     meme_disque,
     meme_disque_a_la_graphie_pres,
@@ -56,6 +67,23 @@ from src.utils.version_descriptors import (
 _COMPILATION = re.compile(
     r"\b(best of|greatest hits|the hits|compilation|anthologie|anthology)\b", re.IGNORECASE
 )
+
+#: Un disque qui se dit une VERSION d'un autre n'a pas la même liste, même aux
+#: mêmes fiches (« Artefact (Instrumentale) »). Liste FERMÉE.
+_VERSION_DE_DISQUE = re.compile(
+    r"\b(instrumentals?|instrumentales?|acoustic|acoustique|remix(es)?|chopped|screwed|live"
+    r"|unplugged|mixed by|mixé par|rough|unmastered)\b",
+    re.IGNORECASE,
+)
+
+#: Une édition augmentée n'est pas un coffret (« … (Deluxe) »). Liste FERMÉE.
+_EDITION_AUGMENTEE = re.compile(
+    r"\b(deluxe|preluxe|édition|edition|réédition|reissue|collector|anniversary|anniversaire)\b",
+    re.IGNORECASE,
+)
+
+#: Un maxi : peu de titres, et bien moins que le disque dont il vient.
+MAXI_FICHES_MAX = 6
 
 #: Part des fiches de la plus petite édition qu'il faut en commun (règle 2bis).
 PART_COMMUNE = 0.8
@@ -72,6 +100,8 @@ class Edition:
     live: bool | None = None
     date: str | None = None
     pistes: frozenset[int] = frozenset()
+    #: Titres des fiches de l'édition (pour reconnaître un maxi à son nom).
+    titres_des_pistes: frozenset[str] = frozenset()
     #: `own` (disque de l'artiste) ou `appearance` (disque d'un autre où il
     #: figure : ses streams d'album en dépendent aussi). Jamais mêlés.
     scope: str = "own"
@@ -95,6 +125,52 @@ def _jamais_ensemble(a: Edition, b: Edition) -> bool:
     return bool(_COMPILATION.search(a.titre) or _COMPILATION.search(b.titre))
 
 
+def _meme_liste(a: Edition, b: Edition) -> bool:
+    """Règle 3 : la même liste de fiches, ni l'une ni l'autre une autre version."""
+    commun = len(a.pistes & b.pistes)
+    if commun < 3 or commun < PART_COMMUNE * len(a.pistes | b.pistes):
+        return False
+    if bool(_VERSION_DE_DISQUE.search(a.titre)) != bool(_VERSION_DE_DISQUE.search(b.titre)):
+        return False
+    return commun >= 4 or meme_disque(a.titre, b.titre)
+
+
+def _contenue(a: Edition, b: Edition) -> bool:
+    return len(a.pistes & b.pistes) >= PART_COMMUNE * len(a.pistes)
+
+
+def _coffret(petite: Edition, grande: Edition, editions: list[Edition]) -> bool:
+    """`grande` réunit `petite` ET un autre disque qui n'a rien de commun avec
+    elle : un coffret ou une trilogie, son propre projet. Une édition augmentée
+    (« Deluxe ») n'en est un que si son nom annonce les deux (« 2 + 2.5 »)."""
+    if _EDITION_AUGMENTEE.search(grande.titre) and "+" not in grande.titre:
+        return False
+    if not _contenue(petite, grande):
+        return False
+    return any(
+        e.scope == grande.scope
+        and e.record_type != "single"
+        and 3 <= len(e.pistes) < len(grande.pistes)
+        and not (e.pistes & petite.pistes)
+        and _contenue(e, grande)
+        for e in editions
+    )
+
+
+def _maxi(petite: Edition, grande: Edition) -> bool:
+    """`petite` est le maxi d'un titre de `grande` : elle en porte le nom."""
+    if len(petite.pistes) > MAXI_FICHES_MAX or len(petite.pistes) * 3 > len(grande.pistes):
+        return False
+    if meme_disque(petite.titre, grande.titre):
+        return False
+    nu = _titre_nu(petite.titre)
+    return bool(nu) and any(_titre_nu(t) == nu for t in petite.titres_des_pistes)
+
+
+def _titre_nu(titre: str) -> str:
+    return normalize_title(re.sub(r"\s*[(\[].*$", "", titre))
+
+
 def meme_projet(a: Edition, b: Edition) -> str | None:
     """PUR. La règle qui réunit ces deux éditions, ou None. « suite » quand
     elles sont deux parties d'une suite (jamais réunies)."""
@@ -108,8 +184,9 @@ def meme_projet(a: Edition, b: Edition) -> str | None:
     # Même nom à la graphie près (« Or Noir Part II » / « Part 2 », « Double
     # F**k » / « Fuck ») : un même nom de disque (décision utilisateur 2026-11-24).
     graphie = meme_disque_a_la_graphie_pres(a.titre, b.titre)
+    liste = "meme_liste" if _meme_liste(a, b) else None
     if commun < 2 or not (graphie or meme_disque(a.titre, b.titre)):
-        return None
+        return liste
     if commun < PART_COMMUNE * max(len(a.pistes), len(b.pistes)) and not memes_parties_de_disque(
         a.titre, b.titre
     ):
@@ -118,7 +195,7 @@ def meme_projet(a: Edition, b: Edition) -> str | None:
     # l'humain exige le même nom à un marqueur d'édition près ; un nom contenu
     # dans l'autre (tome d'un double album) va au panneau « même projet ? ».
     if not (graphie or meme_disque_edition(a.titre, b.titre)):
-        return None
+        return liste
     petite = min(len(a.pistes), len(b.pistes))
     if commun == petite:
         return "contenue"
@@ -183,10 +260,19 @@ def regrouper(
         ids.sort()
         gros = [i for i in ids if len(par_id[i].pistes) >= 3]
         decide = any(frozenset((a, b)) in reunies for k, a in enumerate(ids) for b in ids[k + 1 :])
-        cumule = not decide and any(
-            not (par_id[a].pistes & par_id[b].pistes)
-            for k, a in enumerate(gros)
-            for b in gros[k + 1 :]
+        meme_nom = all(
+            meme_disque_edition(par_id[a].titre, par_id[b].titre)
+            for k, a in enumerate(ids)
+            for b in ids[k + 1 :]
+        )
+        cumule = (
+            not decide
+            and not meme_nom
+            and any(
+                not (par_id[a].pistes & par_id[b].pistes)
+                for k, a in enumerate(gros)
+                for b in gros[k + 1 :]
+            )
         )
         if cumule:
             out.a_trancher.append(ids)
@@ -219,7 +305,7 @@ def cas_a_trancher(editions: list[Edition], regroupement: Regroupement) -> list[
 
     Jamais : deux éditions déjà du même projet, un single, un live contre un
     studio, une compilation, une apparition contre un disque de l'artiste, une
-    suite."""
+    suite, un coffret contre l'un de ses disques, un maxi contre son album."""
     par_id = {e.id: e for e in editions}
     projet_de = {i: k for k, ids in enumerate(regroupement.projets) for i in ids}
     cas = [
@@ -244,7 +330,10 @@ def cas_a_trancher(editions: list[Edition], regroupement: Regroupement) -> list[
             continue
         if x in deja and y in deja or a.scope != b.scope or _jamais_ensemble(a, b):
             continue
-        petite = min(len(a.pistes), len(b.pistes))
+        petite, grande = sorted((a, b), key=lambda e: len(e.pistes))
+        if _coffret(petite, grande, editions) or _maxi(petite, grande):
+            continue
+        petite = len(petite.pistes)
         if n >= 2 and meme_disque(a.titre, b.titre) and memes_parties_de_disque(a.titre, b.titre):
             cas.append(
                 CasDeProjet(

@@ -51,15 +51,18 @@ def _editions(conn, artist_id: int) -> list[Edition]:
         {"a": artist_id},
     ).all()
     pistes: dict[int, set[int]] = {r[0]: set() for r in rows}
-    for rid, tid in conn.execute(
+    titres: dict[int, set[str]] = {r[0]: set() for r in rows}
+    for rid, tid, nom in conn.execute(
         text(
-            "SELECT rt.release_id, rt.track_id FROM release_tracks rt "
-            "JOIN releases r ON r.id = rt.release_id WHERE r.artist_id = :a"
+            "SELECT rt.release_id, rt.track_id, t.title FROM release_tracks rt "
+            "JOIN releases r ON r.id = rt.release_id "
+            "LEFT JOIN tracks t ON t.id = rt.track_id WHERE r.artist_id = :a"
         ),
         {"a": artist_id},
     ):
         if rid in pistes:
             pistes[rid].add(tid)
+            titres[rid].add(nom or "")
     return [
         Edition(
             id=rid,
@@ -69,6 +72,7 @@ def _editions(conn, artist_id: int) -> list[Edition]:
             live=None if live is None else bool(live),
             date=str(date)[:10] if date else None,
             pistes=frozenset(pistes[rid]),
+            titres_des_pistes=frozenset(titres[rid]),
             scope=scope or "own",
         )
         for rid, titre, rt, upc, live, date, scope in rows

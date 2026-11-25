@@ -298,6 +298,29 @@ def test_un_projet_qui_disparait_legue_ses_streams(data_manager):
         )
 
 
+def test_le_legs_garde_le_total_le_plus_complet(data_manager):
+    """*Watching Movies* : 774 M (spotify_web) perdus pour 23 M de Kworb
+    (2026-11-25)."""
+    _deux_editions(data_manager, [1, 4], [1, 5, 6])
+    with data_manager.engine.begin() as conn:
+        for rid, n, source, ids, ytm in (
+            (10, 23, "kworb", "a", 5),
+            (11, 774, "spotify_web", "b", 9),
+        ):
+            conn.exec_driver_sql(
+                f"UPDATE projets SET spotify_streams = {n}, spotify_streams_source = '{source}', "
+                f"spotify_album_ids = '{ids}', ytm_streams = {ytm} "
+                f"WHERE id = (SELECT projet_id FROM releases WHERE id = {rid})"
+            )
+    assert data_manager.merge_tracks(5, 4)
+    with data_manager.engine.connect() as conn:
+        n, source, ids, ytm = conn.exec_driver_sql(
+            "SELECT p.spotify_streams, p.spotify_streams_source, p.spotify_album_ids, "
+            "p.ytm_streams FROM projets p JOIN releases r ON r.projet_id = p.id WHERE r.id = 10"
+        ).one()
+    assert (n, source, set(ids.split(",")), ytm) == (774, "spotify_web", {"a", "b"}, 9)
+
+
 def test_le_total_ytm_du_projet_somme_ses_titres(data_manager):
     # Le total YTM d'un titre est celui des fiches dont l'album porte ce titre :
     # deux titres = deux ensembles de fiches, le projet les somme (une fois par

@@ -350,6 +350,17 @@ def cas_a_trancher(editions: list[Edition], regroupement: Regroupement) -> list[
 
 
 def edition_de_reference(editions: list[Edition]) -> int:
-    """PUR. L'édition qui donne son titre au projet : la plus ancienne qui
-    n'est pas live, à date connue d'abord ; à égalité, le plus petit ID."""
-    return min(editions, key=lambda e: (e.live is True, not e.date, e.date or "", e.id)).id
+    """PUR. L'édition de BASE, qui donne son titre au projet : pas live, sans
+    marqueur d'édition augmentée au titre (« (Edition Collector) » datée comme
+    l'original, « (Deluxe Version) » mal datée), puis la plus ancienne, à date
+    connue d'abord ; à égalité, le plus petit ID."""
+    return min(
+        editions,
+        key=lambda e: (
+            e.live is True,
+            bool(_EDITION_AUGMENTEE.search(e.titre)),
+            not e.date,
+            e.date or "",
+            e.id,
+        ),
+    ).id

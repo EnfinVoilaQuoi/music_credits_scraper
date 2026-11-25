@@ -261,6 +261,15 @@ class TestGraphieDuNom:
         assert meme_projet(c, d) == "commune"
 
 
+def test_l_edition_de_base_n_est_pas_une_edition_augmentee():
+    # IAM : la Collector est datée comme l'original (1997) ; Logic : la deluxe mal datée.
+    a = _ed(1, "L’école du micro d’argent (Edition Collector)", range(58), date="1997-01-01")
+    b = _ed(2, "L’école du micro d’argent", range(19), date="1997-01-01")
+    c = _ed(3, "Under Pressure (Deluxe Version)", range(3), date="2014-04-08")
+    d = _ed(4, "Under Pressure", range(13), date="2014-09-16")
+    assert edition_de_reference([a, b]) == 2 and edition_de_reference([c, d]) == 4
+
+
 class TestRegles20261125:
     """Panneau 💽 : 162 cas → 92 (simulé sur toute la base le 2026-11-25)."""
 

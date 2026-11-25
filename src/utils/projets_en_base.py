@@ -184,8 +184,40 @@ _DONNEES_DU_PROJET = (
 
 
 def _leguer(conn, de: int, a: int) -> None:
-    """Ce que portait un projet disparu passe à celui qui reprend ses éditions,
-    sans rien écraser ; une nature MANUELLE passe avant une nature déduite."""
+    """Ce que portait un projet disparu passe à celui qui reprend ses éditions :
+    le total le plus COMPLET reste (`spotify_web` avant Kworb, puis le plus grand
+    — deux totaux d'éditions d'un disque se recouvrent, ils ne se somment pas :
+    *Watching Movies* y perdait 774 M pour 23 M, 2026-11-25), les ID d'album
+    s'unissent ; une nature MANUELLE passe avant une nature déduite."""
+    lire = text(
+        "SELECT spotify_streams, spotify_daily_streams, spotify_streams_updated, "
+        "spotify_streams_source, spotify_album_ids, ytm_streams, ytm_streams_updated "
+        "FROM projets WHERE id = :p"
+    )
+    vient, garde = (conn.execute(lire, {"p": p}).mappings().one() for p in (de, a))
+
+    def rang(x):
+        return (x["spotify_streams_source"] == "spotify_web", x["spotify_streams"] or 0)
+
+    valeurs = {
+        "spotify_album_ids": _fusion_ids(garde["spotify_album_ids"], vient["spotify_album_ids"])
+    }
+    if vient["spotify_streams"] is not None and (
+        garde["spotify_streams"] is None or rang(vient) > rang(garde)
+    ):
+        valeurs.update(
+            spotify_streams=vient["spotify_streams"],
+            spotify_streams_updated=vient["spotify_streams_updated"],
+            spotify_streams_source=vient["spotify_streams_source"],
+        )
+    if (vient["ytm_streams"] or 0) > (garde["ytm_streams"] or 0):
+        valeurs.update(
+            ytm_streams=vient["ytm_streams"], ytm_streams_updated=vient["ytm_streams_updated"]
+        )
+    conn.execute(
+        text("UPDATE projets SET " + ", ".join(f"{c} = :{c}" for c in valeurs) + " WHERE id = :a"),
+        {**valeurs, "a": a},
+    )
     conn.execute(
         text(
             "UPDATE projets SET "

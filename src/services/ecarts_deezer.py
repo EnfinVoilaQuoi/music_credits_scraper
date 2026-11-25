@@ -1503,6 +1503,10 @@ def creer_lignes(
                 for c in (detail or {}).get("contributors") or []
                 if c.get("id")
             ]
+        if e.socle is None and porte_une_version(e.titre):
+            # Le classement n'a pas vu l'original (autre titre : « 06h16 - … ») ;
+            # le juge de l'héritage le trouve, la fiche naît reliée (2026-11-25).
+            e.socle = version_heritage.socle_parmi(e.titre, base)
         track = _ligne(artist, e, contributeurs)
         if e.socle is not None:
             # Le modèle se choisit par le juge de l'héritage et de son audit

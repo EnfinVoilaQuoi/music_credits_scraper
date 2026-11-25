@@ -340,6 +340,11 @@ def _titre_du_remix(titre: str) -> str | None:
     return " ".join(t.split()) or None
 
 
+#: « 06h16 - » en tête de titre : les pistes de *Orelsan et Gringe sont les
+#: Casseurs Flowters*, que leurs lives nomment sans l'heure (2026-11-25).
+_HORAIRE = re.compile(r"^\d{1,2}h\d{2} - ")
+
+
 class IndexSocles:
     """Les fiches d'un artiste rangées par titre normalisé, calculé UNE fois :
     `socle_parmi` sur toute une discographie comparait chaque version à chaque
@@ -350,9 +355,14 @@ class IndexSocles:
         from src.utils.title_matching import normalize_title
 
         self.par_cle: dict[str, list] = {}
+        #: Les titres à HORAIRE (« 06h16 - Des histoires à raconter »), sans lui.
+        self.sans_horaire: dict[str, list] = {}
         self.nues: set[int] = set()
         for t in fiches:
             self.par_cle.setdefault(normalize_title(t.title or ""), []).append(t)
+            if m := _HORAIRE.match(t.title or ""):
+                reste = normalize_title(t.title[m.end() :])
+                self.sans_horaire.setdefault(reste, []).append(t)
             if parse_variant(t.title or "").kind == Kind.NONE:
                 self.nues.add(id(t))
 
@@ -428,6 +438,8 @@ def socle_parmi(titre: str | None, fiches, index: IndexSocles | None = None) -> 
         return None
     cle = normalize_title(socle)
     candidats = [t for t in index.par_cle.get(cle, []) if id(t) in index.nues]
+    if not candidats:
+        candidats = [t for t in index.sans_horaire.get(cle, []) if id(t) in index.nues]
     if len(candidats) > 1:
         candidats = [t for t in candidats if not t.secondary_role]
     return candidats[0] if len(candidats) == 1 else None

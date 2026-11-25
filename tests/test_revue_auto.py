@@ -426,14 +426,14 @@ def test_deezer_fiche_absente_creee_puis_retablie(data_manager, artiste, monkeyp
         data_manager,
         artiste,
         ed.PisteDeezer(id=9, title="Inédit", duration=200, isrc="FRX1"),
-        ed.PisteDeezer(id=10, title="Inédit (Live)", duration=230, isrc="FRX2"),
+        ed.PisteDeezer(id=10, title="Inédit (Remix)", duration=230, isrc="FRX2"),
     )
     _charger(data_manager, artiste)
 
     bilan = revue_auto.corriger(data_manager, artiste)
     assert len(bilan.appliquees) == 1, bilan
     fiches = _charger(data_manager, artiste)
-    assert "Inédit" in fiches and "Inédit (Live)" not in fiches  # une version : l'humain
+    assert "Inédit" in fiches and "Inédit (Remix)" not in fiches  # une version : l'humain
 
     (correction,) = data_manager.corrections_revue(artiste.id)
     assert correction["action"] == "regle:deezer_appliquer"

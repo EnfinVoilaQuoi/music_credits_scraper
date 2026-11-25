@@ -2515,6 +2515,9 @@ def arbitrage_deezer(
     creditee = _piste_creditee_sur_le_disque_d_un_autre(cas, ids_artiste, lire_deezer, nom_artiste)
     if creditee is not None:
         return creditee
+    live = _live_sans_original(cas, ctx, isrcs_connus, ids_artiste)
+    if live is not None:
+        return live
     medley = _medley_aux_parties_connues(cas, ctx, ids_artiste)
     if medley is not None:
         return medley if medley.action else None
@@ -2570,6 +2573,60 @@ def arbitrage_deezer(
     if arbitrage is not None and (cas.detecteur, arbitrage.action) in REGLES_DEEZER:
         return arbitrage
     return None
+
+
+#: « Medley 1 (A / B) (Live) », « Medley: A / B (Live…) » : le titre S'ANNONCE medley.
+_MEDLEY_ANNONCE = re.compile(r"^medley\b", re.IGNORECASE)
+
+
+def _live_sans_original(cas, ctx, isrcs_connus: dict, ids_artiste: set) -> Arbitrage | None:
+    """La PRISE LIVE (`prise_live` du titre de la piste) d'un disque PROPRE que
+    le classement dit « absente » faute d'original au même titre (inédit de
+    scène, original sous un autre titre : IAM *Live au Dôme de Marseille*,
+    Casseurs Flowters *Live Tour 2016* ; demande utilisateur 2026-11-25) : la
+    fiche se crée. Ni page Genius, ni ISRC connu de la base, ni fiche du même
+    morceau dans la même version. Un titre joint (« A / B ») qui ne s'annonce
+    pas medley, ou un titre générique, reste aux règles qui suivent."""
+    from src.utils.contenants import parties_du_titre
+    from src.utils.version_descriptors import (
+        cle_titre,
+        meme_disque,
+        prise_live,
+        titre_sans_edition,
+        titres_equivalents,
+    )
+
+    if cas.detecteur not in ("deezer_absent", "deezer_album_absent") or ctx is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    titre = piste.get("title") or cas.morceau
+    isrc = str(piste.get("isrc") or "").upper()
+    if album.get("artist_id") not in ids_artiste or ecart.get("genius"):
+        return None
+    if not prise_live(titre) or cle_titre(titre).generique or not isrc or isrc in isrcs_connus:
+        return None
+    if parties_du_titre(titre) and not _MEDLEY_ANNONCE.match(titre):
+        return None
+    titres = {titre, titre_sans_edition(titre) or titre}
+    if any(titres_equivalents(t.title, x) for t in ctx.disco for x in titres):
+        return None
+    # La même prise sous un autre titre : « BDE (Best Day Ever) (Live) » 322 s et
+    # la page « Best Day Ever (Live) » 323 s, sur *Live From Space* (Mac Miller).
+    duree = piste.get("duration")
+    if not duree or any(
+        not t.deezer_id
+        and t.duration
+        and abs(int(t.duration) - int(duree)) <= ECART_FICHIER_S
+        and meme_disque(t.album, album.get("title"))
+        for t in ctx.disco
+    ):
+        return None
+    return Arbitrage(
+        "prise live d'un disque propre, qu'aucune fiche ne porte : créer la fiche",
+        "deezer_appliquer",
+        f"« {titre} » de « {album.get('title')} » ({isrc})",
+    )
 
 
 def _medley_aux_parties_connues(cas, ctx, ids_artiste: set) -> Arbitrage | None:

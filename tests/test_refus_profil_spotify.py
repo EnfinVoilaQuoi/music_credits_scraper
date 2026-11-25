@@ -6,6 +6,8 @@ homonyme (5156YRN7…, reprises rock). Refusé, le profil ne revient ni par les
 voix ni par la recherche, et le profil mémorisé part.
 """
 
+from sqlalchemy import text
+
 from src.models import Artist, Track
 from src.utils import corrections_fiches as cf
 from src.utils import update_kworb as uk
@@ -62,8 +64,15 @@ class TestRefusDeProfilSpotify:
     def test_le_profil_retire_quitte_l_artiste_et_ses_profils(self, data_manager):
         a = _artiste(data_manager, spotify_id=HOMONYME)
         data_manager.record_artist_spotify_ids(a.id, [HOMONYME, "AUTRE"], "musicbrainz")
+        with data_manager.engine.begin() as conn:
+            conn.execute(
+                text("UPDATE artists SET spotify_monthly_listeners = 28206 WHERE id = :a"),
+                {"a": a.id},
+            )
         assert data_manager.retirer_profil_spotify(a.id, HOMONYME)
-        assert data_manager.get_artist_by_name("The Classmates").spotify_id is None
+        relu = data_manager.get_artist_by_name("The Classmates")
+        # Les auditeurs mensuels étaient ceux du profil refusé.
+        assert (relu.spotify_id, relu.spotify_monthly_listeners) == (None, None)
         assert data_manager.ids_spotify_connus(a.id) == {"AUTRE"}
         assert not data_manager.retirer_profil_spotify(a.id, HOMONYME)
 

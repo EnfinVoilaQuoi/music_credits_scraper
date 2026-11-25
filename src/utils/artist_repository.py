@@ -1119,14 +1119,16 @@ class ArtistRepository:
 
     def retirer_profil_spotify(self, artist_id: int, spotify_id: str) -> bool:
         """RETIRE un profil Spotify refusé (homonyme) : l'ID de l'artiste s'il
-        est celui-là, et ses lignes `artist_spotify_ids`. À appeler avec
+        est celui-là, avec les auditeurs mensuels lus sur ce profil (Go Getters,
+        28 206 d'un groupe de rockabilly, 2026-11-25), et ses lignes
+        `artist_spotify_ids`. À appeler avec
         `corrections_fiches.memoriser_profil_spotify_refuse`, sinon le vote
         suivant le reposerait. Rend True si quelque chose a été retiré."""
         with self._ecrire_artiste() as conn:
             efface = conn.execute(
                 update(artists)
                 .where((artists.c.id == artist_id) & (artists.c.spotify_id == spotify_id))
-                .values(spotify_id=None, updated_at=datetime.now())
+                .values(spotify_id=None, spotify_monthly_listeners=None, updated_at=datetime.now())
             ).rowcount
             lignes = conn.execute(
                 delete(artist_spotify_ids).where(

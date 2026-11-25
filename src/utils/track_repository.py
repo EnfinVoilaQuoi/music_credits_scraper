@@ -6725,12 +6725,17 @@ class TrackRepository:
                     )
                     if replacement is None:
                         raise ValueError("La parution de remplacement ne contient pas ce morceau")
-                    conn.execute(
-                        text(
-                            "UPDATE tracks SET album = :album, album_override = 1 WHERE id = :track_id"
-                        ),
-                        {"album": replacement["title"], "track_id": track_id},
-                    )
+                    # Quitter un autre disque que le repère ne le déplace pas :
+                    # 8 fiches de *Héra* sorties de « XX5 » passaient à sa
+                    # réédition (Georgio, 2026-11-25).
+                    if is_reference:
+                        conn.execute(
+                            text(
+                                "UPDATE tracks SET album = :album, album_override = 1 "
+                                "WHERE id = :track_id"
+                            ),
+                            {"album": replacement["title"], "track_id": track_id},
+                        )
                 elif is_reference and clear_reference:
                     conn.execute(
                         text(

@@ -79,6 +79,22 @@ def test_remplacant_qui_ne_contient_pas_le_morceau_refuse(data_manager):
     assert [r["title"] for r in data_manager.get_track_releases(track.id)] == ["A"]
 
 
+def test_quitter_un_autre_disque_ne_deplace_pas_le_repere(data_manager):
+    """Georgio, 8 fiches de *Héra* sorties de « XX5 » (2026-11-25)."""
+    artist = _artist(data_manager)
+    track = _track(data_manager, artist, album="Héra")
+    poser_parution(data_manager, track.id, "Héra")
+    reedition = poser_parution(data_manager, track.id, "Ἥρα (Héra réédition)")
+    xx5 = poser_parution(data_manager, track.id, "XX5")
+    assert (
+        data_manager.unlink_track_from_release(
+            xx5, track.id, replacement_release_id=reedition, clear_reference=True
+        )
+        == "removed"
+    )
+    assert data_manager.get_artist_tracks(artist.id)[0].album == "Héra"
+
+
 def test_retrait_de_l_album_de_reference_exige_un_choix_explicite(data_manager):
     artist = _artist(data_manager)
     track = _track(data_manager, artist, album="Original")

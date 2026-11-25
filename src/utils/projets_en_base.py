@@ -165,7 +165,9 @@ def regrouper_en_base(
             if heritiers:
                 heritier = max(set(heritiers), key=heritiers.count)
                 _leguer(conn, pid, heritier)
-                _sommer_ytm(conn, heritier)
+                # Une édition dont le total n'était que sur son projet ne compte
+                # pas dans la somme : jamais moins que ce qui a été légué.
+                _sommer_ytm(conn, heritier, au_moins=True)
         conn.execute(text("DELETE FROM projets WHERE id = :p"), {"p": pid})
         bilan.retires += 1
     if donnees:
@@ -512,9 +514,10 @@ def poser_streams_ytm(
         )
 
 
-def _sommer_ytm(conn, projet_id: int) -> bool:
+def _sommer_ytm(conn, projet_id: int, *, au_moins: bool = False) -> bool:
     """Le total YTM du projet : la somme de ses éditions, une fois par titre. Faux
-    si aucune édition n'a le sien (le total en place reste)."""
+    si aucune édition n'a le sien (le total en place reste). `au_moins` : une
+    somme plus petite que le total en place ne l'écrase pas."""
     par_titre: dict[str, tuple[int, object]] = {}
     for t, n, q in conn.execute(
         text(
@@ -527,7 +530,10 @@ def _sommer_ytm(conn, projet_id: int) -> bool:
     if not par_titre:
         return False
     conn.execute(
-        text("UPDATE projets SET ytm_streams = :s, ytm_streams_updated = :q WHERE id = :p"),
+        text(
+            "UPDATE projets SET ytm_streams = :s, ytm_streams_updated = :q WHERE id = :p"
+            + (" AND COALESCE(ytm_streams, 0) < :s" if au_moins else "")
+        ),
         {
             "s": sum(n for n, _ in par_titre.values()),
             "q": max((q for _, q in par_titre.values() if q), default=datetime.now()),

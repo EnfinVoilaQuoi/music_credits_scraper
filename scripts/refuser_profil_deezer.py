@@ -81,6 +81,14 @@ def main(argv=None) -> int:
     cf.memoriser_profil_deezer_refuse(artiste.name, args.profil, args.nom or artiste.name)
     if artiste.deezer_id and int(artiste.deezer_id) == args.profil:
         dm.update_artist_deezer_id(artiste.id, None)
+        # Les signalements lus sur ce profil partent avec lui, sans attendre
+        # l'étape identité (Go Getters, 14 cas restés au panneau, 2026-11-25).
+        from src.services import ecarts_deezer
+
+        artiste.deezer_id = None
+        ecarts_deezer.enregistrer_signalements(
+            dm, artiste, ecarts_deezer.BilanEcarts(complete=True)
+        )
     print("✅ Profil refusé")
     return 0
 

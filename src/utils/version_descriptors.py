@@ -215,6 +215,11 @@ DIFFUSION_FORTS = frozenset(
     }
 )
 _DIFFUSION_COMPAGNONS = frozenset({"version", "edit", "mix", "the", "track"})
+#: Le jubilé d'un REMASTER (« 30 Years Remaster », « 25th Anniversary
+#: Remaster ») n'en fait pas une autre prise ; sans lui, « 25 Year Remix » et
+#: « 30 Years » gardent leur sens (House of Pain, 2026-11-25).
+_REMASTERS = frozenset({"remaster", "remastered"})
+_JUBILE_RE = re.compile(r"years?|anniversary|\d+(?:st|nd|rd|th)")
 
 _VOCABULAIRE = RENDITION_WORDS | frozenset(REMIX_WORDS) | DIFFUSION_FORTS
 
@@ -467,7 +472,13 @@ def est_edition_de_diffusion(descripteur: str) -> bool:
         return True
     if not mots or not any(t in DIFFUSION_FORTS for t in mots):
         return False
-    return all(t in DIFFUSION_FORTS or t in _DIFFUSION_COMPAGNONS for t in mots)
+    jubile = bool(_REMASTERS & set(mots))
+    return all(
+        t in DIFFUSION_FORTS
+        or t in _DIFFUSION_COMPAGNONS
+        or (jubile and _JUBILE_RE.fullmatch(t) is not None)
+        for t in mots
+    )
 
 
 def parse_variant(title: str | None) -> Variant:

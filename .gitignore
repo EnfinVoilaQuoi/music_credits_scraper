@@ -227,6 +227,7 @@ scripts/*
 !scripts/retirer_feats_d_album.py
 !scripts/rattraper_confirmations_credits.py
 !scripts/fondre_graphies_credits.py
+!scripts/typer_edition.py
 !scripts/fusionner_copies_de_groupe.py
 !scripts/recalculer_heritage.py
 !scripts/reparer_encodage_genius.py

@@ -514,6 +514,60 @@ def poser_streams_ytm(
 NATURE_MEME_PROJET = "projet"
 
 
+#: Type d'une édition du projet, décidé par l'humain (`acceptations`, valeur :
+#: l'`identity_key` de l'édition) : un second disque est un point à lui dans la
+#: Timeline du studio ; toute autre édition ajoutée est un « bonus »
+#: (décision utilisateur 2026-11-25).
+NATURE_SECOND_DISQUE = "second_disque"
+
+
+def seconds_disques(conn, artist_id: int) -> set[int]:
+    """Les éditions (`releases.id`) que l'humain dit être un second disque."""
+    cles = _cles_editions(conn, artist_id)
+    return {
+        cles[v]
+        for (v,) in conn.execute(
+            text("SELECT valeur FROM acceptations WHERE nature = :n AND artiste = :a"),
+            {"n": NATURE_SECOND_DISQUE, "a": _nom_artiste(conn, artist_id)},
+        )
+        if v in cles
+    }
+
+
+def poser_second_disque(conn, artist_id: int, release_id: int, oui: bool = True) -> bool:
+    """Type une édition « second disque » (ou l'oublie). Rend True si ça change."""
+    ligne = conn.execute(
+        text("SELECT identity_key FROM releases WHERE id = :r AND artist_id = :a"),
+        {"r": release_id, "a": artist_id},
+    ).first()
+    if ligne is None:
+        raise LookupError(f"édition {release_id} introuvable chez l'artiste {artist_id}")
+    nom, valeur = _nom_artiste(conn, artist_id), ligne[0]
+    if not oui:
+        return bool(
+            conn.execute(
+                text("DELETE FROM acceptations WHERE nature = :n AND artiste = :a AND valeur = :v"),
+                {"n": NATURE_SECOND_DISQUE, "a": nom, "v": valeur},
+            ).rowcount
+        )
+    return bool(
+        conn.execute(
+            text(
+                "INSERT OR IGNORE INTO acceptations (cle_fiche, artiste, titre, nature, valeur, "
+                "decide_le) VALUES (:cf, :a, :t, :n, :v, :q)"
+            ),
+            {
+                "cf": f"second_disque:{valeur}",
+                "a": nom,
+                "t": valeur,
+                "n": NATURE_SECOND_DISQUE,
+                "v": valeur,
+                "q": datetime.now().isoformat(timespec="seconds"),
+            },
+        ).rowcount
+    )
+
+
 def _nom_artiste(conn, artist_id: int) -> str | None:
     return conn.execute(text("SELECT name FROM artists WHERE id = :a"), {"a": artist_id}).scalar()
 

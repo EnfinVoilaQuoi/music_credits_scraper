@@ -50,11 +50,6 @@ class TestRegles:
                 _ed(1, "La symphonie des chargeurs, Vol. 2", range(28)),
                 _ed(2, "La Symphonie des chargeurs 2 (Partie 2)", range(14)),
             ),
-            # Un mot hors du vocabulaire d'édition (« Boost », « Refill »).
-            (
-                _ed(1, "Enna", range(20)),
-                _ed(2, "Enna Boost", list(range(18)) + list(range(100, 111))),
-            ),
         ]
         for a, b in cas:
             assert meme_projet(a, b) is None, (a.titre, b.titre)
@@ -268,6 +263,10 @@ def test_l_edition_de_base_n_est_pas_une_edition_augmentee():
     c = _ed(3, "Under Pressure (Deluxe Version)", range(3), date="2014-04-08")
     d = _ed(4, "Under Pressure", range(13), date="2014-09-16")
     assert edition_de_reference([a, b]) == 2 and edition_de_reference([c, d]) == 4
+    # « Enna Boost » datée avant « Enna » (PLK) : l'album de base reste « Enna ».
+    e = _ed(5, "Enna", range(20), date="2020-08-28")
+    f = _ed(6, "Enna Boost", [*range(18), *range(100, 111)], date="2020-07-10")
+    assert edition_de_reference([e, f]) == 5
 
 
 class TestRegles20261125:
@@ -325,3 +324,45 @@ class TestRegles20261125:
         c = Edition(3, "Under Pressure (Deluxe)", pistes=frozenset([*range(12), 20, 21, 22]))
         r, cas = self._cas(a, b, c)
         assert r.projets == [[1, 2, 3]] and cas == []
+
+
+class TestEditionAugmentee:
+    """Règle 4 (décision utilisateur 2026-11-25) : l'album de base et ses
+    éditions font un projet, le studio choisit l'édition."""
+
+    def test_une_edition_augmentee_rejoint_l_album(self):
+        base = _ed(1, "Enna", range(20), date="2020-08-28")
+        boost = _ed(2, "Enna Boost", [*range(18), *range(100, 111)], date="2020-07-10")
+        assert _projets(base, boost) == [[1, 2]]
+        assert cas_a_trancher([base, boost], regrouper([base, boost])) == []
+
+    def test_pas_a_plus_de_trois_ans(self):
+        a = _ed(1, "Flashback", range(4), date="2009-12-29")
+        b = _ed(2, "Flashback (mixtape retrospective 2006-2017)", range(12), date="2019-06-27")
+        assert _projets(a, b) == [[1], [2]]
+
+    def test_pas_un_coffret_ni_une_version_ni_une_autre_partie(self):
+        d = "2024-06-28"
+        box = _ed(1, "Abysses & Ivresse des profondeurs", range(22), date=d)
+        a = _ed(2, "Abysses", range(15), date=d)
+        i = _ed(3, "Ivresse des profondeurs", range(15, 22), date=d)
+        assert _projets(box, a, i) == [[1], [2], [3]]
+        instru = _ed(4, "Artefact (Instrumentale)", range(12), date=d)
+        orig = _ed(5, "Artefact", range(12), date=d)
+        eds = [instru, orig]
+        assert cas_a_trancher(eds, regrouper(eds)) == []
+        assert _projets(
+            _ed(6, "Chambre 140 (Part. 2)", range(22), date=d),
+            _ed(7, "Chambre 140 (Part. 3)", range(32), date=d),
+        ) == [[6], [7]]
+
+    def test_une_edition_augmentee_recolle_ses_deux_moities(self):
+        base = _ed(1, "Music to Be Murdered By", range(20), date="2020-01-17")
+        face_b = _ed(2, "Music to Be Murdered By: Side B", range(20, 36), date="2020-12-18")
+        deluxe = _ed(
+            3,
+            "Music To Be Murdered By - Side B (Deluxe Edition)",
+            range(36),
+            date="2020-01-17",
+        )
+        assert _projets(base, face_b, deluxe) == [[1, 2, 3]]

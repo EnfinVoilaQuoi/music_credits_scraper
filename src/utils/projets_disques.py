@@ -22,6 +22,12 @@ Règles (simulées sur la base entière le 2026-11-20 avant d'être gardées :
    même nom) sous deux noms (« VVRDL », « CDC4 », « HHHH² (Au carré) ») → même
    projet, sauf deux VERSIONS du disque (instrumental, remix, live…) ;
 
+4. l'album de base et son édition augmentée sous un nom lié (« La fête est finie
+   – Épilogue », « Stamina, memento ») : ≥ 80 % de la plus petite (4 fiches au
+   moins), moins de trois ans d'écart, ni coffret ni version → même projet ;
+   l'humain type l'édition (bonus / second disque), le studio la choisit
+   (décision utilisateur 2026-11-25, 22 paires, toutes relues) ;
+
 jamais :
 - avec une édition `single` (un single ne rejoint jamais l'album du même titre,
   décision du 2026-11-12) ;
@@ -51,6 +57,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import date
 
 from src.utils.codes_barres import cle_upc
 from src.utils.title_matching import normalize_title
@@ -130,7 +137,7 @@ def _meme_liste(a: Edition, b: Edition) -> bool:
     commun = len(a.pistes & b.pistes)
     if commun < 3 or commun < PART_COMMUNE * len(a.pistes | b.pistes):
         return False
-    if bool(_VERSION_DE_DISQUE.search(a.titre)) != bool(_VERSION_DE_DISQUE.search(b.titre)):
+    if _autre_version(a, b):
         return False
     return commun >= 4 or meme_disque(a.titre, b.titre)
 
@@ -154,6 +161,56 @@ def _coffret(petite: Edition, grande: Edition, editions: list[Edition]) -> bool:
         and not (e.pistes & petite.pistes)
         and _contenue(e, grande)
         for e in editions
+    )
+
+
+#: Au-delà, un nom lié ne dit plus une édition du disque (« Flashback » 2009 /
+#: « Flashback (mixtape retrospective 2006-2017) » 2019).
+ECART_D_EDITION_MAX_JOURS = 3 * 365
+
+
+def _autre_version(a: Edition, b: Edition) -> bool:
+    return bool(_VERSION_DE_DISQUE.search(a.titre)) != bool(_VERSION_DE_DISQUE.search(b.titre))
+
+
+def _jour(e: Edition) -> date | None:
+    try:
+        return date.fromisoformat((e.date or "")[:10])
+    except ValueError:
+        return None
+
+
+def edition_augmentee(a: Edition, b: Edition, editions: list[Edition]) -> bool:
+    """Règle 4 : l'une des deux éditions est l'autre, augmentée, sous un nom lié."""
+    if a.scope != b.scope or _jamais_ensemble(a, b) or _autre_version(a, b):
+        return False
+    petite, grande = sorted((a, b), key=lambda e: len(e.pistes))
+    if len(petite.pistes & grande.pistes) < 4 or not _contenue(petite, grande):
+        return False
+    if not meme_disque(a.titre, b.titre) or not memes_parties_de_disque(a.titre, b.titre):
+        return False
+    ja, jb = _jour(a), _jour(b)
+    if ja is None or jb is None or abs((ja - jb).days) > ECART_D_EDITION_MAX_JOURS:
+        return False
+    return not _coffret(petite, grande, editions)
+
+
+def _recollee(ids: list[int], par_id: dict[int, Edition]) -> bool:
+    """Deux éditions du groupe n'ont rien en commun, mais une édition AUGMENTÉE
+    les réunit (« … – Side B (Deluxe Edition) » = l'album + « … : Side B ») :
+    ce n'est pas un coffret, le groupe tient."""
+    gros = [par_id[i] for i in ids if len(par_id[i].pistes) >= 3]
+    return all(
+        any(
+            _EDITION_AUGMENTEE.search(g.titre)
+            and "+" not in g.titre
+            and _contenue(x, g)
+            and _contenue(y, g)
+            for g in gros
+        )
+        for k, x in enumerate(gros)
+        for y in gros[k + 1 :]
+        if not (x.pistes & y.pistes)
     )
 
 
@@ -246,7 +303,7 @@ def regrouper(
         verdict = meme_projet(par_id[x], par_id[y])
         if verdict == "suite":
             out.suites.append((x, y))
-        elif verdict:
+        elif verdict or edition_augmentee(par_id[x], par_id[y], editions):
             parent[racine(x)] = racine(y)
     for paire in reunies:
         x, y = sorted(paire)
@@ -268,6 +325,7 @@ def regrouper(
         cumule = (
             not decide
             and not meme_nom
+            and not _recollee(ids, par_id)
             and any(
                 not (par_id[a].pistes & par_id[b].pistes)
                 for k, a in enumerate(gros)
@@ -305,7 +363,8 @@ def cas_a_trancher(editions: list[Edition], regroupement: Regroupement) -> list[
 
     Jamais : deux éditions déjà du même projet, un single, un live contre un
     studio, une compilation, une apparition contre un disque de l'artiste, une
-    suite, un coffret contre l'un de ses disques, un maxi contre son album."""
+    suite, un coffret contre l'un de ses disques, un maxi contre son album, une
+    version (instrumental, remix…) contre son original."""
     par_id = {e.id: e for e in editions}
     projet_de = {i: k for k, ids in enumerate(regroupement.projets) for i in ids}
     cas = [
@@ -333,6 +392,10 @@ def cas_a_trancher(editions: list[Edition], regroupement: Regroupement) -> list[
         petite, grande = sorted((a, b), key=lambda e: len(e.pistes))
         if _coffret(petite, grande, editions) or _maxi(petite, grande):
             continue
+        # Une version du disque (instrumental, remix…) est un autre projet
+        # (décision utilisateur 2026-11-25).
+        if _autre_version(a, b):
+            continue
         petite = len(petite.pistes)
         if n >= 2 and meme_disque(a.titre, b.titre) and memes_parties_de_disque(a.titre, b.titre):
             cas.append(
@@ -349,16 +412,32 @@ def cas_a_trancher(editions: list[Edition], regroupement: Regroupement) -> list[
     return cas
 
 
+def _augmente_une_autre(e: Edition, editions: list[Edition]) -> bool:
+    """`e` est l'édition augmentée d'une autre du groupe, sous un autre nom : un
+    disque qu'elle contient et qui en fait au moins la moitié (« Enna Boost »,
+    mal datée, n'est pas la base d'« Enna ») — jamais d'un relevé partiel."""
+    return any(
+        x.id != e.id
+        and _contenue(x, e)
+        and 2 * len(x.pistes) >= len(e.pistes)
+        and 1.15 * len(x.pistes) < len(e.pistes)
+        and not meme_disque_edition(x.titre, e.titre)
+        for x in editions
+    )
+
+
 def edition_de_reference(editions: list[Edition]) -> int:
     """PUR. L'édition de BASE, qui donne son titre au projet : pas live, sans
-    marqueur d'édition augmentée au titre (« (Edition Collector) » datée comme
-    l'original, « (Deluxe Version) » mal datée), puis la plus ancienne, à date
+    marqueur d'édition augmentée au titre, ni augmentation d'un autre disque du
+    groupe (« (Edition Collector) » datée comme l'original, « Enna Boost » mal
+    datée), puis la plus ancienne, à date
     connue d'abord ; à égalité, le plus petit ID."""
     return min(
         editions,
         key=lambda e: (
             e.live is True,
             bool(_EDITION_AUGMENTEE.search(e.titre)),
+            _augmente_une_autre(e, editions),
             not e.date,
             e.date or "",
             e.id,

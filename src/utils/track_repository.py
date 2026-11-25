@@ -62,10 +62,12 @@ from src.utils.projets_en_base import (
     oublier_meme_projet,
     poser_nature_edition,
     poser_nature_manuelle,
+    poser_second_disque,
     poser_streams_spotify,
     poser_streams_ytm,
     projet_de,
     regrouper_en_base,
+    seconds_disques,
 )
 from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
 from src.utils.track_mapper import (
@@ -5988,6 +5990,12 @@ class TrackRepository:
         with self.engine.begin() as conn:
             return oublier_meme_projet(conn, artist_id, release_ids)
 
+    def poser_second_disque(self, artist_id: int, release_id: int, oui: bool = True) -> bool:
+        """Type une édition « second disque » du projet, ou l'oublie (décision
+        gardée, `projets_en_base.poser_second_disque`)."""
+        with self.engine.begin() as conn:
+            return poser_second_disque(conn, artist_id, release_id, oui)
+
     @staticmethod
     def _artistes_des_parutions(conn, track_id: int) -> list[int]:
         """Les artistes dont une parution porte la fiche (projets à refaire)."""
@@ -7004,9 +7012,10 @@ class TrackRepository:
 
         `[{projet_id, titre, scope, nature, nature_source, spotify_streams,
         spotify_streams_source, ytm_streams, edition_reference_id,
-        track_ids: [...], editions: [{release_id, titre, date, track_ids}]}]`,
-        éditions de la plus ancienne à la plus récente ; seuls les projets qui
-        ont au moins une fiche."""
+        track_ids: [...], editions: [{release_id, titre, date, type,
+        track_ids}]}]`, éditions de la plus ancienne à la plus récente, `type` =
+        « base » (l'édition de référence), « second_disque » (décidé à la main)
+        ou « bonus » ; seuls les projets qui ont au moins une fiche."""
         try:
             with self.engine.connect() as conn:
                 projets = {
@@ -7033,6 +7042,7 @@ class TrackRepository:
                     ).mappings()
                 }
                 editions: dict[int, dict[str, Any]] = {}
+                seconds = seconds_disques(conn, artist_id)
                 for r in conn.execute(
                     text(
                         "SELECT r.id, r.projet_id, r.title, r.release_date, r.scope, rt.track_id "
@@ -7052,6 +7062,11 @@ class TrackRepository:
                             "release_id": r["id"],
                             "titre": r["title"],
                             "date": str(r["release_date"])[:10] if r["release_date"] else None,
+                            "type": (
+                                "base"
+                                if r["id"] == projet["edition_reference_id"]
+                                else "second_disque" if r["id"] in seconds else "bonus"
+                            ),
                             "track_ids": [],
                         }
                         projet["editions"].append(ed)

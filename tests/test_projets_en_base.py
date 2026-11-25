@@ -401,3 +401,24 @@ def test_meme_projet_au_panneau_puis_reuni_et_retabli(data_manager):
     data_manager.oublier_meme_projet(1, [10, 11])
     p = _projets(data_manager)
     assert p[10] != p[11]
+
+
+def test_une_edition_second_disque_est_typee_et_s_oublie(data_manager):
+    _base(data_manager)
+    data_manager.regrouper_projets(1)
+
+    def types():
+        return {
+            e["release_id"]: e["type"]
+            for p in data_manager.get_projets_for_artist(1)
+            for e in p["editions"]
+        }
+
+    assert (types()[10], types()[11]) == ("base", "bonus")
+    assert data_manager.poser_second_disque(1, 11)
+    assert not data_manager.poser_second_disque(1, 11)
+    assert types()[11] == "second_disque"
+    data_manager.regrouper_projets(1)
+    assert types()[11] == "second_disque"
+    assert data_manager.poser_second_disque(1, 11, oui=False)
+    assert types()[11] == "bonus"

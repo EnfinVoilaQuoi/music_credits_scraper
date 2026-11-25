@@ -748,6 +748,7 @@ def durees(c, pistes) -> list[Cas]:
         )
     cas += lrc_trop_longs(c, pistes)
     segments = segments_de_mixtape_de(c)
+    rapides = []
     for t in pistes:
         ref = paroles_de_reference(t["lyrics"], t["lyrics_source"])
         if (
@@ -755,6 +756,21 @@ def durees(c, pistes) -> list[Cas]:
             and trop_courte_pour_les_paroles(t["duration"], ref)
             and not segment_de_dj_mix(t["title"], t["album"])
             and not est_un_segment(t, segments)
+        ):
+            rapides.append((t, ref))
+    durees_rapides = collections.defaultdict(dict)
+    if rapides:
+        from src.utils.track_mapper import _clean_duration
+
+        suivies = {t["id"] for t, _ in rapides}
+        for r in c.execute(
+            "SELECT track_id, source, value FROM observations WHERE field='duration'"
+        ):
+            if r["track_id"] in suivies:
+                durees_rapides[r["track_id"]][r["source"]] = _clean_duration(r["value"])
+    for t, ref in rapides:
+        if not paroles_heritees_hors_debit(
+            t["lyrics_source"], int(t["duration"]), durees_rapides[t["id"]]
         ):
             mots = len(ref.split())
             cas.append(
@@ -766,6 +782,26 @@ def durees(c, pistes) -> list[Cas]:
                 )
             )
     return cas
+
+
+#: Catalogues dont la durée est lue par l'identifiant de la fiche.
+_CATALOGUES_DE_DUREE = frozenset({"deezer", "spotify_web", "apple_music"})
+
+
+def paroles_heritees_hors_debit(source: str | None, duree: int, observees: dict) -> bool:
+    """PUR. Des paroles HÉRITÉES d'une autre fiche (`heritage:<id>`) ne
+    démentent pas une durée que deux catalogues donnent à ± 2 s : un extrait de
+    live porte le texte entier du studio (« Le monde de demain (Live à
+    Paris-Bercy 2008) », 34 s, 540 mots ; décision utilisateur 2026-11-25,
+    simulée sur toute la base : les 3 cas, 281 fiches concernées)."""
+    if not (source or "").lower().startswith("heritage"):
+        return False
+    accords = [
+        s
+        for s in _CATALOGUES_DE_DUREE
+        if observees.get(s) is not None and abs(int(observees[s]) - duree) <= 2
+    ]
+    return len(accords) >= 2
 
 
 def lrc_trop_longs(c, pistes) -> list[Cas]:

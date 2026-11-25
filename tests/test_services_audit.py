@@ -1300,6 +1300,37 @@ class TestFamillesNues:
         assert cas.pistes == [t.id] and cas.nature == au.ERREUR
         assert cas.libelle.endswith("167s, 1350 mots")
 
+    def test_des_paroles_heritees_ne_dementent_pas_deux_catalogues(self, data_manager, isha):
+        """« Le monde de demain (Live à Paris-Bercy 2008) », 34 s (2026-11-25)."""
+        from src.enrichment.observation import Observation
+
+        _, t = isha
+        regle = au.paroles_heritees_hors_debit
+        deux = {"deezer": 34, "apple_music": 35}
+        assert regle("heritage:1", 34, deux)
+        assert not regle("genius", 34, deux)
+        assert not regle("heritage:1", 34, {"deezer": 34, "youtube": 34, "manual": 34})
+        assert not regle("heritage:1", 34, {"deezer": 34, "apple_music": 238})
+
+        def cas_apres(source):
+            _sql(
+                data_manager,
+                "UPDATE tracks SET duration = 34, lyrics = :p, lyrics_source = :s WHERE id = :t",
+                p="mot " * 540,
+                s=source,
+                t=t.id,
+            )
+            audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+            return [c for c in audit.cas if c.famille == "duree_paroles"]
+
+        assert cas_apres("heritage:1")
+        data_manager.record_discography_observations(
+            t.id,
+            [Observation("duration", 34, "deezer"), Observation("duration", 34, "apple_music")],
+        )
+        assert cas_apres("heritage:1") == []
+        assert cas_apres("genius")
+
     def test_un_segment_de_mixtape_decide_n_est_pas_juge_au_debit(self, data_manager, isha):
         """The Game « I'm From The Ghetto » (2026-11-14) : 73 s sur une mixtape
         avec un DJ, Genius transcrit le morceau entier (847 mots)."""

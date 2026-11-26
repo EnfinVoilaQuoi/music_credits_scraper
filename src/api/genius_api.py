@@ -38,6 +38,13 @@ _SOURCE = "genius_api"
 #: L'API Genius n'a pas de « pas au catalogue » : un 404 y serait une rupture.
 _ABSENT: tuple[int, ...] = ()
 
+#: Les statuts par lesquels Genius RÉPOND qu'il n'a pas de détail pour ce
+#: morceau : ni panne ni délai, une absence (`obs.absent(..., repondu=True)`).
+_REPONSES_SANS_DETAIL: dict[int, str] = {
+    403: "détail refusé par l'API (403)",
+    404: "page supprimée (404)",
+}
+
 
 def _statut_http(erreur: Exception) -> int | None:
     """Le code HTTP d'une erreur : `requests` le porte dans `response`,
@@ -924,8 +931,10 @@ class GeniusAPI:
                 with source_usage.attempt(_SOURCE):
                     data = self.genius.song(genius_id)
             except requests.HTTPError as e:
-                if _statut_http(e) == 403:
-                    obs.absent(f"morceau #{genius_id} : détail refusé par l'API (403)")
+                if (statut := _statut_http(e)) in _REPONSES_SANS_DETAIL:
+                    obs.absent(
+                        f"morceau #{genius_id} : {_REPONSES_SANS_DETAIL[statut]}", repondu=True
+                    )
                     return False
                 logger.warning(f"genius.song échec #{genius_id}: {e}")
                 return None
@@ -953,14 +962,19 @@ class GeniusAPI:
                 with source_usage.attempt(_SOURCE):
                     data = self.genius.song(track.genius_id)
             except requests.HTTPError as e:
-                if _statut_http(e) == 403:
-                    # Refus DÉFINITIF de Genius (« Sorry, you're not allowed to
-                    # do that ») : la page web se lit parfois, son détail
-                    # jamais. Re-testé le 2026-11-23 : 290 / 290 pages toujours
-                    # en 403. Une RÉPONSE, donc un constat daté : sans lui, chaque
-                    # run la redemandait et la journalisait en WARNING.
-                    logger.info(f"genius.song : détail refusé (403) pour '{track.title}'")
-                    obs.absent(f"morceau #{track.genius_id} : détail refusé par l'API (403)")
+                if (statut := _statut_http(e)) in _REPONSES_SANS_DETAIL:
+                    # Refus DÉFINITIF de Genius (403, « Sorry, you're not allowed
+                    # to do that ») ou page supprimée (404) : une RÉPONSE, donc
+                    # un constat daté. Re-testé le 2026-11-23 : 290 / 290 pages
+                    # toujours en 403. `repondu=True` : la tentative, elle, est
+                    # notée en échec, et sans lui l'échec l'emportait — le
+                    # suivi gardait la fiche « injoignable » et chaque run la
+                    # redemandait (2026-11-26 : 8 fiches à 3 à 8 échecs).
+                    logger.info(f"genius.song : pas de détail ({statut}) pour '{track.title}'")
+                    obs.absent(
+                        f"morceau #{track.genius_id} : {_REPONSES_SANS_DETAIL[statut]}",
+                        repondu=True,
+                    )
                     track.genius_detail_checked_at = datetime.now().isoformat(timespec="seconds")
                     return False
                 logger.warning(f"genius.song échec '{track.title}': {e}")

@@ -414,6 +414,25 @@ class TestConstatDuDetail:
         assert api.apply_song_metadata(t) is False
         assert t.genius_detail_checked_at is not None
 
+    @pytest.mark.parametrize("statut", [403, 404])
+    def test_refus_ou_page_supprimee_est_une_absence_pour_le_suivi(self, statut):
+        """2026-11-26 : le constat était daté, mais la tentative en échec
+        l'emportait sur l'absence — le suivi gardait la fiche « injoignable »
+        et chaque run la redemandait (8 fiches à 3 à 8 échecs, 403 et 404)."""
+        from src.observability import source_usage as su
+        from src.observability.issues import IssueKind
+
+        su.reset()
+        su.set_sink(None)
+        try:
+            api = GeniusAPI.__new__(GeniusAPI)
+            api.genius = _FauxGenius(songs=requests.HTTPError(statut, "refus"))
+            assert api.apply_song_metadata(_track()) is False
+            assert api.page_repond(123) is False
+            assert [v.issue for v in su.flush()] == [IssueKind.ABSENT, IssueKind.ABSENT]
+        finally:
+            su.reset()
+
 
 # ────────────────────────────────────────────── méthodes appelant l'API
 

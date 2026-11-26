@@ -26,11 +26,12 @@ from src.utils.codes_barres import cle_upc
 from src.utils.corrections_fiches import (
     comptes_ailleurs,
     compteurs_refuses,
-    credits_refuses,
+    credits_refuses_par_personne,
     parutions_refusees_de,
     refus_videos_a_la_fusion,
     videos_refusees,
 )
+from src.utils.credit_normalize import cle_de_doublon
 from src.utils.credit_sources import ecrire as ecrire_confirmations
 from src.utils.credit_sources import (
     ecrire_graphies,
@@ -69,7 +70,7 @@ from src.utils.projets_en_base import (
     regrouper_en_base,
     seconds_disques,
 )
-from src.utils.title_matching import cle_album, clean_stored_title, normalize_name, normalize_title
+from src.utils.title_matching import cle_album, clean_stored_title, normalize_title
 from src.utils.track_mapper import (
     _clean_duration,
     chaine_de_ligne,
@@ -612,7 +613,7 @@ class TrackRepository:
                 # Sauvegarder les nouveaux crédits — sauf ceux retirés À LA MAIN
                 # (data/corrections/fiches.json) : la source les ressert à chaque
                 # run (« Matthieu Cabaret — Composer », compositing du clip).
-                refuses = credits_refuses(track)
+                refuses = credits_refuses_par_personne(track)
                 # Héritage couvert par une source directe : effacé (famille par
                 # famille, cf. `version_heritage.sans_heritage_couvert`).
                 track.credits = sans_heritage_couvert(track.credits)
@@ -622,7 +623,7 @@ class TrackRepository:
                 # (e71).
                 track.credits = fondre_graphies(track.credits)
                 for credit in track.credits:
-                    if (normalize_name(credit.name), credit.role.value) in refuses:
+                    if (cle_de_doublon(credit.name), credit.role.value) in refuses:
                         continue
                     self._save_credit(conn, track.id, credit)
 
@@ -3297,7 +3298,10 @@ class TrackRepository:
                     text("SELECT id, name FROM credits WHERE track_id = :t AND role = :r"),
                     {"t": track_id, "r": role},
                 ).fetchall()
-                ids = [i for i, n in lignes if normalize_name(n) == normalize_name(name)]
+                # Toutes les graphies de la personne (« Lucci » = « Lucci’ (FRA) ») :
+                # le juge du refus qui suit (`credits_refuses_par_personne`).
+                cle = cle_de_doublon(name)
+                ids = [i for i, n in lignes if cle and cle_de_doublon(n) == cle]
                 for i in ids:
                     conn.execute(text("DELETE FROM credits WHERE id = :i"), {"i": i})
             return len(ids)

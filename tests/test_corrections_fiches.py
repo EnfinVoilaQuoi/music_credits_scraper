@@ -110,6 +110,46 @@ def test_save_track_n_ecrit_pas_un_credit_retire(fichier, data_manager):
     assert [c.name for c in relu.credits] == ["Clyde Bessi"]
 
 
+def test_un_credit_refuse_ne_revient_pas_sous_une_autre_graphie(fichier, data_manager):
+    """CORRECTIFS 2026-11-25 : le refus comparait des noms NORMALISÉS ; une autre
+    source qui écrit la personne autrement (« Lucci’ (FRA) », suffixe régional de
+    Genius) la reposait. Le juge est celui des graphies d'une même personne."""
+    fichier(
+        {
+            "A2H": [
+                {
+                    "fiche": {"genius_id": 77},
+                    "retirer_credits": [{"nom": "Lucci", "role": "Producer"}],
+                }
+            ]
+        }
+    )
+    a = Artist(name="A2H")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="Y", artist=a)
+    t.genius_id = 77
+    t.credits = [
+        Credit(name="Lucci’ (FRA)", role=CreditRole.PRODUCER, source="youtube"),
+        Credit(name="Lucci", role=CreditRole.COMPOSER, source="genius"),
+    ]
+    data_manager.save_track(t)
+    (relu,) = data_manager.get_artist_tracks(a.id)
+    assert [(c.name, c.role) for c in relu.credits] == [("Lucci", CreditRole.COMPOSER)]
+
+
+def test_forget_credit_retire_toutes_les_graphies(data_manager):
+    a = Artist(name="A2H")
+    a.id = data_manager.save_artist(a)
+    t = Track(title="X", artist=a)
+    t.credits = [
+        Credit(name="Lucci’ (FRA)", role=CreditRole.PRODUCER, source="genius"),
+        Credit(name="Babz Beats", role=CreditRole.PRODUCER, source="genius"),
+    ]
+    tid = data_manager.save_track(t)
+    assert data_manager.forget_credit(tid, "Lucci", "Producer") == 1
+    assert [c.name for c in data_manager.get_artist_tracks(a.id)[0].credits] == ["Babz Beats"]
+
+
 def test_forget_credit(data_manager):
     a = Artist(name="A2H")
     a.id = data_manager.save_artist(a)

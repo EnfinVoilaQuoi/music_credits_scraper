@@ -534,6 +534,24 @@ def credits_refuses(track) -> set[tuple[str, str]]:
     return {tuple(json.loads(r["valeur"])) for r in _lignes(track, "credit")}
 
 
+def credits_refuses_par_personne(track) -> set[tuple[str, str]]:
+    """{(clé « même personne », rôle)} des crédits refusés : la clé est
+    `credit_normalize.cle_de_doublon` du nom d'ORIGINE (`detail`), le juge des
+    graphies d'une même personne sur un morceau. Comparer des noms normalisés
+    laissait une autre source reposer la personne sous une autre graphie
+    (« Lucci » refusé, « Lucci’ (FRA) » écrit ; CORRECTIFS 2026-11-25)."""
+    from src.utils.credit_normalize import cle_de_doublon
+
+    cles = set()
+    for r in _lignes(track, "credit"):
+        nom_cle, role = json.loads(r["valeur"])
+        detail = json.loads(r["detail"]) if r["detail"] else {}
+        cle = cle_de_doublon(detail.get("nom") or nom_cle)
+        if cle:
+            cles.add((cle, role))
+    return cles
+
+
 def genius_ids_absorbes(artiste: str) -> set[int]:
     """Pages Genius fusionnées dans une autre fiche de `artiste` (relu par
     l'import discographie : une page absorbée n'est pas recréée)."""

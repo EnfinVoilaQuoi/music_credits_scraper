@@ -23,6 +23,7 @@ from src.utils.certification_enricher import apply_certifications
         ("Make Her Say (I Poke Her Face)", "MAKE HER SAY"),  # sous-titre côté fiche
         ("Day ‘N’ Nite", "DAY 'N' NITE (NIGHTMARE)"),  # sous-titre côté certif
         ("Suzy", "SUZY (LIVE 2006)"),  # version sans fiche : l'original la garde
+        ("Bitch Please 2", "BITCH PLEASE II (FEAT. DR. DRE, SNOOP DOGG)"),  # partie en romain
     ],
 )
 def test_admis(fiche, certif):
@@ -40,6 +41,8 @@ def test_admis(fiche, certif):
         ("Caroline", "COMME CAROLINE"),
         ("Scellé", "SCELLÉ PART.2"),
         ("Bande organisée", "BANDE ORGANISÉE 2"),
+        ("Bitch Please 2", "BITCH PLEASE III"),  # autre partie, même en romain
+        ("Serrure #667", "SERRURE #5"),  # autre numéro
         ("Remote Control pt 2", "REMOTE CONTROL"),
         ("Drill FR 4", "DRILL FR"),
         ("Bad Boys de Marseille (Part. 2)", "BAD BOYS DE MARSEILLE"),

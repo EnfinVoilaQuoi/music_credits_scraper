@@ -50,6 +50,18 @@ _PARTIE = re.compile(
     r"|(?:\d+|II|III|IV|V|VI|VII|VIII|IX|X)$)"
 )
 _PARENTHESE_FINALE = re.compile(r"^(.*?)\s*[\(\[]([^\)\]]*)[\)\]]\s*$")
+#: Le numéro de partie FINAL, en chiffres ou en romain (« BITCH PLEASE II »).
+_NUMERO_FINAL = re.compile(r"\s+(\d{1,3}|II|III|IV|V|VI|VII|VIII|IX|X)$")
+_ROMAINS = {"II": 2, "III": 3, "IV": 4, "V": 5, "VI": 6, "VII": 7, "VIII": 8, "IX": 9, "X": 10}
+
+
+def _numero_final(k: str) -> int | None:
+    """Le numéro final d'une clé, romain lu en chiffres (« … II » → 2)."""
+    m = _NUMERO_FINAL.search(k)
+    if not m:
+        return None
+    n = m.group(1)
+    return int(n) if n.isdigit() else _ROMAINS[n]
 
 
 def cle(titre: str | None) -> str:
@@ -93,6 +105,16 @@ def certif_du_morceau(titre_fiche: str | None, titre_certif: str | None) -> bool
     # voit pas comme une partie.
     if parties_du_morceau(titre_fiche) != parties_du_morceau(titre_certif):
         return False
+    if (
+        (n := _numero_final(f)) is not None
+        and n == _numero_final(c)
+        and _NUMERO_FINAL.sub("", f) == _NUMERO_FINAL.sub("", c)
+    ):
+        # Même numéro final écrit en chiffres d'un côté, en romain de l'autre :
+        # « Bitch Please 2 » ← RIAA « BITCH PLEASE II » (2026-11-26, la fiche
+        # Genius gardée par la fusion de sa ressortie). Le numéro se compare
+        # lui-même : « Serrure #667 » n'est pas « SERRURE #5 ».
+        return True
     vc = parse_variant(titre_certif)
     if vc.kind != Kind.NONE and parse_variant(titre_fiche).kind == Kind.NONE:
         # Certif d'une VERSION (« SUZY (LIVE 2006) ») sur l'ORIGINAL : gardée

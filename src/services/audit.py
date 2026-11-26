@@ -1320,8 +1320,11 @@ def streams(c, par) -> list[Cas]:
     return cas
 
 
-def echecs(c, pistes) -> list[Cas]:
-    ids = {t["id"]: t for t in pistes}
+def echecs(c, pistes, desactivees: set[int] = frozenset()) -> list[Cas]:
+    # Une page désactivée n'est relue par aucun run : son échec suivi ne se
+    # solderait jamais, et `echec_perpetuel` la montrerait à vie (2026-11-26 : 22
+    # échecs LRCLIB de pages désactivées d'Eminem, restés après leur run ciblé).
+    ids = {t["id"]: t for t in pistes if t["id"] not in desactivees}
     cas, vus = [], set()
     for r in c.execute(
         "SELECT DISTINCT track_id, source_key, issue, status_code, message "
@@ -2956,7 +2959,7 @@ def auditer(
         audit.cas += certifs(pistes)
         audit.cas += certifs_non_reliees(c, pistes, magasin_des_certifs())
         audit.cas += streams(c, par)
-        audit.cas += echecs(c, pistes)
+        audit.cas += echecs(c, pistes, pages_desactivees(pistes))
         audit.cas += heritage_sans_source(c, pistes)
         audit.cas += credit_graphie(c, pistes)
         audit.cas += studio_sur_live(c, pistes)

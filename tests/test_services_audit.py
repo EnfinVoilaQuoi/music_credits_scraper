@@ -1566,6 +1566,22 @@ class TestFamillesNues:
         assert "jusqu'à 5" in cas.libelle
         assert cas.nature == au.ERREUR
 
+    def test_une_page_desactivee_n_est_pas_un_echec_perpetuel(self, data_manager, isha):
+        """Aucun run ne relit une page désactivée : son échec ne se solde jamais
+        (2026-11-26, 22 pages d'Eminem restées en échec LRCLIB)."""
+        from src.utils.disabled_tracks_manager import DisabledTracksManager
+
+        a, t = isha
+        _sql(
+            data_manager,
+            "INSERT INTO source_track_failures (track_id, source_key, flow, issue, message, "
+            "n_echecs) VALUES (:t, 'lrclib', 'enrichment', 'unreachable', 'x', 5)",
+            t=t.id,
+        )
+        DisabledTracksManager().desactiver("Isha", [t.id], "page_vide", "manuel")
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        assert not [c for c in audit.cas if c.famille == "echec_perpetuel"]
+
 
 def test_date_ancienne_pour_information(data_manager, isha):
     """2026-11-09 : « Lacrimosa » 1792 (juste), « Suicide » 1861 chez Kanye West

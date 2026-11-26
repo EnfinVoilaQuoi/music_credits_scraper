@@ -142,6 +142,16 @@ def test_edition_de_reference_la_plus_ancienne_hors_live():
     assert edition_de_reference(eds) == 3
 
 
+def test_un_disque_bonus_plus_ancien_n_est_pas_la_reference():
+    # IAM « Revoir un printemps » (2026-11-26) : le disque bonus, daté de la
+    # seule année, passait avant l'album du 4 juillet et donnait son nom au projet.
+    eds = [
+        _ed(12354, "Revoir Un Printemps (Bonus Disc)", [1, 2], date="2003-01-01"),
+        _ed(12303, "Revoir un printemps", [1, 2, 3], date="2003-07-04"),
+    ]
+    assert edition_de_reference(eds) == 12303
+
+
 def test_une_apparition_ne_rejoint_jamais_un_disque_de_l_artiste():
     a = _ed(1, "Bitume Caviar (vol.1)", range(15))
     b = _ed(2, "Bitume Caviar (vol.1)", range(15), scope="appearance")

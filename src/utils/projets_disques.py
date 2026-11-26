@@ -89,6 +89,11 @@ _EDITION_AUGMENTEE = re.compile(
     re.IGNORECASE,
 )
 
+#: Un disque ou des titres BONUS (« (Bonus Disc) », « (Bonus Track Version) ») :
+#: jamais l'édition de référence. À part de `_EDITION_AUGMENTEE`, qui juge aussi
+#: les regroupements : ce marqueur ne sert qu'au choix de la référence.
+_EDITION_BONUS = re.compile(r"\bbonus\b", re.IGNORECASE)
+
 #: Un maxi : peu de titres, et bien moins que le disque dont il vient.
 MAXI_FICHES_MAX = 6
 
@@ -436,7 +441,7 @@ def edition_de_reference(editions: list[Edition]) -> int:
         editions,
         key=lambda e: (
             e.live is True,
-            bool(_EDITION_AUGMENTEE.search(e.titre)),
+            bool(_EDITION_AUGMENTEE.search(e.titre) or _EDITION_BONUS.search(e.titre)),
             _augmente_une_autre(e, editions),
             not e.date,
             e.date or "",

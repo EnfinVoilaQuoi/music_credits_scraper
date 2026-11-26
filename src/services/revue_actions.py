@@ -171,6 +171,21 @@ def _sortir_du_disque(ctx: ContexteAction, cas: Cas) -> str:
     )
     if statut != "removed":
         raise LookupError(f"« {track.title} » n'est plus liée à « {p['parution']} »")
+    # Le refus désigne le disque par son TITRE (`cle_parution`) : une autre
+    # parution du même titre où la fiche reste liée le contredirait
+    # (`refus_vivant`). Sadek « All Access » (2026-11-26) : sortie d'« Evolution »
+    # (son album de 2014), elle restait sur l'« Evolution » de Genius (2011).
+    from src.utils.corrections_fiches import cle_parution
+
+    cle = cle_parution(p["parution"])
+    for r in ctx.data_manager.get_track_releases(track.id):
+        if r["id"] != p["release_id"] and cle_parution(r["title"]) == cle:
+            ctx.data_manager.unlink_track_from_release(
+                r["id"],
+                track.id,
+                replacement_release_id=p.get("remplacement"),
+                clear_reference=True,
+            )
     # L'album de la fiche en mémoire suit la base : une fiche sans page se
     # désigne par son album, le refus doit la désigner telle qu'elle est écrite.
     etat = ctx.data_manager.album_de_la_fiche(track.id)

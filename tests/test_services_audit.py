@@ -1939,6 +1939,40 @@ class TestHorsDuDisque:
         assert not self._cas(audit)
         assert not [c for c in audit.cas if c.famille == "refus_vivant"]
 
+    def test_sortir_du_disque_quitte_les_disques_du_meme_titre(self, data_manager, isha):
+        # Sadek « All Access » (2026-11-26) : deux « Evolution » ; le refus
+        # désigne le titre, la fiche ne doit rester sur aucun des deux.
+        from src.services import revue_actions
+
+        a, t = isha
+        self._disque(data_manager, t)
+        _sql(
+            data_manager,
+            "INSERT INTO releases (id, artist_id, title, identity_key) "
+            "VALUES (2, :a, 'Tulum, México', 'tulum'), (3, :a, 'M.A.N', 'man-genius')",
+            a=a.id,
+        )
+        _sql(
+            data_manager,
+            "INSERT INTO release_tracks (release_id, track_id, source) "
+            "VALUES (2, :t, 'deezer'), (3, :t, 'genius')",
+            t=t.id,
+        )
+        (cas,) = [c for c in self._du_panneau(data_manager, a) if c.preuves["release_id"] == 1]
+        (action,) = revue_actions.actions_pour(cas)
+        ctx = revue_actions.ContexteAction(data_manager, a, {x.id: x for x in a.tracks})
+        revue_actions.executer(action, ctx, cas)
+        with data_manager.engine.connect() as conn:
+            liens = sorted(
+                r[0]
+                for r in conn.exec_driver_sql(
+                    "SELECT release_id FROM release_tracks WHERE track_id = ?", (t.id,)
+                )
+            )
+        assert liens == [2]
+        audit = au.auditer(data_manager)
+        assert not [c for c in audit.cas if c.famille == "refus_vivant"]
+
     def test_le_disque_refuse_ne_revient_pas_par_son_identifiant(self, data_manager, isha):
         """SCH « Loup noir (A COLORS SHOW) » (2026-11-14) : sortie à la main du
         single « Loup noir », elle y revenait par Apple — l'observation porte un

@@ -1602,6 +1602,90 @@ class TrackRepository:
             if r[0] in refuses
         ]
 
+    @staticmethod
+    def _page_deezer_absorbee_en_edition(
+        conn, keep_id: int, delete_id: int, refuses: set[str]
+    ) -> None:
+        """Une AUTRE page Deezer du même enregistrement est une édition, avec
+        sa durée (règle des éditions) : la fusion la garde, sinon la fiche
+        gardée, qui a déjà son ID Deezer, la perdait (« Espoirs et peines » de
+        Swift Guad, 2026-11-26 : le disque ne contenait plus la fiche). Un ID
+        que la fiche gardée refuse ne passe pas."""
+        if "deezer_id" in refuses:
+            return
+        lignes = {
+            r["id"]: r
+            for r in conn.execute(
+                text(
+                    "SELECT id, title, deezer_id, isrc, spotify_id FROM tracks "
+                    "WHERE id IN (:k, :d)"
+                ),
+                {"k": keep_id, "d": delete_id},
+            ).mappings()
+        }
+        garde, absorbee = lignes.get(keep_id), lignes.get(delete_id)
+        if not garde or not absorbee or not garde["deezer_id"] or not absorbee["deezer_id"]:
+            return
+        if str(garde["deezer_id"]) == str(absorbee["deezer_id"]):
+            return
+        duree = conn.execute(
+            text(
+                "SELECT value FROM observations WHERE track_id = :d "
+                "AND field = 'duration' AND source = 'deezer'"
+            ),
+            {"d": delete_id},
+        ).scalar()
+        conn.execute(
+            text(
+                "INSERT OR IGNORE INTO track_editions (track_id, label, title, source, "
+                "duration, spotify_id, deezer_id, isrc, created_at) "
+                "VALUES (:k, :t, :t, 'deezer', :du, :sp, :dz, :isrc, :now)"
+            ),
+            {
+                "k": keep_id,
+                "t": absorbee["title"],
+                "du": int(float(duree)) if duree not in (None, "") else None,
+                "sp": None if "spotify_id" in refuses else absorbee["spotify_id"],
+                "dz": absorbee["deezer_id"],
+                "isrc": None if "isrc" in refuses else absorbee["isrc"],
+                "now": datetime.now(),
+            },
+        )
+
+    @staticmethod
+    def _reunir_liens_de_parution(conn, keep_id: int, delete_id: int) -> None:
+        """Sur un disque que les deux fiches portent, le lien de la fiche
+        gardée reçoit les sources (`release_track_sources`) et, s'il n'en a
+        pas, la place du lien de l'absorbée, qui est ensuite effacé."""
+        paires = conn.execute(
+            text(
+                "SELECT d.id AS d, k.id AS k, k.position_source AS kps FROM release_tracks d "
+                "JOIN release_tracks k ON k.release_id = d.release_id "
+                "AND k.track_id = :keep_id WHERE d.track_id = :delete_id"
+            ),
+            {"keep_id": keep_id, "delete_id": delete_id},
+        ).fetchall()
+        for d, k, kps in paires:
+            conn.execute(
+                text(
+                    "INSERT OR IGNORE INTO release_track_sources "
+                    "(release_track_id, source, external_track_id, matched_by, created_at) "
+                    "SELECT :k, source, external_track_id, matched_by, created_at "
+                    "FROM release_track_sources WHERE release_track_id = :d"
+                ),
+                {"k": k, "d": d},
+            )
+            if kps is None:
+                conn.execute(
+                    text(
+                        "UPDATE release_tracks SET (disc_number, track_number, "
+                        "position_source, position_brute) = (SELECT disc_number, "
+                        "track_number, position_source, position_brute FROM release_tracks "
+                        "WHERE id = :d) WHERE id = :k"
+                    ),
+                    {"k": k, "d": d},
+                )
+
     def merge_tracks(self, keep_id: int, delete_id: int) -> bool:
         """Fusionne delete_id dans keep_id : transfère les crédits (en écartant
         ceux déjà présents à l'identique sur le morceau conservé) et les erreurs
@@ -1640,6 +1724,7 @@ class TrackRepository:
                 # ID posé par `relier_par_isrc` le 2026-11-11) fusionnée dans
                 # « New God Flow.1 » y remettait l'ID refusé à la main le 31/10.
                 refuses = self._identites_refusees_a_la_fusion(conn, keep_id, delete_id)
+                self._page_deezer_absorbee_en_edition(conn, keep_id, delete_id, refuses)
                 for col in self._COLONNES_IDENTITE_FUSION:
                     if self._COLONNE_DE_L_ID.get(col, col) in refuses:
                         continue
@@ -1844,7 +1929,9 @@ class TrackRepository:
                 )
                 # Parutions (e31) : une fusion de doublons réunit les
                 # apparitions aussi. La contrainte `(release_id, track_id)`
-                # impose d'écarter d'abord le lien déjà porté par le keep.
+                # impose d'écarter d'abord le lien déjà porté par le keep —
+                # après lui avoir passé ses sources et sa place (2026-11-26).
+                self._reunir_liens_de_parution(conn, keep_id, delete_id)
                 conn.execute(
                     text(
                         "DELETE FROM release_track_sources WHERE release_track_id IN ("

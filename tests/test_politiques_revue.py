@@ -805,6 +805,53 @@ class TestRegleA1:
         monkeypatch.setattr(deezer_identity, "fournisseur_albums_live", lambda: {43852})
         assert juger("Le tour de la question") is None
 
+    @staticmethod
+    def _prise_du_disque(album, motif=True, disco=None, isrc="FR9W1", album_id=43852, genius=None):
+        socle = _t("Come Again", 1, isrc="FR0001", duration=240, album="Paris sous les bombes")
+        socle.genius_id = 555
+        ecart = {
+            "piste": {"id": 9, "title": "Come Again", "isrc": isrc, "duration": 300},
+            "album": {"id": album_id, "title": album, "artist_id": 7, "artist_name": "NTM"},
+            "socle_id": 1,
+            "genius": genius,
+            "motifs": ["version de « Come Again »"]
+            + (["autre enregistrement : ISRC FR9W1 ≠ FR0001, 300 s contre deezer 240 s"] * motif),
+        }
+        cas = _cas("deezer_version", None, {"ecart": ecart})
+        ctx = SimpleNamespace(pages_supprimees={}, disco=[socle, *(disco or [])])
+        return pol.arbitrage_deezer(cas, None, ctx, {}, {7})
+
+    def test_autre_enregistrement_d_un_disque_live_cree_la_prise(self, monkeypatch):
+        """Décision utilisateur 2026-11-26 (NTM « Come Again », Everlast *Gampel
+        2004*) : la piste au titre nu d'un disque live, autre enregistrement de
+        la fiche, devient sa prise « (Live) »."""
+        from src.utils import deezer_identity
+
+        arb = self._prise_du_disque("Live à Bercy (Live)")
+        assert arb.action == "deezer_appliquer" and "Come Again (Live)" in arb.sens
+        arb = self._prise_du_disque("The Life Acoustic")
+        assert arb.action == "deezer_appliquer" and "Come Again (Acoustic)" in arb.sens
+        # Everlast : un disque « Live At… » que MusicBrainz ne type pas.
+        arb = self._prise_du_disque("Live At Open Air Gampel (2004)")
+        assert arb.action == "deezer_appliquer"
+        # La page Genius trouvée au titre nu est celle de l'ORIGINAL : pas la sienne.
+        arb = self._prise_du_disque("The Life Acoustic", genius={"id": 555, "title": "Come Again"})
+        assert arb.action == "deezer_appliquer"
+        monkeypatch.setattr(deezer_identity, "fournisseur_albums_live", lambda: {43852})
+        assert self._prise_du_disque("Gampel 2004").action == "deezer_appliquer"
+
+    def test_prise_du_disque_l_humain(self):
+        # Ni live ni acoustique : un réenregistrement (MC Solaar, Flynt).
+        assert self._prise_du_disque("Best Of") is None
+        # Pas un autre enregistrement : la règle ne s'en mêle pas.
+        assert self._prise_du_disque("Live à Bercy (Live)", motif=False) is None
+        # Une fiche porte déjà la prise, ou l'ISRC est connu de la base.
+        deja = _t("Come Again (Live)", 2, duration=300)
+        assert self._prise_du_disque("Live à Bercy (Live)", disco=[deja]) is None
+        assert self._prise_du_disque("Live à Bercy (Live)", isrc=None) is None
+        # Une page Genius à elle : l'humain.
+        assert self._prise_du_disque("Live à Bercy (Live)", genius={"id": 777}) is None
+
     def test_regles_listees(self):
         for regle in (
             ("deezer_version", "deezer_rattacher_edition"),

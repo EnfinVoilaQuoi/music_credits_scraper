@@ -601,6 +601,35 @@ class TestCreerLignes:
         a.id = dm.save_artist(a)
         return a
 
+    def test_la_prise_d_un_disque_live_a_son_titre_complete(self, data_manager):
+        """Décision utilisateur 2026-11-26 : la version au titre nu d'un disque
+        live se crée « X (Live) », version de l'original — sous le titre nu,
+        la création se croyait déjà faite (l'original a ce titre)."""
+        artist = self._artiste(data_manager)
+        socle = Track(title="Come Again", artist=artist, album="Paris sous les bombes")
+        socle.isrc, socle.duration, socle.genius_id = "FR0001", 240, 555
+        socle.genius_url = "https://genius.com/come-again"
+        socle.id = data_manager.save_track(socle)
+        piste = _piste(70, "Come Again", isrc="FR9W1")
+        e = ed.Ecart("version", _album(7, "Live à Bercy (Live)", [piste]), piste, socle=socle)
+        # La recherche Genius au titre nu a trouvé la page de l'ORIGINAL.
+        e.genius = {"id": 555, "title": "Come Again", "url": socle.genius_url}
+        assert e.titre_a_creer == "Come Again (Live)"
+
+        (compte,) = ed.creer_lignes(data_manager, artist, [e])
+
+        fiches = {t.title: t for t in data_manager.get_artist_tracks(artist.id)}
+        assert set(fiches) == {"Come Again", "Come Again (Live)"}, compte
+        assert fiches["Come Again (Live)"].genius_id is None
+
+    def test_sans_socle_ou_sur_un_disque_studio_le_titre_de_la_piste(self):
+        piste = _piste(70, "Come Again")
+        assert ed.Ecart("version", _album(7, "Studio", [piste]), piste).titre_a_creer == (
+            "Come Again"
+        )
+        live = _album(7, "Live (Live)", [piste])
+        assert ed.Ecart("absent", live, piste).titre_a_creer == "Come Again"
+
     def test_une_ligne_complete_depuis_deezer(self, data_manager):
         artist = self._artiste(data_manager)
         # Son profil Deezer : le disque est le SIEN (`own`), donc un de ses

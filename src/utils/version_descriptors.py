@@ -1350,6 +1350,43 @@ def prise_live(titre: str | None) -> bool:
     return v.kind == Kind.RENDITION and "live" in _familles_de_rendition(v)
 
 
+def prise_acoustique(titre: str | None) -> bool:
+    """PUR. Le titre (d'un morceau ou d'un DISQUE) désigne une prise
+    ACOUSTIQUE (« The Life Acoustic », « MTV Unplugged ») : rendition de la
+    famille acoustique de `_FAMILLES_RENDITION`."""
+    v = cle_titre(titre).variant
+    return v.kind == Kind.RENDITION and "acoustique" in _familles_de_rendition(v)
+
+
+#: Un disque dont le titre COMMENCE par « Live at / au / à… » (« Live At Open
+#: Air Gampel (2004) » d'Everlast, que MusicBrainz ne type pas).
+_DISQUE_LIVE_EN_TETE = re.compile(r"^live\s+(?:at|in|from|au|aux|à|a|du|de)\b", re.IGNORECASE)
+
+
+def disque_live(titre: str | None, *, live: bool = False) -> bool:
+    """PUR. Le disque est live : MusicBrainz le dit (`live`, e64), son titre
+    est une prise live (`prise_live`) ou commence par « Live at… »."""
+    return bool(live or prise_live(titre) or _DISQUE_LIVE_EN_TETE.match(titre or ""))
+
+
+def titre_de_la_prise_du_disque(
+    titre: str | None, disque: str | None, *, live: bool = False
+) -> str | None:
+    """PUR. Le titre COMPLÉTÉ de la piste au titre nu d'un disque live (`live` :
+    MusicBrainz le dit, e64 ; ou `prise_live` du titre du disque) ou
+    acoustique (`prise_acoustique`) : « Come Again » de *Live à Paris* →
+    « Come Again (Live) ». Deezer omet le descripteur ; la fiche créée sous le
+    titre nu aurait celui de l'original (décision utilisateur 2026-11-26). None
+    si le titre porte déjà une version ou si le disque n'est ni l'un ni l'autre."""
+    if not titre or porte_une_version(titre):
+        return None
+    if disque_live(disque, live=live):
+        return f"{titre} (Live)"
+    if prise_acoustique(disque):
+        return f"{titre} (Acoustic)"
+    return None
+
+
 def studio_sur_disque_live(
     titre: str | None, album: str | None, disque: str | None, *, live: bool = False
 ) -> bool:

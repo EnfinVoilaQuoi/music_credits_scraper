@@ -289,6 +289,22 @@ class Ecart:
     def titre(self) -> str:
         return self.piste.title
 
+    @property
+    def titre_a_creer(self) -> str:
+        """Le titre de la fiche que l'écart créerait : celui de la piste, sauf
+        pour la VERSION au titre nu d'un disque live ou acoustique, complété
+        (« Come Again » → « Come Again (Live) », décision utilisateur
+        2026-11-26) — sous le titre nu, elle aurait celui de son original."""
+        from src.utils.deezer_identity import album_live
+        from src.utils.version_descriptors import titre_de_la_prise_du_disque
+
+        if self.nature != "version" or self.socle is None:
+            return self.piste.title
+        complete = titre_de_la_prise_du_disque(
+            self.piste.title, self.album.title, live=album_live({"album": {"id": self.album.id}})
+        )
+        return complete or self.piste.title
+
 
 @dataclass
 class BilanEcarts(Bilan):
@@ -863,6 +879,17 @@ def cocher_par_defaut(ecarts: list[Ecart], base: list[Track]) -> None:
         e.coche = bool(e.genius or e.kworb_spotify_id)
 
 
+def page_propre_a_la_version(genius: dict | None, socle: Track | None) -> dict | None:
+    """PUR. La page Genius accrochée à une VERSION, sauf si c'est celle de son
+    original : au titre nu (prise d'un disque live), la recherche par le titre
+    retrouve la page du studio (Everlast *The Life Acoustic*, 2026-11-26 :
+    22 / 35 « autres enregistrements » portaient la page de leur socle) — la
+    fiche créée l'aurait reprise, doublon de l'original."""
+    if not genius or socle is None or not socle.genius_id:
+        return genius
+    return None if str(genius.get("id")) == str(socle.genius_id) else genius
+
+
 def accrocher_genius(ecarts: list[Ecart], artist, genius_api) -> None:
     """Cherche la page Genius de chaque écart (artiste principal + titre
     normalisé identiques, hit UNIQUE) ; sans hit sûr, rien n'est accroché."""
@@ -889,7 +916,7 @@ def accrocher_genius(ecarts: list[Ecart], artist, genius_api) -> None:
             and normalize_title(h["title"]) == voulu
         ]
         if len(bons) == 1:
-            e.genius = bons[0]
+            e.genius = page_propre_a_la_version(bons[0], e.socle)
 
 
 # ── Détection (async) ────────────────────────────────────────────────────────
@@ -1051,21 +1078,21 @@ def _deja_en_base(e: Ecart, base: list[Track]) -> tuple[Track | None, str | None
     ⇒ on ne crée pas, sans rien affirmer (l'ISRC d'une fiche peut être faux) ;
     `title` (même titre à la graphie près) ⇒ rien.
     """
-    p = e.piste
+    p, titre = e.piste, e.titre_a_creer
     for t in base:
         if t.deezer_id and int(t.deezer_id) == p.id:
             return t, "deezer_id"
     if p.isrc:
         memes = [t for t in base if t.isrc and str(t.isrc).upper() == p.isrc.upper()]
         for t in memes:
-            if meme_enregistrement_pour(t, p.title, graphie=True):
+            if meme_enregistrement_pour(t, titre, graphie=True):
                 return t, "isrc"
         if memes:
             return memes[0], "isrc_autre_titre"
     # Le remix d'un autre remixeur n'est pas la fiche « (Remix) » nue de
     # l'artiste (`meme_enregistrement_pour`, 2026-10-26).
     for t in base:
-        if meme_enregistrement_pour(t, p.title, graphie=True):
+        if meme_enregistrement_pour(t, titre, graphie=True):
             return t, "title"
     return None, None
 
@@ -1098,7 +1125,7 @@ def artiste_de_l_original(socle: Track, artist) -> str:
 def _ligne(artist, e: Ecart, contributeurs: list[tuple[int, str]]) -> Track:
     """La ligne de morceau d'un écart, renseignée par Deezer."""
     a, p = e.album, e.piste
-    track = Track(title=clean_stored_title(p.title), artist=artist)
+    track = Track(title=clean_stored_title(e.titre_a_creer), artist=artist)
     est_apparition = e.nature == "apparition"
     track.album = None if est_apparition else a.title
     track.track_number = p.position
@@ -1166,9 +1193,10 @@ def _ligne(artist, e: Ecart, contributeurs: list[tuple[int, str]]) -> Track:
             }
         ]
         track._relationships_pending = True
-    if e.genius:
-        track.genius_id = e.genius.get("id")
-        track.genius_url = e.genius.get("url")
+    genius = page_propre_a_la_version(e.genius, e.socle)
+    if genius:
+        track.genius_id = genius.get("id")
+        track.genius_url = genius.get("url")
     obs = []
     if p.duration:
         obs.append(Observation("duration", p.duration, "deezer"))

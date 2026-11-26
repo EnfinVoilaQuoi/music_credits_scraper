@@ -2321,13 +2321,53 @@ def _piste_nue_d_un_disque_live(cas) -> bool:
     créées ou rattachées au titre des fiches studio). Ni fiche, ni lien par
     règle : l'humain (`studio_sur_disque_live`)."""
     from src.utils.deezer_identity import album_live
-    from src.utils.version_descriptors import porte_une_version, prise_live
+    from src.utils.version_descriptors import disque_live, porte_une_version
 
     ecart = (cas.preuves or {}).get("ecart") or {}
     album = ecart.get("album") or {}
-    if not (album_live({"album": album}) or prise_live(album.get("title"))):
+    if not disque_live(album.get("title"), live=album_live({"album": album})):
         return False
     return not porte_une_version((ecart.get("piste") or {}).get("title") or cas.morceau)
+
+
+def _autre_enregistrement_d_un_disque_live(cas, ctx, isrcs_connus: dict) -> Arbitrage | None:
+    """La piste au titre NU d'un disque live (MusicBrainz, e64, ou le titre du
+    disque) ou acoustique, que le classement dit AUTRE ENREGISTREMENT de la
+    fiche au même titre (`ecarts_deezer.autre_enregistrement` : autre ISRC,
+    plus de 10 s d'écart) : la prise du disque, fiche secondaire au titre
+    COMPLÉTÉ « X (Live) » / « X (Acoustic) » (`Ecart.titre_a_creer`), version
+    de l'original (décision utilisateur 2026-11-26 : Everlast *Gampel 2004* et
+    *The Life Acoustic*, Oxmo *Black Tour Desperado*, NTM « Come Again »).
+    Une fiche qui porte déjà ce titre, ou l'ISRC connu de la base : l'humain."""
+    from src.services.ecarts_deezer import page_propre_a_la_version
+    from src.utils.deezer_identity import album_live
+    from src.utils.version_descriptors import titre_de_la_prise_du_disque, titres_equivalents
+
+    if cas.detecteur != "deezer_version" or ctx is None:
+        return None
+    ecart = (cas.preuves or {}).get("ecart") or {}
+    piste, album = ecart.get("piste") or {}, ecart.get("album") or {}
+    if not any(str(m).startswith("autre enregistrement") for m in ecart.get("motifs") or ()):
+        return None
+    socle = next((t for t in ctx.disco if t.id == ecart.get("socle_id")), None)
+    # Une page Genius à elle (pas celle de l'original) : l'humain.
+    if socle is None or page_propre_a_la_version(ecart.get("genius"), socle) is not None:
+        return None
+    titre = piste.get("title") or cas.morceau
+    complet = titre_de_la_prise_du_disque(
+        titre, album.get("title"), live=album_live({"album": album})
+    )
+    isrc = str(piste.get("isrc") or "").upper()
+    if complet is None or not isrc or isrc in isrcs_connus:
+        return None
+    if any(titres_equivalents(t.title, complet) for t in ctx.disco):
+        return None
+    return Arbitrage(
+        f"prise du disque « {album.get('title')} », autre enregistrement de "
+        f"« {socle.title} » : créer « {complet} »",
+        "deezer_appliquer",
+        f"« {titre} » {piste.get('duration')} s ({isrc}) ; #{socle.id} {socle.duration} s",
+    )
 
 
 def _credits_de_la_piste(cas, lire_deezer: Callable) -> list[dict]:
@@ -2481,6 +2521,9 @@ def arbitrage_deezer(
     `lire_deezer` (`id -> GET /track`) : par défaut, Deezer."""
     if not any(cas.detecteur == d for d, _ in REGLES_DEEZER):
         return None
+    prise_du_disque = _autre_enregistrement_d_un_disque_live(cas, ctx, isrcs_connus)
+    if prise_du_disque is not None:
+        return prise_du_disque
     if _piste_nue_d_un_disque_live(cas):
         return None
     if ((cas.preuves or {}).get("ecart") or {}).get("disque_etranger"):

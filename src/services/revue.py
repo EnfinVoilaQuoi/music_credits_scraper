@@ -80,6 +80,7 @@ from src.utils.title_matching import (
 )
 from src.utils.track_validation import sans_info
 from src.utils.version_descriptors import (
+    meme_titre_a_la_graphie_pres,
     meme_titre_de_base,
     meme_titre_normalise,
     meme_version,
@@ -1973,6 +1974,46 @@ def page_et_fiche_plateforme(track, ctx):
             f"fiche sans page Genius, même titre que la page « {page.title} »"
             + (f" ({page.album})" if page.album else "")
             + " — "
+            + verdict_page_et_plateforme(page, track),
+            {"autres": [page.id], "empreinte": f"g{page.genius_id}"},
+        )
+    return _ressortie_a_la_graphie_pres(track, ctx)
+
+
+def _index_pages_par_disque(ctx) -> dict[str, list]:
+    index: dict[str, list] = {}
+    for t in ctx.disco:
+        if t.genius_id and (cle := cle_album(t.album)):
+            index.setdefault(cle, []).append(t)
+    return index
+
+
+def _ressortie_a_la_graphie_pres(track, ctx):
+    """La forme des RESSORTIES (2026-11-26) : une mixtape lue par Genius,
+    ressortie des années plus tard sur les plateformes, où Deezer a créé une
+    seconde fiche sous une autre GRAPHIE du titre (« Hémophile » / « Hémophiles »
+    de Kaaris sur Z.E.R.O, « Épouventail » / « Épouvantail » d'Aketo) — que
+    `meme_titre_de_base` ne rapproche pas. Seulement sur le MÊME disque (la
+    graphie seule ne prouve rien d'un disque à l'autre), mêmes gardes que le
+    titre de base. Mesuré le 2026-11-26 : 50 paires sur 73 rapprochées sur un
+    même disque, toutes des graphies d'un même morceau. À l'humain : la fusion
+    n'est pas réversible."""
+    cle = cle_album(track.album)
+    if not cle:
+        return None
+    index = ctx.memo("pages_par_disque", lambda: _index_pages_par_disque(ctx))
+    for page in index.get(cle, []):
+        if (
+            page is track
+            or not meme_titre_a_la_graphie_pres(page.title, track.title)
+            or _interprete(page) != _interprete(track)
+            or _ids_de_catalogue(page) & _ids_de_catalogue(track)
+            or _a_la_meme_place(page, track, ctx)
+        ):
+            continue
+        return (
+            f"fiche sans page Genius sur « {track.album} », même titre à la graphie près "
+            f"que la page « {page.title} » (ressortie sur les plateformes ?) — "
             + verdict_page_et_plateforme(page, track),
             {"autres": [page.id], "empreinte": f"g{page.genius_id}"},
         )

@@ -1866,6 +1866,87 @@ def meme_disque_a_la_graphie_pres(a: str | None, b: str | None) -> bool:
     return _accord_graphique(ca, cb)
 
 
+#: Mots qu'une graphie ajoute ou retire sans changer le titre (« Rue des
+#: bergères » / « Rue de bergères », « J'viens » / « Je viens »).
+_MOTS_LEGERS_DU_TITRE = _MOTS_VIDES_DU_NOM | {"de", "des", "du", "je"}
+#: Une lettre finale qu'une graphie ajoute (« Hémophile » / « Hémophiles »,
+#: « Noms d'oiseau » / « oiseaux », « Joint de beu » / « beuh »).
+_LETTRES_FINALES_LEGERES = frozenset("sxeh")
+
+
+def _mots_graphiques(titre: str) -> list[str]:
+    t = re.sub(r"[’'`´]", " ", titre)
+    mots = re.findall(r"[a-z]+|\d+", normalize_title(t))
+    out = []
+    for m in mots:
+        m = _ROMAINS_DU_NOM.get(m, m)
+        if m == "i" and out and out[-1] in _ANNONCE_DE_NUMERO:
+            m = "1"  # « Part I » = « Part. 1 » (« I » seul reste un pronom)
+        if m in _MOTS_LEGERS_DU_TITRE or m in _ELISIONS:
+            continue
+        out.append(m)
+    return [m for k, m in enumerate(out) if not (m in _ANNONCE_DE_NUMERO and k + 1 < len(out))]
+
+
+def _accord_de_nombre(a: str, b: str) -> bool:
+    """Le même mot au singulier et au pluriel (« Espoir » / « Espoirs »)."""
+    court, long_ = sorted((a, b), key=len)
+    return len(court) >= 3 and long_ == court + long_[-1] and long_[-1] in "sx"
+
+
+def _une_lettre_de_graphie(a: str, b: str) -> bool:
+    """Deux mots à une lettre près, jamais l'initiale ni un chiffre : une lettre
+    finale légère en plus (`_LETTRES_FINALES_LEGERES`), ou, sur un mot d'au
+    moins quatre lettres, une lettre changée, ajoutée ou retirée (« Épouventail »,
+    « Cauhemar », « Mississipi »). « IO Love » / « No Love » : initiale, non."""
+    if a == b:
+        return True
+    if a.isdigit() or b.isdigit() or not a or not b or a[0] != b[0]:
+        return False
+    court, long_ = sorted((a, b), key=len)
+    if len(long_) - len(court) > 1:
+        return False
+    if len(long_) == len(court) + 1 and long_[:-1] == court:
+        return long_[-1] in _LETTRES_FINALES_LEGERES or len(court) >= 4
+    if len(court) < 4:
+        return False
+    if len(a) == len(b):
+        return sum(x != y for x, y in zip(a, b, strict=True)) == 1
+    return any(long_[:k] + long_[k + 1 :] == court for k in range(1, len(long_)))
+
+
+def meme_titre_a_la_graphie_pres(a: str | None, b: str | None) -> bool:
+    """PUR. Deux titres SANS version (ni remix, ni live, ni démo…), aux mêmes
+    parties, qui ne diffèrent que par la GRAPHIE : élisions et petits mots
+    (« J'viens d' l'incendie » / « J'viens de l'incendie », « Rue des bergères »
+    / « Rue de bergères »), chiffres romains, une lettre sur UN mot
+    (« Hémophile » / « Hémophiles », « Épouventail » / « Épouvantail »), les
+    accords de nombre (« Espoir et peine » / « Espoirs et peines »), mots
+    collés. C'est la forme des RESSORTIES : une mixtape lue par Genius, ressortie
+    des années plus tard sur les plateformes sous une autre graphie, où Deezer a
+    créé une seconde fiche (« Hémophiles » de Kaaris, Z.E.R.O, 2026-11-26).
+    Jamais un titre de moins de six lettres ; un nombre différent, un mot de
+    plus (« Puissance » / « Puissance 10 ») ou l'initiale d'un mot changée
+    (« IO Love » / « No Love ») ne passent pas. Ne juge que le titre : l'appelant
+    exige le même disque."""
+    if not a or not b or porte_une_version(a) or porte_une_version(b):
+        return False
+    if not memes_parties(a, b):
+        return False
+    ma, mb = _mots_graphiques(a), _mots_graphiques(b)
+    if len("".join(ma)) < 6 or len("".join(mb)) < 6:
+        return False
+    if "".join(ma) == "".join(mb):
+        return True
+    if len(ma) != len(mb):
+        return False
+    ecarts = [(x, y) for x, y in zip(ma, mb, strict=True) if x != y]
+    # Les accords de nombre (« Espoirs et peines ») autant qu'il y en a, et une
+    # seule autre lettre de graphie.
+    autres = [e for e in ecarts if not _accord_de_nombre(*e)]
+    return len(autres) <= 1 and all(_une_lettre_de_graphie(*e) for e in autres)
+
+
 def edition_de_diffusion(titre: str | None) -> str | None:
     """PUR. Le libellé de l'ÉDITION de diffusion que porte le titre (« Radio
     Edit », « 2011 Remaster » : même fiche que l'original), ou None."""

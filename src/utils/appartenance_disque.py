@@ -25,7 +25,12 @@ from contextlib import closing
 from pathlib import Path
 
 from src.utils.codes_barres import cle_upc
-from src.utils.version_descriptors import meme_disque, meme_titre_de_base, titres_equivalents
+from src.utils.version_descriptors import (
+    meme_disque,
+    meme_titre_a_la_graphie_pres,
+    meme_titre_de_base,
+    titres_equivalents,
+)
 
 #: Sources de place d'un catalogue (`release_tracks.position_source`) : la
 #: piste a été vue dans la liste d'un catalogue, la fiche est sur le disque.
@@ -186,9 +191,12 @@ def dans_la_liste(fiche, ids_deezer: set[str], isrcs: set[str], liste: list[dict
     d'abord : le juge des titres coûte cent fois plus."""
     if any(p["id"] in ids_deezer or (p["isrc"] and p["isrc"] in isrcs) for p in liste):
         return True
+    # À la graphie près aussi (2026-11-26) : la ressortie d'une mixtape sur les
+    # plateformes écrit « Hémophiles », « Espoirs et peines ».
     return any(
         titres_equivalents(fiche["title"], p["title"])
         or meme_titre_de_base(fiche["title"], p["title"])
+        or meme_titre_a_la_graphie_pres(fiche["title"], p["title"])
         for p in liste
     )
 

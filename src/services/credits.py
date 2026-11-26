@@ -563,6 +563,39 @@ def _retablir_sans_reponse(
                     setattr(t.lyrics, c, etat[f"lyrics.{c}"])
 
 
+def echecs_par_source(runtime: Runtime, cles) -> dict[str, set[int]]:
+    """Les morceaux en échec suivi, source par source (`morceaux_en_echec`)."""
+    from src.services import runtime as _runtime  # lu par le module : neutralisable
+
+    return {cle: _runtime.morceaux_en_echec(runtime, (cle,)) for cle in cles}
+
+
+def solder_sans_besoin(echecs: dict[str, set[int]], track_id) -> None:
+    """Solde « sans besoin » les échecs suivis du morceau, pour les seules
+    sources où il en a un : une phase qui le SAUTE (rien à lui apporter) ne
+    doit pas le laisser en échec à vie — ni compter un saut pour chaque fiche
+    qui n'en avait pas."""
+    for cle, ids in echecs.items():
+        if track_id in ids:
+            source_usage.sans_besoin(cle, track_id)
+
+
+def sources_de_la_synchro(options) -> tuple[str, ...]:
+    """PUR. Les clés suivies (observabilité) que la phase synchro interroge
+    morceau par morceau : celles qu'un morceau SAUTÉ par elle (LRC déjà là,
+    instrumental) solde « sans besoin ». YouTube Music y est dès que la
+    synchro ou les paroles YTM sont demandées : sauté, le morceau n'a besoin
+    ni de l'une ni des autres."""
+    cles = []
+    if options.sync_lrclib:
+        cles.append("lrclib")
+    if options.sync_ytm or options.paroles_ytm:
+        cles.append("ytmusic")
+    if options.sync_musixmatch:
+        cles.append("musixmatch")
+    return tuple(cles)
+
+
 def lrc_sans_duree_audio(observations) -> bool:
     """PUR. La fiche porte un LRC LRCLIB sans la durée de l'audio de cette lecture
     (`CHAMP_DUREE_AUDIO`, posée à la lecture depuis le 2026-10-27) : la règle « un
@@ -693,6 +726,15 @@ def run(
                 )
             )
             bilan.discogs_ignores = len(tracks) - len(a_lire)
+            # Une fiche là pour son échec Discogs mais qui n'a plus rien à en
+            # attendre (crédits Discogs posés, absence récente) : l'échec se
+            # solde, sinon il la resélectionnait à chaque run sans être retenté
+            # (2026-11-26, même défaut que la synchro).
+            lus = {t.id for t in a_lire}
+            echecs_discogs = echecs_par_source(runtime, ("discogs",))
+            for t in tracks:
+                if t.id not in lus:
+                    solder_sans_besoin(echecs_discogs, t.id)
             ok = ko = 0
             n_discogs = len(a_lire)
             for i, t in enumerate(a_lire, 1):
@@ -773,6 +815,7 @@ def run(
                         or (artist.id and runtime.data_manager.get_artist_tracks(artist.id))
                         or tracks
                     )
+                    echecs_synchro = echecs_par_source(runtime, sources_de_la_synchro(options))
                     for i, t in enumerate(tracks, 1):
                         if hooks.should_stop():
                             bilan.interrompu("arrêt demandé pendant la synchro")
@@ -791,6 +834,13 @@ def run(
                             options.paroles_ytm and not instrumental and t.lyrics.a_chercher()
                         )
                         if not need_sync and not need_text:
+                            # La synchro n'a rien à chercher (LRC déjà là,
+                            # instrumental) : l'échec suivi de ses sources n'a
+                            # plus d'objet. Sans ce solde, il restait à vie et
+                            # resélectionnait la fiche à chaque run (2026-11-26 :
+                            # 458 des 611 échecs LRCLIB, fiches à LRC YTM ou
+                            # LRCLIB, sautées ici sans rien dire).
+                            solder_sans_besoin(echecs_synchro, t.id)
                             continue
                         with source_usage.track_scope(t.id):
                             outcome = provider.enrich(

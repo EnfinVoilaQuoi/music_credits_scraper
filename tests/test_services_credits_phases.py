@@ -117,6 +117,32 @@ class TestPhaseDiscogs:
         assert bilan.discogs == {"success": 1, "failed": 2} and bilan.complete
         assert bilan.sauves == 3
 
+    def test_une_fiche_sautee_solde_son_echec_discogs(self, monkeypatch):
+        # 2026-11-26 : 210 échecs Discogs restaient ouverts sur des fiches que
+        # la phase saute (crédits Discogs déjà posés) — resélectionnées à
+        # chaque run, jamais retentées.
+        soldes = []
+        monkeypatch.setattr(
+            credits.source_usage, "sans_besoin", lambda cle, tid, **kw: soldes.append((cle, tid))
+        )
+        posee, manque = _track("A"), _track("B")
+        posee.credits = [Credit(name="D", role=CreditRole.PRODUCER, source="discogs")]
+        monkeypatch.setattr(
+            "src.services.runtime.morceaux_en_echec",
+            lambda runtime, sources: {posee.id, manque.id} if "discogs" in sources else set(),
+        )
+        disc = _Discogs([False])
+        credits.run(
+            _rt(),
+            Artist(name="S"),
+            [posee, manque],
+            _opts_discogs_seul(),
+            Hooks(),
+            _clients_discogs(disc),
+        )
+        assert disc.appels == [("B", False)]  # la fiche qui manque est retentée
+        assert soldes == [("discogs", posee.id)]
+
     def test_force_credits_force_le_client_sans_purge_anticipee(self):
         # 2026-09-27 : la purge AVANT l'appel effaçait des crédits justes quand
         # Discogs échouait (A2H, 16 crédits). Le client purge lui-même, et

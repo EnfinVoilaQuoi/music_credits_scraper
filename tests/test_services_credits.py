@@ -534,6 +534,49 @@ def test_synchro_forcee_garde_le_lrc_d_une_source_muette(data_manager):
     assert restantes == {"lrclib": lrclib, "ytmusic": nouveau_ytm}
 
 
+def test_une_fiche_sautee_par_la_synchro_solde_ses_echecs(monkeypatch):
+    """2026-11-26 : 458 des 611 échecs LRCLIB suivis portaient sur des fiches
+    qui ont déjà un LRC (YTM ou LRCLIB). Sélectionnées pour cet échec, elles
+    étaient sautées par la synchro sans rien dire : l'échec restait à vie. Le
+    saut solde « sans besoin » les sources de la synchro ; la fiche appelée,
+    elle, garde son verdict d'appel."""
+    soldes = []
+    monkeypatch.setattr(
+        credits.source_usage, "sans_besoin", lambda cle, tid, **kw: soldes.append((cle, tid))
+    )
+    avec_lrc, sans = _track("Avec LRC"), _track("Sans LRC")
+    avec_lrc.lyrics.synced = "[00:01.00] déjà là"
+    instrumental = _track("Beat")
+    instrumental.lyrics.instrumental = True  # constaté
+    complete = _track("Complète")  # sautée aussi, mais sans échec : rien à solder
+    complete.lyrics.synced = "[00:01.00] là"
+    en_echec = {"lrclib": {avec_lrc.id, instrumental.id}, "ytmusic": {avec_lrc.id}}
+    monkeypatch.setattr(
+        "src.services.runtime.morceaux_en_echec",
+        lambda runtime, sources: set().union(*(en_echec.get(s, set()) for s in sources)),
+    )
+    cl, _, lyrics = _clients()
+    opts = credits.OptionsCredits(
+        genius=False, discogs=False, paroles_genius=False, paroles_ytm=False
+    )
+    fiches = [avec_lrc, sans, instrumental, complete]
+    credits.run(_rt(), Artist(name="Swing"), fiches, opts, Hooks(), cl)
+    assert [a[0] for a in lyrics.appels] == ["Sans LRC"]
+    assert sorted(soldes) == sorted(
+        [("lrclib", avec_lrc.id), ("ytmusic", avec_lrc.id), ("lrclib", instrumental.id)]
+    )
+
+
+def test_sources_de_la_synchro():
+    o = credits.OptionsCredits
+    assert credits.sources_de_la_synchro(o()) == ("lrclib", "ytmusic")
+    assert credits.sources_de_la_synchro(o(sync_ytm=False, paroles_ytm=False)) == ("lrclib",)
+    assert credits.sources_de_la_synchro(o(sync_lrclib=False, sync_musixmatch=True)) == (
+        "ytmusic",
+        "musixmatch",
+    )
+
+
 def test_lrc_sans_duree_audio_ne_relit_que_les_lrc_lrclib_sans_audio(data_manager):
     """2026-10-28 : la relecture forcée de LRCLIB pour Kanye ne tenait pas en 2 h.
     `lrc_sans_duree_audio` ne passe au fournisseur que les fiches dont le LRC

@@ -1653,6 +1653,77 @@ class TrackRepository:
         )
 
     @staticmethod
+    def _page_genius_perdue(conn, keep_id: int, delete_id: int) -> bool:
+        """La fiche absorbée a une page Genius que la gardée n'a pas, et
+        qu'aucune édition de la gardée ne note : la fusion perdrait la page
+        (ID, adresse, paroles, relations, anecdotes ne sont pas recopiés).
+        `editions.absorber` note la page de l'édition AVANT de fusionner."""
+        pages = dict(
+            conn.execute(
+                text("SELECT id, genius_id FROM tracks WHERE id IN (:k, :d)"),
+                {"k": keep_id, "d": delete_id},
+            ).fetchall()
+        )
+        page = pages.get(delete_id)
+        if not page or pages.get(keep_id):
+            return False
+        return not conn.execute(
+            text("SELECT 1 FROM track_editions WHERE track_id = :k AND genius_id = :g"),
+            {"k": keep_id, "g": page},
+        ).first()
+
+    #: Données de la fiche, hors identité, qui remplissent la gardée quand elle
+    #: ne les a pas (2026-11-26 : 19 contenus explicites et 5 genres de fiches
+    #: Deezer sur les 44 ressorties à fusionner).
+    _COLONNES_COMBLEES_A_LA_FUSION = ("explicit_lyrics", "genre")
+
+    @classmethod
+    def _completer_a_la_fusion(cls, conn, keep_id: int, delete_id: int) -> None:
+        """Comble les colonnes vides de la gardée et réunit les certifications
+        (par ligne : les deux fiches sont du même enregistrement chez le même
+        artiste), sans doublon. « Bitch Please II » d'Eminem perdait son or
+        RIAA, absorbé par la page « Bitch Please 2 » qui n'en avait pas."""
+        for col in cls._COLONNES_COMBLEES_A_LA_FUSION:
+            conn.execute(
+                text(
+                    f"UPDATE tracks SET {col} = (SELECT {col} FROM tracks WHERE id = :d) "  # noqa: S608
+                    f"WHERE id = :k AND ({col} IS NULL OR {col} = '')"
+                ),
+                {"k": keep_id, "d": delete_id},
+            )
+        lignes = {
+            r["id"]: r
+            for r in conn.execute(
+                text(
+                    "SELECT id, certifications, album_certifications FROM tracks "
+                    "WHERE id IN (:k, :d)"
+                ),
+                {"k": keep_id, "d": delete_id},
+            ).mappings()
+        }
+        if keep_id not in lignes or delete_id not in lignes:
+            return
+        for col in ("certifications", "album_certifications"):
+            reunies, vues = [], set()
+            for tid in (keep_id, delete_id):
+                try:
+                    entrees = json.loads(lignes[tid][col] or "[]")
+                except (TypeError, ValueError):
+                    entrees = []
+                for e in entrees if isinstance(entrees, list) else []:
+                    cle = json.dumps(e, sort_keys=True, ensure_ascii=False)
+                    if cle not in vues:
+                        vues.add(cle)
+                        reunies.append(e)
+            avant = lignes[keep_id][col]
+            apres = json.dumps(reunies, ensure_ascii=False) if reunies else avant
+            if apres != avant:
+                conn.execute(
+                    text(f"UPDATE tracks SET {col} = :v WHERE id = :k"),  # noqa: S608
+                    {"v": apres, "k": keep_id},
+                )
+
+    @staticmethod
     def _reunir_liens_de_parution(conn, keep_id: int, delete_id: int) -> None:
         """Sur un disque que les deux fiches portent, le lien de la fiche
         gardée reçoit les sources (`release_track_sources`) et, s'il n'en a
@@ -1723,8 +1794,15 @@ class TrackRepository:
                 # ligne `track_spotify_ids` : « New God Flow » (fiche Deezer,
                 # ID posé par `relier_par_isrc` le 2026-11-11) fusionnée dans
                 # « New God Flow.1 » y remettait l'ID refusé à la main le 31/10.
+                if self._page_genius_perdue(conn, keep_id, delete_id):
+                    logger.warning(
+                        f"Fusion refusée : {delete_id} a une page Genius que {keep_id} "
+                        "n'a pas (garder la page, ou la noter en édition d'abord)"
+                    )
+                    return False
                 refuses = self._identites_refusees_a_la_fusion(conn, keep_id, delete_id)
                 self._page_deezer_absorbee_en_edition(conn, keep_id, delete_id, refuses)
+                self._completer_a_la_fusion(conn, keep_id, delete_id)
                 for col in self._COLONNES_IDENTITE_FUSION:
                     if self._COLONNE_DE_L_ID.get(col, col) in refuses:
                         continue

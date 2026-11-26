@@ -622,6 +622,23 @@ class TestCreerLignes:
         assert set(fiches) == {"Come Again", "Come Again (Live)"}, compte
         assert fiches["Come Again (Live)"].genius_id is None
 
+    def test_le_live_d_un_autre_concert_n_existe_pas_deja(self):
+        """2026-11-26 : « C'est clair (Live au Zénith de Paris 1995) » de NTM
+        se croyait déjà en base sous « (Live au Bataclan 1995) » — autre ISRC,
+        159 s contre 170 s. À ± 2 s ou sans ISRC, le titre suffit encore."""
+        bataclan = _track("C'est clair (Live au Bataclan 1995)", isrc="FRZ089603280")
+        bataclan.duration = 170
+        piste = _piste(1, "C'est clair (Live au Zénith de Paris 1995)", isrc="FRZ089503060")
+        piste = dataclasses.replace(piste, duration=159)
+        e = ed.Ecart("version", _album(7, "Live", [piste]), piste)
+        assert ed._deja_en_base(e, [bataclan]) == (None, None)
+        meme = dataclasses.replace(piste, duration=171)
+        e = ed.Ecart("version", _album(7, "Live", [meme]), meme)
+        assert ed._deja_en_base(e, [bataclan]) == (bataclan, "title")
+        sans_isrc = dataclasses.replace(piste, isrc=None)
+        e = ed.Ecart("version", _album(7, "Live", [sans_isrc]), sans_isrc)
+        assert ed._deja_en_base(e, [bataclan]) == (bataclan, "title")
+
     def test_sans_socle_ou_sur_un_disque_studio_le_titre_de_la_piste(self):
         piste = _piste(70, "Come Again")
         assert ed.Ecart("version", _album(7, "Studio", [piste]), piste).titre_a_creer == (

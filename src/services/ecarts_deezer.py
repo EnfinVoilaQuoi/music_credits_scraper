@@ -1092,9 +1092,26 @@ def _deja_en_base(e: Ecart, base: list[Track]) -> tuple[Track | None, str | None
     # Le remix d'un autre remixeur n'est pas la fiche « (Remix) » nue de
     # l'artiste (`meme_enregistrement_pour`, 2026-10-26).
     for t in base:
-        if meme_enregistrement_pour(t, titre, graphie=True):
+        if meme_enregistrement_pour(t, titre, graphie=True) and not _autre_prise(t, p):
             return t, "title"
     return None, None
+
+
+def _autre_prise(t: Track, p: PisteDeezer) -> bool:
+    """PUR. Deux prises au même titre — deux concerts : « (Live au Zénith 1995) »
+    et « (Live au Bataclan 1995) » de NTM, que le juge des titres tient pour la
+    même version — sont deux enregistrements quand leurs ISRC diffèrent ET que
+    leurs durées s'écartent de plus de 2 s (convention des prises au même titre,
+    2026-10-15). Sans ce départage, la création se croyait déjà faite (2026-11-26 :
+    NTM ×2, Oxmo « Alias Jon Smoke (Live) », 107 s contre 228 s)."""
+    return bool(
+        t.isrc
+        and p.isrc
+        and str(t.isrc).upper() != p.isrc.upper()
+        and t.duration
+        and p.duration
+        and abs(int(t.duration) - int(p.duration)) > 2
+    )
 
 
 def _date(texte: str | None) -> datetime | None:

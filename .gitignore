@@ -245,6 +245,7 @@ scripts/*
 !scripts/remplacer_photos_homonymes.py
 # Échantillon témoin : ce que l'audit rate, vérifié à la main (2026-11-09).
 !scripts/echantillon_temoin.py
+!scripts/critere_fin_du_gel.py
 # Scripts ponctuels (une réparation datée, nommée) : le dossier, puis chacun.
 !scripts/ponctuels/
 scripts/ponctuels/*

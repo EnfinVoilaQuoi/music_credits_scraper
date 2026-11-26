@@ -192,6 +192,8 @@ FAMILLES = {
     "streams_double": "même compteur Spotify sur deux pages Genius",
     "ytm_incoherent": "ytm_streams ≠ vues de ses vidéos propres + compteurs du run (> 5 %)",
     "echec_mal_classe": "absence ou délai rangé en échec (`crash`)",
+    "echec_perpetuel": "source qui échoue sur les mêmes fiches à chaque run (≥ 3 échecs suivis "
+    "sans réponse) : un défaut du client, pas une panne",
     "studio_sur_live": "fiche studio rattachée à une parution d'album LIVE (MusicBrainz ou titre)",
     "single_fondu": "parution d'un album fondue avec le single de son titre (type, ID Deezer, code-barres)",
     "disque_homonyme": "disque d'au moins 3 fiches, ni page Genius ni ID Spotify d'un profil connu (homonyme ?)",
@@ -1343,7 +1345,38 @@ def echecs(c, pistes) -> list[Cas]:
                     f"{_lib(t)} {r['source_key']} crash : {msg[:60] or '(vide)'}",
                 )
             )
+    # Un échec suivi qui revient à CHAQUE run n'est plus une panne : c'est le
+    # client qui ne sait pas lire la réponse. Un cas par (source, nature) —
+    # 2026-11-26 : 270 recherches Spotify en « timeout » depuis le 15/10 (le
+    # « / » des titres coupait l'adresse) et 8 détails Genius refusés comptés
+    # « injoignables », que rien ne montrait.
+    par: dict[tuple, list] = collections.defaultdict(list)
+    for r in c.execute(
+        "SELECT track_id, source_key, flow, issue, n_echecs, message "
+        "FROM source_track_failures WHERE n_echecs >= :n ORDER BY track_id",
+        {"n": ECHECS_PERPETUELS},
+    ):
+        if r["track_id"] in ids:
+            par[(r["source_key"], r["flow"], r["issue"])].append(r)
+    for (source, flux, issue), lignes in sorted(par.items()):
+        pire = max(lignes, key=lambda r: r["n_echecs"])
+        t = ids[pire["track_id"]]
+        cas.append(
+            Cas(
+                "echec_perpetuel",
+                t["artiste"],
+                sorted(r["track_id"] for r in lignes),
+                f"{source} ({flux}) {issue} : {len(lignes)} fiche(s) à ≥ {ECHECS_PERPETUELS} "
+                f"échecs, jusqu'à {pire['n_echecs']} ({_lib(t)} "
+                f"{(pire['message'] or '(vide)')[:50]})",
+            )
+        )
     return cas
+
+
+#: Nombre d'échecs suivis sans réponse à partir duquel une source est tenue
+#: pour défaillante sur la fiche (`echec_perpetuel`).
+ECHECS_PERPETUELS = 3
 
 
 def _credits_par_fiche(c, ids, where: str = "") -> dict[int, list]:

@@ -1538,6 +1538,34 @@ class TestFamillesNues:
         assert "genius crash : CancelledError()" in cas[0]
         assert "lrclib crash : Pas de paroles" in cas[1]
 
+    def test_echec_perpetuel(self, data_manager, isha):
+        """2026-11-26 : 270 recherches Spotify en « timeout » à chaque run depuis
+        le 15/10, que rien ne montrait. Un cas par source ; un échec isolé
+        (panne d'un jour) n'en est pas un."""
+        a, t = isha
+        u = Track(title="Autre", artist=a)
+        u.genius_id = 4343
+        data_manager.save_track(u)
+        for tid, source, n in (
+            (t.id, "spotify_embed", 5),
+            (u.id, "spotify_embed", 3),
+            (u.id, "lrclib", 1),
+        ):
+            _sql(
+                data_manager,
+                "INSERT INTO source_track_failures (track_id, source_key, flow, issue, message, "
+                "n_echecs) VALUES (:t, :s, 'identite', 'timeout', 'aucune page', :n)",
+                t=tid,
+                s=source,
+                n=n,
+            )
+        audit = au.auditer(data_manager, ["Isha"], revue=False, persistance=False)
+        (cas,) = [c for c in audit.cas if c.famille == "echec_perpetuel"]
+        assert sorted(cas.pistes) == sorted([t.id, u.id])
+        assert "spotify_embed (identite) timeout : 2 fiche(s)" in cas.libelle
+        assert "jusqu'à 5" in cas.libelle
+        assert cas.nature == au.ERREUR
+
 
 def test_date_ancienne_pour_information(data_manager, isha):
     """2026-11-09 : « Lacrimosa » 1792 (juste), « Suicide » 1861 chez Kanye West

@@ -270,6 +270,26 @@ class TestGeniusDeclareSaPrecision:
             GeniusAPI.precision_de_la_date({"release_date_components": None, **detail}) == attendu
         )
 
+    @pytest.mark.parametrize(
+        ("album", "attendu"),
+        [
+            # Objet `album` d'un morceau (`GET /songs/7520925`, brut du 2026-11-08).
+            (
+                {"name": "C.P.C.D.M.C, Vol. 2", "release_date_for_display": "December 24, 2021"},
+                "2021-12-24",
+            ),
+            ({"name": "X", "release_date_for_display": "2011"}, "2011"),
+            ({"name": "X", "release_date_for_display": "February 2006"}, "2006-02"),
+            ({"name": "X"}, None),
+            (None, None),
+        ],
+    )
+    def test_date_de_l_album(self, album, attendu):
+        """Swift Guad (2026-11-26) : la parution prenait la date du MORCEAU lu."""
+        from src.api.genius_api import GeniusAPI
+
+        assert GeniusAPI.date_de_l_album(album) == attendu
+
 
 class TestPositionDansLaPeriode:
     """Appartenance à un groupe (2026-09-24) : n'exclure que ce qui est PROUVÉ

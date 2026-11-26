@@ -143,7 +143,7 @@ def piste_depuis_tracklist(entree: dict, album: dict, artist: Artist) -> Track |
                 source="genius",
                 external_release_id=album.get("id"),
                 external_track_id=song["id"],
-                release_date=track.release_date,
+                release_date=GeniusAPI.date_de_l_album(album) or track.release_date,
                 scope="own",
                 confidence="identified",
             )

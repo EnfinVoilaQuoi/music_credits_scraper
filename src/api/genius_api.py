@@ -621,7 +621,7 @@ class GeniusAPI:
                                 source="genius",
                                 external_release_id=album_data.get("id"),
                                 external_track_id=track.genius_id,
-                                release_date=track.release_date,
+                                release_date=self.date_de_l_album(album_data) or track.release_date,
                                 scope="appearance" if is_feat else "own",
                                 confidence="identified" if album_data.get("id") else "suggested",
                             )
@@ -992,7 +992,7 @@ class GeniusAPI:
                     source="genius",
                     external_release_id=album_id,
                     external_track_id=track.genius_id,
-                    release_date=track.release_date,
+                    release_date=self.date_de_l_album(album) or track.release_date,
                     scope="appearance" if track.is_featuring else "own",
                     confidence="identified" if album_id else "suggested",
                 )
@@ -1427,7 +1427,27 @@ class GeniusAPI:
         if mois_annee and mois_annee.group(1).lower() in _MOIS_ANGLAIS:
             mois = _MOIS_ANGLAIS.index(mois_annee.group(1).lower()) + 1
             return f"{mois_annee.group(2)}-{mois:02d}"
+        complete = re.fullmatch(r"([A-Za-z]+) (\d{1,2}), (\d{4})", affichee)
+        if complete and complete.group(1).lower() in _MOIS_ANGLAIS:
+            mois = _MOIS_ANGLAIS.index(complete.group(1).lower()) + 1
+            return f"{complete.group(3)}-{mois:02d}-{int(complete.group(2)):02d}"
         return None
+
+    @staticmethod
+    def date_de_l_album(album) -> str | None:
+        """La date de sortie de l'ALBUM que Genius range sous un morceau, à sa
+        précision (« December 24, 2021 », « 2011 »). L'observation de parution
+        portait la date du MORCEAU, et la parution garde la plus ancienne vue :
+        *C.P.C.D.M.C, Vol. 2* de Swift Guad (2021) restait datée du 23/09/2012,
+        date de distributeur d'un de ses morceaux (2026-11-26)."""
+        if not isinstance(album, dict):
+            return None
+        return GeniusAPI._precision_du_detail(
+            {
+                "release_date": album.get("release_date"),
+                "release_date_for_display": album.get("release_date_for_display"),
+            }
+        )
 
     def _extract_release_date_from_song(self, song: dict) -> datetime | None:
         """Extrait la date de sortie depuis les données de l'API.

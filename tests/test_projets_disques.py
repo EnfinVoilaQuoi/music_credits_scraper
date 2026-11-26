@@ -142,6 +142,17 @@ def test_edition_de_reference_la_plus_ancienne_hors_live():
     assert edition_de_reference(eds) == 3
 
 
+def test_la_reunion_de_deux_disques_reste_a_part():
+    # « OSO / Hat Trick » (2026-11-26) : chez Caballero, la réunion ne porte que
+    # ses morceaux d'OSO, et la règle de la même liste la fondait dans OSO.
+    oso = _ed(1, "OSO", range(19), date="2021-02-26")
+    reunion = _ed(2, "OSO / Hat Trick", range(18), date="2021-04-15")
+    hat_trick = _ed(3, "Hat Trick", range(30, 49), date="2021-02-26")
+    assert meme_projet(oso, reunion) is None
+    assert meme_projet(hat_trick, reunion) is None
+    assert sorted(regrouper([oso, reunion, hat_trick]).projets) == [[1], [2], [3]]
+
+
 def test_un_disque_bonus_plus_ancien_n_est_pas_la_reference():
     # IAM « Revoir un printemps » (2026-11-26) : le disque bonus, daté de la
     # seule année, passait avant l'album du 4 juillet et donnait son nom au projet.

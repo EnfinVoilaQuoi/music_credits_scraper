@@ -129,8 +129,19 @@ class Regroupement:
     suites: list[tuple[int, int]] = field(default_factory=list)
 
 
+def _reunion_nommee(a: Edition, b: Edition) -> bool:
+    """`a` s'intitule « X / Y » et `b` est X ou Y : la parution qui RÉUNIT deux
+    disques (« OSO / Hat Trick », double album de Caballero et JeanJass sorti
+    le même jour) n'est l'édition d'aucun des deux — chacun le sien, et la
+    réunion à part (décision utilisateur 2026-11-26)."""
+    parties = [normalize_title(p) for p in a.titre.split(" / ")]
+    return len(parties) == 2 and all(parties) and normalize_title(b.titre) in parties
+
+
 def _jamais_ensemble(a: Edition, b: Edition) -> bool:
     if "single" in (a.record_type, b.record_type):
+        return True
+    if _reunion_nommee(a, b) or _reunion_nommee(b, a):
         return True
     if (a.live is True) != (b.live is True) and True in (a.live, b.live):
         return True

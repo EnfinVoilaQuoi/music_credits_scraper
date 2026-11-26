@@ -13,15 +13,13 @@ mère. Les méthodes sync héritées touchant Playwright sont neutralisées
 (RuntimeError) pour éviter tout usage accidentel.
 """
 
-import urllib.parse
-
 from playwright.async_api import Error as PlaywrightError
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from src.observability import source_usage
 from src.observability.issues import IssueKind
 from src.scrapers.playwright_manager import get_playwright_async
-from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper
+from src.scrapers.spotify_id_scraper_v2 import SpotifyIDScraper, url_de_recherche
 from src.utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -162,7 +160,7 @@ class SpotifyIDScraperAsync(SpotifyIDScraper):
         for query_idx, query in enumerate(search_queries):
             logger.info(f"📝 Essai {query_idx + 1}/{len(search_queries)}: '{query}'")
             try:
-                spotify_url = f"https://open.spotify.com/search/{urllib.parse.quote(query)}"
+                spotify_url = url_de_recherche(query)
                 await self.page.goto(spotify_url, wait_until="domcontentloaded", timeout=30_000)
                 await self._handle_cookies_async()
 

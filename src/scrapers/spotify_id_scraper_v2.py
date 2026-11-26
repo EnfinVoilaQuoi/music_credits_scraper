@@ -41,6 +41,19 @@ _SOURCE = "spotify_embed"
 #: (`Settings.spotify_id_min_relevance`, calibré sur données — cf. config.py).
 _MIN_RELEVANCE = settings.spotify_id_min_relevance
 
+
+def url_de_recherche(requete: str, onglet: str | None = None) -> str:
+    """L'adresse de la recherche Spotify pour `requete`, onglet éventuel en plus
+    (`artists`). La requête est un SEGMENT de chemin : son « / » s'encode
+    (`safe=""`). Laissé tel quel, « Testify / The Next One » coupait l'adresse,
+    la page ne rendait aucune piste et chaque fiche au titre à « / » (medleys,
+    dates de freestyle, « 68 3/4 ») finissait en timeout — les 270 échecs suivis
+    `spotify_embed` du 2026-11-26, sans exception. Seul constructeur des deux
+    voies (jumeaux sync / async)."""
+    url = f"https://open.spotify.com/search/{urllib.parse.quote(requete, safe='')}"
+    return f"{url}/{onglet}" if onglet else url
+
+
 #: User-Agent des lectures d'embed en `requests` NU (artistes, identité). Une
 #: seule définition : deux copies divergent, et celle qu'on ne regarde pas est
 #: toujours la mauvaise.
@@ -527,9 +540,7 @@ class SpotifyIDScraper:
             return None
 
         try:
-            search_url = (
-                f"https://open.spotify.com/search/{urllib.parse.quote(artist_name)}/artists"
-            )
+            search_url = url_de_recherche(artist_name, "artists")
             self.page.goto(search_url, wait_until="domcontentloaded", timeout=30_000)
             self._handle_cookies()
 

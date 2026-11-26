@@ -223,3 +223,30 @@ class TestVoteIdentiteArtiste:
     def test_nom_credite_vide_ignore(self, tmp_path):
         s = self._scraper(tmp_path, [{"name": "", "id": "VIDE"}, {"name": "Isha", "id": "ISHA"}])
         assert s.get_artist_id_from_track("T1", expected_name="Isha") == "ISHA"
+
+
+class TestUrlDeRecherche:
+    """Les 270 échecs suivis `spotify_embed` du 2026-11-26 avaient tous un « / »
+    dans le titre : laissé tel quel, il coupait l'adresse de la recherche."""
+
+    def test_le_slash_du_titre_est_encode(self):
+        from src.scrapers.spotify_id_scraper_v2 import url_de_recherche
+
+        url = url_de_recherche("Eminem Testify / The Next One")
+        assert url == "https://open.spotify.com/search/Eminem%20Testify%20%2F%20The%20Next%20One"
+        assert url.count("/") == 4  # https: // open.spotify.com / search / <requête>
+
+    def test_onglet_apres_la_requete(self):
+        from src.scrapers.spotify_id_scraper_v2 import url_de_recherche
+
+        assert url_de_recherche("AC/DC", "artists") == (
+            "https://open.spotify.com/search/AC%2FDC/artists"
+        )
+
+    def test_la_voie_async_passe_par_le_meme_constructeur(self):
+        import inspect
+
+        from src.scrapers import spotify_id_scraper_async as a
+
+        source = inspect.getsource(a)
+        assert "url_de_recherche(" in source and "open.spotify.com/search" not in source

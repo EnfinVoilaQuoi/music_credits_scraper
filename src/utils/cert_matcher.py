@@ -509,6 +509,11 @@ class CertMatcher:
         cle = self._norm(titre)
         if juge is None or self.df.empty or not cle:
             return []
+        # L'initiale du titre, et celle du mot suivant quand le premier n'est
+        # qu'un signe : la place en lettre grecque des pistes d'*Ipséité*
+        # (« Θ. Macarena » ← SNEP « MACARENA », Damso 2026-11-26).
+        mots = cle.split()
+        initiales = {cle[:1]} | ({mots[1][:1]} if len(mots) > 1 and len(mots[0]) == 1 else set())
         idx: list = []
         vus: set = set()
         juges: dict[str, bool] = {}
@@ -517,7 +522,7 @@ class CertMatcher:
             if not a:
                 continue
             df = self._sous_ensemble_artiste(a)
-            df = df[((df["cat"] == "album") == album) & (df["title_clean"].str[:1] == cle[:1])]
+            df = df[((df["cat"] == "album") == album) & df["title_clean"].str[:1].isin(initiales)]
             for i, titre_certif in zip(df.index, df["title"], strict=True):
                 if i in vus:
                     continue

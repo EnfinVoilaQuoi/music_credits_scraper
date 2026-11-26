@@ -91,6 +91,30 @@ def certif_d_une_version(titre_fiche: str | None, titre_certif: str | None) -> b
     )
 
 
+def meme_numero_final(titre_fiche: str | None, titre_certif: str | None) -> bool:
+    """Même titre au même numéro final, écrit en chiffres d'un côté, en romain
+    de l'autre : « Bitch Please 2 » ← RIAA « BITCH PLEASE II » (2026-11-26, la
+    fiche Genius gardée par la fusion de sa ressortie). Le numéro se compare
+    lui-même : « Serrure #667 » n'est pas « SERRURE #5 ». Partagé par le juge
+    de la pose et le pré-filtre du matcher (`equivalents_ou_numerotes`)."""
+    f, c = cle(titre_fiche), cle(titre_certif)
+    return (
+        bool(f and c)
+        and (n := _numero_final(f)) is not None
+        and n == _numero_final(c)
+        and _NUMERO_FINAL.sub("", f) == _NUMERO_FINAL.sub("", c)
+    )
+
+
+def equivalents_ou_numerotes(titre_fiche: str | None, titre_certif: str | None) -> bool:
+    """Le juge du PRÉ-FILTRE du matcher (`_indices_par_le_juge`) : l'équivalence
+    des titres, plus le même numéro final — sans lui, la pose ne voyait jamais
+    la certif que son juge admet (`certif_non_reliee`, Eminem 2026-11-26)."""
+    return titres_equivalents(titre_fiche, titre_certif) or meme_numero_final(
+        titre_fiche, titre_certif
+    )
+
+
 def certif_du_morceau(titre_fiche: str | None, titre_certif: str | None) -> bool:
     f, c = cle(titre_fiche), cle(titre_certif)
     if not f or not c:
@@ -105,15 +129,7 @@ def certif_du_morceau(titre_fiche: str | None, titre_certif: str | None) -> bool
     # voit pas comme une partie.
     if parties_du_morceau(titre_fiche) != parties_du_morceau(titre_certif):
         return False
-    if (
-        (n := _numero_final(f)) is not None
-        and n == _numero_final(c)
-        and _NUMERO_FINAL.sub("", f) == _NUMERO_FINAL.sub("", c)
-    ):
-        # Même numéro final écrit en chiffres d'un côté, en romain de l'autre :
-        # « Bitch Please 2 » ← RIAA « BITCH PLEASE II » (2026-11-26, la fiche
-        # Genius gardée par la fusion de sa ressortie). Le numéro se compare
-        # lui-même : « Serrure #667 » n'est pas « SERRURE #5 ».
+    if meme_numero_final(titre_fiche, titre_certif):
         return True
     vc = parse_variant(titre_certif)
     if vc.kind != Kind.NONE and parse_variant(titre_fiche).kind == Kind.NONE:

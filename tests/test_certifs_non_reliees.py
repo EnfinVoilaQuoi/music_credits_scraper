@@ -323,6 +323,25 @@ class TestPoseRattrapee:
             "Niggas in Paris": ["NI**AS IN PARIS"],
         }
 
+    def test_place_en_lettre_grecque_et_numero_en_romain(self):
+        """2026-11-26 : « Θ. Macarena » (pistes d'*Ipséité*, Damso) et « Bitch
+        Please 2 » (← « BITCH PLEASE II ») — le juge de la pose les admettait,
+        le pré-filtre ne les lui proposait pas (initiale « Θ », numéro romain)."""
+        d, e = Artist(name="Damso"), Artist(name="Eminem")
+        damso = [Track(title="Θ. Macarena", artist=d), Track(title="Ζ. Kietu", artist=d)]
+        m = _magasin(
+            _certif("SNEP", "DAMSO", "MACARENA"),
+            _certif("SNEP", "DAMSO", "KIETU"),
+            _certif("SNEP", "DAMSO", "MOROSE"),  # même artiste, autre titre
+        )
+        assert self._poser(d, damso, m) == {"Θ. Macarena": ["MACARENA"], "Ζ. Kietu": ["KIETU"]}
+        eminem = [Track(title="Bitch Please 2", artist=e)]
+        m = _magasin(
+            _certif("RIAA", "EMINEM", "BITCH PLEASE II"),
+            _certif("RIAA", "EMINEM", "BITCH PLEASE III"),  # autre partie
+        )
+        assert self._poser(e, eminem, m) == {"Bitch Please 2": ["BITCH PLEASE II"]}
+
     def test_certif_d_album_sous_un_alias(self):
         """« GAME » (alias confirmé de The Game) : les morceaux passaient
         l'alias au matcher, les albums non."""

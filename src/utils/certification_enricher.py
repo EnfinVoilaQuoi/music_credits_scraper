@@ -13,7 +13,7 @@ import re
 from src.models import Artist, Track
 from src.models.certification import Certification
 from src.models.track import CreditRole
-from src.utils.cert_titres import certif_du_morceau, cle
+from src.utils.cert_titres import certif_du_morceau, cle, equivalents_ou_numerotes
 from src.utils.corrections_fiches import certifs_refusees, cle_certif
 from src.utils.dates import parse_flexible
 from src.utils.logger import get_logger
@@ -478,7 +478,7 @@ def apply_certifications(
 
             matches = (
                 matcher.get_track_certifications(
-                    cherche, title, extra_artists=extra, juge=titres_equivalents
+                    cherche, title, extra_artists=extra, juge=equivalents_ou_numerotes
                 )
                 if cherche
                 else []

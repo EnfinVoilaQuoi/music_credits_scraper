@@ -146,6 +146,11 @@ class Settings(BaseSettings):
     # puis on reprend seul — jamais de disjoncteur définitif, la source doit
     # pouvoir revenir dans le même run. 0 désactive la mise au repos.
     musixmatch_token_cooldown_s: int = 600
+    # Hôte FERMÉ : HTTP 403 du répartiteur (`awselb`, page HTML), mesuré le
+    # 2026-11-26 sur toute adresse de `apic.musixmatch.com`, jeton ou non, quel
+    # que soit le client. Ce n'est pas un jeton à refaire : un blocage de l'IP,
+    # qui ne se lève pas en 10 min. Repos long, jamais de contournement.
+    musixmatch_hote_ferme_repos_s: int = 24 * 3600
     # Transport. Mesuré le 2026-09-23 : le client `web-desktop-app-v1.0` (celui
     # de syncedlyrics, YTubic, lyrics-api…) ne rend plus que le jeton LEURRE sur
     # notre IP (56 zéros), le client iOS rend un vrai jeton et de vraies paroles.
@@ -313,6 +318,7 @@ SPOTIFY_ID_MIN_RELEVANCE = settings.spotify_id_min_relevance
 
 # Musixmatch (fenêtre de repos après un jeton refusé)
 MUSIXMATCH_TOKEN_COOLDOWN_S = settings.musixmatch_token_cooldown_s
+MUSIXMATCH_HOTE_FERME_REPOS_S = settings.musixmatch_hote_ferme_repos_s
 MUSIXMATCH_APP_ID = settings.musixmatch_app_id
 MUSIXMATCH_API_BASE = settings.musixmatch_api_base
 MUSIXMATCH_TOKEN_GET_MIN_INTERVAL_S = settings.musixmatch_token_get_min_interval_s

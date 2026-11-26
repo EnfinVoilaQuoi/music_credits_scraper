@@ -102,12 +102,14 @@ try:
         MUSIXMATCH_ABSENT_RETRY_DAYS,
         MUSIXMATCH_API_BASE,
         MUSIXMATCH_APP_ID,
+        MUSIXMATCH_HOTE_FERME_REPOS_S,
         MUSIXMATCH_TOKEN_COOLDOWN_S,
         MUSIXMATCH_TOKEN_GET_MIN_INTERVAL_S,
     )
 except ImportError:  # exécution hors package (tests standalone)
     DELAY_BETWEEN_REQUESTS, MAX_RETRIES = 1, 3
     MUSIXMATCH_TOKEN_COOLDOWN_S = 600
+    MUSIXMATCH_HOTE_FERME_REPOS_S = 24 * 3600
     MUSIXMATCH_APP_ID = "mac-ios-v2.0"
     MUSIXMATCH_API_BASE = "https://apic.musixmatch.com/ws/1.1"
     MUSIXMATCH_TOKEN_GET_MIN_INTERVAL_S = 300
@@ -160,6 +162,9 @@ _ABSENTS_FILENAME = ".musixmatch_absents.json"
 
 _STATUS_OK = 200
 _STATUS_AUTH = 401  # blocage token / CAPTCHA-gate
+# 403 HTTP : le RÉPARTITEUR ferme l'hôte à notre IP (page HTML `awselb`, toute
+# adresse, jeton ou non ; mesuré le 2026-11-26). Un blocage, pas un jeton périmé.
+_STATUS_INTERDIT = 403
 
 # Seuils de validation du morceau apparié (mêmes ordres de grandeur que lrclib_api).
 _TITLE_MATCH_MIN = 0.72
@@ -285,13 +290,14 @@ class MusixmatchAPI:
         self._repos_jusqua = 0.0
         return False
 
-    def _mettre_au_repos(self, raison: str) -> None:
+    def _mettre_au_repos(self, raison: str, duree: int | None = None) -> None:
         """Arme la fenêtre. Un SEUL warning par fenêtre, pas un par morceau."""
-        duree = MUSIXMATCH_TOKEN_COOLDOWN_S
+        if duree is None:
+            duree = MUSIXMATCH_TOKEN_COOLDOWN_S
         if duree <= 0:
             return
         deja_armee = self._repos_jusqua > time.time()
-        self._repos_jusqua = time.time() + duree
+        self._repos_jusqua = max(self._repos_jusqua, time.time() + duree)
         self._ecrire_etat(repos_jusqua=self._repos_jusqua)
         if not deja_armee:
             logger.warning(
@@ -538,7 +544,9 @@ class MusixmatchAPI:
                     except ValueError as e:
                         logger.debug(f"Musixmatch {action} : JSON invalide ({e})")
                         return _STATUS_OK, None  # 200 corps illisible : ne pas réessayer
-                if r.status_code in (401, 403):
+                if r.status_code == _STATUS_INTERDIT:
+                    return _STATUS_INTERDIT, None  # hôte fermé : ne pas réessayer
+                if r.status_code == _STATUS_AUTH:
                     return _STATUS_AUTH, None  # auth : ne pas réessayer aveuglément
                 last_err = f"HTTP {r.status_code}"  # 5xx/429 → retry
             except httpx.HTTPError as e:
@@ -547,6 +555,14 @@ class MusixmatchAPI:
                 await asyncio.sleep(max(DELAY_BETWEEN_REQUESTS, 0.5) * (attempt + 1))
         logger.debug(f"Musixmatch {action} échec ({last_err})")
         return None, None
+
+    def _hote_ferme(self) -> None:
+        """403 du répartiteur : BLOCAGE de l'IP, repos long (un jeton n'y peut rien)."""
+        self._dernier_refus = IssueKind.BLOCKED
+        self._invalidate_token()
+        self._mettre_au_repos(
+            "HTTP 403 du répartiteur (hôte fermé à notre IP)", MUSIXMATCH_HOTE_FERME_REPOS_S
+        )
 
     def _noter_refus(self, header: dict | None) -> None:
         """Retient la nature d'un refus : `captcha` = blocage, sinon auth."""
@@ -565,6 +581,9 @@ class MusixmatchAPI:
         self._ecrire_etat(last_token_get=time.time())
         self._dernier_refus = IssueKind.AUTH
         status, env = await self._api_get_async(http, "token.get", {"user_language": "en"})
+        if status == _STATUS_INTERDIT:
+            self._hote_ferme()
+            return None
         if status == _STATUS_AUTH or _envelope_status(env) == _STATUS_AUTH:
             header = ((env or {}).get("message") or {}).get("header")
             self._noter_refus(header)
@@ -608,7 +627,7 @@ class MusixmatchAPI:
                 obs.skipped(f"absence constatée il y a < {MUSIXMATCH_ABSENT_RETRY_DAYS} j")
                 return None
             result = await self._try_fetch_async(http, track_name, artist_name, duration, False)
-            if result is _AUTH_FAILURE:
+            if result is _AUTH_FAILURE and self._dernier_refus is not IssueKind.BLOCKED:
                 logger.debug("Musixmatch: auth échouée → refresh token + retry")
                 result = await self._try_fetch_async(http, track_name, artist_name, duration, True)
                 if result is _EN_ATTENTE:
@@ -671,6 +690,9 @@ class MusixmatchAPI:
             params["f_subtitle_length_max_deviation"] = "3"
 
         status, env = await self._api_get_async(http, "macro.subtitles.get", params)
+        if status == _STATUS_INTERDIT:
+            self._hote_ferme()
+            return _AUTH_FAILURE
         if status == _STATUS_AUTH:
             self._dernier_refus = IssueKind.AUTH
             self._invalidate_token()

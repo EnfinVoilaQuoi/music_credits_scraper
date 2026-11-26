@@ -422,6 +422,41 @@ class TestFenetreDeRepos:
         client._mettre_au_repos("test")
         assert client._au_repos() is False
 
+    def test_un_403_du_repartiteur_est_un_blocage_au_repos_long(self, client, monkeypatch):
+        """2026-11-26 : `apic.musixmatch.com` répond 403 `awselb` à TOUTE adresse.
+
+        Compté `auth` et mis au repos 10 min, il rejouait `token.get` toute la
+        nuit sur une IP fermée ; c'est un blocage, au repos long, sans second essai.
+        """
+        appels = []
+
+        async def faux_get(http, action, params):
+            appels.append(action)
+            return mod._STATUS_INTERDIT, None
+
+        monkeypatch.setattr(client, "_api_get_async", faux_get)
+        source_usage.reset()
+        assert asyncio.run(client.get_synced_async(None, "Titre", "Artiste")) is None
+        verdicts = [v.issue for v in source_usage.flush()]
+        source_usage.reset()
+        assert appels == ["token.get"]
+        assert client._dernier_refus is IssueKind.BLOCKED
+        assert client._repos_jusqua >= time.time() + mod.MUSIXMATCH_HOTE_FERME_REPOS_S - 5
+        assert verdicts == [IssueKind.BLOCKED]
+
+    def test_un_403_sur_les_paroles_ne_relance_pas_token_get(self, client, monkeypatch):
+        appels = []
+        _avec_jeton(client)
+
+        async def faux_get(http, action, params):
+            appels.append(action)
+            return mod._STATUS_INTERDIT, None
+
+        monkeypatch.setattr(client, "_api_get_async", faux_get)
+        assert asyncio.run(client.get_synced_async(None, "Titre", "Artiste")) is None
+        assert appels == ["macro.subtitles.get"]
+        assert client._au_repos() is True
+
     def test_au_repos_aucune_requete_n_est_emise(self, client, monkeypatch):
         """Le point de la fenêtre : ne plus taper l'IP bridée."""
         appels = []

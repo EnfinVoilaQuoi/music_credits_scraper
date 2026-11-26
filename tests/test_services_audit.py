@@ -1973,6 +1973,36 @@ class TestHorsDuDisque:
         audit = au.auditer(data_manager)
         assert not [c for c in audit.cas if c.famille == "refus_vivant"]
 
+    def test_sortir_du_disque_delie_aussi_la_ligne_soeur(self, data_manager, isha):
+        # Lesram « #Boosté » (2026-11-26) : sortie de « G-31 », sa ligne sœur
+        # chez Sheldon y restait — le refus vaut pour l'enregistrement.
+        from src.services import revue_actions
+
+        a, t = isha
+        self._disque(data_manager, t)
+        b = Artist(name="Sheldon")
+        b.id = data_manager.save_artist(b)
+        s = Track(title="Durag", artist=b)
+        s.genius_id = 4242
+        data_manager.save_track(s)
+        _sql(
+            data_manager,
+            "INSERT INTO release_tracks (release_id, track_id, source) VALUES (1, :s, 'genius')",
+            s=s.id,
+        )
+        (cas,) = self._du_panneau(data_manager, a)
+        (action,) = revue_actions.actions_pour(cas)
+        ctx = revue_actions.ContexteAction(data_manager, a, {x.id: x for x in a.tracks})
+        revue_actions.executer(action, ctx, cas)
+        with data_manager.engine.connect() as conn:
+            restants = conn.exec_driver_sql(
+                "SELECT track_id FROM release_tracks WHERE release_id = 1 AND track_id IN (?, ?)",
+                (t.id, s.id),
+            ).fetchall()
+        assert restants == []
+        audit = au.auditer(data_manager)
+        assert not [c for c in audit.cas if c.famille == "refus_vivant"]
+
     def test_le_disque_refuse_ne_revient_pas_par_son_identifiant(self, data_manager, isha):
         """SCH « Loup noir (A COLORS SHOW) » (2026-11-14) : sortie à la main du
         single « Loup noir », elle y revenait par Apple — l'observation porte un

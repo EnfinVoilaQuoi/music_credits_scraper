@@ -186,6 +186,19 @@ def _sortir_du_disque(ctx: ContexteAction, cas: Cas) -> str:
                 replacement_release_id=p.get("remplacement"),
                 clear_reference=True,
             )
+    # Le refus vaut pour l'ENREGISTREMENT : les lignes sœurs (même page Genius,
+    # autres artistes) quittent aussi les disques de ce titre, sinon elles le
+    # portent encore (`refus_vivant`). Lesram « #Boosté » et Népal « Benji »
+    # (2026-11-26) : sorties de « G-31 » / « Adios Bahamas », leur ligne chez
+    # Sheldon y restait.
+    from src.utils.track_soeurs import ids_soeurs
+
+    with ctx.data_manager.engine.connect() as conn:
+        jumelles, _ = ids_soeurs(conn, track.id, track.genius_id)
+    for soeur in jumelles:
+        for r in ctx.data_manager.get_track_releases(soeur):
+            if cle_parution(r["title"]) == cle:
+                ctx.data_manager.unlink_track_from_release(r["id"], soeur, clear_reference=True)
     # L'album de la fiche en mémoire suit la base : une fiche sans page se
     # désigne par son album, le refus doit la désigner telle qu'elle est écrite.
     etat = ctx.data_manager.album_de_la_fiche(track.id)

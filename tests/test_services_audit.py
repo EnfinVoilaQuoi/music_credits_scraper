@@ -167,6 +167,23 @@ class TestInvariants:
         audit = au.auditer(data_manager, ["Isha"], revue=False)
         assert len([c for c in audit.cas if c.famille == "isrc_edition_autre_fiche"]) == 1
 
+    def test_edition_a_l_isrc_de_sa_fiche_n_est_pas_un_defaut(self, data_manager, isha):
+        """« ICE CUBE & MACK 10 » d'Aketo (2026-11-27) : sa page d'album en édition
+        porte l'ISRC de la fiche, que la ligne de l'invité (sans page Genius,
+        donc sans sœur reconnue) porte aussi."""
+        a, t = isha
+        _sql(data_manager, "UPDATE tracks SET isrc = 'FR9W12646678' WHERE id = :t", t=t.id)
+        akh = Artist(name="Akhenaton")
+        akh.id = data_manager.save_artist(akh)
+        invite = Track(title="Durag", artist=akh)
+        invite.isrc = "FR9W12646678"
+        data_manager.save_track(invite)
+        data_manager.record_track_edition(
+            t.id, "Album", source="deezer", deezer_id=4336492122, isrc="FR9W12646678"
+        )
+        audit = au.auditer(data_manager, ["Isha"], revue=False)
+        assert not [c for c in audit.cas if c.famille == "isrc_edition_autre_fiche"]
+
     def test_orphelin_et_schema_sur_la_base_entiere(self, data_manager, isha):
         _sql(
             data_manager,

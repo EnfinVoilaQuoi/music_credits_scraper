@@ -1887,15 +1887,22 @@ def isrc_d_une_autre_fiche(c, pistes) -> list[Cas]:
     (ni elle, ni une sœur de la même page Genius) : l'édition est la page d'un
     autre enregistrement, posée sur la mauvaise fiche — les deux pages Deezer
     de « La Gamberge (Live 2006; Version EP) » (#12092) notées sur « La
-    Gamberge - Live 2006 » (#8199), 2026-10-27."""
+    Gamberge - Live 2006 » (#8199), 2026-10-27.
+
+    Une édition à l'ISRC de SA fiche ne désigne pas un autre enregistrement :
+    qu'une autre ligne porte aussi cet ISRC (la ligne d'un invité, sans page
+    Genius, donc sans sœur reconnue) relève de `id_partage` (2026-11-27 :
+    « ICE CUBE & MACK 10 » d'Aketo et sa ligne chez Akhenaton)."""
     tables = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
     if "track_editions" not in tables:
         return []
     par_isrc = collections.defaultdict(list)
+    isrc_de = {}
     for r in c.execute(
         "SELECT id, title, genius_id, isrc FROM tracks WHERE isrc IS NOT NULL AND isrc != ''"
     ):
         par_isrc[r["isrc"].strip().upper()].append(r)
+        isrc_de[r["id"]] = r["isrc"].strip().upper()
     fiches = {t["id"]: t for t in pistes}
     cas = []
     for e in c.execute(
@@ -1903,7 +1910,7 @@ def isrc_d_une_autre_fiche(c, pistes) -> list[Cas]:
         "WHERE isrc IS NOT NULL AND isrc != '' ORDER BY track_id, label"
     ):
         f = fiches.get(e["track_id"])
-        if f is None:
+        if f is None or isrc_de.get(f["id"]) == e["isrc"].strip().upper():
             continue
         autres = [
             t
@@ -3038,7 +3045,7 @@ def en_hausse(audit: Audit, reference: dict | None) -> dict[str, tuple[int, int]
     }
 
 
-def _identite(cas) -> tuple:
+def identite_du_cas(cas) -> tuple:
     """Ce qui désigne un cas d'un audit à l'autre (objet, ou dict d'un
     `vers_dict`) : sa famille et ses fiches ; sans fiche, son libellé. Le libellé
     d'un cas de fiche porte des valeurs qui bougent (durées, compteurs) : hors de
@@ -3057,8 +3064,10 @@ def cas_nouveaux(audit: Audit, reference: dict | None) -> list[Cas]:
     anciens = (reference or {}).get("cas")
     if anciens is None:
         return []
-    connus = {_identite(c) for c in anciens if c.get("nature") in (None, *NATURES_DU_CRITERE)}
-    return [c for c in audit.cas if c.nature in NATURES_DU_CRITERE and _identite(c) not in connus]
+    connus = {identite_du_cas(c) for c in anciens if c.get("nature") in (None, *NATURES_DU_CRITERE)}
+    return [
+        c for c in audit.cas if c.nature in NATURES_DU_CRITERE and identite_du_cas(c) not in connus
+    ]
 
 
 def _par_nature_et_famille(cas) -> dict[str, collections.Counter]:

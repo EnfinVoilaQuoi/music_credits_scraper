@@ -54,6 +54,17 @@ def test_un_cycle_qui_ouvre_plus_qu_il_ne_ferme_ne_tient_pas():
     assert "1 fermées, 2 ouvertes" in v.detail[-1]
 
 
+def test_deux_cas_sans_fiche_d_un_artiste_restent_deux():
+    a = {**_cas("revue:deezer_version", []), "libelle": "X (Remix)"}
+    b = {**_cas("revue:deezer_version", []), "libelle": "Y (Live)"}
+    audits = [
+        _audit("2026-11-20T00:00:00", [a]),
+        _audit("2026-11-26T00:00:00", [a, b]),
+    ]
+    v = cg.volet_delai(audits)
+    assert "0 fermées, 1 ouvertes" in v.detail[-1]
+
+
 def test_le_temoin_non_rempli_ou_sans_seuil_n_est_jamais_tenu():
     assert cg.volet_temoin(None, {"duree": 0.02}).tenu is None
     dep = {"total": {"verifiees": 10}, "duree": {"taux": 0.1}}

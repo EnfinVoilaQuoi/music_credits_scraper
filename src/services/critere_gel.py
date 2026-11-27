@@ -24,7 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from src.services.audit import DECISION, ERREUR, INVARIANTS
+from src.services.audit import DECISION, ERREUR, INVARIANTS, identite_du_cas
 
 #: Âge maximal d'une décision du panneau (décision utilisateur 2026-11-22).
 DELAI_DECISION_JOURS = 14
@@ -34,12 +34,12 @@ BASE_ENTIERE = "base entière"
 
 
 def cle_cas(cas: dict) -> tuple:
-    """L'identité d'un cas d'un audit à l'autre : famille, artiste, fiches."""
-    return (
-        cas.get("famille"),
-        cas.get("artiste"),
-        tuple(sorted(int(p) for p in cas.get("pistes") or [])),
-    )
+    """L'identité d'un cas d'un audit à l'autre, celle des hausses de fin de run
+    (`audit.identite_du_cas` : famille et fiches ; sans fiche, le libellé). Sur
+    la clé (famille, artiste, fiches), tous les cas sans fiche d'un artiste —
+    `deezer_version`, `deezer_absent`… — n'en faisaient qu'un (2026-11-27 :
+    93 cas comptés 23)."""
+    return identite_du_cas(cas)
 
 
 def _date(texte: str) -> datetime:
